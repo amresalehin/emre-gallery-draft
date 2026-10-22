@@ -83,9 +83,14 @@ object TesseractOcr {
     private fun decodeBitmap(context: Context, uri: Uri): Bitmap {
         val resolver = context.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: error("Cannot open this media item.")
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) error("This file is not a readable image.")
+        // BitmapFactory intentionally returns null when inJustDecodeBounds is true.
+        // Do not use that return value to decide whether the stream opened successfully.
+        val boundsStream = resolver.openInputStream(uri)
+            ?: error("Cannot open this media item. Check that Emre Gallery still has permission to access it.")
+        boundsStream.use { stream -> BitmapFactory.decodeStream(stream, null, bounds) }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            error("This file is not a readable image. Try another image format.")
+        }
         var sample = 1
         while (bounds.outWidth / sample > 2200 || bounds.outHeight / sample > 2200) sample *= 2
         val options = BitmapFactory.Options().apply {
@@ -93,6 +98,6 @@ object TesseractOcr {
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-            ?: error("Could not decode this image.")
+            ?: error("Could not decode this image. Check the file permissions and image format.")
     }
 }
