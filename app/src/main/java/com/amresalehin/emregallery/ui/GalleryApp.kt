@@ -2374,6 +2374,13 @@ private fun ViewerScreen(
     onOpenNeighbor: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
+    var metadata by remember(item.uri) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(item.uri) {
+        metadata = withContext(Dispatchers.IO) {
+            runCatching { readMediaMetadata(context, item) }.getOrDefault(emptyMap())
+        }
+    }
+    fun meta(key: String): String = metadata[key]?.takeIf { it.isNotBlank() } ?: "Not available"
     var showMore by remember { mutableStateOf(false) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
@@ -3183,17 +3190,17 @@ private fun ViewerScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        ExifColumn(top = "f/1.8", bottom = "Aperture", modifier = Modifier.weight(1f))
+                                        ExifColumn(top = meta("aperture"), bottom = "Aperture", modifier = Modifier.weight(1f))
                                         VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = "1/640 s", bottom = "Shutter speed", modifier = Modifier.weight(1.2f))
+                                        ExifColumn(top = meta("shutter"), bottom = "Shutter speed", modifier = Modifier.weight(1.2f))
                                         VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = "50", bottom = "ISO", modifier = Modifier.weight(0.7f))
+                                        ExifColumn(top = meta("iso"), bottom = "ISO", modifier = Modifier.weight(0.7f))
                                         VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = "5.4 mm", bottom = "Focal length", modifier = Modifier.weight(1.1f))
+                                        ExifColumn(top = meta("focal"), bottom = "Focal length", modifier = Modifier.weight(1.1f))
                                         VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = "No flash", bottom = "Flash", modifier = Modifier.weight(1f))
+                                        ExifColumn(top = meta("flash"), bottom = "Flash", modifier = Modifier.weight(1f))
                                         VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = "sRGB", bottom = "Color space", modifier = Modifier.weight(1f))
+                                        ExifColumn(top = meta("color"), bottom = "Color space", modifier = Modifier.weight(1f))
                                     }
                                     Spacer(Modifier.width(8.dp))
                                     Icon(
@@ -3229,15 +3236,15 @@ private fun ViewerScreen(
                                     ) {
                                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                             MetaKeyValueRow("Title", photoTitle)
-                                            MetaKeyValueRow("Description", "Snow-covered mountains at sunset with a lake.")
-                                            MetaKeyValueRow("Creator", "Amre Salehin")
-                                            MetaKeyValueRow("Copyright", "© 2024 Amre Salehin. All rights reserved.")
+                                            MetaKeyValueRow("Description", meta("description"))
+                                            MetaKeyValueRow("Creator", meta("creator"))
+                                            MetaKeyValueRow("Copyright", meta("copyright"))
                                         }
                                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            MetaKeyValueRow("Subject", "Pahalgam; Kashmir; Nature")
-                                            MetaKeyValueRow("Keywords", "nature, mountains, lake, sunset, kashmir, travel")
-                                            MetaKeyValueRow("Rating", "5")
-                                            MetaKeyValueRow("Label", "Green")
+                                            MetaKeyValueRow("Subject", meta("subject"))
+                                            MetaKeyValueRow("Keywords", meta("keywords"))
+                                            MetaKeyValueRow("Rating", meta("rating"))
+                                            MetaKeyValueRow("Label", meta("label"))
                                             MetaKeyValueRow("Capture date", formatIsoDate(item.dateTakenMillis, item.dateAddedSeconds))
                                         }
                                     }
@@ -3418,6 +3425,67 @@ private fun SettingsScreen(
             }
         }
     }
+}
+
+
+private fun readMediaMetadata(context: android.content.Context, item: MediaItem): Map<String, String> {
+    val values = mutableMapOf<String, String>()
+    val uri = Uri.parse(item.uri)
+    if (!item.isVideo) {
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val exif = ExifInterface(stream)
+                fun put(key: String, vararg tags: String) {
+                    tags.firstNotNullOfOrNull { tag -> exif.getAttribute(tag)?.takeIf { it.isNotBlank() } }?.let { values[key] = it }
+                }
+                put("aperture", ExifInterface.TAG_F_NUMBER, ExifInterface.TAG_APERTURE_VALUE)
+                put("shutter", ExifInterface.TAG_EXPOSURE_TIME)
+                put("iso", ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, ExifInterface.TAG_ISO_SPEED_RATINGS)
+                put("focal", ExifInterface.TAG_FOCAL_LENGTH)
+                put("flash", ExifInterface.TAG_FLASH)
+                put("color", ExifInterface.TAG_COLOR_SPACE)
+                put("capture_date", ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DATETIME_DIGITIZED, ExifInterface.TAG_DATETIME)
+                put("description", ExifInterface.TAG_IMAGE_DESCRIPTION)
+                put("copyright", ExifInterface.TAG_COPYRIGHT)
+                put("creator", ExifInterface.TAG_ARTIST)
+                put("title", ExifInterface.TAG_DOCUMENT_NAME)
+            }
+        }
+    }
+    // XMP is often embedded near the beginning of the file. Read a bounded amount only.
+    runCatching {
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            var total = 0
+            while (total < 1024 * 1024) {
+                val count = stream.read(buffer, 0, minOf(buffer.size, 1024 * 1024 - total))
+                if (count <= 0) break
+                out.write(buffer, 0, count)
+                total += count
+            }
+            val xmp = out.toString("ISO-8859-1")
+            fun readXmp(key: String, regex: Regex) {
+                regex.find(xmp)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }?.let { values[key] = it }
+            }
+            readXmp("title", Regex("""(?:xmp:Title|dc:title)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("description", Regex("""(?:dc:description|photoshop:Caption)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("creator", Regex("""(?:dc:creator|xmp:Creator)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("copyright", Regex("""(?:dc:rights|xmpRights:UsageTerms)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("subject", Regex("""(?:dc:subject|Subject)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("keywords", Regex("""(?:MicrosoftPhoto:LastKeywordXMP|Keywords)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("rating", Regex("""xmp:Rating="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("label", Regex("""xmp:Label="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("capture_date", Regex("""(?:photoshop:DateCreated|xmp:CreateDate|xmp:DateCreated)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("aperture", Regex("""(?:exif:FNumber|FNumber)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("shutter", Regex("""(?:exif:ExposureTime|ExposureTime)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("iso", Regex("""(?:exif:ISOSpeedRatings|exif:PhotographicSensitivity|PhotographicSensitivity)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("focal", Regex("""(?:exif:FocalLength|FocalLength)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("flash", Regex("""(?:exif:Flash|Flash)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("color", Regex("""(?:exif:ColorSpace|ColorSpace)="([^"]+)""", RegexOption.IGNORE_CASE))
+        }
+    }
+    return values
 }
 
 private fun formatDate(takenMillis: Long, addedSeconds: Long): String { val millis = takenMillis.takeIf { it > 0 } ?: addedSeconds * 1000; if (millis <= 0) return "Date unavailable"; return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis)) }
