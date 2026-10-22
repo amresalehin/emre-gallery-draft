@@ -127,7 +127,6 @@ fun GalleryApp() {
             loading = false
         }
     }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { if (hasMediaPermission(context)) refreshMedia() }
     LaunchedEffect(Unit) { if (hasMediaPermission(context)) refreshMedia() }
 
     if (destination != Destination.HOME || albumFilter != null) {
@@ -218,6 +217,7 @@ fun GalleryApp() {
                     Destination.HOME -> HomeScreen(
                         media = visibleMedia,
                         loading = loading,
+                        onPermissionGranted = { refreshMedia() },
                         albumTitle = activeAlbumTitle,
                         sortOrder = sortOrderPref,
                         groupBy = groupByPref,
@@ -633,11 +633,16 @@ private fun HomeScreen(
     bottomContentPadding: Dp,
     onClearAlbumFilter: () -> Unit = {},
     onAddPhotosToAlbum: (() -> Unit)? = null,
+    onPermissionGranted: () -> Unit = {},
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
     var granted by remember { mutableStateOf(hasMediaPermission(context)) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted = hasMediaPermission(context) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        val hasPermission = hasMediaPermission(context)
+        granted = hasPermission
+        if (hasPermission) onPermissionGranted()
+    }
     LaunchedEffect(Unit) { granted = hasMediaPermission(context) }
     if (!granted) {
         PermissionState { launcher.launch(if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)) }
