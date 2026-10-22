@@ -3503,23 +3503,31 @@ private fun ViewerScreen(
                                                 style = MaterialTheme.typography.titleSmall,
                                                 fontWeight = FontWeight.SemiBold
                                             )
-                                            metadataRows.forEach { (label, value) ->
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    verticalAlignment = Alignment.Top
-                                                ) {
-                                                    Text(
-                                                        label,
-                                                        modifier = Modifier.weight(0.9f),
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                    Text(
-                                                        value,
-                                                        modifier = Modifier.weight(1.1f),
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface
-                                                    )
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(max = 260.dp)
+                                                    .verticalScroll(rememberScrollState()),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                metadataRows.forEach { (label, value) ->
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        verticalAlignment = Alignment.Top
+                                                    ) {
+                                                        Text(
+                                                            label,
+                                                            modifier = Modifier.weight(0.9f),
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                        Text(
+                                                            value,
+                                                            modifier = Modifier.weight(1.1f),
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
