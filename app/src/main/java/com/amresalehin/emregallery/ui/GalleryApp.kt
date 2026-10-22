@@ -95,6 +95,7 @@ fun GalleryApp() {
     val mediaRepository = remember { MediaRepository(context.contentResolver) }
     var destination by remember { mutableStateOf(Destination.HOME) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
+    var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
@@ -138,12 +139,21 @@ fun GalleryApp() {
 
     if (destination != Destination.HOME || albumFilter != null) {
         androidx.activity.compose.BackHandler {
-            if (destination == Destination.VIEWER || destination == Destination.SEARCH) {
-                destination = previousDestination
-            } else if (albumFilter != null) {
-                albumFilter = null
-            } else {
-                destination = Destination.HOME
+            when {
+                destination == Destination.VIEWER || destination == Destination.SEARCH -> {
+                    destination = previousDestination
+                }
+                albumFilter != null -> {
+                    albumFilter = null
+                    destination = albumFilterReturnDestination
+                }
+                destination in listOf(Destination.MAP, Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG) -> {
+                    destination = Destination.ALBUMS
+                }
+                destination in listOf(Destination.LIBRARY_OVERVIEW, Destination.OCR_SETTINGS, Destination.ABOUT) -> {
+                    destination = Destination.SETTINGS
+                }
+                else -> destination = Destination.HOME
             }
         }
     }
@@ -245,7 +255,7 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> destination = Destination.MAP; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; else -> { albumFilter = it; destination = Destination.HOME } } },
+                        onFilter = { when (it) { "Map" -> destination = Destination.MAP; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; destination = Destination.HOME } } },
                         onOpen = { selectedMedia = it; previousDestination = Destination.ALBUMS; destination = Destination.VIEWER },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -262,7 +272,7 @@ fun GalleryApp() {
                     Destination.DEVICE_FOLDERS -> DeviceFoldersScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         onBack = { destination = Destination.ALBUMS },
-                        onOpenFolder = { folderPath -> albumFilter = folderPath; destination = Destination.HOME }
+                        onOpenFolder = { folderPath -> albumFilterReturnDestination = Destination.ALBUMS; albumFilter = folderPath; destination = Destination.HOME }
                     )
                     Destination.ALBUM_CATALOG -> AlbumCatalogScreen(
                         albums = customAlbums,
@@ -273,6 +283,7 @@ fun GalleryApp() {
                             showCreateAlbumDialog = true
                         },
                         onOpenAlbum = { album ->
+                            albumFilterReturnDestination = Destination.ALBUMS
                             albumFilter = album.id
                             destination = Destination.HOME
                         }
