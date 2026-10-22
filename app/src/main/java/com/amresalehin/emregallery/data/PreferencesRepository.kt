@@ -3,6 +3,7 @@ package com.amresalehin.emregallery.data
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +20,8 @@ class PreferencesRepository(private val context: Context) {
     private val favouritesKey = stringSetPreferencesKey("favourites")
     private val hiddenKey = stringSetPreferencesKey("hidden")
     private val binKey = stringSetPreferencesKey("bin")
-    private val searchesKey = stringPreferencesKey("recent_searches")
+    private val legacySearchesKey = stringSetPreferencesKey("recent_searches")
+    private val searchesKey = stringPreferencesKey("recent_searches_v2")
     private val themeKey = stringPreferencesKey("theme")
     private val customAlbumsKey = stringPreferencesKey("custom_albums")
     private val archiveKey = stringSetPreferencesKey("archive")
@@ -34,7 +36,7 @@ class PreferencesRepository(private val context: Context) {
     val archive: Flow<Set<String>> = context.galleryDataStore.data.map { it[archiveKey] ?: emptySet() }
     val recentSearches: Flow<List<String>> = context.galleryDataStore.data.map { prefs ->
         runCatching {
-            val array = JSONArray(prefs[searchesKey] ?: "[]")
+            val array = JSONArray(prefs[searchesKey] ?: JSONArray((prefs[legacySearchesKey] ?: emptySet()).sorted()).toString())
             (0 until array.length())
                 .mapNotNull { index -> array.optString(index).trim().takeIf { it.isNotBlank() } }
                 .distinct()
@@ -146,7 +148,7 @@ class PreferencesRepository(private val context: Context) {
         if (normalized.isBlank()) return
         context.galleryDataStore.edit { prefs ->
             val existing = runCatching {
-                val array = JSONArray(prefs[searchesKey] ?: "[]")
+                val array = JSONArray(prefs[searchesKey] ?: JSONArray((prefs[legacySearchesKey] ?: emptySet()).sorted()).toString())
                 (0 until array.length()).mapNotNull { index ->
                     array.optString(index).trim().takeIf { it.isNotBlank() }
                 }
