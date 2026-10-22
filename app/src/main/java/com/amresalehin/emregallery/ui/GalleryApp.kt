@@ -2493,7 +2493,8 @@ private fun ViewerScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            // Keep the viewer canvas consistent with the user's selected app theme.
+            .background(MaterialTheme.colorScheme.background)
             .pointerInput(item.uri) {
                 detectTapGestures(
                     onTap = { onToggleControls() },
