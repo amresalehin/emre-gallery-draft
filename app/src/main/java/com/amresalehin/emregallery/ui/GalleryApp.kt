@@ -82,7 +82,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 
-private enum class Destination { HOME, ALBUMS, MAP, SETTINGS, SEARCH, VIEWER }
+private enum class Destination { HOME, ALBUMS, MAP, SETTINGS, LIBRARY_OVERVIEW, SEARCH, VIEWER }
 private enum class SearchStage { DISCOVERY, TYPING, RESULTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -265,8 +265,16 @@ fun GalleryApp() {
                         bottomContentPadding = bottomContentPadding,
                         onTheme = { scope.launch { prefs.setTheme(it) } },
                         onRefresh = { refreshMedia() },
-                        onSettings = {},
+                        onSettings = { label ->
+                            if (label == "Library overview") destination = Destination.LIBRARY_OVERVIEW
+                        },
                         onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
+                    )
+                    Destination.LIBRARY_OVERVIEW -> LibraryOverviewScreen(
+                        media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
+                        loading = loading,
+                        onBack = { destination = Destination.SETTINGS },
+                        onRefresh = { refreshMedia() }
                     )
                     Destination.SEARCH -> SearchScreen(
                         query = searchQuery,
@@ -3549,6 +3557,92 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                 }
             }
             Text("© OpenStreetMap contributors", modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = .8f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun LibraryOverviewScreen(
+    media: List<MediaItem>,
+    loading: Boolean,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    val imageCount = remember(media) { media.count { !it.isVideo } }
+    val videoCount = remember(media) { media.count { it.isVideo } }
+    val totalBytes = remember(media) { media.sumOf { it.sizeBytes.coerceAtLeast(0L) } }
+    val folderCount = remember(media) { media.map { it.relativePath.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" } }.distinct().size }
+    val datedCount = remember(media) { media.count { it.dateTakenMillis > 0L || it.dateAddedSeconds > 0L } }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back to settings") }
+            Column(Modifier.weight(1f)) {
+                Text("Library overview", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(if (loading) "Updating media index…" else "Local device library", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, contentDescription = "Refresh library") }
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Surface(shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("Your library", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Text(media.size.toString(), style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(8.dp))
+                            Text("items", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 7.dp))
+                        }
+                        Text(if (loading) "Scanning media…" else "Based on accessible media on this device", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    LibraryMetricCard("Photos", imageCount.toString(), Icons.Default.Photo, Modifier.weight(1f))
+                    LibraryMetricCard("Videos", videoCount.toString(), Icons.Default.Videocam, Modifier.weight(1f))
+                }
+            }
+            item { LibraryMetricCard("Storage represented by media", formatBytes(totalBytes), Icons.Default.Storage, Modifier.fillMaxWidth()) }
+            item { LibraryMetricCard("Device folders", folderCount.toString(), Icons.Default.Folder, Modifier.fillMaxWidth()) }
+            item { LibraryMetricCard("Items with date metadata", datedCount.toString(), Icons.Default.CalendarMonth, Modifier.fillMaxWidth()) }
+            item {
+                Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(12.dp))
+                        Text("This overview counts media accessible to Emre Gallery. Storage size is the sum of media file sizes, not the app's own storage usage.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryMetricCard(title: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+    ) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
