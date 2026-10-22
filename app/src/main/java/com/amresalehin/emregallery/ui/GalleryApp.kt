@@ -82,7 +82,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 
-private enum class Destination { HOME, ALBUMS, MAP, DEVICE_FOLDERS, SETTINGS, LIBRARY_OVERVIEW, ABOUT, SEARCH, VIEWER }
+private enum class Destination { HOME, ALBUMS, MAP, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, ABOUT, SEARCH, VIEWER }
 private enum class SearchStage { DISCOVERY, TYPING, RESULTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -244,7 +244,7 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> destination = Destination.MAP; "Folders" -> destination = Destination.DEVICE_FOLDERS; else -> { albumFilter = it; destination = Destination.HOME } } },
+                        onFilter = { when (it) { "Map" -> destination = Destination.MAP; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; else -> { albumFilter = it; destination = Destination.HOME } } },
                         onOpen = { selectedMedia = it; previousDestination = Destination.ALBUMS; destination = Destination.VIEWER },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -262,6 +262,19 @@ fun GalleryApp() {
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         onBack = { destination = Destination.ALBUMS },
                         onOpenFolder = { folderPath -> albumFilter = folderPath; destination = Destination.HOME }
+                    )
+                    Destination.ALBUM_CATALOG -> AlbumCatalogScreen(
+                        albums = customAlbums,
+                        media = media,
+                        onBack = { destination = Destination.ALBUMS },
+                        onCreateAlbum = { parentPath ->
+                            createAlbumPresetParent = parentPath
+                            showCreateAlbumDialog = true
+                        },
+                        onOpenAlbum = { album ->
+                            albumFilter = album.id
+                            destination = Destination.HOME
+                        }
                     )
                     Destination.SETTINGS -> SettingsScreen(
                         total = media.size,
@@ -3569,6 +3582,123 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                 }
             }
             Text("© OpenStreetMap contributors", modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = .8f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun AlbumCatalogScreen(
+    albums: List<CustomAlbum>,
+    media: List<MediaItem>,
+    onBack: () -> Unit,
+    onCreateAlbum: (String) -> Unit,
+    onOpenAlbum: (CustomAlbum) -> Unit
+) {
+    val sortedAlbums = remember(albums) { albums.sortedBy { it.fullPath.lowercase(Locale.getDefault()) } }
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding()
+                .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back to albums")
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Albums", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${albums.size} ${if (albums.size == 1) "album" else "albums"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            FilledTonalButton(onClick = { onCreateAlbum("") }) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("New album")
+            }
+        }
+        if (sortedAlbums.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(
+                    modifier = Modifier.padding(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(Icons.Default.PhotoAlbum, contentDescription = null, modifier = Modifier.size(52.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(14.dp))
+                    Text("No albums yet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Create an album to collect and organise your favourite photos and videos.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Button(onClick = { onCreateAlbum("") }) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Create album")
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(sortedAlbums, key = { it.id }) { album ->
+                    val albumMedia = remember(media, album) { media.filter { it.uri in album.mediaUris } }
+                    val cover = albumMedia.firstOrNull()
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable { onOpenAlbum(album) },
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(76.dp).clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                if (cover != null) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(Uri.parse(cover.uri))
+                                            .size(240, 240)
+                                            .crossfade(false)
+                                            .memoryCacheKey("${cover.uri}_album_catalog")
+                                            .build(),
+                                        contentDescription = album.name,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(Icons.Default.PhotoAlbum, contentDescription = null, modifier = Modifier.align(Alignment.Center))
+                                }
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(album.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (album.parentPath.isNotBlank()) {
+                                    Text(album.parentPath, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "${albumMedia.size} ${if (albumMedia.size == 1) "item" else "items"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Icon(Icons.Default.ChevronRight, contentDescription = "Open album", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
         }
     }
 }
