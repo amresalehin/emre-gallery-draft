@@ -20,4 +20,13 @@ class GalleryRepositoryStateTest {
     @Test fun folderGroupingUsesRelativePathParent() {
         assertEquals(setOf("DCIM/Camera", "Movies/Trips"), GalleryRepositoryState.groupByFolder(listOf(photo, video)).keys)
     }
+
+    @Test fun sortMediaCorrectlyOrdersByDateNameAndSize() {
+        // Sunset.jpg: dateTaken=1, dateAdded=2, size=512
+        // Trip.mp4: dateTaken=3, dateAdded=4, size=1024
+        assertEquals(listOf(video, photo), GalleryRepositoryState.sortMedia(listOf(photo, video), "date_desc"))
+        assertEquals(listOf(photo, video), GalleryRepositoryState.sortMedia(listOf(video, photo), "date_asc"))
+        assertEquals(listOf(photo, video), GalleryRepositoryState.sortMedia(listOf(video, photo), "name_asc"))
+        assertEquals(listOf(video, photo), GalleryRepositoryState.sortMedia(listOf(photo, video), "size_desc"))
+    }
 }

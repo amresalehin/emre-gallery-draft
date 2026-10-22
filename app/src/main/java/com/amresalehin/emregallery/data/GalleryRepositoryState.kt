@@ -13,4 +13,11 @@ object GalleryRepositoryState {
 
     fun groupByFolder(items: List<MediaItem>): Map<String, List<MediaItem>> =
         items.groupBy { it.relativePath.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" } }
+
+    fun sortMedia(items: List<MediaItem>, sortOrder: String): List<MediaItem> = when (sortOrder) {
+        "date_asc" -> items.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
+        "name_asc" -> items.sortedWith(compareBy({ it.name.lowercase() }, { it.id }))
+        "size_desc" -> items.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
+        else -> items.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
+    }
 }

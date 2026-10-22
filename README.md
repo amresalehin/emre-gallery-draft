@@ -1,33 +1,50 @@
 # Emre Gallery
 
-Native Android gallery MVP based on the supplied designs, using Kotlin, Jetpack Compose, Material 3 and Android MediaStore.
+Emre Gallery is a native Android gallery MVP built with Kotlin, Jetpack Compose and Material 3. It is based on the supplied screen designs and uses Android MediaStore to access on-device photos and videos.
 
-## Included source
-- Home timeline with memories strip and masonry-style media tiles
-- Albums screen with device folders, collection placeholders, and Favourites/Videos/Recently added/Hidden/Bin shortcuts
-- Explore screen with memories, folder-derived place shortcuts and topic placeholders
-- Dedicated Search screen with discovery, typing suggestions, and submitted results
-- Immersive photo/video viewer with toggleable controls, horizontal navigation, and swipe-up details panel
-- Settings screen with theme, tools, OCR/intelligence/index status placeholders and permissions shortcut
-- Local DataStore preference persistence for favourites, hidden items, Bin, recent searches and theme
-- Plan and task checklist
+## Current scope
+
+- Home gallery with date-grouped media and masonry-style cards
+- Albums, device folders, custom collections, favourites, videos, recently added, hidden items and Bin
+- Search discovery, typing suggestions and submitted results
+- Explore surfaces for memories, places and topics
+- Immersive image/video viewer with tap-to-show controls and swipe-up details
+- Settings and local persistence for collection and media states
+- Project planning and implementation checklist in `Plan.md` and `Task.md`
 
 ## Technology
-- Kotlin and Jetpack Compose / Material 3
-- Android SDK 35; min SDK 26; JDK 17
-- MediaStore; AndroidX Media3; Coil; Preferences DataStore
+
+- Kotlin
+- Jetpack Compose and Material 3
+- Android MediaStore
+- AndroidX Media3 for video playback
+- Gradle Kotlin DSL
 
 ## Build
-Open the project root in Android Studio and allow Gradle sync. Run `assembleDebug` and `testDebugUnitTest`. A pull-request workflow is configured to build, test, and upload a debug APK artifact when successful.
 
-Note: the checked-in `gradlew`/`gradlew.bat` are fallback launchers, not the official Gradle wrapper distribution. Use Android Studio or a locally installed Gradle 8.9+ until a proper wrapper JAR/scripts are added.
+Open the repository root in Android Studio with Android SDK Platform 35 and JDK 17 or newer. Allow Gradle sync, then run:
+
+```powershell
+.\gradlew.bat assembleDebug
+```
+
+or on Linux/macOS:
+
+```bash
+./gradlew assembleDebug
+```
+
+The expected output is `app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Verification status
-No successful Android build, CI run, APK artifact, or on-device test has been verified. This repository is a source MVP, not a release-ready verified APK.
 
-Advanced OCR, captioning/tagging, semantic search, face/person clustering, GPS map integration, duplicate detection, custom nested-album persistence, non-destructive in-app editing, platform deletion/trash integration, robust paging and production-grade video-player lifecycle handling still require work. Screens that depend on unavailable engines are marked as not configured; some Explore/My Vision cards are visual/navigation placeholders rather than computed AI output.
+The project source has been packaged and checked for basic Kotlin parser-level issues and Android XML validity. A full Android build and on-device run have not been verified in the authoring environment because Android SDK/Gradle installation and network access were unavailable.
+
+## Planned integrations
+
+Production OCR, AI captions and semantic search, robust people/face grouping, map tiles/geocoding, duplicate detection, hierarchical album management and a full non-destructive editor require further implementation. Do not treat these as completed just because the corresponding surfaces are specified.
 
 ## Documentation
-- [Plan.md](Plan.md) — product behavior and architecture
-- [Task.md](Task.md) — implementation checklist and acceptance criteria
-- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution guidance
+
+- [`Plan.md`](Plan.md): product and technical plan
+- [`Task.md`](Task.md): implementation checklist and acceptance criteria
