@@ -55,7 +55,7 @@ object TesseractOcr {
             engine.setImage(bitmap)
             return engine.utF8Text.orEmpty().trim()
         } finally {
-            engine.recycle()
+            engine.end()
             bitmap.recycle()
         }
     }
