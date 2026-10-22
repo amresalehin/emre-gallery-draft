@@ -68,6 +68,7 @@ import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.PreferencesRepository
+import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -2484,6 +2485,11 @@ private fun ViewerScreen(
 ) {
     val context = LocalContext.current
     var metadata by remember(item.uri) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var ocrText by remember(item.uri) { mutableStateOf("") }
+    var ocrError by remember(item.uri) { mutableStateOf<String?>(null) }
+    var ocrBusy by remember(item.uri) { mutableStateOf(false) }
+    val ocrLanguages = remember(item.uri) { mutableStateListOf("eng") }
+    val ocrScope = rememberCoroutineScope()
     LaunchedEffect(item.uri) {
         metadata = withContext(Dispatchers.IO) {
             runCatching { readMediaMetadata(context, item) }.getOrDefault(emptyMap())
@@ -2905,33 +2911,112 @@ private fun ViewerScreen(
                             }
                         }
 
-                        // Card 3: Text detection / OCR
+                        // Card 3: Real local Tesseract OCR with selectable trained languages.
                         item {
                             DetailCard {
-                                Row(
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Icon(
-                                        Icons.Default.Description,
-                                        contentDescription = "Text detection",
-                                        modifier = Modifier.size(22.dp),
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(
-                                        text = "No text found",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Icon(
-                                        Icons.Default.ChevronRight,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.DocumentScanner,
+                                            contentDescription = "Text recognition",
+                                            modifier = Modifier.size(22.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Text found", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                "On-device Tesseract OCR · images stay on this device",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Text("Recognition languages", style = MaterialTheme.typography.labelLarge)
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        TesseractOcr.supportedLanguages.forEach { (languageName, code) ->
+                                            FilterChip(
+                                                selected = code in ocrLanguages,
+                                                onClick = {
+                                                    if (code in ocrLanguages) {
+                                                        if (ocrLanguages.size > 1) ocrLanguages.remove(code)
+                                                    } else {
+                                                        ocrLanguages.add(code)
+                                                    }
+                                                },
+                                                label = { Text(languageName) },
+                                                enabled = !ocrBusy
+                                            )
+                                        }
+                                    }
+                                    Button(
+                                        onClick = {
+                                            if (!item.isVideo) {
+                                                ocrBusy = true
+                                                ocrError = null
+                                                ocrText = ""
+                                                ocrScope.launch {
+                                                    val result = withContext(Dispatchers.IO) {
+                                                        runCatching {
+                                                            TesseractOcr.recognize(
+                                                                context,
+                                                                Uri.parse(item.uri),
+                                                                ocrLanguages.toList()
+                                                            )
+                                                        }
+                                                    }
+                                                    result.onSuccess { text ->
+                                                        ocrText = text.ifBlank { "No text detected in this image." }
+                                                    }.onFailure { error ->
+                                                        ocrError = error.message ?: "OCR failed. Please try again."
+                                                    }
+                                                    ocrBusy = false
+                                                }
+                                            }
+                                        },
+                                        enabled = !item.isVideo && !ocrBusy && ocrLanguages.isNotEmpty(),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        if (ocrBusy) {
+                                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("Preparing language data and recognizing…")
+                                        } else {
+                                            Icon(Icons.Default.DocumentScanner, contentDescription = null)
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(if (ocrText.isBlank()) "Recognize text" else "Recognize again")
+                                        }
+                                    }
+                                    if (item.isVideo) {
+                                        Text("OCR is currently available for images, not video frames.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    ocrError?.let { error ->
+                                        Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    if (ocrText.isNotBlank()) {
+                                        HorizontalDivider()
+                                        Text(ocrText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                                        if (ocrText != "No text detected in this image.") {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Recognized text", ocrText))
+                                                },
+                                                modifier = Modifier.align(Alignment.End)
+                                            ) {
+                                                Icon(Icons.Default.ContentCopy, contentDescription = null)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Copy text")
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
