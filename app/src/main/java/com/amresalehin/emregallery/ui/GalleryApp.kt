@@ -3374,31 +3374,36 @@ private fun ViewerScreen(
                             }
                         }
 
-                        // Card 7: Camera & Dimensions Info
+                        // Card 7: Actual device metadata and file properties
                         item {
+                            val deviceName = listOf(metadata["make"], metadata["model"])
+                                .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+                                .distinct()
+                                .joinToString(" ")
+                                .ifBlank { "Device not recorded" }
                             DetailCard {
-                                Row(
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    Icon(
-                                        Icons.Default.PhotoCamera,
-                                        contentDescription = "Device info",
-                                        modifier = Modifier.size(22.dp),
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(Modifier.width(12.dp))
                                     Row(
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Column(modifier = Modifier.weight(1.3f)) {
+                                        Icon(
+                                            Icons.Default.PhotoCamera,
+                                            contentDescription = "Device info",
+                                            modifier = Modifier.size(22.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                text = "Samsung Galaxy S21 FE",
+                                                text = deviceName,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
+                                                maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
@@ -3407,44 +3412,39 @@ private fun ViewerScreen(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
-                                        VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 6.dp))
+                                        Icon(
+                                            Icons.Default.ChevronRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text(
-                                                text = if (item.width > 0 && item.height > 0) "${item.width} × ${item.height}" else "4096 × 3072",
+                                                text = if (item.width > 0 && item.height > 0) "${item.width} × ${item.height}" else "Not available",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = MaterialTheme.colorScheme.onSurface,
                                                 maxLines = 1
                                             )
-                                            Text(
-                                                text = "Dimensions",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            Text("Dimensions", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
-                                        VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 6.dp))
-                                        Column(modifier = Modifier.weight(0.9f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 8.dp))
+                                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                                             Text(
-                                                text = if (item.sizeBytes > 0) formatBytes(item.sizeBytes) else "4.8 MB",
+                                                text = if (item.sizeBytes > 0) formatBytes(item.sizeBytes) else "Not available",
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = MaterialTheme.colorScheme.onSurface,
                                                 maxLines = 1
                                             )
-                                            Text(
-                                                text = "File size",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                            Text("File size", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
-                                    Spacer(Modifier.width(8.dp))
-                                    Icon(
-                                        Icons.Default.ChevronRight,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(20.dp)
-                                    )
                                 }
                             }
                         }
@@ -4341,6 +4341,8 @@ private fun readMediaMetadata(context: android.content.Context, item: MediaItem)
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { stream ->
                 val exif = ExifInterface(stream)
+                exif.getAttribute(ExifInterface.TAG_MAKE)?.takeIf { it.isNotBlank() }?.let { values["make"] = it }
+                exif.getAttribute(ExifInterface.TAG_MODEL)?.takeIf { it.isNotBlank() }?.let { values["model"] = it }
                 exif.latLong?.let { coordinates ->
                     values["latitude"] = coordinates[0].toString()
                     values["longitude"] = coordinates[1].toString()
