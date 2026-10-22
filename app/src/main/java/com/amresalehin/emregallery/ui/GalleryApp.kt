@@ -3891,6 +3891,23 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
             }
         )
 
+        // Soft translucent blur behind the floating map controls, including the status bar.
+        Box(
+            Modifier.fillMaxWidth()
+                .height(142.dp)
+                .align(Alignment.TopCenter)
+                .blur(24.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.48f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Surface(onClick = onBack, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
