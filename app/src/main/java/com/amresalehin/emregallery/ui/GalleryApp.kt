@@ -2767,13 +2767,39 @@ private fun ViewerScreen(
                 )
             }
     ) {
+        val currentIndex = items.indexOfFirst { it.uri == item.uri }
+        val swipeNeighbor = when {
+            dragOffsetX < 0f -> items.getOrNull(currentIndex + 1)
+            dragOffsetX > 0f -> items.getOrNull(currentIndex - 1)
+            else -> null
+        }
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val widthPx = constraints.maxWidth.toFloat()
+            // Show the adjacent image sliding in from the edge underneath the image
+            // being dragged, so the gesture tracks the user's finger.
+            swipeNeighbor?.takeIf { !showDetails && !item.isVideo && !it.isVideo && kotlin.math.abs(dragOffsetX) > 0f }?.let { neighbor ->
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(Uri.parse(neighbor.uri))
+                        .memoryCacheKey("${neighbor.uri}:viewer-swipe-preview")
+                        .crossfade(false)
+                        .build(),
+                    contentDescription = neighbor.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        translationX = (if (dragOffsetX < 0f) widthPx else -widthPx) + dragOffsetX
+                    }
+                )
+            }
         AnimatedContent(
             targetState = item,
             transitionSpec = {
-                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(180))
+                val direction = if (targetState.dateTakenMillis >= initialState.dateTakenMillis) 1 else -1
+                slideInHorizontally(animationSpec = tween(240), initialOffsetX = { width -> direction * width }) togetherWith
+                    slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { width -> -direction * width })
             },
             label = "viewer_media_transition",
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize().graphicsLayer { translationX = dragOffsetX }
         ) { currentItem ->
             if (currentItem.isVideo) {
                 androidx.compose.ui.viewinterop.AndroidView(
@@ -2808,6 +2834,7 @@ private fun ViewerScreen(
                     contentScale = ContentScale.Fit
                 )
             }
+        }
         }
 
         if (showControls && !showDetails) {
