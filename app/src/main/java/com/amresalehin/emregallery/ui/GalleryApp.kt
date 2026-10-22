@@ -2936,10 +2936,10 @@ private fun ViewerScreen(
                                         }
                                     }
                                     Text("Recognition languages", style = MaterialTheme.typography.labelLarge)
-                                    FlowRow(
-                                        modifier = Modifier.fillMaxWidth(),
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         TesseractOcr.supportedLanguages.forEach { (languageName, code) ->
                                             FilterChip(
