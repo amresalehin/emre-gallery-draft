@@ -3449,90 +3449,81 @@ private fun ViewerScreen(
                             }
                         }
 
-                        // Card 8: Camera Settings / EXIF grid
+                        // Card 8: Combined EXIF and XMP metadata, showing only available values
                         item {
-                            DetailCard {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.Camera,
-                                        contentDescription = "EXIF Settings",
-                                        modifier = Modifier.size(22.dp),
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Row(
-                                        modifier = Modifier.weight(1f),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        ExifColumn(top = meta("aperture"), bottom = "Aperture", modifier = Modifier.weight(1f))
-                                        VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = meta("shutter"), bottom = "Shutter speed", modifier = Modifier.weight(1.2f))
-                                        VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = meta("iso"), bottom = "ISO", modifier = Modifier.weight(0.7f))
-                                        VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = meta("focal"), bottom = "Focal length", modifier = Modifier.weight(1.1f))
-                                        VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = meta("flash"), bottom = "Flash", modifier = Modifier.weight(1f))
-                                        VerticalDivider(modifier = Modifier.height(26.dp).padding(horizontal = 2.dp))
-                                        ExifColumn(top = meta("color"), bottom = "Color space", modifier = Modifier.weight(1f))
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    Icon(
-                                        Icons.Default.ChevronRight,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                            val metadataRows = remember(metadata, item.uri, item.dateTakenMillis, item.dateAddedSeconds) {
+                                val rows = listOf(
+                                    "Device manufacturer" to metadata["make"],
+                                    "Device model" to metadata["model"],
+                                    "Aperture" to metadata["aperture"],
+                                    "Shutter speed" to metadata["shutter"],
+                                    "ISO" to metadata["iso"],
+                                    "Focal length" to metadata["focal"],
+                                    "Flash" to metadata["flash"],
+                                    "Color space" to metadata["color"],
+                                    "Location" to metadata["location"],
+                                    "Latitude" to metadata["latitude"],
+                                    "Longitude" to metadata["longitude"],
+                                    "Title" to (metadata["title"]?.takeIf { it.isNotBlank() }
+                                        ?: item.name.substringBeforeLast('.').takeIf { it.isNotBlank() }),
+                                    "Description" to metadata["description"],
+                                    "Creator" to metadata["creator"],
+                                    "Copyright" to metadata["copyright"],
+                                    "Subject" to metadata["subject"],
+                                    "Keywords" to metadata["keywords"],
+                                    "Rating" to metadata["rating"],
+                                    "Label" to metadata["label"],
+                                    "Capture date" to (metadata["capture_date"]?.takeIf { it.isNotBlank() }
+                                        ?: item.dateTakenMillis.takeIf { it > 0 }?.let { formatIsoDate(it, item.dateAddedSeconds) })
+                                )
+                                rows.mapNotNull { (label, value) ->
+                                    value?.trim()?.takeIf { it.isNotEmpty() && it != "Not available" }
+                                        ?.let { label to it }
                                 }
                             }
-                        }
-
-                        // Card 9: Extended Metadata / EXIF Attributes Table
-                        item {
-                            val photoTitle = metadata["title"]?.takeIf { it.isNotBlank() }
-                                ?: item.name.substringBeforeLast('.').takeIf { it.isNotBlank() }
-                                ?: "Not available"
-                            DetailCard {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.Top
-                                ) {
-                                    Icon(
-                                        Icons.Default.Article,
-                                        contentDescription = "Metadata Table",
-                                        modifier = Modifier.size(22.dp).padding(top = 2.dp),
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(Modifier.width(12.dp))
+                            if (metadataRows.isNotEmpty()) {
+                                DetailCard {
                                     Row(
-                                        modifier = Modifier.weight(1f),
-                                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.Top
                                     ) {
-                                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            MetaKeyValueRow("Title", photoTitle)
-                                            MetaKeyValueRow("Description", meta("description"))
-                                            MetaKeyValueRow("Creator", meta("creator"))
-                                            MetaKeyValueRow("Copyright", meta("copyright"))
-                                        }
-                                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            MetaKeyValueRow("Subject", meta("subject"))
-                                            MetaKeyValueRow("Keywords", meta("keywords"))
-                                            MetaKeyValueRow("Rating", meta("rating"))
-                                            MetaKeyValueRow("Label", meta("label"))
-                                            MetaKeyValueRow("Capture date", metadata["capture_date"]?.takeIf { it.isNotBlank() } ?: item.dateTakenMillis.takeIf { it > 0 }?.let { formatIsoDate(it, item.dateAddedSeconds) } ?: "Not available")
+                                        Icon(
+                                            Icons.Default.Article,
+                                            contentDescription = "Image metadata",
+                                            modifier = Modifier.size(22.dp).padding(top = 2.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Text(
+                                                "Metadata",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            metadataRows.forEach { (label, value) ->
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.Top
+                                                ) {
+                                                    Text(
+                                                        label,
+                                                        modifier = Modifier.weight(0.9f),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Text(
+                                                        value,
+                                                        modifier = Modifier.weight(1.1f),
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
-                                    Spacer(Modifier.width(8.dp))
-                                    Icon(
-                                        Icons.Default.ChevronRight,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(20.dp).padding(top = 2.dp)
-                                    )
                                 }
                             }
                         }
