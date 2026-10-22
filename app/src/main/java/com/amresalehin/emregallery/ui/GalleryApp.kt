@@ -849,35 +849,18 @@ private fun HomeScreen(
                     }
                 }
 
-                val rowChunks = group.items.chunked(gridColumns)
+                val rowChunks = group.items.chunked(gridColumns.coerceIn(1, 6))
                 items(
                     count = rowChunks.size,
                     key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
                     contentType = { "photo_row" }
                 ) { rowIndex ->
-                    val rowItems = rowChunks[rowIndex]
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        for (i in 0 until gridColumns) {
-                            val item = rowItems.getOrNull(i)
-                            Box(modifier = Modifier.weight(1f)) {
-                                if (item != null) {
-                                    MediaGridItem(
-                                        item = item,
-                                        isSquare = (gridStyle == "square"),
-                                        colIndex = i,
-                                        onOpen = onOpen
-                                    )
-                                } else {
-                                    Spacer(Modifier.aspectRatio(1f))
-                                }
-                            }
-                        }
-                    }
+                    JustifiedMosaicRow(
+                        items = rowChunks[rowIndex],
+                        rowIndex = rowIndex,
+                        isSquare = (gridStyle == "square"),
+                        onOpen = onOpen
+                    )
                 }
             }
         }
@@ -1315,6 +1298,101 @@ private fun SquareGrid(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun JustifiedMosaicRow(
+    items: List<MediaItem>,
+    rowIndex: Int,
+    isSquare: Boolean,
+    onOpen: (MediaItem) -> Unit
+) {
+    if (items.isEmpty()) return
+
+    val aspects = items.mapIndexed { index, item ->
+        if (isSquare) 1f else if (item.width > 0 && item.height > 0) {
+            (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
+        } else {
+            when ((item.id.hashCode() + rowIndex + index).mod(4)) {
+                0 -> 0.72f
+                1 -> 0.9f
+                2 -> 1.0f
+                else -> 1.35f
+            }
+        }
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp)
+    ) {
+        val gap = 4.dp
+        val totalGap = gap * (items.size - 1)
+        val rowHeight = ((maxWidth - totalGap) / aspects.sum()).coerceIn(72.dp, 220.dp)
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(gap)
+        ) {
+            items.forEachIndexed { index, item ->
+                MosaicMediaItem(
+                    item = item,
+                    modifier = Modifier
+                        .weight(aspects[index])
+                        .height(rowHeight),
+                    onOpen = onOpen
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MosaicMediaItem(
+    item: MediaItem,
+    modifier: Modifier,
+    onOpen: (MediaItem) -> Unit
+) {
+    val context = LocalContext.current
+    val imageRequest = remember(item.uri) {
+        ImageRequest.Builder(context)
+            .data(Uri.parse(item.uri))
+            .size(720, 720)
+            .crossfade(false)
+            .memoryCacheKey("${item.uri}_thumb")
+            .build()
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable { onOpen(item) }
+    ) {
+        AsyncImage(
+            model = imageRequest,
+            contentDescription = item.name,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+        if (item.isVideo) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(6.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                    .padding(3.dp)
+            ) {
+                Icon(
+                    Icons.Default.PlayArrow,
+                    contentDescription = "Video",
+                    modifier = Modifier.size(16.dp),
+                    tint = Color.White
+                )
             }
         }
     }
