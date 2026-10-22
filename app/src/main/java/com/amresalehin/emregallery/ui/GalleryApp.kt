@@ -82,7 +82,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 
-private enum class Destination { HOME, ALBUMS, MAP, SETTINGS, LIBRARY_OVERVIEW, ABOUT, SEARCH, VIEWER }
+private enum class Destination { HOME, ALBUMS, MAP, DEVICE_FOLDERS, SETTINGS, LIBRARY_OVERVIEW, ABOUT, SEARCH, VIEWER }
 private enum class SearchStage { DISCOVERY, TYPING, RESULTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -244,7 +244,7 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { if (it == "Map") destination = Destination.MAP else { albumFilter = it; destination = Destination.HOME } },
+                        onFilter = { when (it) { "Map" -> destination = Destination.MAP; "Folders" -> destination = Destination.DEVICE_FOLDERS; else -> { albumFilter = it; destination = Destination.HOME } } },
                         onOpen = { selectedMedia = it; previousDestination = Destination.ALBUMS; destination = Destination.VIEWER },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -257,6 +257,11 @@ fun GalleryApp() {
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         onBack = { destination = Destination.ALBUMS },
                         onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.MAP; destination = Destination.VIEWER }
+                    )
+                    Destination.DEVICE_FOLDERS -> DeviceFoldersScreen(
+                        media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
+                        onBack = { destination = Destination.ALBUMS },
+                        onOpenFolder = { folderPath -> albumFilter = folderPath; destination = Destination.HOME }
                     )
                     Destination.SETTINGS -> SettingsScreen(
                         total = media.size,
@@ -3564,6 +3569,111 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                 }
             }
             Text("© OpenStreetMap contributors", modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = .8f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun DeviceFoldersScreen(
+    media: List<MediaItem>,
+    onBack: () -> Unit,
+    onOpenFolder: (String) -> Unit
+) {
+    val folders = remember(media) {
+        media.groupBy { item ->
+            item.relativePath.trim().trim('/').ifBlank { "Internal storage" }
+        }.toList().sortedBy { it.first.lowercase(Locale.getDefault()) }
+    }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding()
+                .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back to albums")
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Device folders", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${folders.size} folders · ${media.size} media items",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (folders.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                    Icon(Icons.Default.FolderOff, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(12.dp))
+                    Text("No device folders found", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Folders appear here when accessible photos or videos are found on your device.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 28.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(folders, key = { it.first }) { (path, itemsInFolder) ->
+                    val cover = itemsInFolder.firstOrNull()
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable { onOpenFolder(path) },
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier.size(72.dp).clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                if (cover != null) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(Uri.parse(cover.uri))
+                                            .size(240, 240)
+                                            .crossfade(false)
+                                            .memoryCacheKey("${cover.uri}_device_folder")
+                                            .build(),
+                                        contentDescription = "Folder preview",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.align(Alignment.Center))
+                                }
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    path.substringAfterLast('/').ifBlank { "Internal storage" },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(3.dp))
+                                Text(path, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "${itemsInFolder.size} ${if (itemsInFolder.size == 1) "item" else "items"} · ${itemsInFolder.count { it.isVideo }} videos",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Icon(Icons.Default.ChevronRight, contentDescription = "Open folder", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
         }
     }
 }
