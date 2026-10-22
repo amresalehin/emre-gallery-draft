@@ -83,7 +83,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 
-private enum class Destination { HOME, ALBUMS, MAP, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, ABOUT, SEARCH, VIEWER }
+private enum class Destination { HOME, ALBUMS, MAP, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, OCR_SETTINGS, ABOUT, SEARCH, VIEWER }
 private enum class SearchStage { DISCOVERY, TYPING, RESULTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -288,6 +288,7 @@ fun GalleryApp() {
                             when (label) {
                                 "Library overview" -> destination = Destination.LIBRARY_OVERVIEW
                                 "About" -> destination = Destination.ABOUT
+                                "OCR" -> destination = Destination.OCR_SETTINGS
                             }
                         },
                         onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
@@ -297,6 +298,9 @@ fun GalleryApp() {
                         loading = loading,
                         onBack = { destination = Destination.SETTINGS },
                         onRefresh = { refreshMedia() }
+                    )
+                    Destination.OCR_SETTINGS -> OcrSettingsScreen(
+                        onBack = { destination = Destination.SETTINGS }
                     )
                     Destination.ABOUT -> AboutScreen(
                         onBack = { destination = Destination.SETTINGS }
@@ -3889,6 +3893,81 @@ private fun DeviceFoldersScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun OcrSettingsScreen(onBack: () -> Unit) {
+    var selectedLanguages by remember { mutableStateOf(setOf("eng")) }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
+            Text("OCR configuration", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        }
+        Text(
+            "Text recognition",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Emre Gallery uses Tesseract OCR locally on your device. Choose the languages you commonly read. Their trained-data files are downloaded when OCR is first run for a selected language and then cached for offline use.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(18.dp))
+        Text("Available trained languages", style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(8.dp))
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 12.dp)
+        ) {
+            items(TesseractOcr.supportedLanguages.entries.toList()) { entry ->
+                ElevatedCard(
+                    onClick = {
+                        selectedLanguages = if (entry.value in selectedLanguages) {
+                            if (selectedLanguages.size > 1) selectedLanguages - entry.value else selectedLanguages
+                        } else selectedLanguages + entry.value
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(entry.key, style = MaterialTheme.typography.bodyLarge)
+                            Text(entry.value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Checkbox(
+                            checked = entry.value in selectedLanguages,
+                            onCheckedChange = { checked ->
+                                selectedLanguages = if (checked) selectedLanguages + entry.value
+                                else if (selectedLanguages.size > 1) selectedLanguages - entry.value else selectedLanguages
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        Surface(
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp)
+        ) {
+            Text(
+                "Selected: ${selectedLanguages.size} language(s). Language selection in the media viewer can also be adjusted for an individual image.",
+                modifier = Modifier.padding(14.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
