@@ -1,3 +1,6 @@
+import java.net.URL
+import java.net.HttpURLConnection
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -65,15 +68,15 @@ val prepareBundledOcrData by tasks.registering {
             if (!target.exists() || target.length() < 1024) {
                 val temporary = tessdataDir.resolve("$code.traineddata.download")
                 try {
-                    val connection = java.net.URL(
+                    val connection = URL(
                         "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$code.traineddata"
-                    ).openConnection() as java.net.HttpURLConnection
+                    ).openConnection() as HttpURLConnection
                     connection.connectTimeout = 20000
                     connection.readTimeout = 120000
                     connection.instanceFollowRedirects = true
                     try {
                         connection.connect()
-                        if (connection.responseCode != java.net.HttpURLConnection.HTTP_OK) {
+                        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                             error("Could not fetch OCR data for $code (HTTP ${connection.responseCode}).")
                         }
                         connection.inputStream.use { input ->
@@ -117,6 +120,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Native Tesseract engine and its JNI libraries are packaged in the APK.
     implementation("com.rmtheis:tess-two:9.1.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")

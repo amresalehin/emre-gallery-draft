@@ -849,7 +849,7 @@ private fun HomeScreen(
                     }
                 }
 
-                val rowChunks = remember(group.items, gridColumns) { group.items.chunked(gridColumns) }
+                val rowChunks = group.items.chunked(gridColumns)
                 items(
                     count = rowChunks.size,
                     key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
@@ -3923,7 +3923,7 @@ private fun OcrSettingsScreen(onBack: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 12.dp)
         ) {
-            items(TesseractOcr.supportedLanguages.entries.toList()) { entry ->
+            gridItems(TesseractOcr.supportedLanguages.entries.toList()) { entry ->
                 ElevatedCard(
                     onClick = {
                         selectedLanguages = if (entry.value in selectedLanguages) {
@@ -4270,7 +4270,7 @@ private fun readMediaMetadata(context: android.content.Context, item: MediaItem)
                 put("description", ExifInterface.TAG_IMAGE_DESCRIPTION)
                 put("copyright", ExifInterface.TAG_COPYRIGHT)
                 put("creator", ExifInterface.TAG_ARTIST)
-                put("title", ExifInterface.TAG_DOCUMENT_NAME)
+                put("title", "DocumentName")
             }
         }
     }
