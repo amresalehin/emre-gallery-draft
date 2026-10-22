@@ -3914,23 +3914,13 @@ private fun OcrSettingsScreen(onBack: () -> Unit) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
             Text("OCR configuration", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         }
-        Text(
-            "Text recognition",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Emre Gallery uses Tesseract OCR locally on your device. Choose the languages you commonly read. Their trained-data files are downloaded when OCR is first run for a selected language and then cached for offline use.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(18.dp))
-        Text("Available trained languages", style = MaterialTheme.typography.titleSmall)
-        Spacer(Modifier.height(8.dp))
-        LazyColumn(
+        Text("Languages", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = 12.dp)
         ) {
             items(TesseractOcr.supportedLanguages.entries.toList()) { entry ->
@@ -3940,16 +3930,22 @@ private fun OcrSettingsScreen(onBack: () -> Unit) {
                             if (selectedLanguages.size > 1) selectedLanguages - entry.value else selectedLanguages
                         } else selectedLanguages + entry.value
                     },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 10.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(entry.key, style = MaterialTheme.typography.bodyLarge)
-                            Text(entry.value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                        Text(
+                            entry.key,
+                            style = MaterialTheme.typography.labelMedium,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            minLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         Checkbox(
                             checked = entry.value in selectedLanguages,
                             onCheckedChange = { checked ->
@@ -3961,18 +3957,13 @@ private fun OcrSettingsScreen(onBack: () -> Unit) {
                 }
             }
         }
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp)
-        ) {
-            Text(
-                "Selected: ${selectedLanguages.size} language(s). Language selection in the media viewer can also be adjusted for an individual image.",
-                modifier = Modifier.padding(14.dp),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Text(
+            "${selectedLanguages.size} selected",
+            modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.End
+        )
     }
 }
 
