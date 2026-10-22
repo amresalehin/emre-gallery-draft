@@ -953,25 +953,90 @@ private fun HomeScreenSkeleton(
 
 @Composable
 private fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
-    if (media.isEmpty()) return
-    val stories = listOf("Recently added", "Camera roll", "Videos", "Your library")
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
-        items(stories.size) { i ->
-            val candidate = when (i) { 2 -> media.firstOrNull { it.isVideo }; 1 -> media.firstOrNull { it.relativePath.contains("Camera", true) }; else -> media.getOrNull(i) } ?: media.first()
-            Box(Modifier.width(118.dp).height(174.dp).clip(RoundedCornerShape(14.dp)).clickable { onOpen(candidate) }) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(Uri.parse(candidate.uri))
-                        .size(240, 360)
-                        .crossfade(false)
-                        .memoryCacheKey("${candidate.uri}_memories")
-                        .build(),
-                    contentDescription = candidate.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-                Box(Modifier.fillMaxWidth().height(74.dp).align(Alignment.BottomCenter).background(Color.Black.copy(alpha = .55f)))
-                Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) { Text(stories[i], color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis); Text("${media.size} items", color = Color.White.copy(alpha = .85f), style = MaterialTheme.typography.labelSmall) }
+    val today = remember { Calendar.getInstance() }
+    val currentYear = today.get(Calendar.YEAR)
+    val todayMonth = today.get(Calendar.MONTH)
+    val todayDay = today.get(Calendar.DAY_OF_YEAR)
+
+    val stories = remember(media, currentYear, todayMonth, todayDay) {
+        val eligible = media.mapNotNull { item ->
+            val timestamp = item.dateTakenMillis.takeIf { it > 0L } ?: item.dateAddedSeconds * 1000L
+            if (timestamp <= 0L) null else item to Calendar.getInstance().apply { timeInMillis = timestamp }
+        }
+        val result = mutableListOf<Pair<String, List<MediaItem>>>()
+
+        // Google Photos-style "On this day" stories: real photos from this calendar date in prior years.
+        val onThisDay = eligible.filter { (_, date) ->
+            date.get(Calendar.MONTH) == todayMonth &&
+                date.get(Calendar.DAY_OF_YEAR) == todayDay &&
+                date.get(Calendar.YEAR) < currentYear
+        }.groupBy { (_, date) -> date.get(Calendar.YEAR) }
+            .toSortedMap(compareByDescending { it })
+        onThisDay.forEach { (year, entries) ->
+            result += "On this day · $year" to entries.map { it.first }
+        }
+
+        // Real date-based trip/story groups from the library, not generic sample cards.
+        eligible.groupBy { (_, date) ->
+            date.get(Calendar.YEAR) * 100 + date.get(Calendar.DAY_OF_YEAR)
+        }.entries
+            .filter { it.value.size >= 4 }
+            .sortedByDescending { it.key }
+            .take(8)
+            .forEach { (_, entries) ->
+                val date = entries.first().second
+                val label = SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(date.time)
+                if (result.none { it.second.any { storyItem -> storyItem.uri == entries.first().first.uri } }) {
+                    result += label to entries.map { it.first }
+                }
+            }
+
+        result.filter { it.second.isNotEmpty() }.take(10)
+    }
+
+    if (stories.isEmpty()) return
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "Memories",
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+            items(stories.size, key = { index -> stories[index].first }) { index ->
+                val (title, storyMedia) = stories[index]
+                val cover = storyMedia.first()
+                Box(
+                    Modifier.width(132.dp).height(184.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onOpen(cover) }
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(Uri.parse(cover.uri))
+                            .size(264, 368)
+                            .crossfade(false)
+                            .memoryCacheKey("${cover.uri}_memory_story")
+                            .build(),
+                        contentDescription = title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                    Box(
+                        Modifier.fillMaxWidth().height(78.dp).align(Alignment.BottomCenter)
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.78f))))
+                    )
+                    Column(Modifier.align(Alignment.BottomStart).padding(10.dp)) {
+                        Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${storyMedia.size} photos and videos",
+                            color = Color.White.copy(alpha = 0.88f),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
         }
     }
