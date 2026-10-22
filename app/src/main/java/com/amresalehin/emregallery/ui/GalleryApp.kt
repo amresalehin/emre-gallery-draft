@@ -2357,6 +2357,7 @@ private fun SearchScreen(query: String, stage: SearchStage, results: List<MediaI
 private fun ViewerScreen(
     item: MediaItem,
     items: List<MediaItem>,
+    customAlbums: List<CustomAlbum>,
     favourite: Boolean,
     isHidden: Boolean,
     isBin: Boolean,
@@ -2988,9 +2989,11 @@ private fun ViewerScreen(
                             }
                         }
 
-                        // Card 6: Albums
+                        // Card 6: Actual custom albums containing this media item
                         item {
-                            val albumList = listOf("Trips", "Kashmir", "Favorites")
+                            val containingAlbums = remember(customAlbums, item.uri) {
+                                customAlbums.filter { item.uri in it.mediaUris }
+                            }
                             DetailCard {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -3003,86 +3006,79 @@ private fun ViewerScreen(
                                         tint = MaterialTheme.colorScheme.onSurface
                                     )
                                     Spacer(Modifier.width(12.dp))
-                                    Row(
+                                    Column(
                                         modifier = Modifier.weight(1f),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        albumList.forEachIndexed { idx, albumName ->
-                                            val coverItem = items.getOrNull(idx + 1) ?: items.firstOrNull()
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Surface(
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                                                    modifier = Modifier.size(width = 56.dp, height = 40.dp)
+                                        Text(
+                                            text = "Albums",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (containingAlbums.isEmpty()) {
+                                            Text(
+                                                text = "Not in any custom album",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        } else {
+                                            containingAlbums.forEach { album ->
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                                                 ) {
-                                                    if (coverItem != null) {
-                                                        AsyncImage(
-                                                            model = ImageRequest.Builder(LocalContext.current)
-                                                                .data(Uri.parse(coverItem.uri))
-                                                                .size(150, 120)
-                                                                .crossfade(false)
-                                                                .build(),
-                                                            contentDescription = albumName,
-                                                            modifier = Modifier.fillMaxSize(),
-                                                            contentScale = ContentScale.Crop
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                        modifier = Modifier.size(width = 48.dp, height = 36.dp)
+                                                    ) {
+                                                        val cover = items.firstOrNull { it.uri in album.mediaUris }
+                                                        if (cover != null) {
+                                                            AsyncImage(
+                                                                model = ImageRequest.Builder(context)
+                                                                    .data(Uri.parse(cover.uri))
+                                                                    .size(144, 108)
+                                                                    .crossfade(false)
+                                                                    .build(),
+                                                                contentDescription = album.fullPath,
+                                                                modifier = Modifier.fillMaxSize(),
+                                                                contentScale = ContentScale.Crop
+                                                            )
+                                                        } else {
+                                                            Box(contentAlignment = Alignment.Center) {
+                                                                Icon(Icons.Default.PhotoAlbum, contentDescription = null)
+                                                            }
+                                                        }
+                                                    }
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = album.name,
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            color = MaterialTheme.colorScheme.onSurface,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
-                                                    } else {
-                                                        Box(contentAlignment = Alignment.Center) {
-                                                            Icon(
-                                                                Icons.Default.PhotoAlbum,
-                                                                contentDescription = null,
-                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                modifier = Modifier.size(20.dp)
+                                                        if (album.parentPath.isNotBlank()) {
+                                                            Text(
+                                                                text = album.parentPath,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
                                                             )
                                                         }
                                                     }
                                                 }
-                                                Spacer(Modifier.height(4.dp))
-                                                Text(
-                                                    text = albumName,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 1
-                                                )
                                             }
-                                        }
-
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                                                modifier = Modifier
-                                                    .size(width = 64.dp, height = 40.dp)
-                                                    .clickable { onAddTo() }
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        Icons.Default.Add,
-                                                        contentDescription = "Add to album",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
-                                            }
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(
-                                                text = "Add to album",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1
-                                            )
                                         }
                                     }
                                     Spacer(Modifier.width(8.dp))
-                                    Icon(
-                                        Icons.Default.ChevronRight,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                    TextButton(onClick = onAddTo) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Edit")
+                                    }
                                 }
                             }
                         }
