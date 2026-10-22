@@ -3215,9 +3215,9 @@ private fun ViewerScreen(
 
                         // Card 9: Extended Metadata / EXIF Attributes Table
                         item {
-                            val photoTitle = remember(item.name) {
-                                if (item.name.contains("IMG", true)) "Sunset at Pahalgam" else item.name.substringBeforeLast('.')
-                            }
+                            val photoTitle = metadata["title"]?.takeIf { it.isNotBlank() }
+                                ?: item.name.substringBeforeLast('.').takeIf { it.isNotBlank() }
+                                ?: "Not available"
                             DetailCard {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -3245,7 +3245,7 @@ private fun ViewerScreen(
                                             MetaKeyValueRow("Keywords", meta("keywords"))
                                             MetaKeyValueRow("Rating", meta("rating"))
                                             MetaKeyValueRow("Label", meta("label"))
-                                            MetaKeyValueRow("Capture date", formatIsoDate(item.dateTakenMillis, item.dateAddedSeconds))
+                                            MetaKeyValueRow("Capture date", metadata["capture_date"]?.takeIf { it.isNotBlank() } ?: item.dateTakenMillis.takeIf { it > 0 }?.let { formatIsoDate(it, item.dateAddedSeconds) } ?: "Not available")
                                         }
                                     }
                                     Spacer(Modifier.width(8.dp))
