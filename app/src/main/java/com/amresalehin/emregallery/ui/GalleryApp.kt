@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -75,8 +76,13 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 
-private enum class Destination { HOME, ALBUMS, SETTINGS, SEARCH, VIEWER }
+private enum class Destination { HOME, ALBUMS, MAP, SETTINGS, SEARCH, VIEWER }
 private enum class SearchStage { DISCOVERY, TYPING, RESULTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -153,7 +159,7 @@ fun GalleryApp() {
             "Videos" -> "Videos"
             "Recently added" -> "Recently added"
             "People" -> "People & pets"
-            "Places" -> "Map & Places"
+            "Places", "Map" -> "Map & Places"
             "Albums" -> "Albums"
             "Folders" -> "Device folders"
             else -> albumFilter
@@ -169,7 +175,7 @@ fun GalleryApp() {
                 else -> item.uri !in hidden && item.uri !in inBin && item.uri !in archive
             }
             val matchesCategory = when (albumFilter) {
-                null, "Hidden", "Bin", "Archive", "People", "Places", "Albums", "Folders" -> true
+                null, "Hidden", "Bin", "Archive", "People", "Places", "Map", "Albums", "Folders" -> true
                 "Favourites" -> item.uri in favourites
                 "Videos" -> item.isVideo
                 "Recently added" -> item.dateAddedSeconds * 1000L > System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
@@ -246,6 +252,11 @@ fun GalleryApp() {
                         },
                         onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
                         onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
+                    )
+                    Destination.MAP -> PhotoMapScreen(
+                        media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
+                        onBack = { destination = Destination.ALBUMS },
+                        onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.MAP; destination = Destination.VIEWER }
                     )
                     Destination.SETTINGS -> SettingsScreen(
                         total = media.size,
@@ -2153,7 +2164,7 @@ private fun AlbumsScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onFilter("Places") }
+                    .clickable { onFilter("Map") }
                     .testTag("albums_map_card")
             ) {
                 Box(
@@ -3448,6 +3459,97 @@ private fun MetaKeyValueRow(key: String, value: String) {
             modifier = Modifier.weight(1f),
             fontSize = 11.sp
         )
+    }
+}
+
+@Composable
+private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
+    val context = LocalContext.current
+    var locatedMedia by remember { mutableStateOf<List<Pair<MediaItem, GeoPoint>>>(emptyList()) }
+    var loading by remember { mutableStateOf(true) }
+    var mapRef by remember { mutableStateOf<MapView?>(null) }
+
+    LaunchedEffect(media) {
+        loading = true
+        locatedMedia = withContext(Dispatchers.IO) {
+            media.mapNotNull { item ->
+                if (item.isVideo) return@mapNotNull null
+                runCatching {
+                    context.contentResolver.openInputStream(Uri.parse(item.uri))?.use { stream ->
+                        ExifInterface(stream).latLong?.let { c ->
+                            if (c[0].isFinite() && c[1].isFinite() && c[0] in -90.0..90.0 && c[1] in -180.0..180.0) item to GeoPoint(c[0], c[1]) else null
+                        }
+                    }
+                }.getOrNull()?.let { it }
+            }
+        }
+        loading = false
+    }
+
+    DisposableEffect(Unit) { onDispose { mapRef?.onPause(); mapRef?.onDetach(); mapRef = null } }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back to albums") }
+            Column(Modifier.weight(1f)) {
+                Text("Photo map", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(if (loading) "Finding GPS-tagged photos…" else "${locatedMedia.size} photos with location data", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Box(Modifier.fillMaxSize()) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    Configuration.getInstance().userAgentValue = ctx.packageName
+                    MapView(ctx).apply {
+                        setTileSource(TileSourceFactory.MAPNIK)
+                        setMultiTouchControls(true)
+                        controller.setZoom(3.0)
+                        controller.setCenter(GeoPoint(20.5937, 78.9629))
+                        mapRef = this
+                    }
+                },
+                update = { map ->
+                    mapRef = map
+                    map.overlays.clear()
+                    locatedMedia.forEach { (item, point) ->
+                        Marker(map).apply {
+                            position = point
+                            title = item.name
+                            subDescription = "Tap to open photo"
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            setOnMarkerClickListener { _, _ -> onOpen(item); true }
+                            map.overlays.add(this)
+                        }
+                    }
+                    if (locatedMedia.isNotEmpty()) {
+                        val points = locatedMedia.map { it.second }
+                        val box = org.osmdroid.util.BoundingBox(points.maxOf { it.latitude }, points.maxOf { it.longitude }, points.minOf { it.latitude }, points.minOf { it.longitude })
+                        runCatching { map.zoomToBoundingBox(box, true, 48) }
+                    }
+                    map.invalidate()
+                }
+            )
+            if (!loading && locatedMedia.isEmpty()) {
+                Surface(Modifier.align(Alignment.Center).padding(24.dp), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 4.dp) {
+                    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.LocationOff, null, modifier = Modifier.size(36.dp))
+                        Spacer(Modifier.height(10.dp))
+                        Text("No photos with GPS data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Only photos with embedded location coordinates appear here.", textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (loading) Surface(Modifier.align(Alignment.Center), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f)) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text("Reading photo locations…")
+                }
+            }
+            Text("© OpenStreetMap contributors", modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = .8f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
