@@ -3498,7 +3498,6 @@ private fun readMediaMetadata(context: android.content.Context, item: MediaItem)
             readXmp("focal", Regex("""(?:exif:FocalLength|FocalLength)="([^"]+)""", RegexOption.IGNORE_CASE))
             readXmp("flash", Regex("""(?:exif:Flash|Flash)="([^"]+)""", RegexOption.IGNORE_CASE))
             readXmp("color", Regex("""(?:exif:ColorSpace|ColorSpace)="([^"]+)""", RegexOption.IGNORE_CASE))
-            readXmp("location", Regex("""(?:Iptc4xmpCore:Location|photoshop:City|photoshop:State|photoshop:Country|exif:GPSAreaInformation)="([^"]+)""", RegexOption.IGNORE_CASE))
             if (values["location"].isNullOrBlank()) {
                 val city = Regex("""photoshop:City="([^"]+)""", RegexOption.IGNORE_CASE).find(xmp)?.groupValues?.getOrNull(1)
                 val state = Regex("""photoshop:State="([^"]+)""", RegexOption.IGNORE_CASE).find(xmp)?.groupValues?.getOrNull(1)
