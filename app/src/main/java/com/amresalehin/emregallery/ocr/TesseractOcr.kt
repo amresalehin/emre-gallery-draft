@@ -53,7 +53,7 @@ object TesseractOcr {
                 error("Tesseract could not initialize the selected language data.")
             }
             engine.setImage(bitmap)
-            return engine.utF8Text.orEmpty().trim()
+            return engine.getUTF8Text().orEmpty().trim()
         } finally {
             engine.end()
             bitmap.recycle()
