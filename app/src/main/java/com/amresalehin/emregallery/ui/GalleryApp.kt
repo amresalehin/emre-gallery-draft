@@ -2471,6 +2471,10 @@ private fun ViewerScreen(
     item: MediaItem,
     items: List<MediaItem>,
     customAlbums: List<CustomAlbum>,
+    customTags: Set<String>,
+    customPeople: Set<String>,
+    onAddTag: (String) -> Unit,
+    onAddPerson: (String) -> Unit,
     favourite: Boolean,
     isHidden: Boolean,
     isBin: Boolean,
@@ -3027,7 +3031,7 @@ private fun ViewerScreen(
 
                         // Card 4: Tags / Labels
                         item {
-                            val tags = listOf("Nature", "Mountains", "Lake", "Sunset", "Pahalgam")
+                            val tags = customTags.toList().sorted()
                             DetailCard {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
