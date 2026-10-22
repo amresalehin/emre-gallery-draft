@@ -2038,7 +2038,113 @@ private fun AlbumsScreen(
             }
         }
 
-        // 2. Album (2/3rd, squaricle) and Device Folder (1/3rd, portrait) in same row
+
+        // 2. Google Photos-style Places map preview
+        item {
+            val context = LocalContext.current
+            var mapLocations by remember(normalMedia) { mutableStateOf<List<GeoPoint>>(emptyList()) }
+            var mapLocationsLoading by remember(normalMedia) { mutableStateOf(true) }
+            LaunchedEffect(normalMedia) {
+                mapLocationsLoading = true
+                mapLocations = withContext(Dispatchers.IO) {
+                    normalMedia.mapNotNull { mediaItem ->
+                        if (mediaItem.isVideo) return@mapNotNull null
+                        runCatching {
+                            context.contentResolver.openInputStream(Uri.parse(mediaItem.uri))?.use { stream ->
+                                ExifInterface(stream).latLong?.let { coordinates ->
+                                    if (coordinates[0].isFinite() && coordinates[1].isFinite() &&
+                                        coordinates[0] in -90.0..90.0 && coordinates[1] in -180.0..180.0
+                                    ) GeoPoint(coordinates[0], coordinates[1]) else null
+                                }
+                            }
+                        }.getOrNull()
+                    }
+                }
+                mapLocationsLoading = false
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth().height(176.dp)
+                    .clickable { onFilter("Map") }
+                    .testTag("albums_places_map_card"),
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                tonalElevation = 2.dp,
+                shadowElevation = 5.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            ) {
+                Box(Modifier.fillMaxSize()) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            Configuration.getInstance().userAgentValue = ctx.packageName
+                            MapView(ctx).apply {
+                                setTileSource(TileSourceFactory.MAPNIK)
+                                setMultiTouchControls(false)
+                                controller.setZoom(2.5)
+                                controller.setCenter(GeoPoint(20.5937, 78.9629))
+                            }
+                        },
+                        update = { map ->
+                            map.overlays.clear()
+                            if (mapLocations.isNotEmpty()) {
+                                mapLocations.take(100).forEach { point ->
+                                    map.overlays.add(Marker(map).apply {
+                                        position = point
+                                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                    })
+                                }
+                                val points = mapLocations
+                                val bounds = org.osmdroid.util.BoundingBox(
+                                    points.maxOf { it.latitude }, points.maxOf { it.longitude },
+                                    points.minOf { it.latitude }, points.minOf { it.longitude }
+                                )
+                                runCatching { map.zoomToBoundingBox(bounds, true, 36) }
+                            }
+                            map.invalidate()
+                        }
+                    )
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.68f)),
+                                startY = 45f
+                            )
+                        )
+                    )
+                    Row(
+                        Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.94f), modifier = Modifier.size(40.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Map, contentDescription = null, tint = Color(0xFF202124))
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Places", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(
+                                if (mapLocationsLoading) "Finding photos on the map…" else "${mapLocations.size} photos with location data",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                        }
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Open photo map", tint = Color.White)
+                    }
+                    Text(
+                        "© OpenStreetMap contributors",
+                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
+                            .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.DarkGray
+                    )
+                }
+            }
+        }
+
+        // 3. Album (2/3rd, squaricle) and Device Folder (1/3rd, portrait) in same row
         item {
             Row(
                 modifier = Modifier
