@@ -2695,17 +2695,8 @@ private fun ViewerScreen(
 
                         // Card 1: Location & Mini Map Thumbnail Preview
                         item {
-                            val locationText = remember(item) {
-                                when {
-                                    item.relativePath.isNotBlank() && !item.relativePath.contains("DCIM", true) -> {
-                                        item.relativePath.trim('/').replace("/", ", ")
-                                    }
-                                    item.name.contains("IMG", true) || item.name.contains("Pahalgam", true) -> {
-                                        "Pahalgam, Anantnag, Jammu and Kashmir, India"
-                                    }
-                                    else -> "Pahalgam, Anantnag, Jammu and Kashmir, India"
-                                }
-                            }
+                            val locationText = metadata["location"]?.takeIf { it.isNotBlank() }
+                                ?: "Location not available"
                             DetailCard {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -3428,6 +3419,25 @@ private fun SettingsScreen(
 }
 
 
+private fun reverseGeocodeLocation(context: android.content.Context, latitude: Double, longitude: Double): String? {
+    if (!android.location.Geocoder.isPresent()) return null
+    return runCatching {
+        @Suppress("DEPRECATION")
+        android.location.Geocoder(context, Locale.getDefault()).getFromLocation(latitude, longitude, 1)
+            ?.firstOrNull()
+            ?.let { address ->
+                listOfNotNull(
+                    address.subLocality,
+                    address.locality,
+                    address.subAdminArea,
+                    address.adminArea,
+                    address.countryName
+                ).map { it.trim() }.filter { it.isNotBlank() }.distinct().joinToString(", ")
+                    .takeIf { it.isNotBlank() }
+            }
+    }.getOrNull()
+}
+
 private fun readMediaMetadata(context: android.content.Context, item: MediaItem): Map<String, String> {
     val values = mutableMapOf<String, String>()
     val uri = Uri.parse(item.uri)
@@ -3435,6 +3445,11 @@ private fun readMediaMetadata(context: android.content.Context, item: MediaItem)
         runCatching {
             context.contentResolver.openInputStream(uri)?.use { stream ->
                 val exif = ExifInterface(stream)
+                exif.latLong?.let { coordinates ->
+                    values["latitude"] = coordinates[0].toString()
+                    values["longitude"] = coordinates[1].toString()
+                    reverseGeocodeLocation(context, coordinates[0], coordinates[1])?.let { values["location"] = it }
+                }
                 fun put(key: String, vararg tags: String) {
                     tags.firstNotNullOfOrNull { tag -> exif.getAttribute(tag)?.takeIf { it.isNotBlank() } }?.let { values[key] = it }
                 }
@@ -3483,6 +3498,13 @@ private fun readMediaMetadata(context: android.content.Context, item: MediaItem)
             readXmp("focal", Regex("""(?:exif:FocalLength|FocalLength)="([^"]+)""", RegexOption.IGNORE_CASE))
             readXmp("flash", Regex("""(?:exif:Flash|Flash)="([^"]+)""", RegexOption.IGNORE_CASE))
             readXmp("color", Regex("""(?:exif:ColorSpace|ColorSpace)="([^"]+)""", RegexOption.IGNORE_CASE))
+            readXmp("location", Regex("""(?:Iptc4xmpCore:Location|photoshop:City|photoshop:State|photoshop:Country|exif:GPSAreaInformation)="([^"]+)""", RegexOption.IGNORE_CASE))
+            if (values["location"].isNullOrBlank()) {
+                val city = Regex("""photoshop:City="([^"]+)""", RegexOption.IGNORE_CASE).find(xmp)?.groupValues?.getOrNull(1)
+                val state = Regex("""photoshop:State="([^"]+)""", RegexOption.IGNORE_CASE).find(xmp)?.groupValues?.getOrNull(1)
+                val country = Regex("""photoshop:Country="([^"]+)""", RegexOption.IGNORE_CASE).find(xmp)?.groupValues?.getOrNull(1)
+                listOfNotNull(city, state, country).map { it.trim() }.filter { it.isNotBlank() }.distinct().joinToString(", ").takeIf { it.isNotBlank() }?.let { values["location"] = it }
+            }
         }
     }
     return values
