@@ -2791,10 +2791,20 @@ private fun ViewerScreen(
                     update = { it.useController = showControls }
                 )
             } else {
+                // The grid requests small decodes for the same MediaStore URI. Give the
+                // viewer its own cache key and request the original dimensions so Coil
+                // cannot reuse a low-resolution thumbnail in the full-screen viewer.
                 AsyncImage(
-                    Uri.parse(currentItem.uri),
-                    currentItem.name,
-                    Modifier.fillMaxSize(),
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(Uri.parse(currentItem.uri))
+                        .size(Size.ORIGINAL)
+                        .precision(Precision.EXACT)
+                        .memoryCacheKey("${currentItem.uri}:viewer-original")
+                        .diskCacheKey("${currentItem.uri}:viewer-original")
+                        .crossfade(false)
+                        .build(),
+                    contentDescription = currentItem.name,
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
             }
