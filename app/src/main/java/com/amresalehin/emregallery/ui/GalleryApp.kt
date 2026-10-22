@@ -244,7 +244,7 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { albumFilter = it; destination = Destination.HOME },
+                        onFilter = { if (it == "Map") destination = Destination.MAP else { albumFilter = it; destination = Destination.HOME } },
                         onOpen = { selectedMedia = it; previousDestination = Destination.ALBUMS; destination = Destination.VIEWER },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
