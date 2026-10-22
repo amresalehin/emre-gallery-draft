@@ -3,7 +3,7 @@ package com.amresalehin.emregallery.data
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -19,7 +19,7 @@ class PreferencesRepository(private val context: Context) {
     private val favouritesKey = stringSetPreferencesKey("favourites")
     private val hiddenKey = stringSetPreferencesKey("hidden")
     private val binKey = stringSetPreferencesKey("bin")
-    private val searchesKey = stringSetPreferencesKey("recent_searches")
+    private val searchesKey = stringPreferencesKey("recent_searches")
     private val themeKey = stringPreferencesKey("theme")
     private val customAlbumsKey = stringPreferencesKey("custom_albums")
     private val archiveKey = stringSetPreferencesKey("archive")
@@ -32,7 +32,14 @@ class PreferencesRepository(private val context: Context) {
     val hidden: Flow<Set<String>> = context.galleryDataStore.data.map { it[hiddenKey] ?: emptySet() }
     val bin: Flow<Set<String>> = context.galleryDataStore.data.map { it[binKey] ?: emptySet() }
     val archive: Flow<Set<String>> = context.galleryDataStore.data.map { it[archiveKey] ?: emptySet() }
-    val recentSearches: Flow<List<String>> = context.galleryDataStore.data.map { it[searchesKey]?.toList().orEmpty() }
+    val recentSearches: Flow<List<String>> = context.galleryDataStore.data.map { prefs ->
+        runCatching {
+            val array = JSONArray(prefs[searchesKey] ?: "[]")
+            (0 until array.length())
+                .mapNotNull { index -> array.optString(index).trim().takeIf { it.isNotBlank() } }
+                .distinct()
+        }.getOrDefault(emptyList())
+    }
     val theme: Flow<String> = context.galleryDataStore.data.map { it[themeKey] ?: "system" }
     val sortOrder: Flow<String> = context.galleryDataStore.data.map { it[sortOrderKey] ?: "date_desc" }
     val groupBy: Flow<String> = context.galleryDataStore.data.map { it[groupByKey] ?: "day" }
@@ -134,11 +141,21 @@ class PreferencesRepository(private val context: Context) {
         if (archived) values.add(uri) else values.remove(uri)
         it[archiveKey] = values
     }
-    suspend fun addRecentSearch(query: String) = context.galleryDataStore.edit {
-        val values = (it[searchesKey] ?: emptySet()).toMutableList()
-        values.remove(query)
-        values.add(0, query)
-        it[searchesKey] = values.take(12).toSet()
+    suspend fun addRecentSearch(query: String) {
+        val normalized = query.trim()
+        if (normalized.isBlank()) return
+        context.galleryDataStore.edit { prefs ->
+            val existing = runCatching {
+                val array = JSONArray(prefs[searchesKey] ?: "[]")
+                (0 until array.length()).mapNotNull { index ->
+                    array.optString(index).trim().takeIf { it.isNotBlank() }
+                }
+            }.getOrDefault(emptyList())
+            val updated = (listOf(normalized) + existing.filterNot { it.equals(normalized, ignoreCase = true) })
+                .distinctBy { it.lowercase(java.util.Locale.ROOT) }
+                .take(12)
+            prefs[searchesKey] = JSONArray(updated).toString()
+        }
     }
     suspend fun clearRecentSearches() = context.galleryDataStore.edit { it.remove(searchesKey) }
     suspend fun setTheme(value: String) = context.galleryDataStore.edit { it[themeKey] = value }
