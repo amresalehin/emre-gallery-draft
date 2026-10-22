@@ -796,7 +796,7 @@ private fun HomeScreen(
                     }
                 }
 
-                val rowChunks = group.items.chunked(gridColumns)
+                val rowChunks = remember(group.items, gridColumns) { group.items.chunked(gridColumns) }
                 items(
                     count = rowChunks.size,
                     key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
@@ -1222,6 +1222,16 @@ private fun MediaGridItem(
         }
     }
 
+    val context = LocalContext.current
+    val imageRequest = remember(item.uri) {
+        ImageRequest.Builder(context)
+            .data(Uri.parse(item.uri))
+            .size(360, 360)
+            .crossfade(false)
+            .memoryCacheKey("${item.uri}_thumb")
+            .build()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1231,12 +1241,7 @@ private fun MediaGridItem(
             .clickable { onOpen(item) }
     ) {
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(Uri.parse(item.uri))
-                .size(360, 360)
-                .crossfade(false)
-                .memoryCacheKey("${item.uri}_thumb")
-                .build(),
+            model = imageRequest,
             contentDescription = item.name,
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
