@@ -3825,6 +3825,8 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
     var locatedMedia by remember { mutableStateOf<List<Pair<MediaItem, GeoPoint>>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
+    var sheetExpanded by remember { mutableStateOf(false) }
+    val dayFormat = remember { SimpleDateFormat("EEEE", Locale.getDefault()) }
 
     LaunchedEffect(media) {
         loading = true
@@ -3837,76 +3839,136 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                             if (c[0].isFinite() && c[1].isFinite() && c[0] in -90.0..90.0 && c[1] in -180.0..180.0) item to GeoPoint(c[0], c[1]) else null
                         }
                     }
-                }.getOrNull()?.let { it }
+                }.getOrNull()
             }
         }
         loading = false
     }
 
+    val dayGroups = remember(locatedMedia) {
+        locatedMedia.groupBy { (item, _) ->
+            val millis = if (item.dateTakenMillis > 0) item.dateTakenMillis else item.dateAddedSeconds * 1000
+            dayFormat.format(Date(millis))
+        }.entries.sortedByDescending { entry ->
+            entry.value.maxOfOrNull { (item, _) -> if (item.dateTakenMillis > 0) item.dateTakenMillis else item.dateAddedSeconds * 1000 } ?: 0L
+        }
+    }
+
     DisposableEffect(Unit) { onDispose { mapRef?.onPause(); mapRef?.onDetach(); mapRef = null } }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back to albums") }
-            Column(Modifier.weight(1f)) {
-                Text("Photo map", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(if (loading) "Finding GPS-tagged photos…" else "${locatedMedia.size} photos with location data", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                Configuration.getInstance().userAgentValue = ctx.packageName
+                MapView(ctx).apply {
+                    setTileSource(TileSourceFactory.MAPNIK)
+                    setMultiTouchControls(true)
+                    controller.setZoom(3.0)
+                    controller.setCenter(GeoPoint(20.5937, 78.9629))
+                    mapRef = this
+                }
+            },
+            update = { map ->
+                mapRef = map
+                map.overlays.clear()
+                locatedMedia.forEach { (item, point) ->
+                    Marker(map).apply {
+                        position = point
+                        title = item.name
+                        subDescription = "Tap to open photo"
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        setOnMarkerClickListener { _, _ -> onOpen(item); true }
+                        map.overlays.add(this)
+                    }
+                }
+                if (locatedMedia.isNotEmpty()) {
+                    val points = locatedMedia.map { it.second }
+                    val bounds = org.osmdroid.util.BoundingBox(points.maxOf { it.latitude }, points.maxOf { it.longitude }, points.minOf { it.latitude }, points.minOf { it.longitude })
+                    runCatching { map.zoomToBoundingBox(bounds, true, 48) }
+                }
+                map.invalidate()
+            }
+        )
+
+        Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Surface(onClick = onBack, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+            Surface(onClick = {
+                mapRef?.let { map ->
+                    locatedMedia.firstOrNull()?.second?.let { point -> map.controller.animateTo(point); map.controller.setZoom(12.0) }
+                }
+            }, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
+                Icon(Icons.Default.MyLocation, contentDescription = "Focus photos", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
             }
         }
-        Box(Modifier.fillMaxSize()) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { ctx ->
-                    Configuration.getInstance().userAgentValue = ctx.packageName
-                    MapView(ctx).apply {
-                        setTileSource(TileSourceFactory.MAPNIK)
-                        setMultiTouchControls(true)
-                        controller.setZoom(3.0)
-                        controller.setCenter(GeoPoint(20.5937, 78.9629))
-                        mapRef = this
+
+        if (loading) Surface(Modifier.align(Alignment.Center), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(12.dp))
+                Text("Finding photos on the map…")
+            }
+        }
+
+        Surface(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(if (sheetExpanded) .78f else .43f),
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 12.dp
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().clickable { sheetExpanded = !sheetExpanded }.padding(top = 10.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
+                    Box(Modifier.width(38.dp).height(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f)))
+                }
+                Text(
+                    if (loading) "Finding photos…" else "%,d photos".format(Locale.getDefault(), locatedMedia.size),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Normal
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .6f))
+                if (!loading && locatedMedia.isEmpty()) {
+                    Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.LocationOff, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        Text("No photos with GPS data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Only images containing embedded location coordinates appear on this map.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                },
-                update = { map ->
-                    mapRef = map
-                    map.overlays.clear()
-                    locatedMedia.forEach { (item, point) ->
-                        Marker(map).apply {
-                            position = point
-                            title = item.name
-                            subDescription = "Tap to open photo"
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                            setOnMarkerClickListener { _, _ -> onOpen(item); true }
-                            map.overlays.add(this)
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+                        dayGroups.forEach { (day, entries) ->
+                            item(key = "heading_$day") {
+                                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(day, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                                    Text("${entries.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Icon(Icons.Default.CheckCircleOutline, null, modifier = Modifier.padding(start = 8.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            item(key = "photos_$day") {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    items(entries, key = { it.first.uri }) { (photo, point) ->
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context).data(Uri.parse(photo.uri)).crossfade(false).build(),
+                                            contentDescription = photo.name,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.size(width = 118.dp, height = 118.dp).clickable {
+                                                mapRef?.controller?.animateTo(point)
+                                                mapRef?.controller?.setZoom(14.0)
+                                                onOpen(photo)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
-                    if (locatedMedia.isNotEmpty()) {
-                        val points = locatedMedia.map { it.second }
-                        val box = org.osmdroid.util.BoundingBox(points.maxOf { it.latitude }, points.maxOf { it.longitude }, points.minOf { it.latitude }, points.minOf { it.longitude })
-                        runCatching { map.zoomToBoundingBox(box, true, 48) }
-                    }
-                    map.invalidate()
-                }
-            )
-            if (!loading && locatedMedia.isEmpty()) {
-                Surface(Modifier.align(Alignment.Center).padding(24.dp), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), tonalElevation = 4.dp) {
-                    Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.LocationOff, null, modifier = Modifier.size(36.dp))
-                        Spacer(Modifier.height(10.dp))
-                        Text("No photos with GPS data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(6.dp))
-                        Text("Only photos with embedded location coordinates appear here.", textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
                 }
             }
-            if (loading) Surface(Modifier.align(Alignment.Center), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .94f)) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Reading photo locations…")
-                }
-            }
-            Text("© OpenStreetMap contributors", modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = .8f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Text("© OpenStreetMap contributors", modifier = Modifier.align(Alignment.TopCenter).padding(top = 58.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = .85f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
