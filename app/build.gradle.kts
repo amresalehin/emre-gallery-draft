@@ -62,6 +62,8 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+    // Local, on-device OCR using Tesseract; language traineddata is downloaded once and cached locally.
+    implementation("com.rmtheis:tess-two:9.1.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
