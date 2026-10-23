@@ -124,6 +124,10 @@ fun GalleryApp() {
     val mediaRepository = remember { MediaRepository(context.contentResolver) }
     var destination by remember { mutableStateOf(Destination.HOME) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
+    val workspacePages = remember { listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) }
+    var workspaceDragOffsetX by remember { mutableFloatStateOf(0f) }
+    var workspacePreviewDestination by remember { mutableStateOf<Destination?>(null) }
+    var skipWorkspaceAnimatedTransition by remember { mutableStateOf(false) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
@@ -288,93 +292,7 @@ fun GalleryApp() {
     val topContentPadding = statusBarTop + 68.dp
     val bottomContentPadding = navBarBottom + 88.dp
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.onBackground
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            AnimatedContent(
-                targetState = destination,
-                transitionSpec = {
-                    val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
-                    val initialIndex = mainPages.indexOf(initialState)
-                    val targetIndex = mainPages.indexOf(targetState)
-                    if (targetState == Destination.VIEWER) {
-                        (fadeIn(animationSpec = tween(260)) + scaleIn(initialScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)))
-                            .togetherWith(fadeOut(animationSpec = tween(180)))
-                    } else if (initialState == Destination.VIEWER) {
-                        fadeIn(animationSpec = tween(200))
-                            .togetherWith(fadeOut(animationSpec = tween(240) ) + scaleOut(targetScale = 0.96f, animationSpec = tween(240, easing = FastOutLinearInEasing)))
-                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex > initialIndex) {
-                        (slideInHorizontally(
-                            animationSpec = tween(320, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> width }
-                        ) + fadeIn(animationSpec = tween(220)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> -width / 4 }
-                                ) + fadeOut(animationSpec = tween(220))
-                            )
-                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex < initialIndex) {
-                        (slideInHorizontally(
-                            animationSpec = tween(320, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> -width }
-                        ) + fadeIn(animationSpec = tween(220)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> width / 4 }
-                                ) + fadeOut(animationSpec = tween(220))
-                            )
-                    } else {
-                        fadeIn(animationSpec = tween(200)).togetherWith(fadeOut(animationSpec = tween(160)))
-                    }
-                },
-                label = "destination_screen_transition",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(destination, showSidePanel) {
-                        val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
-                        var horizontalDistance = 0f
-                        var startedAtLeftEdge = false
-                        val swipeThreshold = 72.dp.toPx()
-                        val edgeWidth = 32.dp.toPx()
-                        if (!showSidePanel && destination in mainPages) {
-                            detectHorizontalDragGestures(
-                                onDragStart = { offset ->
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = offset.x <= edgeWidth
-                                },
-                                onHorizontalDrag = { _, dragAmount ->
-                                    horizontalDistance += dragAmount
-                                },
-                                onDragEnd = {
-                                    if (destination == Destination.HOME &&
-                                        startedAtLeftEdge &&
-                                        horizontalDistance >= swipeThreshold
-                                    ) {
-                                        showSidePanel = true
-                                    } else if (kotlin.math.abs(horizontalDistance) >= swipeThreshold) {
-                                        val currentIndex = mainPages.indexOf(destination)
-                                        val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
-                                        if (nextIndex in mainPages.indices) {
-                                            destination = mainPages[nextIndex]
-                                            albumFilter = null
-                                        }
-                                    }
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = false
-                                },
-                                onDragCancel = {
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = false
-                                }
-                            )
-                        }
-                    }
-            ) { currentDestination ->
+    val renderDestination: @Composable (Destination) -> Unit = { currentDestination ->
                 when (currentDestination) {
                     Destination.HOME -> HomeScreen(
                         media = visibleMedia,
@@ -596,6 +514,190 @@ fun GalleryApp() {
                         )
                     }
                 }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clipToBounds()
+                    .pointerInput(destination, showSidePanel) {
+                        val mainPages = workspacePages
+                        var horizontalDistance = 0f
+                        var startedAtLeftEdge = false
+                        val swipeThreshold = 72.dp.toPx()
+                        val edgeWidth = 32.dp.toPx()
+                        val viewportWidthPx = size.width.toFloat()
+
+                        if (!showSidePanel && destination in mainPages) {
+                            detectHorizontalDragGestures(
+                                onDragStart = { offset ->
+                                    horizontalDistance = 0f
+                                    startedAtLeftEdge = offset.x <= edgeWidth
+                                    workspaceDragOffsetX = 0f
+                                    workspacePreviewDestination = null
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    horizontalDistance += dragAmount.x
+                                    val isDrawerEdgeDrag = destination == Destination.HOME &&
+                                        startedAtLeftEdge && horizontalDistance > 0f
+                                    if (!isDrawerEdgeDrag) {
+                                        val currentIndex = mainPages.indexOf(destination)
+                                        val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
+                                        val nextPage = mainPages.getOrNull(nextIndex)
+                                        if (nextPage != null) {
+                                            workspacePreviewDestination = nextPage
+                                            workspaceDragOffsetX = horizontalDistance.coerceIn(
+                                                -viewportWidthPx, viewportWidthPx
+                                            )
+                                        } else {
+                                            // A bounded, rubber-band response at the ends of the workspace list.
+                                            workspacePreviewDestination = null
+                                            workspaceDragOffsetX = horizontalDistance * 0.18f
+                                        }
+                                        change.consume()
+                                    } else {
+                                        workspacePreviewDestination = null
+                                        workspaceDragOffsetX = 0f
+                                    }
+                                },
+                                onDragEnd = {
+                                    val isDrawerEdgeDrag = destination == Destination.HOME &&
+                                        startedAtLeftEdge && horizontalDistance >= swipeThreshold
+                                    val currentIndex = mainPages.indexOf(destination)
+                                    val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
+                                    val nextPage = mainPages.getOrNull(nextIndex)
+                                    if (isDrawerEdgeDrag) {
+                                        showSidePanel = true
+                                        workspaceDragOffsetX = 0f
+                                        workspacePreviewDestination = null
+                                    } else if (
+                                        kotlin.math.abs(horizontalDistance) >= swipeThreshold &&
+                                        nextPage != null
+                                    ) {
+                                        val targetOffset = if (horizontalDistance < 0f) -viewportWidthPx else viewportWidthPx
+                                        val targetPage = nextPage
+                                        scope.launch {
+                                            animate(
+                                                initialValue = workspaceDragOffsetX,
+                                                targetValue = targetOffset,
+                                                animationSpec = tween(180, easing = FastOutSlowInEasing)
+                                            ) { value, _ -> workspaceDragOffsetX = value }
+
+                                            // The preview is now exactly aligned with the viewport.
+                                            // Swap the logical destination without starting a second
+                                            // independent slide animation (which would cause a snap).
+                                            skipWorkspaceAnimatedTransition = true
+                                            destination = targetPage
+                                            albumFilter = null
+                                            workspacePreviewDestination = null
+                                            workspaceDragOffsetX = 0f
+                                            withFrameNanos { }
+                                            skipWorkspaceAnimatedTransition = false
+                                        }
+                                    } else {
+                                        scope.launch {
+                                            animate(
+                                                initialValue = workspaceDragOffsetX,
+                                                targetValue = 0f,
+                                                animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                                            ) { value, _ -> workspaceDragOffsetX = value }
+                                            workspacePreviewDestination = null
+                                        }
+                                    }
+                                    horizontalDistance = 0f
+                                    startedAtLeftEdge = false
+                                },
+                                onDragCancel = {
+                                    scope.launch {
+                                        animate(
+                                            initialValue = workspaceDragOffsetX,
+                                            targetValue = 0f,
+                                            animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                                        ) { value, _ -> workspaceDragOffsetX = value }
+                                        workspacePreviewDestination = null
+                                    }
+                                    horizontalDistance = 0f
+                                    startedAtLeftEdge = false
+                                }
+                            )
+                        }
+                    }
+            ) {
+                val previewDestination = workspacePreviewDestination
+                if (previewDestination != null && kotlin.math.abs(workspaceDragOffsetX) > 0.1f) {
+                    Box(Modifier.fillMaxSize().clipToBounds()) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    translationX = if (workspaceDragOffsetX < 0f) {
+                                        size.width + workspaceDragOffsetX
+                                    } else {
+                                        -size.width + workspaceDragOffsetX
+                                    }
+                                }
+                                .background(MaterialTheme.colorScheme.background)
+                        ) {
+                            renderDestination(previewDestination)
+                        }
+                    }
+                }
+
+                AnimatedContent(
+                targetState = destination,
+                transitionSpec = {
+                    val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
+                    val initialIndex = mainPages.indexOf(initialState)
+                    val targetIndex = mainPages.indexOf(targetState)
+                    if (skipWorkspaceAnimatedTransition &&
+                        initialState in workspacePages && targetState in workspacePages
+                    ) {
+                        EnterTransition.None togetherWith ExitTransition.None
+                    } else if (targetState == Destination.VIEWER) {
+                        (fadeIn(animationSpec = tween(260)) + scaleIn(initialScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)))
+                            .togetherWith(fadeOut(animationSpec = tween(180)))
+                    } else if (initialState == Destination.VIEWER) {
+                        fadeIn(animationSpec = tween(200))
+                            .togetherWith(fadeOut(animationSpec = tween(240) ) + scaleOut(targetScale = 0.96f, animationSpec = tween(240, easing = FastOutLinearInEasing)))
+                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex > initialIndex) {
+                        (slideInHorizontally(
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> width }
+                        ) + fadeIn(animationSpec = tween(220)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> -width / 4 }
+                                ) + fadeOut(animationSpec = tween(220))
+                            )
+                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex < initialIndex) {
+                        (slideInHorizontally(
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> -width }
+                        ) + fadeIn(animationSpec = tween(220)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> width / 4 }
+                                ) + fadeOut(animationSpec = tween(220))
+                            )
+                    } else {
+                        fadeIn(animationSpec = tween(200)).togetherWith(fadeOut(animationSpec = tween(160)))
+                    }
+                },
+                label = "destination_screen_transition",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { translationX = workspaceDragOffsetX }
+                    }
+            ) { currentDestination -> renderDestination(currentDestination) }
+            }
             }
 
         // Wider top and bottom edge blur across app screens
