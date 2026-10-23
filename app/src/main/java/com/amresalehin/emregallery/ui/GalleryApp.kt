@@ -1750,7 +1750,7 @@ private fun HomeViewOptionsBottomSheet(
                     shape = RoundedCornerShape(16.dp),
                     color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else if (isGridSelected) Color(0xFFE5E5E5) else MaterialTheme.colorScheme.surfaceContainerHigh,
                     contentColor = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface,
-                    border = if (isGridSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
+                    border = if (isGridSelected) BorderStroke(1.5.dp, if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
                     modifier = Modifier
                         .weight(1f)
                         .height(58.dp)
@@ -1782,7 +1782,7 @@ private fun HomeViewOptionsBottomSheet(
                     shape = RoundedCornerShape(16.dp),
                     color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else if (isMasonrySelected) Color(0xFFE5E5E5) else MaterialTheme.colorScheme.surfaceContainerHigh,
                     contentColor = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface,
-                    border = if (isMasonrySelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
+                    border = if (isMasonrySelected) BorderStroke(1.5.dp, if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
                     modifier = Modifier
                         .weight(1f)
                         .height(58.dp)
