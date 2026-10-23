@@ -2753,10 +2753,14 @@ private fun ViewerScreen(
         mutableStateListOf(*initial.toTypedArray())
     }
     val ocrScope = rememberCoroutineScope()
-    LaunchedEffect(item.uri) {
+    LaunchedEffect(item.uri, defaultOcrLanguages) {
         metadata = withContext(Dispatchers.IO) {
             runCatching { readMediaMetadata(context, item) }.getOrDefault(emptyMap())
         }
+        ocrText = withContext(Dispatchers.IO) {
+            TesseractOcr.readCachedResult(context, Uri.parse(item.uri)).orEmpty()
+        }
+        ocrError = null
     }
     fun meta(key: String): String = metadata[key]?.takeIf { it.isNotBlank() } ?: "Not available"
     var showMore by remember { mutableStateOf(false) }
@@ -3321,11 +3325,16 @@ private fun ViewerScreen(
                                                 ocrScope.launch {
                                                     val result = withContext(Dispatchers.IO) {
                                                         runCatching {
-                                                            TesseractOcr.recognize(
+                                                            val mediaUri = Uri.parse(item.uri)
+                                                            val recognized = TesseractOcr.recognize(
                                                                 context,
-                                                                Uri.parse(item.uri),
+                                                                mediaUri,
                                                                 ocrLanguages.toList()
                                                             )
+                                                            runCatching {
+                                                                TesseractOcr.saveCachedResult(context, mediaUri, recognized)
+                                                            }
+                                                            recognized
                                                         }
                                                     }
                                                     result.onSuccess { text ->
