@@ -106,9 +106,12 @@ object TesseractOcr {
 
     private fun decodeBitmap(context: Context, uri: Uri): Bitmap {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        openStream(context, uri)?.use { stream ->
+        val boundsStream = openStream(context, uri)
+            ?: error("Cannot open this media item. Check that Emre Gallery has permission to access it.")
+        boundsStream.use { stream ->
+            // Bounds-only decoding intentionally returns null; dimensions are set on bounds.
             BitmapFactory.decodeStream(stream, null, bounds)
-        } ?: error("Cannot open this media item. Check that Emre Gallery has permission to access it.")
+        }
 
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
             error("This file is not a readable image. Try another image format.")
