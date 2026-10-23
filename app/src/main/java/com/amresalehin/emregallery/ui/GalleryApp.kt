@@ -2339,7 +2339,7 @@ private fun AlbumsScreen(
                     }
                 }
 
-                // Right Column: Device Folder Card (1/3rd - portrait)
+                // Right Column: Device folders with two compact preview tiles
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = MaterialTheme.colorScheme.surfaceContainer,
@@ -2353,36 +2353,74 @@ private fun AlbumsScreen(
                         .clickable { onFilter("Folders") }
                         .testTag("folders_section_card")
                 ) {
-                    val folderPreview = folders.take(4)
-                    val topFolder = folders.firstOrNull()
-                    val topFolderCover = topFolder?.value?.firstOrNull()
+                    val folderPreview = folders.take(2)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                "Folders",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
 
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        if (folderPreview.isNotEmpty()) {
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(2),
-                                modifier = Modifier.fillMaxSize(),
-                                userScrollEnabled = false,
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        if (folderPreview.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                contentAlignment = Alignment.Center
                             ) {
-                                gridItems(folderPreview, key = { it.key }) { folder ->
+                                Icon(
+                                    Icons.Default.FolderOpen,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                folderPreview.forEach { folder ->
                                     val cover = folder.value.firstOrNull()
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .height(90.dp)
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(10.dp))
                                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                     ) {
                                         if (cover != null) {
                                             AsyncImage(
                                                 model = ImageRequest.Builder(LocalContext.current)
                                                     .data(Uri.parse(cover.uri))
-                                                    .size(240, 240)
+                                                    .size(240, 160)
                                                     .crossfade(false)
-                                                    .memoryCacheKey("${cover.uri}_folder_cover")
+                                                    .memoryCacheKey("${cover.uri}_folder_collection_cover")
                                                     .build(),
-                                                contentDescription = folder.key.substringAfterLast('/'),
+                                                contentDescription = "Preview of ${folder.key.substringAfterLast('/')}",
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop
                                             )
@@ -2390,60 +2428,15 @@ private fun AlbumsScreen(
                                     }
                                 }
                             }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.42f))
-                            )
                         }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(12.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = if (topFolderCover != null) Color.Black.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.Folder,
-                                            contentDescription = null,
-                                            tint = if (topFolderCover != null) Color.White else MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-
-                            }
-
-                            Column {
-                                Text(
-                                    text = topFolder?.key?.substringAfterLast('/') ?: "Folders",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (topFolderCover != null) Color.White else MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${folders.size} ${if (folders.size == 1) "folder" else "folders"} · ${normalMedia.size} items",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (topFolderCover != null) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
+                        Text(
+                            "${folders.size} ${if (folders.size == 1) "folder" else "folders"}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
