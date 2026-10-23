@@ -49,10 +49,14 @@ object TesseractOcr {
         }
 
         val bitmap = decodeBitmap(context, uri)
+        val englishData = File(tessdataDir, "eng.traineddata")
+        if (!englishData.exists() || englishData.length() < 1024) {
+            copyBundledTrainedData(context, "eng", englishData)
+        }
+
         val combinedLangs = validCodes.joinToString("+")
         val candidates = (listOf(combinedLangs) + validCodes + listOf("eng")).distinct()
         var activeEngine: TessBaseAPI? = null
-        var activeLanguage: String? = null
         try {
             // Use a fresh native engine for every attempt. A failed init can leave
             // the native instance unsuitable for another init call.
@@ -69,7 +73,6 @@ object TesseractOcr {
                 }.getOrDefault(false)
                 if (initialized) {
                     activeEngine = candidateEngine
-                    activeLanguage = candidate
                     break
                 }
                 candidateEngine.end()
