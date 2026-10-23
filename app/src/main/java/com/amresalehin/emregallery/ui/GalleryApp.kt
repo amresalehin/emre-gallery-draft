@@ -134,6 +134,7 @@ fun GalleryApp() {
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
+    var showSidePanel by remember { mutableStateOf(false) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
     val permanentDeleteLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
@@ -409,6 +410,7 @@ fun GalleryApp() {
                     )
                     Destination.SETTINGS -> SettingsScreen(
                         total = media.size,
+                        onMenuClick = { showSidePanel = true },
                         theme = themePref,
                         ocrLanguageCount = ocrLanguagesPref.size,
                         topContentPadding = statusBarTop + 14.dp,
@@ -540,7 +542,7 @@ fun GalleryApp() {
             )
         }
 
-        // Floating Top Search Bar across Home, Albums
+        // Floating search bar across Home and Albums
         if (destination in listOf(Destination.HOME, Destination.ALBUMS)) {
             Box(
                 modifier = Modifier
@@ -555,6 +557,7 @@ fun GalleryApp() {
                         else -> "Search photos, people, places…"
                     },
                     showMoreOptions = destination == Destination.HOME,
+                    onMenuClick = { showSidePanel = true },
                     onOptionsClick = { showHomeViewOptionsSheet = true },
                     onClick = {
                         previousDestination = destination
@@ -585,6 +588,99 @@ fun GalleryApp() {
             }
         }
         }
+                if (showSidePanel) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.38f))
+                    .clickable { showSidePanel = false }
+                    .testTag("side_panel_scrim")
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxHeight()
+                        .width(304.dp)
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .clickable { /* Keep taps inside the drawer from dismissing it. */ }
+                        .testTag("side_panel"),
+                    shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 12.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 18.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(27.dp))
+                                }
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Emre Gallery", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text("Your media library", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = { showSidePanel = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "Close navigation menu")
+                            }
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+                        Spacer(Modifier.height(12.dp))
+                        val drawerItems = listOf(
+                            Triple(Destination.HOME, "Home", Icons.Default.Home),
+                            Triple(Destination.ALBUMS, "Albums", Icons.Default.PhotoLibrary),
+                            Triple(Destination.FAVOURITES, "Favourites", Icons.Default.Favorite),
+                            Triple(Destination.VIDEOS, "Videos", Icons.Default.PlayCircle),
+                            Triple(Destination.RECENTLY_ADDED, "Recently added", Icons.Default.Schedule),
+                            Triple(Destination.LOCKED_FOLDER, "Locked folder", Icons.Default.Lock),
+                            Triple(Destination.ARCHIVE, "Archive", Icons.Default.Archive),
+                            Triple(Destination.BIN, "Bin", Icons.Default.Delete),
+                            Triple(Destination.MAP, "Map & Places", Icons.Default.Map),
+                            Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings)
+                        )
+                        drawerItems.forEach { (dest, label, icon) ->
+                            val selected = destination == dest
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                                    .clickable {
+                                        if (dest == Destination.MAP) {
+                                            mapReturnDestination = destination
+                                            mapFocusItem = null
+                                        }
+                                        destination = dest
+                                        albumFilter = null
+                                        showSidePanel = false
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 13.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(icon, contentDescription = null, tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(14.dp))
+                                Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
     }
 
     if (showCreateAlbumDialog) {
@@ -676,6 +772,7 @@ private fun FloatingSearchPill(
     label: String,
     onClick: () -> Unit,
     showMoreOptions: Boolean = false,
+    onMenuClick: () -> Unit = {},
     onOptionsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -693,14 +790,25 @@ private fun FloatingSearchPill(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 16.dp, end = if (showMoreOptions) 4.dp else 16.dp),
+                .padding(start = 4.dp, end = if (showMoreOptions) 4.dp else 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(
+                onClick = onMenuClick,
+                modifier = Modifier.size(44.dp).testTag("open_side_panel")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = "Open navigation menu",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .clickable(onClick = onClick),
+                    .clickable(onClick = onClick)
+                    .padding(start = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -5700,13 +5808,14 @@ private fun SettingsScreen(
     onTheme: (String) -> Unit,
     onRefresh: () -> Unit,
     onSettings: (String) -> Unit,
-    onPermissionSettings: () -> Unit
+    onPermissionSettings: () -> Unit,
+    onMenuClick: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     val entries = listOf("Library overview" to Icons.Default.PhotoLibrary, "Theme" to Icons.Default.Palette, "Tools" to Icons.Default.Build, "Intelligence" to Icons.Default.Psychology, "OCR" to Icons.Default.DocumentScanner, "Indexing Status" to Icons.Default.Storage, "Duplicates or Similar" to Icons.Default.Collections, "Permissions" to Icons.Default.Lock, "About" to Icons.Default.Info).filter { it.first.contains(query, true) }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(topContentPadding))
-        OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp), placeholder = { Text("Search settings…") }, leadingIcon = { Icon(Icons.Default.Search, null) }, shape = CircleShape, singleLine = true)
+        OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp), placeholder = { Text("Search settings…") }, leadingIcon = { IconButton(onClick = onMenuClick) { Icon(Icons.Default.Menu, contentDescription = "Open navigation menu") } }, trailingIcon = { Icon(Icons.Default.Search, contentDescription = "Search settings") }, shape = CircleShape, singleLine = true)
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = bottomContentPadding)
