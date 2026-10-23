@@ -152,8 +152,12 @@ class BuffaloLFaceEngine private constructor(
             val keypointOutput = outputs.firstOrNull {
                 it.name.contains("kps_$stride", true) || it.name.contains("landmark_$stride", true)
             } ?: outputs.firstOrNull { lastDim(it.shape) == 10L && rowCount(it.shape) == anchorCount.toLong() }
-            val scores = scoreOutput?.values ?: continue
-            val boxes = boxOutput?.values ?: continue
+            check(scoreOutput != null && boxOutput != null) {
+                "Unsupported SCRFD output layout for stride $stride. Outputs: " +
+                    outputs.joinToString { it.name + ":" + it.shape.contentToString() }
+            }
+            val scores = scoreOutput.values
+            val boxes = boxOutput.values
             val keypoints = keypointOutput?.values
             val count = min(anchorCount, min(scores.size, boxes.size / 4))
             val grid = DETECT_SIZE / stride
