@@ -1691,8 +1691,9 @@ private fun HomeScreen(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
+                .padding(top = topContentPadding, bottom = bottomContentPadding)
                 .width(24.dp)
-                .pointerInput(scrollItems, viewportPx) {
+                .pointerInput(scrollItems, viewportPx, topContentPadding, bottomContentPadding) {
                     detectDragGestures(
                         onDragStart = { scrollbarDragging = true; scrollbarDragRemainder = 0f },
                         onDragEnd = { scrollbarDragging = false; scrollbarDragRemainder = 0f },
@@ -1701,7 +1702,7 @@ private fun HomeScreen(
                             change.consume()
                             val currentLayout = homeListState.layoutInfo
                             val count = currentLayout.totalItemsCount
-                            val height = currentLayout.viewportSize.height.toFloat()
+                            val height = size.height.toFloat()
                             if (count > 0 && height > 0f) {
                                 scrollbarDragRemainder += dragAmount.y / height * count
                                 val itemDelta = scrollbarDragRemainder.toInt()
