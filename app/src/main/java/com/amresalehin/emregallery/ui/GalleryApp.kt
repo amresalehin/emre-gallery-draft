@@ -4121,12 +4121,35 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
             Surface(onClick = onBack, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
             }
-            Surface(onClick = {
-                mapRef?.let { map ->
-                    locatedMedia.firstOrNull()?.second?.let { point -> map.controller.animateTo(point); map.controller.setZoom(12.0) }
+            Surface(
+                onClick = {
+                    if (!loading) {
+                        mapRef?.let { map ->
+                            locatedMedia.firstOrNull()?.second?.let { point -> map.controller.animateTo(point); map.controller.setZoom(12.0) }
+                        }
+                    }
+                },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+                shadowElevation = 4.dp
+            ) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    if (loading) {
+                        CircularProgressIndicator(
+                            progress = { if (scanTotal > 0) (scanProgress.toFloat() / scanTotal).coerceIn(0f, 1f) else 0f },
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.5.dp,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.MyLocation,
+                            contentDescription = "Focus photos",
+                            modifier = Modifier.padding(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
-            }, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
-                Icon(Icons.Default.MyLocation, contentDescription = "Focus photos", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -4151,14 +4174,6 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                         Text("Grant permission")
                     }
                 }
-            }
-        }
-
-        if (loading) Surface(Modifier.align(Alignment.Center), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(12.dp))
-                Text(if (scanTotal > 0) "Reading photo locations… $scanProgress / $scanTotal" else "Preparing map…")
             }
         }
 
