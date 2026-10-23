@@ -5359,7 +5359,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                         trailingIcon = { if (mapLayer == "Standard") Icon(Icons.Default.Check, contentDescription = "Selected") },
                         onClick = {
                             mapLayer = "Standard"
-                            mapRef?.setTileSource(TileSourceFactory.MAPNIK)
+                            mapRef?.setTileSource(if (mapAppearance == "Night") nightTileSource() else TileSourceFactory.MAPNIK)
                             mapRef?.invalidate()
                             showMapLayerMenu = false
                         }
@@ -5381,9 +5381,8 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                 onClick = {
                     mapAppearance = if (mapAppearance == "Day") "Night" else "Day"
                     mapRef?.let { map ->
-                        if (mapLayer == "Standard") {
-                            map.setTileSource(if (mapAppearance == "Night") nightTileSource() else TileSourceFactory.MAPNIK)
-                        }
+                        if (mapLayer == "Satellite") mapLayer = "Standard"
+                        map.setTileSource(if (mapAppearance == "Night") nightTileSource() else TileSourceFactory.MAPNIK)
                         map.invalidate()
                     }
                 },
