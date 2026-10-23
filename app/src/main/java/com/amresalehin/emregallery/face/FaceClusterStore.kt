@@ -213,6 +213,11 @@ class FaceClusterStore(context: Context) :
         readableDatabase.rawQuery("SELECT COUNT(*) FROM faces", null)
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
+    @Synchronized
+    fun failedMediaCount(): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM indexed_media WHERE status='failed'", null)
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
     private fun recomputeCentroid(db: SQLiteDatabase, clusterId: String) {
         val vectors = mutableListOf<FloatArray>()
         db.rawQuery("SELECT embedding FROM faces WHERE cluster_id=?", arrayOf(clusterId)).use { cursor ->
