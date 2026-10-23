@@ -354,6 +354,7 @@ class BuffaloLFaceEngine private constructor(
          * The copy runs on a background dispatcher during startup, and open() retries it
          * if face indexing starts before the startup copy has completed.
          */
+        @Synchronized
         fun installBundledModel(context: Context) {
             if (isModelInstalled(context)) return
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
