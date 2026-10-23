@@ -158,6 +158,15 @@ object TesseractOcr {
             ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
             ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
             ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            // EXIF 5 (transpose) and 7 (transverse) combine rotation and reflection.
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
             ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
             ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
         }
@@ -173,8 +182,12 @@ object TesseractOcr {
         // Tesseract requires a software ARGB_8888 bitmap
         return if (orientedBitmap.config != Bitmap.Config.ARGB_8888) {
             val softwareBitmap = orientedBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                ?: run {
+                    orientedBitmap.recycle()
+                    error("Could not prepare this image for OCR. Try a different image.")
+                }
             orientedBitmap.recycle()
-            softwareBitmap ?: orientedBitmap
+            softwareBitmap
         } else {
             orientedBitmap
         }
