@@ -2310,6 +2310,17 @@ private fun AlbumsScreen(
                 ) {
                     // Stylized map underlayer: a soft map-like canvas with winding roads,
                     // a river and location pins, kept decorative so it works offline.
+                    val isLight = MaterialTheme.colorScheme.background.luminance() > 0.5f
+                    val mapBgColors = remember(isLight) {
+                        if (isLight) {
+                            listOf(Color(0xFFE4F1E8), Color(0xFFD8E8F4), Color(0xFFF3EEDC))
+                        } else {
+                            listOf(Color(0xFF263B35), Color(0xFF243746), Color(0xFF35352E))
+                        }
+                    }
+                    val roadColor = if (isLight) Color(0xFFFFFFFF).copy(alpha = 0.9f) else Color(0xFFB9C8C0).copy(alpha = 0.55f)
+                    val minorRoad = if (isLight) Color(0xFFB8D0C0).copy(alpha = 0.8f) else Color(0xFF7F9D90).copy(alpha = 0.55f)
+                    val riverColor = if (isLight) Color(0xFF7CC5EE).copy(alpha = 0.65f) else Color(0xFF5BA9D5).copy(alpha = 0.6f)
                     Canvas(
                         modifier = Modifier.fillMaxSize()
                     ) {
@@ -2317,18 +2328,11 @@ private fun AlbumsScreen(
                         val h = size.height
                         drawRect(
                             brush = Brush.linearGradient(
-                                colors = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) {
-                                    listOf(Color(0xFFE4F1E8), Color(0xFFD8E8F4), Color(0xFFF3EEDC))
-                                } else {
-                                    listOf(Color(0xFF263B35), Color(0xFF243746), Color(0xFF35352E))
-                                },
+                                colors = mapBgColors,
                                 start = Offset.Zero,
                                 end = Offset(w, h)
                             )
                         )
-                        val roadColor = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) Color(0xFFFFFFFF).copy(alpha = 0.9f) else Color(0xFFB9C8C0).copy(alpha = 0.55f)
-                        val minorRoad = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) Color(0xFFB8D0C0).copy(alpha = 0.8f) else Color(0xFF7F9D90).copy(alpha = 0.55f)
-                        val riverColor = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) Color(0xFF7CC5EE).copy(alpha = 0.65f) else Color(0xFF5BA9D5).copy(alpha = 0.6f)
                         val roads = listOf(
                             listOf(Offset(-w * .08f, h * .82f), Offset(w * .22f, h * .62f), Offset(w * .37f, h * .45f), Offset(w * .62f, h * .32f), Offset(w * 1.08f, h * .12f)),
                             listOf(Offset(w * .04f, h * .10f), Offset(w * .31f, h * .28f), Offset(w * .47f, h * .58f), Offset(w * .76f, h * .70f), Offset(w * 1.02f, h * .88f)),
