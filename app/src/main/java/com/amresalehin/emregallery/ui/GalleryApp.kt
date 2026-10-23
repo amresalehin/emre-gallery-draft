@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -558,7 +559,7 @@ fun GalleryApp() {
                                         } else {
                                             // A bounded, rubber-band response at the ends of the workspace list.
                                             workspacePreviewDestination = null
-                                            workspaceDragOffsetX = horizontalDistance * 0.18f
+                                            workspaceDragOffsetX = (horizontalDistance * 0.18f).coerceIn(-viewportWidthPx * 0.22f, viewportWidthPx * 0.22f)
                                         }
                                         change.consume()
                                     } else {
