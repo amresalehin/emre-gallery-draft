@@ -3931,7 +3931,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
             }
         }
         locatedMedia = result.toList()
-        scanProgress = uncachedCount
+        scanProgress = uncachedPhotos.size
         loading = false
     }
 
@@ -4030,7 +4030,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                     Box(Modifier.width(38.dp).height(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f)))
                 }
                 Text(
-                    if (loading) "Reading locations · $scanProgress / $scanTotal" else "%,d photos".format(Locale.getDefault(), locatedMedia.size),
+                    "%,d photos".format(Locale.getDefault(), locatedMedia.size),
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.headlineSmall,
