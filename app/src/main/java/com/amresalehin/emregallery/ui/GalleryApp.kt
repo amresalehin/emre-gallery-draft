@@ -4648,9 +4648,16 @@ private fun ViewerScreen(
                                     ) {
                                         Icon(
                                             Icons.Default.DocumentScanner,
-                                            contentDescription = "Recognized text",
+                                            contentDescription = null,
                                             modifier = Modifier.size(20.dp),
                                             tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(
+                                            "OCR",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Spacer(Modifier.weight(1f))
                                         IconButton(
@@ -4689,8 +4696,8 @@ private fun ViewerScreen(
                                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                             } else {
                                                 Icon(
-                                                    Icons.Default.DocumentScanner,
-                                                    contentDescription = if (ocrText.isBlank()) "Recognize text" else "Recognize again"
+                                                    Icons.Default.PlayArrow,
+                                                    contentDescription = if (ocrText.isBlank()) "Run OCR" else "Run OCR again"
                                                 )
                                             }
                                         }
