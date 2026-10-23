@@ -2044,13 +2044,7 @@ private fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
 
     if (stories.isEmpty()) return
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Memories",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-        )
+    Column {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
             items(stories.size, key = { index -> stories[index].first }) { index ->
                 val (title, storyMedia) = stories[index]
