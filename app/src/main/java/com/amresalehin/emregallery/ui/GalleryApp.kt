@@ -6075,59 +6075,140 @@ private fun SettingsScreen(
     onMenuClick: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
-    val entries = listOf("Library overview" to Icons.Default.PhotoLibrary, "Theme" to Icons.Default.Palette, "Tools" to Icons.Default.Build, "Intelligence" to Icons.Default.Psychology, "OCR" to Icons.Default.DocumentScanner, "Indexing Status" to Icons.Default.Storage, "Duplicates or Similar" to Icons.Default.Collections, "Permissions" to Icons.Default.Lock, "About" to Icons.Default.Info).filter { it.first.contains(query, true) }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(Modifier.statusBarsPadding().height(8.dp))
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 4.dp,
-            shadowElevation = 8.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-            modifier = Modifier.fillMaxWidth().height(52.dp).padding(bottom = 0.dp)
+    val entries = listOf(
+        "Library overview" to Icons.Default.PhotoLibrary,
+        "Theme" to Icons.Default.Palette,
+        "Tools" to Icons.Default.Build,
+        "Intelligence" to Icons.Default.Psychology,
+        "OCR" to Icons.Default.DocumentScanner,
+        "Indexing Status" to Icons.Default.Storage,
+        "Duplicates or Similar" to Icons.Default.Collections,
+        "Permissions" to Icons.Default.Lock,
+        "About" to Icons.Default.Info
+    ).filter { it.first.contains(query, true) }
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(
+                top = topContentPadding + 60.dp,
+                bottom = bottomContentPadding
+            )
         ) {
-            Row(
-                modifier = Modifier.fillMaxSize().padding(start = 4.dp, end = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onMenuClick, modifier = Modifier.size(44.dp)) {
-                    Icon(Icons.Default.Menu, contentDescription = "Open navigation menu", tint = MaterialTheme.colorScheme.onSurface)
-                }
-                Icon(
-                    Icons.Default.Search,
-                    contentDescription = "Search settings",
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.width(12.dp))
-                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) {
-                        Text("Search settings…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            items(entries) { (label, icon) ->
+                if (label == "Theme") {
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(icon, null, Modifier.size(30.dp))
+                                Spacer(Modifier.width(14.dp))
+                                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                                listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEachIndexed { index, (key, name) ->
+                                    SegmentedButton(
+                                        selected = theme == key,
+                                        onClick = { onTheme(key) },
+                                        shape = SegmentedButtonDefaults.itemShape(index, 3)
+                                    ) { Text(name) }
+                                }
+                            }
+                        }
                     }
-                    BasicTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                } else {
+                    ElevatedCard(
+                        onClick = {
+                            if (label == "Library overview" || label == "Indexing Status") onRefresh()
+                            if (label == "Permissions") onPermissionSettings()
+                            onSettings(label)
+                        },
                         modifier = Modifier.fillMaxWidth()
-                    )
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(icon, null, Modifier.size(30.dp))
+                            Spacer(Modifier.width(18.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                                Text(
+                                    when (label) {
+                                        "Library overview" -> "$total media items indexed"
+                                        "Intelligence" -> "AI providers not configured"
+                                        "OCR" -> "$ocrLanguageCount active language${if (ocrLanguageCount == 1) "" else "s"} · On-device Tesseract"
+                                        "Indexing Status" -> "Local MediaStore scan"
+                                        "Duplicates or Similar" -> "Detection engine not configured"
+                                        "About" -> "Emre Gallery · 0.1.0"
+                                        "Tools" -> "Local library tools"
+                                        else -> "Manage access"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(14.dp))
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = bottomContentPadding)
+
+        // Match the Albums page's floating search pill geometry and placement.
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            items(entries) { (label, icon) ->
-                if (label == "Theme") ElevatedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, Modifier.size(30.dp)); Spacer(Modifier.width(14.dp)); Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }; Spacer(Modifier.height(12.dp)); SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) { listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEachIndexed { index, (key, name) -> SegmentedButton(selected = theme == key, onClick = { onTheme(key) }, shape = SegmentedButtonDefaults.itemShape(index, 3)) { Text(name) } } } } }
-                else ElevatedCard(onClick = { if (label == "Library overview" || label == "Indexing Status") onRefresh(); if (label == "Permissions") onPermissionSettings(); onSettings(label) }, modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(horizontal = 18.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, Modifier.size(30.dp)); Spacer(Modifier.width(18.dp)); Column(Modifier.weight(1f)) { Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium); Text(when (label) { "Library overview" -> "$total media items indexed"; "Intelligence" -> "AI providers not configured"; "OCR" -> "$ocrLanguageCount active language${if (ocrLanguageCount == 1) "" else "s"} · On-device Tesseract"; "Indexing Status" -> "Local MediaStore scan"; "Duplicates or Similar" -> "Detection engine not configured"; "About" -> "Emre Gallery · 0.1.0"; "Tools" -> "Local library tools"; else -> "Manage access" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } }
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 4.dp,
+                shadowElevation = 8.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(start = 4.dp, end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onMenuClick, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.Menu, contentDescription = "Open navigation menu", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+                    Row(
+                        modifier = Modifier.weight(1f).fillMaxHeight().padding(start = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = "Search settings",
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            if (query.isEmpty()) {
+                                Text("Search settings…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            }
+                            BasicTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
-
 
 
 @OptIn(ExperimentalMaterial3Api::class)
