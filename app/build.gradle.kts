@@ -34,6 +34,7 @@ android {
         }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -120,40 +121,51 @@ val prepareBundledFaceModel by tasks.registering {
         if (missing.isNotEmpty()) {
             val archive = layout.buildDirectory.file("tmp/buffalo_l.zip").get().asFile
             archive.parentFile.mkdirs()
-            val connection = URL(
-                "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
-            ).openConnection() as HttpURLConnection
-            connection.connectTimeout = 20000
-            connection.readTimeout = 180000
-            connection.instanceFollowRedirects = true
+            val temporary = layout.buildDirectory.file("tmp/buffalo_l.zip.download").get().asFile
             try {
-                connection.connect()
-                if (connection.responseCode !in 200..299) {
-                    error("Could not download buffalo_l model pack (HTTP ${connection.responseCode}).")
+                val connection = URL(
+                    "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
+                ).openConnection() as HttpURLConnection
+                connection.connectTimeout = 20000
+                connection.readTimeout = 180000
+                connection.instanceFollowRedirects = true
+                try {
+                    connection.connect()
+                    if (connection.responseCode !in 200..299) {
+                        error("Could not download buffalo_l model pack (HTTP ${connection.responseCode}).")
+                    }
+                    connection.inputStream.use { input ->
+                        temporary.outputStream().buffered().use { output -> input.copyTo(output) }
+                    }
+                } finally {
+                    connection.disconnect()
                 }
-                connection.inputStream.use { input ->
-                    archive.outputStream().buffered().use { output -> input.copyTo(output) }
-                }
-            } finally {
-                connection.disconnect()
-            }
 
-            ZipFile(archive).use { zip ->
-                val entries = zip.entries()
-                while (entries.hasMoreElements()) {
-                    val entry = entries.nextElement()
-                    if (entry.isDirectory) continue
-                    val name = entry.name.substringAfterLast('/')
-                    if (name in bundledFaceModelNames || name.contains("LICENSE", ignoreCase = true)) {
-                        zip.getInputStream(entry).use { input ->
-                            modelDir.resolve(name).outputStream().buffered().use { output ->
-                                input.copyTo(output)
+                if (temporary.length() < 100 * 1024 * 1024) {
+                    error("buffalo_l archive download incomplete (${temporary.length()} bytes).")
+                }
+                if (archive.exists()) archive.delete()
+                if (!temporary.renameTo(archive)) error("Could not move downloaded buffalo_l archive to $archive.")
+
+                ZipFile(archive).use { zip ->
+                    val entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        val entry = entries.nextElement()
+                        if (entry.isDirectory) continue
+                        val name = entry.name.substringAfterLast('/')
+                        if (name in bundledFaceModelNames || name.contains("LICENSE", ignoreCase = true)) {
+                            zip.getInputStream(entry).use { input ->
+                                modelDir.resolve(name).outputStream().buffered().use { output ->
+                                    input.copyTo(output)
+                                }
                             }
                         }
                     }
                 }
+            } finally {
+                temporary.delete()
+                archive.delete()
             }
-            archive.delete()
         }
         val invalid = bundledFaceModelNames.filter { name ->
             modelDir.resolve(name).let { !it.isFile || it.length() < 1024 * 1024 }
