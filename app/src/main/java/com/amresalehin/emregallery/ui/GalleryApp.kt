@@ -323,20 +323,11 @@ fun GalleryApp() {
                         onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
                         onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
                     )
-                    Destination.FAVOURITES -> HomeScreen(
-                        media = media.filter { it.uri in favourites && it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
-                        loading = loading,
-                        onPermissionGranted = { refreshMedia() },
-                        albumTitle = "Favourites",
-                        sortOrder = sortOrderPref,
-                        groupBy = groupByPref,
-                        gridColumns = gridColumnsPref,
-                        gridStyle = gridStylePref,
-                        topContentPadding = topContentPadding,
-                        bottomContentPadding = bottomContentPadding,
-                        onClearAlbumFilter = { destination = Destination.ALBUMS },
-                        onAddPhotosToAlbum = null,
-                        onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.FAVOURITES; destination = Destination.VIEWER }
+                    Destination.FAVOURITES -> FavouritesScreen(
+                        items = media.filter { it.uri in favourites && it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
+                        onBack = { destination = Destination.ALBUMS },
+                        onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.FAVOURITES; destination = Destination.VIEWER },
+                        onRemoveFavourite = { item -> scope.launch { prefs.toggleFavourite(item.uri) } }
                     )
                     Destination.BIN -> BinScreen(
                         items = media.filter { it.uri in inBin },
@@ -973,6 +964,131 @@ private fun BinScreen(
             },
             dismissButton = { TextButton(onClick = { confirmEmptyBin = false }) { Text("Cancel") } }
         )
+    }
+}
+
+
+@Composable
+private fun FavouritesScreen(
+    items: List<MediaItem>,
+    onBack: () -> Unit,
+    onOpen: (MediaItem) -> Unit,
+    onRemoveFavourite: (MediaItem) -> Unit
+) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding()
+                .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back to Albums")
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Favourites", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${items.size} ${if (items.size == 1) "item" else "items"} · Your saved photos and videos",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(Icons.Default.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+        if (items.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.FavoriteBorder,
+                        contentDescription = null,
+                        modifier = Modifier.size(76.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text("No favourites yet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Mark photos or videos with the heart icon to keep them together here.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 28.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                gridItems(items, key = { it.uri }) { item ->
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                    ) {
+                        Column {
+                            Box {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(Uri.parse(item.uri))
+                                        .crossfade(true)
+                                        .size(Size(480, 480))
+                                        .precision(Precision.INEXACT)
+                                        .build(),
+                                    contentDescription = item.name,
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                                        .clickable { onOpen(item) },
+                                    contentScale = ContentScale.Crop
+                                )
+                                if (item.isVideo) {
+                                    Icon(
+                                        Icons.Default.PlayCircle,
+                                        contentDescription = "Video",
+                                        modifier = Modifier.align(Alignment.Center).size(36.dp),
+                                        tint = Color.White
+                                    )
+                                }
+                                Surface(
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                                    shape = CircleShape,
+                                    color = Color.Black.copy(alpha = 0.55f)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Favorite,
+                                        contentDescription = "Favourite",
+                                        modifier = Modifier.padding(6.dp).size(16.dp),
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
+                                Text(
+                                    item.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { onRemoveFavourite(item) },
+                                    modifier = Modifier.fillMaxWidth().height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp)
+                                ) {
+                                    Icon(Icons.Default.FavoriteBorder, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Remove", style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
