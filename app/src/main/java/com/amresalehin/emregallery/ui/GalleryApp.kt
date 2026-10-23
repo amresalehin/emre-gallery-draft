@@ -6372,28 +6372,48 @@ private fun PeopleScreen(
         clusters = store.summaries()
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().statusBarsPadding()
-                .padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        if (selectedCluster != null) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                tonalElevation = 2.dp
+            ) {
+                Text(
+                    clusters.firstOrNull { it.id == selectedCluster }?.displayName ?: "Person",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Surface(
+            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 16.dp, top = 8.dp).size(48.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            tonalElevation = 3.dp,
+            shadowElevation = 3.dp
         ) {
             IconButton(onClick = { if (selectedCluster == null) onBack() else selectedCluster = null }) {
                 Icon(Icons.Default.ArrowBack, contentDescription = if (selectedCluster == null) "Back to Albums" else "Back to people")
             }
-            Text(
-                text = selectedCluster?.let { id -> clusters.firstOrNull { it.id == id }?.displayName ?: "Person" } ?: "People & pets",
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        }
+        Surface(
+            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(end = 16.dp, top = 8.dp).size(48.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            tonalElevation = 3.dp,
+            shadowElevation = 3.dp
+        ) {
             IconButton(onClick = { reload() }) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh people")
             }
         }
 
+        Box(Modifier.fillMaxSize().padding(top = 4.dp)) {
         if (selectedCluster == null) {
             if (clusters.isEmpty()) {
                 Box(
@@ -6488,6 +6508,9 @@ private fun PeopleScreen(
                     }
                 }
             }
+        }
+    }
+
         }
     }
 
