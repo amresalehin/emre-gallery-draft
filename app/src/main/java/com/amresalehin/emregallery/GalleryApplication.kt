@@ -5,7 +5,6 @@ import coil.Coil
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
 
 class GalleryApplication : Application() {
     override fun onCreate() {
@@ -19,14 +18,11 @@ class GalleryApplication : Application() {
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(cacheDir.resolve("thumbnail_cache"))
-                    .maxSizeBytes(150L * 1024 * 1024)
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(250L * 1024 * 1024)
                     .build()
             }
-            .components {
-                add(MediaStoreThumbnailFetcher.Factory(applicationContext))
-            }
-            .crossfade(false)
+            .crossfade(true)
             .respectCacheHeaders(false)
             .allowHardware(true)
             .build()

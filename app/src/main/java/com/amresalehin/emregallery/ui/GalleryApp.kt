@@ -1442,7 +1442,7 @@ private fun MediaGridItem(
     val imageRequest = remember(item.uri) {
         ImageRequest.Builder(context)
             .data(Uri.parse(item.uri))
-            .size(360, 360)
+            .size(540, 540)
             .crossfade(false)
             .memoryCacheKey("${item.uri}_thumb")
             .build()
@@ -2733,7 +2733,10 @@ private fun ViewerScreen(
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(Uri.parse(neighbor.uri))
-                        .memoryCacheKey("${neighbor.uri}:viewer-swipe-preview")
+                        .size(Size.ORIGINAL)
+                        .precision(Precision.EXACT)
+                        .memoryCacheKey("${neighbor.uri}:viewer-original")
+                        .diskCacheKey("${neighbor.uri}:viewer-original")
                         .crossfade(false)
                         .build(),
                     contentDescription = neighbor.name,

@@ -15,13 +15,13 @@ import coil.fetch.DrawableResult
 import coil.fetch.FetchResult
 import coil.fetch.Fetcher
 import coil.request.Options
-import coil.size.pxOrElse
+import coil.size.Dimension
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Super fast thumbnail fetcher that taps directly into Android OS's pre-rendered
- * MediaStore thumbnail cache (ContentResolver.loadThumbnail) instead of decoding full multi-megabyte source files.
+ * Optional fast thumbnail fetcher for small thumbnails only (<= 480px).
+ * NEVER intercepts full-resolution or viewer requests.
  */
 class MediaStoreThumbnailFetcher(
     private val context: Context,
@@ -36,18 +36,22 @@ class MediaStoreThumbnailFetcher(
             return@withContext null
         }
 
-        val widthPx = options.size.width.pxOrElse { 360 }
-        val heightPx = options.size.height.pxOrElse { 360 }
+        val widthDim = options.size.width
+        val heightDim = options.size.height
+        if (widthDim !is Dimension.Pixels || heightDim !is Dimension.Pixels) {
+            return@withContext null
+        }
 
-        // If the caller requested full-screen viewer resolution (e.g. > 1080), let Coil's default stream fetcher handle full decode
-        if (widthPx > 1080 && heightPx > 1080) {
+        val widthPx = widthDim.px
+        val heightPx = heightDim.px
+        if (widthPx > 480 || heightPx > 480) {
             return@withContext null
         }
 
         val bitmap: Bitmap? = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val clampedWidth = widthPx.coerceIn(120, 640)
-                val clampedHeight = heightPx.coerceIn(120, 640)
+                val clampedWidth = widthPx.coerceIn(120, 480)
+                val clampedHeight = heightPx.coerceIn(120, 480)
                 context.contentResolver.loadThumbnail(uri, Size(clampedWidth, clampedHeight), null)
             } else {
                 val id = try { ContentUris.parseId(uri) } catch (_: Exception) { -1L }
@@ -76,17 +80,19 @@ class MediaStoreThumbnailFetcher(
                 dataSource = DataSource.DISK
             )
         } else {
-            null // Fallback to normal Coil stream decoder
+            null
         }
     }
 
     class Factory(private val context: Context) : Fetcher.Factory<Uri> {
         override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
             if (data.scheme == ContentResolver.SCHEME_CONTENT && data.authority == MediaStore.AUTHORITY) {
-                val widthPx = options.size.width.pxOrElse { 360 }
-                val heightPx = options.size.height.pxOrElse { 360 }
-                if (widthPx <= 1080 || heightPx <= 1080) {
-                    return MediaStoreThumbnailFetcher(context, data, options)
+                val widthDim = options.size.width
+                val heightDim = options.size.height
+                if (widthDim is Dimension.Pixels && heightDim is Dimension.Pixels) {
+                    if (widthDim.px <= 480 && heightDim.px <= 480) {
+                        return MediaStoreThumbnailFetcher(context, data, options)
+                    }
                 }
             }
             return null
