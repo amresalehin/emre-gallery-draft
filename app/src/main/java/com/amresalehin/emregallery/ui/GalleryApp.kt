@@ -471,7 +471,7 @@ fun GalleryApp() {
                     Destination.DEVICE_FOLDERS -> DeviceFoldersScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         onBack = { destination = Destination.ALBUMS },
-                        onOpenFolder = { folderPath -> albumFilterReturnDestination = Destination.ALBUMS; albumFilter = folderPath; destination = Destination.HOME }
+                        onOpenFolder = { folderPath -> albumFilterReturnDestination = Destination.DEVICE_FOLDERS; albumFilter = folderPath; destination = Destination.HOME }
                     )
                     Destination.ALBUM_CATALOG -> AlbumCatalogScreen(
                         albums = customAlbums,
@@ -482,7 +482,7 @@ fun GalleryApp() {
                             showCreateAlbumDialog = true
                         },
                         onOpenAlbum = { album ->
-                            albumFilterReturnDestination = Destination.ALBUMS
+                            albumFilterReturnDestination = Destination.ALBUM_CATALOG
                             albumFilter = album.id
                             destination = Destination.HOME
                         }
