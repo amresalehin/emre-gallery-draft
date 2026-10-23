@@ -147,6 +147,9 @@ fun GalleryApp() {
     if (destination != Destination.HOME || albumFilter != null) {
         androidx.activity.compose.BackHandler {
             when {
+                destination == Destination.VIEWER && showDetails -> {
+                    showDetails = false
+                }
                 destination == Destination.VIEWER || destination == Destination.SEARCH -> {
                     destination = previousDestination
                 }
@@ -360,7 +363,13 @@ fun GalleryApp() {
                             onAddPerson = { person -> scope.launch { prefs.addPersonForMedia(item.uri, person) } },
                             onToggleControls = { showViewerControls = !showViewerControls },
                             onToggleDetails = { showDetails = !showDetails; showViewerControls = true },
-                            onBack = { destination = previousDestination },
+                            onBack = {
+                                if (showDetails) {
+                                    showDetails = false
+                                } else {
+                                    destination = previousDestination
+                                }
+                            },
                             onFavourite = { scope.launch { prefs.toggleFavourite(item.uri) } },
                             onToggleHide = {
                                 val willHide = item.uri !in hidden
@@ -2909,10 +2918,17 @@ private fun ViewerScreen(
                         Modifier
                             .fillMaxWidth()
                             .padding(top = 10.dp, bottom = 4.dp)
-                            .pointerInput(Unit) {
-                                detectDragGestures { change, dragAmount ->
+                            .pointerInput(showDetails) {
+                                var totalDragY = 0f
+                                detectDragGestures(
+                                    onDragStart = { totalDragY = 0f },
+                                    onDragEnd = {
+                                        if (totalDragY > 48f) onToggleDetails()
+                                    },
+                                    onDragCancel = { totalDragY = 0f }
+                                ) { change, dragAmount ->
                                     change.consume()
-                                    if (dragAmount.y > 16f) onToggleDetails()
+                                    totalDragY += dragAmount.y
                                 }
                             },
                         contentAlignment = Alignment.Center
