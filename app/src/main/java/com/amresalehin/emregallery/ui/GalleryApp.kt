@@ -2568,9 +2568,9 @@ private fun HomeViewOptionsBottomSheet(
                 Surface(
                     onClick = { tempGridStyle = "square" },
                     shape = RoundedCornerShape(16.dp),
-                    color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else if (isGridSelected) Color(0xFFE5E5E5) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface,
-                    border = if (isGridSelected) BorderStroke(1.5.dp, if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
+                    color = if (isGridSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    border = if (isGridSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
                     modifier = Modifier
                         .weight(1f)
                         .height(58.dp)
@@ -2608,9 +2608,9 @@ private fun HomeViewOptionsBottomSheet(
                 Surface(
                     onClick = { tempGridStyle = "masonry" },
                     shape = RoundedCornerShape(16.dp),
-                    color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else if (isMasonrySelected) Color(0xFFE5E5E5) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface,
-                    border = if (isMasonrySelected) BorderStroke(1.5.dp, if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
+                    color = if (isMasonrySelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    border = if (isMasonrySelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
                     modifier = Modifier
                         .weight(1f)
                         .height(58.dp)
@@ -2672,11 +2672,11 @@ private fun HomeViewOptionsBottomSheet(
                         .padding(horizontal = 8.dp)
                         .testTag("view_columns_slider"),
                     colors = SliderDefaults.colors(
-                        thumbColor = Color(0xFF141416),
-                        activeTrackColor = Color(0xFF141416),
-                        inactiveTrackColor = Color(0xFFE5E5EA),
-                        activeTickColor = Color.White,
-                        inactiveTickColor = Color(0xFF8E8E93)
+                        thumbColor = MaterialTheme.colorScheme.primary,
+                        activeTrackColor = MaterialTheme.colorScheme.primary,
+                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        activeTickColor = MaterialTheme.colorScheme.onPrimary,
+                        inactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 )
                 Icon(
@@ -2724,10 +2724,10 @@ private fun HomeViewOptionsBottomSheet(
                             }
                         },
                         shape = RoundedCornerShape(14.dp),
-                        color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else if (isSelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        contentColor = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface,
+                        color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
                         border = if (isSelected) {
-                            BorderStroke(2.dp, if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else Color(0xFF141416))
+                            BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline)
                         } else {
                             BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         },
@@ -2751,13 +2751,13 @@ private fun HomeViewOptionsBottomSheet(
                                     icon,
                                     contentDescription = null,
                                     modifier = Modifier.size(22.dp),
-                                    tint = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                    tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
                                 )
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(if (isSelected && MaterialTheme.colorScheme.background.luminance() >= 0.5f) Color.White.copy(alpha = 0.16f) else Color.Transparent)
+                                        .background(if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.10f) else Color.Transparent)
                                         .padding(horizontal = 2.dp, vertical = 2.dp)
                                 ) {
                                     Box(
@@ -2773,7 +2773,7 @@ private fun HomeViewOptionsBottomSheet(
                                             Icons.Default.ArrowUpward,
                                             contentDescription = "Ascending",
                                             modifier = Modifier.size(13.dp),
-                                            tint = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else if (isSelected && tempSortDirection == "asc") Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            tint = if (isSelected && tempSortDirection == "asc") MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                         )
                                     }
                                     Spacer(Modifier.height(2.dp))
@@ -2790,7 +2790,7 @@ private fun HomeViewOptionsBottomSheet(
                                             Icons.Default.ArrowDownward,
                                             contentDescription = "Descending",
                                             modifier = Modifier.size(13.dp),
-                                            tint = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else if (isSelected && tempSortDirection == "desc") Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                            tint = if (isSelected && tempSortDirection == "desc") MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                                         )
                                     }
                                 }
@@ -2801,7 +2801,7 @@ private fun HomeViewOptionsBottomSheet(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -2836,9 +2836,9 @@ private fun HomeViewOptionsBottomSheet(
                     Surface(
                         onClick = { tempGroupBy = key },
                         shape = RoundedCornerShape(14.dp),
-                        color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else if (isSelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
                         border = if (isSelected) {
-                            BorderStroke(2.dp, Color(0xFF141416))
+                            BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline)
                         } else {
                             BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         },
@@ -2858,7 +2858,7 @@ private fun HomeViewOptionsBottomSheet(
                                 icon,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp),
-                                tint = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
@@ -2867,7 +2867,7 @@ private fun HomeViewOptionsBottomSheet(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
                                 textAlign = TextAlign.Center
                             )
                         }
@@ -2894,7 +2894,7 @@ private fun HomeViewOptionsBottomSheet(
                     },
                     shape = CircleShape,
                     color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else MaterialTheme.colorScheme.surface,
-                    contentColor = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
                     border = BorderStroke(1.dp, Color(0xFFDCDCE0)),
                     modifier = Modifier
                         .height(48.dp)
@@ -2909,14 +2909,14 @@ private fun HomeViewOptionsBottomSheet(
                             Icons.Default.RestartAlt,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp),
-                            tint = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
                             text = "Reset to default",
                             fontWeight = FontWeight.SemiBold,
                             style = MaterialTheme.typography.labelLarge,
-                            color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF141416) else MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
