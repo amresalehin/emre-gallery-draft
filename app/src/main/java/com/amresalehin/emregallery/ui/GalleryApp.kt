@@ -280,12 +280,37 @@ fun GalleryApp() {
             AnimatedContent(
                 targetState = destination,
                 transitionSpec = {
+                    val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
+                    val initialIndex = mainPages.indexOf(initialState)
+                    val targetIndex = mainPages.indexOf(targetState)
                     if (targetState == Destination.VIEWER) {
                         (fadeIn(animationSpec = tween(260)) + scaleIn(initialScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)))
                             .togetherWith(fadeOut(animationSpec = tween(180)))
                     } else if (initialState == Destination.VIEWER) {
                         fadeIn(animationSpec = tween(200))
-                            .togetherWith(fadeOut(animationSpec = tween(240)) + scaleOut(targetScale = 0.96f, animationSpec = tween(240, easing = FastOutLinearInEasing)))
+                            .togetherWith(fadeOut(animationSpec = tween(240) ) + scaleOut(targetScale = 0.96f, animationSpec = tween(240, easing = FastOutLinearInEasing)))
+                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex > initialIndex) {
+                        (slideInHorizontally(
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> width }
+                        ) + fadeIn(animationSpec = tween(220)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> -width / 4 }
+                                ) + fadeOut(animationSpec = tween(220))
+                            )
+                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex < initialIndex) {
+                        (slideInHorizontally(
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> -width }
+                        ) + fadeIn(animationSpec = tween(220)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> width / 4 }
+                                ) + fadeOut(animationSpec = tween(220))
+                            )
                     } else {
                         fadeIn(animationSpec = tween(200)).togetherWith(fadeOut(animationSpec = tween(160)))
                     }
