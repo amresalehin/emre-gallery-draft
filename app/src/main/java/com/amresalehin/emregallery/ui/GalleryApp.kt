@@ -1827,6 +1827,7 @@ private fun HomeFastScrollbar(
     val density = androidx.compose.ui.platform.LocalDensity.current
     val minThumbPx = with(density) { 36.dp.toPx() }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     if (totalItems > 0 && visibleItems.isNotEmpty() && viewportPx > 0f &&
         (visibleItems.first().index > 0 || visibleItems.last().index < totalItems - 1)
     ) {
@@ -1882,8 +1883,8 @@ private fun HomeFastScrollbar(
             }
         }
     }
+    }
 }
-
 @Composable
 private fun HomeScreenSkeleton(
     gridColumns: Int = 3,
