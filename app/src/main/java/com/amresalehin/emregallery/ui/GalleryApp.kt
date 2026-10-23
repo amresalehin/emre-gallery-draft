@@ -3825,7 +3825,7 @@ private fun MetaKeyValueRow(key: String, value: String) {
 
 // Persistent SQLite cache for photo GPS metadata, including photos with no GPS coordinates.
 private class PhotoMapLocationCache(context: android.content.Context) :
-    SQLiteOpenHelper(context.applicationContext, "photo_map_locations.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "photo_map_locations.db", null, 2) {
 
     data class CachedLocation(val point: GeoPoint?)
 
@@ -3836,7 +3836,9 @@ private class PhotoMapLocationCache(context: android.content.Context) :
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Version 1 is the initial schema. Add migrations here if the schema changes.
+        // Older cache entries may contain redacted coordinates from Android's media provider.
+        db.execSQL("DROP TABLE IF EXISTS photo_locations")
+        onCreate(db)
     }
 
     @Synchronized
@@ -3884,6 +3886,15 @@ private class PhotoMapLocationCache(context: android.content.Context) :
 private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
     val context = LocalContext.current
     val locationCache = remember(context.applicationContext) { PhotoMapLocationCache(context.applicationContext) }
+    var canReadOriginalLocation by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> canReadOriginalLocation = granted }
     var locatedMedia by remember { mutableStateOf<List<Pair<MediaItem, GeoPoint>>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var scanProgress by remember { mutableIntStateOf(0) }
@@ -3892,9 +3903,20 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
     var sheetExpanded by remember { mutableStateOf(false) }
     val dayFormat = remember { SimpleDateFormat("EEEE", Locale.getDefault()) }
 
-    LaunchedEffect(media) {
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+        }
+    }
+
+    LaunchedEffect(media, canReadOriginalLocation) {
         loading = true
         scanProgress = 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
+            loading = false
+            locatedMedia = emptyList()
+            return@LaunchedEffect
+        }
         val photos = media.filterNot { it.isVideo }
         val cached = withContext(Dispatchers.IO) { locationCache.loadAll() }
         // Cached coordinates and cached "no GPS" results both survive app restarts.
@@ -3913,7 +3935,11 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
         uncachedPhotos.forEach { item ->
             val point = withContext(Dispatchers.IO) {
                 runCatching {
-                    context.contentResolver.openInputStream(Uri.parse(item.uri))?.use { stream ->
+                    context.contentResolver.openInputStream(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && canReadOriginalLocation) {
+                            android.provider.MediaStore.setRequireOriginal(Uri.parse(item.uri))
+                        } else Uri.parse(item.uri)
+                    )?.use { stream ->
                         ExifInterface(stream).latLong?.let { c ->
                             if (c[0].isFinite() && c[1].isFinite() && c[0] in -90.0..90.0 && c[1] in -180.0..180.0) GeoPoint(c[0], c[1]) else null
                         }
@@ -4008,6 +4034,30 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                 }
             }, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
                 Icon(Icons.Default.MyLocation, contentDescription = "Focus photos", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
+            Surface(
+                modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shadowElevation = 8.dp
+            ) {
+                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text("Allow photo location access", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Android hides embedded GPS coordinates unless Emre Gallery has permission to read original photo metadata.",
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = { locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION) }) {
+                        Text("Grant permission")
+                    }
+                }
             }
         }
 
