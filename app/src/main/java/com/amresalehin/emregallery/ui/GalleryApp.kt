@@ -859,31 +859,13 @@ private fun HomeScreen(
     }
 
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
-    val scrollbarThumbColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+    val scrollbarScope = rememberCoroutineScope()
+    var scrollbarDragging by remember { mutableStateOf(false) }
+    val scrollbarThumbColor = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
         state = homeListState,
-        modifier = Modifier.fillMaxSize().drawWithContent {
-            drawContent()
-            val layout = homeListState.layoutInfo
-            val totalItems = layout.totalItemsCount
-            val visibleItems = layout.visibleItemsInfo
-            if (totalItems > 0 && visibleItems.isNotEmpty() && layout.viewportSize.height > 0 &&
-                (visibleItems.first().index > 0 || visibleItems.last().index < totalItems - 1)
-            ) {
-                val viewportHeight = layout.viewportSize.height.toFloat()
-                val contentHeight = (layout.totalItemsCount.toFloat() / visibleItems.size.coerceAtLeast(1)) * viewportHeight
-                val thumbHeight = (viewportHeight * viewportHeight / contentHeight).coerceIn(36.dp.toPx(), viewportHeight)
-                val scrollFraction = (homeListState.firstVisibleItemIndex.toFloat() /
-                    (totalItems - visibleItems.size).coerceAtLeast(1)).coerceIn(0f, 1f)
-                val thumbTop = (viewportHeight - thumbHeight) * scrollFraction
-                drawRoundRect(
-                    color = scrollbarThumbColor,
-                    topLeft = Offset(size.width - 3.dp.toPx(), thumbTop),
-                    size = androidx.compose.ui.geometry.Size(2.dp.toPx(), thumbHeight),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
-                )
-            }
-        },
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = 12.dp,
             end = 12.dp,
@@ -1024,6 +1006,63 @@ private fun HomeScreen(
                 }
             }
         }
+    }
+
+    // A dedicated edge hit target keeps scrollbar dragging separate from photo-grid scrolling.
+    val scrollLayout = homeListState.layoutInfo
+    val scrollItems = scrollLayout.totalItemsCount
+    val visibleScrollItems = scrollLayout.visibleItemsInfo
+    val viewportPx = scrollLayout.viewportSize.height.toFloat()
+    if (scrollItems > 0 && visibleScrollItems.isNotEmpty() && viewportPx > 0 &&
+        (visibleScrollItems.first().index > 0 || visibleScrollItems.last().index < scrollItems - 1)
+    ) {
+        val thumbHeightPx = (viewportPx * visibleScrollItems.size / scrollItems.toFloat())
+            .coerceIn(with(androidx.compose.ui.platform.LocalDensity.current) { 36.dp.toPx() }, viewportPx)
+        val maxThumbTravel = (viewportPx - thumbHeightPx).coerceAtLeast(1f)
+        val scrollFraction = (homeListState.firstVisibleItemIndex.toFloat() /
+            (scrollItems - visibleScrollItems.size).coerceAtLeast(1)).coerceIn(0f, 1f)
+        val thumbTopPx = maxThumbTravel * scrollFraction
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(24.dp)
+                .pointerInput(scrollItems, viewportPx) {
+                    detectDragGestures(
+                        onDragStart = { scrollbarDragging = true },
+                        onDragEnd = { scrollbarDragging = false },
+                        onDragCancel = { scrollbarDragging = false },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            val currentLayout = homeListState.layoutInfo
+                            val count = currentLayout.totalItemsCount
+                            val height = currentLayout.viewportSize.height.toFloat()
+                            if (count > 0 && height > 0f) {
+                                val itemDelta = (dragAmount.y / height * count).roundToInt()
+                                val target = (homeListState.firstVisibleItemIndex + itemDelta)
+                                    .coerceIn(0, (count - 1).coerceAtLeast(0))
+                                scrollbarScope.launch { homeListState.scrollToItem(target) }
+                            }
+                        }
+                    )
+                },
+            contentAlignment = Alignment.TopEnd
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val thumbWidth = if (scrollbarDragging || homeListState.isScrollInProgress) 6.dp.toPx() else 2.dp.toPx()
+                val trackHeight = size.height
+                val height = thumbHeightPx.coerceAtMost(trackHeight)
+                val fraction = if (trackHeight <= height) 0f else thumbTopPx / (trackHeight - height)
+                val top = (trackHeight - height) * fraction
+                drawRoundRect(
+                    color = scrollbarThumbColor.copy(alpha = if (scrollbarDragging || homeListState.isScrollInProgress) 0.95f else 0.65f),
+                    topLeft = Offset(size.width - thumbWidth, top),
+                    size = androidx.compose.ui.geometry.Size(thumbWidth, height),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(thumbWidth / 2f)
+                )
+            }
+        }
+    }
     }
 }
 
