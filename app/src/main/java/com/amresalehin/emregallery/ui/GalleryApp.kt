@@ -3955,7 +3955,26 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
     var sheetExpanded by remember { mutableStateOf(false) }
     var visibleBounds by remember { mutableStateOf<org.osmdroid.util.BoundingBox?>(null) }
     var mapFramed by remember { mutableStateOf(false) }
+    val sheetExpandedState = rememberUpdatedState(sheetExpanded)
     val dayFormat = remember { SimpleDateFormat("EEEE", Locale.getDefault()) }
+
+    fun updateVisibleMapBounds(map: MapView, expanded: Boolean = sheetExpanded) {
+        if (map.width <= 0 || map.height <= 0) return
+        val density = context.resources.displayMetrics.density
+        // Exclude the blurred top controls and the portion covered by the drawer.
+        // Use the middle of the remaining upper map area rather than the full MapView bounds.
+        val topPx = (142f * density).toInt().coerceIn(0, map.height - 1)
+        val drawerTopPx = (map.height * (if (expanded) 0.22f else 0.57f)).toInt()
+        val bottomPx = drawerTopPx.coerceIn(topPx + 1, map.height)
+        val northWest = map.projection.fromPixels(0, topPx)
+        val southEast = map.projection.fromPixels(map.width, bottomPx)
+        visibleBounds = org.osmdroid.util.BoundingBox(
+            northWest.latitude,
+            southEast.longitude,
+            southEast.latitude,
+            northWest.longitude
+        )
+    }
 
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
@@ -4052,11 +4071,11 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                     mapRef = this
                     addMapListener(object : org.osmdroid.events.MapListener {
                         override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
-                            visibleBounds = boundingBox
+                            updateVisibleMapBounds(this@apply, sheetExpandedState.value)
                             return true
                         }
                         override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
-                            visibleBounds = boundingBox
+                            updateVisibleMapBounds(this@apply, sheetExpandedState.value)
                             return true
                         }
                     })
@@ -4072,9 +4091,14 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                 }
                 map.overlays.removeAll { it is PhotoHeatmapOverlay }
                 if (locatedMedia.isNotEmpty()) map.overlays.add(PhotoHeatmapOverlay(locatedMedia.map { it.second }))
+                map.post { updateVisibleMapBounds(map, sheetExpanded) }
                 map.invalidate()
             }
         )
+
+        LaunchedEffect(sheetExpanded) {
+            mapRef?.let { map -> updateVisibleMapBounds(map, sheetExpanded) }
+        }
 
         // Soft translucent blur behind the floating map controls, including the status bar.
         Box(
