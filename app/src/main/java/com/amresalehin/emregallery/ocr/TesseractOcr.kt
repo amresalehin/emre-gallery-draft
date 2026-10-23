@@ -49,30 +49,42 @@ object TesseractOcr {
         }
 
         val bitmap = decodeBitmap(context, uri)
-        val engine = TessBaseAPI()
+        val combinedLangs = validCodes.joinToString("+")
+        val candidates = (listOf(combinedLangs) + validCodes + listOf("eng")).distinct()
+        var activeEngine: TessBaseAPI? = null
+        var activeLanguage: String? = null
         try {
-            val combinedLangs = validCodes.joinToString("+")
-            var initialized = engine.init(baseDir.absolutePath, combinedLangs)
-            if (!initialized && validCodes.size > 1) {
-                // Fallback to primary requested language if combined initialization fails
-                initialized = engine.init(baseDir.absolutePath, validCodes.first())
-            }
-            if (!initialized) {
-                // Fallback to English if available
-                val engFile = File(tessdataDir, "eng.traineddata")
-                if (!engFile.exists() || engFile.length() < 1024) {
-                    copyBundledTrainedData(context, "eng", engFile)
+            // Use a fresh native engine for every attempt. A failed init can leave
+            // the native instance unsuitable for another init call.
+            for (candidate in candidates) {
+                if (candidate.split("+").any { code ->
+                        val file = File(tessdataDir, "$code.traineddata")
+                        !file.isFile || file.length() < 1024
+                    }) {
+                    continue
                 }
-                initialized = engine.init(baseDir.absolutePath, "eng")
+                val candidateEngine = TessBaseAPI()
+                val initialized = runCatching {
+                    candidateEngine.init(baseDir.absolutePath, candidate)
+                }.getOrDefault(false)
+                if (initialized) {
+                    activeEngine = candidateEngine
+                    activeLanguage = candidate
+                    break
+                }
+                candidateEngine.end()
             }
-            if (!initialized) {
-                error("Tesseract could not initialize OCR engine for language(s): $combinedLangs")
-            }
+
+            val engine = activeEngine ?: error(
+                "Tesseract could not load OCR language data ($combinedLangs). " +
+                    "The bundled traineddata may be missing, incomplete, or incompatible. " +
+                    "Reinstall the latest app build and try selecting one language at a time."
+            )
             engine.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
             engine.setImage(bitmap)
             return engine.getUTF8Text().orEmpty().trim()
         } finally {
-            engine.end()
+            activeEngine?.end()
             bitmap.recycle()
         }
     }
