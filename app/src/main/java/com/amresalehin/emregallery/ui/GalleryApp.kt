@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -2307,16 +2308,56 @@ private fun AlbumsScreen(
                         .fillMaxWidth()
                         .height(180.dp)
                 ) {
-                    // Decorative map icon overlay
-                    Icon(
-                        Icons.Default.Map,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .size(150.dp)
-                            .align(Alignment.CenterEnd)
-                            .offset(x = 24.dp)
-                            .alpha(0.06f),
-                        tint = MaterialTheme.colorScheme.onSurface
+                    // Stylized map underlayer: a soft map-like canvas with winding roads,
+                    // a river and location pins, kept decorative so it works offline.
+                    Canvas(
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        val w = size.width
+                        val h = size.height
+                        drawRect(
+                            brush = Brush.linearGradient(
+                                colors = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) {
+                                    listOf(Color(0xFFE4F1E8), Color(0xFFD8E8F4), Color(0xFFF3EEDC))
+                                } else {
+                                    listOf(Color(0xFF263B35), Color(0xFF243746), Color(0xFF35352E))
+                                },
+                                start = Offset.Zero,
+                                end = Offset(w, h)
+                            )
+                        )
+                        val roadColor = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) Color(0xFFFFFFFF).copy(alpha = 0.9f) else Color(0xFFB9C8C0).copy(alpha = 0.55f)
+                        val minorRoad = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) Color(0xFFB8D0C0).copy(alpha = 0.8f) else Color(0xFF7F9D90).copy(alpha = 0.55f)
+                        val riverColor = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) Color(0xFF7CC5EE).copy(alpha = 0.65f) else Color(0xFF5BA9D5).copy(alpha = 0.6f)
+                        val roads = listOf(
+                            listOf(Offset(-w * .08f, h * .82f), Offset(w * .22f, h * .62f), Offset(w * .37f, h * .45f), Offset(w * .62f, h * .32f), Offset(w * 1.08f, h * .12f)),
+                            listOf(Offset(w * .04f, h * .10f), Offset(w * .31f, h * .28f), Offset(w * .47f, h * .58f), Offset(w * .76f, h * .70f), Offset(w * 1.02f, h * .88f)),
+                            listOf(Offset(w * .22f, h * 1.08f), Offset(w * .36f, h * .78f), Offset(w * .58f, h * .54f), Offset(w * .78f, h * .38f), Offset(w * .88f, -h * .08f))
+                        )
+                        roads.forEachIndexed { index, points ->
+                            val path = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(points.first().x, points.first().y)
+                                points.drop(1).forEach { lineTo(it.x, it.y) }
+                            }
+                            drawPath(path, if (index == 1) riverColor else minorRoad, style = androidx.compose.ui.graphics.drawscope.Stroke(width = if (index == 1) 16.dp.toPx() else 5.dp.toPx(), cap = StrokeCap.Round))
+                            if (index != 1) drawPath(path, roadColor, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+                        }
+                        listOf(Offset(w * .25f, h * .28f), Offset(w * .67f, h * .48f), Offset(w * .48f, h * .78f), Offset(w * .82f, h * .22f)).forEachIndexed { index, point ->
+                            drawCircle(Color(0xFF4285F4).copy(alpha = .16f), radius = (if (index == 1) 19.dp else 12.dp).toPx(), center = point)
+                            drawCircle(Color(0xFF4285F4).copy(alpha = .75f), radius = (if (index == 1) 8.dp else 5.dp).toPx(), center = point)
+                            drawCircle(Color.White, radius = (if (index == 1) 3.dp else 2.dp).toPx(), center = point)
+                        }
+                    }
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.04f),
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.10f),
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)
+                                )
+                            )
+                        )
                     )
 
                     // Content overlay
