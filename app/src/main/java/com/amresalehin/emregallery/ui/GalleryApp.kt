@@ -4360,34 +4360,13 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
         }
 
         Surface(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(if (sheetExpanded) .78f else .43f),
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.43f),
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             color = MaterialTheme.colorScheme.surface,
             shadowElevation = 12.dp
         ) {
             Column(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier.fillMaxWidth()
-                        .pointerInput(sheetExpanded) {
-                            var verticalDrag = 0f
-                            detectDragGestures(
-                                onDragEnd = {
-                                    if (verticalDrag < -30f) sheetExpanded = true
-                                    else if (verticalDrag > 30f) sheetExpanded = false
-                                    verticalDrag = 0f
-                                },
-                                onDragCancel = { verticalDrag = 0f }
-                            ) { change, dragAmount ->
-                                verticalDrag += dragAmount.y
-                                change.consume()
-                            }
-                        }
-                        .clickable { sheetExpanded = !sheetExpanded }
-                        .padding(top = 10.dp, bottom = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(Modifier.width(38.dp).height(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f)))
-                }
+                Spacer(Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -4399,12 +4378,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Normal
                     )
-                    IconButton(onClick = { sheetExpanded = !sheetExpanded }) {
-                        Icon(
-                            if (sheetExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-                            contentDescription = if (sheetExpanded) "Collapse photo drawer" else "Expand photo drawer"
-                        )
-                    }
+
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .6f))
                 if (!loading && locatedMedia.isEmpty()) {
