@@ -87,6 +87,8 @@ import java.util.Locale
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
@@ -4107,17 +4109,22 @@ private class PhotoHeatmapOverlay(
     }
 }
 
-private fun satelliteTileSource(): XYTileSource = XYTileSource(
+private fun satelliteTileSource(): OnlineTileSourceBase = object : OnlineTileSourceBase(
     "EsriWorldImagery",
     1,
     19,
     256,
     ".jpg",
-    arrayOf(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"
-    ),
+    arrayOf("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"),
     "Esri World Imagery"
-)
+) {
+    // ArcGIS REST tiles use /{level}/{row}/{column}; osmdroid's default
+    // XYTileSource path order is /{zoom}/{x}/{y}, so build this URL explicitly.
+    override fun getTileURLString(pMapTileIndex: Long): String =
+        baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" +
+            MapTileIndex.getY(pMapTileIndex) + "/" +
+            MapTileIndex.getX(pMapTileIndex) + imageFilenameEnding
+}
 
 @Composable
 private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
