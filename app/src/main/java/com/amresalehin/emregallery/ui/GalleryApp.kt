@@ -80,6 +80,7 @@ import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ocr.TesseractOcr
+import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceIndexingProgress
@@ -6199,7 +6200,7 @@ private fun PeopleScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text(if (modelReady) "Scan new photos" else "Download buffalo_l model")
                             }
-                            if (!modelReady) Text("Downloads and retains all five ONNX models in the official ~326 MB buffalo_l pack. Use Wi-Fi and ensure sufficient storage.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (!modelReady) Text("Downloads and retains all five ONNX models in the official buffalo_l pack. The archive is about 326 MB; keep at least 500 MB free for installation.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -6238,7 +6239,7 @@ private fun PeopleScreen(
         AlertDialog(
             onDismissRequest = { showLicenseDialog = false },
             title = { Text("Download buffalo_l?") },
-            text = { Text("The official InsightFace buffalo_l pretrained pack includes face detection, recognition, 2D/3D landmarks, and gender/age models. Its pretrained weights are licensed for non-commercial research use. The archive is about 326 MB. Download only if these terms fit your use; processing is local to this device.") },
+            text = { Text("The official InsightFace buffalo_l pretrained pack includes face detection, recognition, 2D/3D landmarks, and gender/age models. Its pretrained weights are licensed for non-commercial research use. The archive is about 326 MB and installation needs about 500 MB free. Download only if these terms fit your use; processing is local to this device.") },
             confirmButton = { TextButton(onClick = {
                 showLicenseDialog = false
                 busy = true
