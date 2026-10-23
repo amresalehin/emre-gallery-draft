@@ -43,7 +43,8 @@ data class DetectedFaceEmbedding(
 class BuffaloLFaceEngine private constructor(
     private val context: Context,
     private val session: OrtSession,
-    private val detector: FaceDetector
+    private val detector: FaceDetector,
+    private val packSessions: List<OrtSession>
 ) : AutoCloseable {
 
     fun embed(uri: Uri): List<DetectedFaceEmbedding> {
@@ -137,6 +138,7 @@ class BuffaloLFaceEngine private constructor(
     override fun close() {
         runCatching { detector.close() }
         runCatching { session.close() }
+        packSessions.forEach { runCatching { it.close() } }
     }
 
     companion object {
@@ -144,6 +146,16 @@ class BuffaloLFaceEngine private constructor(
         private const val MIN_FACE_SIZE = 28
         private const val MODEL_URL =
             "https://github.com/deepinsight/insightface/releases/download/model-zoo/buffalo_l.zip"
+        private val REQUIRED_MODELS = listOf(
+            "det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx", "1k3d68.onnx", "genderage.onnx"
+        )
+
+        fun isModelInstalled(context: Context): Boolean {
+            val dir = File(context.filesDir, "face-models/buffalo_l")
+            return REQUIRED_MODELS.all { name ->
+                dir.resolve(name).let { it.isFile && it.length() > 1024 * 1024 }
+            }
+        }
 
         /**
          * Downloads the official model pack on demand, extracts only the recognizer needed by
@@ -153,28 +165,28 @@ class BuffaloLFaceEngine private constructor(
         fun downloadModel(context: Context, onProgress: (Long, Long) -> Unit = { _, _ -> }) {
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             if (!modelDir.exists() && !modelDir.mkdirs()) error("Cannot create face model directory.")
-            val target = File(modelDir, "w600k_r50.onnx")
-            if (target.isFile && target.length() > MIN_MODEL_BYTES) return
+            if (isModelInstalled(context)) return
 
             val connection = URL(MODEL_URL).openConnection() as HttpURLConnection
             connection.connectTimeout = 20_000
             connection.readTimeout = 120_000
             connection.instanceFollowRedirects = true
+            val staging = File(modelDir, "installing").apply { deleteRecursively(); mkdirs() }
             try {
                 connection.connect()
                 if (connection.responseCode !in 200..299) {
-                    error("Could not download buffalo_l model (HTTP ${connection.responseCode}).")
+                    error("Could not download buffalo_l model pack (HTTP " + connection.responseCode + ").")
                 }
                 val total = connection.contentLengthLong.coerceAtLeast(-1L)
                 var received = 0L
-                var found = false
-                val temporary = File(modelDir, "w600k_r50.onnx.tmp")
-                try {
-                    ZipInputStream(BufferedInputStream(connection.inputStream)).use { zip ->
-                        var entry = zip.nextEntry
-                        while (entry != null) {
-                            if (!entry.isDirectory && entry.name.substringAfterLast('/') == target.name) {
-                                temporary.outputStream().buffered().use { output ->
+                ZipInputStream(BufferedInputStream(connection.inputStream)).use { zip ->
+                    var entry = zip.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory) {
+                            val name = entry.name.substringAfterLast('/')
+                            if (name.endsWith(".onnx") || name.equals("MODEL.LICENSE", true) || name.equals("LICENSE", true)) {
+                                val outputFile = staging.resolve(name)
+                                outputFile.outputStream().buffered().use { output ->
                                     val buffer = ByteArray(64 * 1024)
                                     while (true) {
                                         val count = zip.read(buffer)
@@ -184,7 +196,6 @@ class BuffaloLFaceEngine private constructor(
                                         onProgress(received, total)
                                     }
                                 }
-                                found = true
                             } else {
                                 val buffer = ByteArray(64 * 1024)
                                 while (true) {
@@ -194,45 +205,66 @@ class BuffaloLFaceEngine private constructor(
                                     if (received % (4L * 1024 * 1024) < buffer.size) onProgress(received, total)
                                 }
                             }
-                            zip.closeEntry()
-                            entry = zip.nextEntry
                         }
+                        zip.closeEntry()
+                        entry = zip.nextEntry
                     }
-                    if (!found || !temporary.isFile || temporary.length() < MIN_MODEL_BYTES) {
-                        error("The buffalo_l archive did not contain a complete w600k_r50.onnx model.")
-                    }
-                    if (!temporary.renameTo(target)) {
-                        temporary.copyTo(target, overwrite = true)
-                        temporary.delete()
-                    }
-                } finally {
-                    temporary.delete()
+                }
+                val missing = REQUIRED_MODELS.filter { name ->
+                    staging.resolve(name).let { !it.isFile || it.length() < 1024 * 1024 }
+                }
+                if (missing.isNotEmpty()) error("Incomplete buffalo_l archive; missing or invalid: " + missing.joinToString())
+                REQUIRED_MODELS.forEach { name ->
+                    val source = staging.resolve(name)
+                    val target = modelDir.resolve(name)
+                    if (target.exists()) target.delete()
+                    if (!source.renameTo(target)) source.copyTo(target, overwrite = true)
+                }
+                staging.listFiles()?.filter { it.isFile && it.name.contains("LICENSE", true) }?.forEach {
+                    it.copyTo(modelDir.resolve(it.name), overwrite = true)
                 }
             } finally {
                 connection.disconnect()
+                staging.deleteRecursively()
             }
+            check(isModelInstalled(context)) { "buffalo_l model pack installation failed validation." }
         }
 
         fun open(context: Context): BuffaloLFaceEngine {
-            val model = File(context.filesDir, "face-models/buffalo_l/w600k_r50.onnx")
-            check(model.isFile && model.length() > MIN_MODEL_BYTES) {
-                "Face model is not installed. Download buffalo_l from the People settings first."
+            check(isModelInstalled(context)) {
+                "The complete buffalo_l model pack is not installed. Download it from People settings first."
             }
+            val modelDir = File(context.filesDir, "face-models/buffalo_l")
             val options = OrtSession.SessionOptions().apply {
                 setIntraOpNumThreads(2)
                 setInterOpNumThreads(1)
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
             }
-            val session = OrtEnvironment.getEnvironment().createSession(model.absolutePath, options)
-            val detectorOptions = FaceDetectorOptions.Builder()
-                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
-                .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-                .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
-                .enableTracking()
-                .build()
-            return BuffaloLFaceEngine(context.applicationContext, session, FaceDetection.getClient(detectorOptions))
+            val env = OrtEnvironment.getEnvironment()
+            val auxiliarySessions = mutableListOf<OrtSession>()
+            val recognition = env.createSession(modelDir.resolve("w600k_r50.onnx").absolutePath, options)
+            try {
+                listOf("det_10g.onnx", "2d106det.onnx", "1k3d68.onnx", "genderage.onnx").forEach { name ->
+                    auxiliarySessions += env.createSession(modelDir.resolve(name).absolutePath, options)
+                }
+                val detectorOptions = FaceDetectorOptions.Builder()
+                    .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
+                    .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
+                    .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+                    .enableTracking()
+                    .build()
+                return BuffaloLFaceEngine(
+                    context.applicationContext,
+                    recognition,
+                    FaceDetection.getClient(detectorOptions),
+                    auxiliarySessions
+                )
+            } catch (error: Throwable) {
+                recognition.close()
+                auxiliarySessions.forEach { runCatching { it.close() } }
+                throw error
+            }
         }
 
-        private const val MIN_MODEL_BYTES = 50L * 1024 * 1024
     }
 }
