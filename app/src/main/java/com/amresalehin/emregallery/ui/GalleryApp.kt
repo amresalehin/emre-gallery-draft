@@ -2231,7 +2231,7 @@ private fun AlbumsScreen(
                     .height(180.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Left Column: Album Card (2/3rd - squaricle)
+                // Left Column: Albums collection preview with nested mini album cards
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = MaterialTheme.colorScheme.surfaceContainer,
@@ -2245,78 +2245,110 @@ private fun AlbumsScreen(
                         .clickable { onFilter("Albums") }
                         .testTag("albums_section_card")
                 ) {
-                    val topAlbum = customAlbums.firstOrNull()
-                    val topAlbumCover = topAlbum?.let { alb -> media.firstOrNull { it.uri in alb.mediaUris } }
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        if (topAlbumCover != null) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(Uri.parse(topAlbumCover.uri))
-                                    .size(400, 400)
-                                    .crossfade(false)
-                                    .memoryCacheKey("${topAlbumCover.uri}_album_cover")
-                                    .build(),
-                                contentDescription = topAlbum.name,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(RoundedCornerShape(20.dp)),
-                                contentScale = ContentScale.Crop
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PhotoAlbum,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
                             )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.45f))
+                            Text(
+                                "Albums",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                customAlbums.size.toString(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        if (customAlbums.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = if (topAlbumCover != null) Color.Black.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                    modifier = Modifier.size(34.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.PhotoAlbum,
-                                            contentDescription = null,
-                                            tint = if (topAlbumCover != null) Color.White else MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(17.dp)
-                                        )
-                                    }
-                                }
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("Create your first album", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
-
-                            Column {
-                                Text(
-                                    text = if (topAlbum != null) topAlbum.name else "Albums",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (topAlbumCover != null) Color.White else MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = if (customAlbums.isEmpty()) "Tap to create" else "${customAlbums.size} ${if (customAlbums.size == 1) "album" else "albums"}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (topAlbumCover != null) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                userScrollEnabled = false,
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                gridItems(customAlbums.take(4), key = { it.id }) { album ->
+                                    val cover = media.firstOrNull { it.uri in album.mediaUris }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(54.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    ) {
+                                        if (cover != null) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(Uri.parse(cover.uri))
+                                                    .size(240, 160)
+                                                    .crossfade(false)
+                                                    .memoryCacheKey("${cover.uri}_album_collection_cover")
+                                                    .build(),
+                                                contentDescription = "Preview of ${album.name}",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(
+                                                        Brush.verticalGradient(
+                                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
+                                                        )
+                                                    )
+                                            )
+                                        }
+                                        Column(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                album.name,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = if (cover != null) Color.White else MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
