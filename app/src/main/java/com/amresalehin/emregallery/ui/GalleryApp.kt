@@ -3716,36 +3716,39 @@ private fun ViewerScreen(
             modifier = Modifier.fillMaxSize()
         ) {
             Box(Modifier.fillMaxSize()) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(190.dp)
-                        .align(Alignment.TopCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Black.copy(alpha = 0.42f),
-                                    Color.Black.copy(alpha = 0.20f),
-                                    Color.Transparent
+                BoxWithConstraints(Modifier.fillMaxSize()) {
+                    val edgeShadeHeight = maxHeight * 0.07f
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(edgeShadeHeight)
+                            .align(Alignment.TopCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.32f),
+                                        Color.Black.copy(alpha = 0.12f),
+                                        Color.Transparent
+                                    )
                                 )
                             )
-                        )
-                )
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(210.dp)
-                        .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.18f),
-                                    Color.Black.copy(alpha = 0.40f)
+                    )
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(edgeShadeHeight)
+                            .align(Alignment.BottomCenter)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.12f),
+                                        Color.Black.copy(alpha = 0.32f)
+                                    )
                                 )
                             )
-                        )
-                )
+                    )
+                }
             }
         }
 
