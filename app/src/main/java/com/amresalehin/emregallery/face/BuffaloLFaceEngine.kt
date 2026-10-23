@@ -9,6 +9,8 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import android.net.Uri
+import android.os.StatFs
+import androidx.exifinterface.media.ExifInterface
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -47,7 +49,7 @@ class BuffaloLFaceEngine private constructor(
     private data class FaceDetection(val bounds: RectF, val landmarks: FloatArray, val score: Float)
 
     fun embed(uri: Uri): List<DetectedFaceEmbedding> {
-        val bitmap = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+        val bitmap = decodeOrientedBitmap(uri)
             ?: error("Could not decode this image.")
         try {
             val detections = detect(bitmap)
@@ -65,6 +67,31 @@ class BuffaloLFaceEngine private constructor(
         } finally {
             bitmap.recycle()
         }
+    }
+
+    private fun decodeOrientedBitmap(uri: Uri): Bitmap? {
+        val orientation = runCatching {
+            context.contentResolver.openInputStream(uri)?.use { ExifInterface(it).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
+            ) } ?: ExifInterface.ORIENTATION_NORMAL
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val decoded = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.setRotate(90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.setRotate(-90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
+            else -> return decoded
+        }
+        return runCatching {
+            Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true).also {
+                if (it !== decoded) decoded.recycle()
+            }
+        }.getOrElse { decoded }
     }
 
     /** SCRFD-10GF, 640px input, BGR with (pixel - 127.5) / 128 normalization. */
@@ -303,6 +330,7 @@ class BuffaloLFaceEngine private constructor(
         private const val DETECTION_THRESHOLD = 0.5f
         private const val NMS_THRESHOLD = 0.4f
         private const val MAX_FACES = 100
+        private const val MIN_FREE_SPACE_BYTES = 500L * 1024 * 1024
         private val STRIDES = intArrayOf(8, 16, 32)
         private const val MODEL_URL =
             "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
@@ -326,6 +354,12 @@ class BuffaloLFaceEngine private constructor(
             connection.connectTimeout = 20_000
             connection.readTimeout = 120_000
             connection.instanceFollowRedirects = true
+            // The five uncompressed ONNX files occupy roughly 340 MB. Keep a safety margin
+            // so extraction does not fail halfway through on devices with tight storage.
+            val availableBytes = StatFs(modelDir.absolutePath).availableBytes
+            check(availableBytes >= MIN_FREE_SPACE_BYTES) {
+                "At least 500 MB of free storage is recommended to install the complete buffalo_l pack."
+            }
             val staging = File(modelDir, "installing").apply { deleteRecursively(); mkdirs() }
             try {
                 connection.connect()
