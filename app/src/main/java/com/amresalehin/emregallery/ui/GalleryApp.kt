@@ -2837,6 +2837,7 @@ private fun ViewerScreen(
             ) {
                 ViewerButton(Icons.Default.ArrowBack, "Back", onBack)
                 Spacer(Modifier.weight(1f))
+                ViewerButton(Icons.Default.Share, "Share", share)
                 ViewerButton(if (favourite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Favourite", onFavourite)
                 ViewerButton(Icons.Default.MoreVert, "More") { showMore = true }
             }
@@ -2849,7 +2850,6 @@ private fun ViewerScreen(
                     .padding(horizontal = 8.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                ViewerAction(Icons.Default.Share, "Share", share)
                 ViewerAction(Icons.Default.Tune, "Edit") {
                     runCatching {
                         context.startActivity(
