@@ -2474,13 +2474,17 @@ private fun AlbumsScreen(
                             }
                         },
                         update = { preview ->
-                            preview.setOnTouchListener { _, _ -> true }
+                            // Let taps reach the Compose card overlay.
+                            preview.setOnTouchListener { _, _ -> false }
                             preview.invalidate()
                         }
                     )
                     // Keep the title readable while preserving the appearance of a real map.
                     Box(
-                        Modifier.fillMaxSize().background(
+                        Modifier
+                            .fillMaxSize()
+                            .clickable { onFilter("Map") }
+                            .background(
                             Brush.verticalGradient(
                                 colors = listOf(
                                     Color.Black.copy(alpha = 0.08f),
