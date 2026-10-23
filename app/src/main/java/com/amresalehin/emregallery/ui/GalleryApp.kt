@@ -6154,7 +6154,7 @@ private fun PeopleScreen(
                 .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = if (selectedCluster == null) onBack else { { selectedCluster = null } }) {
+            IconButton(onClick = { if (selectedCluster == null) onBack() else selectedCluster = null }) {
                 Icon(Icons.Default.ArrowBack, contentDescription = if (selectedCluster == null) "Back to Albums" else "Back to people")
             }
             Column(Modifier.weight(1f)) {
