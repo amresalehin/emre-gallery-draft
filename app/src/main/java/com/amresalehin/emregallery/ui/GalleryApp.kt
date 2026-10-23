@@ -4063,7 +4063,6 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                 }
                 map.overlays.removeAll { it is PhotoHeatmapOverlay }
                 if (locatedMedia.isNotEmpty()) map.overlays.add(PhotoHeatmapOverlay(locatedMedia.map { it.second }))
-                visibleBounds = map.boundingBox
                 map.invalidate()
             }
         )
