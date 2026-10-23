@@ -17,11 +17,13 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -2454,6 +2456,7 @@ private fun JustifiedMosaicRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MosaicMediaItem(
     item: MediaItem,
@@ -5255,6 +5258,11 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
         )
     }
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        canReadOriginalLocation = granted || (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q)
+    }
     var locatedMedia by remember { mutableStateOf<List<Pair<MediaItem, GeoPoint>>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var scanProgress by remember { mutableIntStateOf(0) }
@@ -6510,8 +6518,6 @@ private fun PeopleScreen(
             }
         }
     }
-
-        }
     }
 
     if (renameCluster != null) {
