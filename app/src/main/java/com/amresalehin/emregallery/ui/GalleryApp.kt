@@ -322,15 +322,26 @@ fun GalleryApp() {
                     .fillMaxSize()
                     .pointerInput(destination, showSidePanel) {
                         val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
-                        if (destination in mainPages && !showSidePanel) {
-                            var horizontalDistance = 0f
-                            val swipeThreshold = 72.dp.toPx()
+                        var horizontalDistance = 0f
+                        var startedAtLeftEdge = false
+                        val swipeThreshold = 72.dp.toPx()
+                        val edgeWidth = 32.dp.toPx()
+                        if (!showSidePanel && destination in mainPages) {
                             detectHorizontalDragGestures(
+                                onDragStart = { offset ->
+                                    horizontalDistance = 0f
+                                    startedAtLeftEdge = offset.x <= edgeWidth
+                                },
                                 onHorizontalDrag = { _, dragAmount ->
                                     horizontalDistance += dragAmount
                                 },
                                 onDragEnd = {
-                                    if (kotlin.math.abs(horizontalDistance) >= swipeThreshold) {
+                                    if (destination == Destination.HOME &&
+                                        startedAtLeftEdge &&
+                                        horizontalDistance >= swipeThreshold
+                                    ) {
+                                        showSidePanel = true
+                                    } else if (kotlin.math.abs(horizontalDistance) >= swipeThreshold) {
                                         val currentIndex = mainPages.indexOf(destination)
                                         val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
                                         if (nextIndex in mainPages.indices) {
@@ -339,8 +350,12 @@ fun GalleryApp() {
                                         }
                                     }
                                     horizontalDistance = 0f
+                                    startedAtLeftEdge = false
                                 },
-                                onDragCancel = { horizontalDistance = 0f }
+                                onDragCancel = {
+                                    horizontalDistance = 0f
+                                    startedAtLeftEdge = false
+                                }
                             )
                         }
                     }
@@ -649,6 +664,18 @@ fun GalleryApp() {
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.38f))
                     .clickable { showSidePanel = false }
+                    .pointerInput(showSidePanel) {
+                        var horizontalDistance = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { horizontalDistance = 0f },
+                            onHorizontalDrag = { _, dragAmount -> horizontalDistance += dragAmount },
+                            onDragEnd = {
+                                if (horizontalDistance <= -72.dp.toPx()) showSidePanel = false
+                                horizontalDistance = 0f
+                            },
+                            onDragCancel = { horizontalDistance = 0f }
+                        )
+                    }
                     .testTag("side_panel_scrim")
             ) {
                 Surface(
