@@ -80,15 +80,16 @@ object TesseractOcr {
             }
         }
 
-        val bitmap = decodeBitmap(context, uri)
         val englishData = File(tessdataDir, "eng.traineddata")
         if (!englishData.exists() || englishData.length() < 1024) {
             copyBundledTrainedData(context, "eng", englishData)
         }
 
+        val bitmap = decodeBitmap(context, uri)
         val combinedLangs = validCodes.joinToString("+")
         val candidates = (listOf(combinedLangs) + validCodes + listOf("eng")).distinct()
         var activeEngine: TessBaseAPI? = null
+        var lastInitError: String? = null
         try {
             // Use a fresh native engine for every attempt. A failed init can leave
             // the native instance unsuitable for another init call.
@@ -101,25 +102,34 @@ object TesseractOcr {
                 }
                 val candidateEngine = TessBaseAPI()
                 val initialized = runCatching {
-                    candidateEngine.init(baseDir.absolutePath, candidate)
+                    // The bundled tessdata_fast models are LSTM-only. Explicitly
+                    // select the LSTM engine rather than the legacy/default mode.
+                    candidateEngine.init(
+                        baseDir.absolutePath,
+                        candidate,
+                        TessBaseAPI.OEM_LSTM_ONLY
+                    )
+                }.onFailure { error ->
+                    lastInitError = error.message ?: error.javaClass.simpleName
                 }.getOrDefault(false)
                 if (initialized) {
                     activeEngine = candidateEngine
                     break
                 }
-                candidateEngine.end()
+                candidateEngine.recycle()
             }
 
             val engine = activeEngine ?: error(
                 "Tesseract could not load OCR language data ($combinedLangs). " +
                     "The bundled traineddata may be missing, incomplete, or incompatible. " +
-                    "Reinstall the latest app build and try selecting one language at a time."
+                    (lastInitError?.let { "Last initialization error: $it. " } ?: "") +
+                    "Verify the language data and try again."
             )
             engine.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
             engine.setImage(bitmap)
             return engine.getUTF8Text().orEmpty().trim()
         } finally {
-            activeEngine?.end()
+            activeEngine?.recycle()
             bitmap.recycle()
         }
     }
