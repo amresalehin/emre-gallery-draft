@@ -15,6 +15,38 @@ import java.io.InputStream
  * Traineddata files are bundled into APK assets and extracted to internal storage on demand.
  */
 object TesseractOcr {
+    private fun cacheFile(context: Context, uri: Uri): File {
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(uri.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte) }
+        val directory = File(context.filesDir, "ocr-results")
+        if (!directory.exists() && !directory.mkdirs()) {
+            error("Could not create OCR result cache.")
+        }
+        return File(directory, "$"+"digest.txt")
+    }
+
+    /** Returns previously recognized text for this media URI, or null if not cached. */
+    fun readCachedResult(context: Context, uri: Uri): String? =
+        runCatching {
+            cacheFile(context, uri).takeIf { it.isFile }?.readText(Charsets.UTF_8)
+        }.getOrNull()
+
+    /** Atomically persists OCR output so it survives viewer navigation and app restarts. */
+    fun saveCachedResult(context: Context, uri: Uri, text: String) {
+        val target = cacheFile(context, uri)
+        val temporary = File(target.parentFile, "$"+"{target.name}.tmp")
+        try {
+            temporary.writeText(text, Charsets.UTF_8)
+            if (!temporary.renameTo(target)) {
+                temporary.copyTo(target, overwrite = true)
+                temporary.delete()
+            }
+        } finally {
+            temporary.delete()
+        }
+    }
+
     val supportedLanguages = linkedMapOf(
         "English" to "eng",
         "Hindi" to "hin",
