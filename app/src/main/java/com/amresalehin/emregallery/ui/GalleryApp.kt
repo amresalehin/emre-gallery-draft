@@ -5062,10 +5062,12 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
     }
 
     LaunchedEffect(media, canReadOriginalLocation) {
-        loading = true
+        // Keep the map responsive while loading the persistent cache. Opening the map must not
+        // look like a fresh scan when every photo already has a cached GPS/no-GPS result.
+        loading = false
         scanProgress = 0
+        scanTotal = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
-            loading = false
             locatedMedia = emptyList()
             return@LaunchedEffect
         }
@@ -5078,10 +5080,12 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
         val uncachedPhotos = photos.filterNot { cached.containsKey(it.uri) }
         scanTotal = uncachedPhotos.size
         if (uncachedPhotos.isEmpty()) {
+            // All current photos are already indexed. Do not show scan progress or reopen EXIF.
             loading = false
             return@LaunchedEffect
         }
 
+        loading = true
         val result = locatedMedia.toMutableList()
         var scanned = 0
         uncachedPhotos.forEach { item ->
