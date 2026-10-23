@@ -4426,7 +4426,13 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                 }
             }
         }
-        Text("© OpenStreetMap contributors", modifier = Modifier.align(Alignment.TopCenter).padding(top = 58.dp).background(MaterialTheme.colorScheme.surface.copy(alpha = .85f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Keep required map-data attribution unobtrusive without a floating credit badge.
+        Text(
+            "© OpenStreetMap contributors",
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 8.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.82f)
+        )
     }
 }
 
