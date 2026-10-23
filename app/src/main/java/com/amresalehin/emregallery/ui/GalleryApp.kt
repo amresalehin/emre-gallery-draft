@@ -4186,128 +4186,126 @@ private fun ViewerScreen(
                             }
                         }
 
-                        // Card 3: Real local Tesseract OCR with selectable trained languages.
+                        // Card 3: Compact OCR result card.
                         item {
                             DetailCard {
                                 Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Default.DocumentScanner,
-                                            contentDescription = "Text recognition",
-                                            modifier = Modifier.size(22.dp),
-                                            tint = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(Modifier.width(10.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text("Text found", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                            Text(
-                                                "On-device Tesseract OCR · images stay on this device",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                    Text("Recognition languages", style = MaterialTheme.typography.labelLarge)
                                     Row(
-                                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.fillMaxWidth(),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        TesseractOcr.supportedLanguages.forEach { (languageName, code) ->
-                                            FilterChip(
-                                                selected = code in ocrLanguages,
-                                                onClick = {
-                                                    if (code in ocrLanguages) {
-                                                        if (ocrLanguages.size > 1) ocrLanguages.remove(code)
-                                                    } else {
-                                                        ocrLanguages.add(code)
-                                                    }
-                                                },
-                                                label = { Text(languageName) },
-                                                enabled = !ocrBusy
-                                            )
-                                        }
-                                    }
-                                    Button(
-                                        onClick = {
-                                            if (!item.isVideo) {
-                                                ocrBusy = true
-                                                ocrError = null
-                                                ocrText = ""
-                                                ocrScope.launch {
-                                                    val result = withContext(Dispatchers.IO) {
-                                                        runCatching {
-                                                            val mediaUri = Uri.parse(item.uri)
-                                                            val recognized = TesseractOcr.recognize(
-                                                                context,
-                                                                mediaUri,
-                                                                ocrLanguages.toList()
-                                                            )
-                                                            runCatching {
-                                                                TesseractOcr.saveCachedResult(context, mediaUri, recognized)
-                                                            }
-                                                            recognized
-                                                        }
-                                                    }
-                                                    result.onSuccess { text ->
-                                                        ocrText = text.ifBlank { "No text detected in this image." }
-                                                    }.onFailure { error ->
-                                                        ocrError = error.message ?: "OCR failed. Please try again."
-                                                    }
-                                                    ocrBusy = false
-                                                }
-                                            }
-                                        },
-                                        enabled = !item.isVideo && !ocrBusy && ocrLanguages.isNotEmpty(),
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            contentColor = MaterialTheme.colorScheme.onSurface,
-                                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        Icon(
+                                            Icons.Default.DocumentScanner,
+                                            contentDescription = "Recognized text",
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
                                         )
-                                    ) {
-                                        if (ocrBusy) {
-                                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                            Spacer(Modifier.width(8.dp))
-                                            Text("Preparing language data and recognizing…")
-                                        } else {
-                                            Icon(Icons.Default.DocumentScanner, contentDescription = null)
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(if (ocrText.isBlank()) "Recognize text" else "Recognize again")
+                                        Spacer(Modifier.weight(1f))
+                                        IconButton(
+                                            onClick = {
+                                                if (!item.isVideo) {
+                                                    ocrBusy = true
+                                                    ocrError = null
+                                                    ocrText = ""
+                                                    ocrScope.launch {
+                                                        val result = withContext(Dispatchers.IO) {
+                                                            runCatching {
+                                                                val mediaUri = Uri.parse(item.uri)
+                                                                val recognized = TesseractOcr.recognize(
+                                                                    context,
+                                                                    mediaUri,
+                                                                    ocrLanguages.toList()
+                                                                )
+                                                                runCatching {
+                                                                    TesseractOcr.saveCachedResult(context, mediaUri, recognized)
+                                                                }
+                                                                recognized
+                                                            }
+                                                        }
+                                                        result.onSuccess { text ->
+                                                            ocrText = text.ifBlank { "No text detected in this image." }
+                                                        }.onFailure { error ->
+                                                            ocrError = error.message ?: "OCR failed. Please try again."
+                                                        }
+                                                        ocrBusy = false
+                                                    }
+                                                }
+                                            },
+                                            enabled = !item.isVideo && !ocrBusy && ocrLanguages.isNotEmpty()
+                                        ) {
+                                            if (ocrBusy) {
+                                                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                            } else {
+                                                Icon(
+                                                    Icons.Default.DocumentScanner,
+                                                    contentDescription = if (ocrText.isBlank()) "Recognize text" else "Recognize again"
+                                                )
+                                            }
                                         }
-                                    }
-                                    if (item.isVideo) {
-                                        Text("OCR is currently available for images, not video frames.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    ocrError?.let { error ->
-                                        Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                    if (ocrText.isNotBlank()) {
-                                        HorizontalDivider()
-                                        Text(ocrText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                                        if (ocrText != "No text detected in this image.") {
-                                            OutlinedButton(
+                                        if (ocrText.isNotBlank() && ocrText != "No text detected in this image.") {
+                                            IconButton(
                                                 onClick = {
                                                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                                                     clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Recognized text", ocrText))
-                                                },
-                                                modifier = Modifier.align(Alignment.End),
-                                                colors = ButtonDefaults.outlinedButtonColors(
-                                                    contentColor = MaterialTheme.colorScheme.onSurface
-                                                ),
-                                                border = BorderStroke(
-                                                    1.dp,
-                                                    MaterialTheme.colorScheme.outlineVariant
-                                                )
+                                                }
                                             ) {
-                                                Icon(Icons.Default.ContentCopy, contentDescription = null)
-                                                Spacer(Modifier.width(6.dp))
-                                                Text("Copy text")
+                                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy recognized text")
                                             }
+                                        }
+                                    }
+
+                                    if (!item.isVideo) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            TesseractOcr.supportedLanguages.forEach { (languageName, code) ->
+                                                FilterChip(
+                                                    selected = code in ocrLanguages,
+                                                    onClick = {
+                                                        if (code in ocrLanguages) {
+                                                            if (ocrLanguages.size > 1) ocrLanguages.remove(code)
+                                                        } else {
+                                                            ocrLanguages.add(code)
+                                                        }
+                                                    },
+                                                    label = { Text(languageName) },
+                                                    enabled = !ocrBusy
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (ocrError != null) {
+                                        Text(
+                                            ocrError!!,
+                                            color = MaterialTheme.colorScheme.error,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    if (item.isVideo) {
+                                        Text(
+                                            "Text recognition is unavailable for videos.",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    } else if (ocrText.isNotBlank()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 220.dp)
+                                                .verticalScroll(rememberScrollState())
+                                                .padding(vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                ocrText,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
                                         }
                                     }
                                 }
