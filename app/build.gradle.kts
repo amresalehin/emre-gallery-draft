@@ -130,6 +130,9 @@ dependencies {
     implementation("io.coil-kt:coil-video:2.7.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+    // Bundled on-device face detector and ONNX Runtime for the Buffalo_L recognition model.
+    implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     // Native Tesseract engine and its JNI libraries are packaged in the APK.
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
