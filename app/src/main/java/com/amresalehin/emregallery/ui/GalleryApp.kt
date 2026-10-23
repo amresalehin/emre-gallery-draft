@@ -19,6 +19,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.text.BasicTextField
@@ -1605,6 +1606,8 @@ private fun HomeScreen(
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
+    var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val selectionMode = selectedUris.isNotEmpty()
     var granted by remember { mutableStateOf(hasMediaPermission(context)) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val hasPermission = hasMediaPermission(context)
@@ -1659,6 +1662,37 @@ private fun HomeScreen(
         ),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        if (selectionMode) {
+            item(key = "home_selection_toolbar") {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { selectedUris = emptySet() }) {
+                            Icon(Icons.Default.Close, contentDescription = "Exit selection")
+                        }
+                        Text(
+                            text = "${selectedUris.size} selected",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        TextButton(onClick = {
+                            selectedUris = if (selectedUris.size == sortedMedia.size) emptySet() else sortedMedia.map { it.uri }.toSet()
+                        }) {
+                            Text(if (selectedUris.size == sortedMedia.size) "Deselect all" else "Select all")
+                        }
+                    }
+                }
+            }
+        }
+
         if (albumTitle != null) {
             val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
             val collectionIcon = when (albumTitle) {
@@ -1792,7 +1826,10 @@ private fun HomeScreen(
                         items = rowChunks[rowIndex],
                         rowIndex = rowIndex,
                         isSquare = (gridStyle == "square"),
-                        onOpen = onOpen
+                        selectedUris = selectedUris,
+                        onLongPress = { item -> selectedUris = selectedUris + item.uri },
+                        onToggleSelection = { item -> selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri },
+                        onOpen = { item -> if (selectionMode) { selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri } else onOpen(item) }
                     )
                 }
             }
@@ -2321,6 +2358,9 @@ private fun JustifiedMosaicRow(
     items: List<MediaItem>,
     rowIndex: Int,
     isSquare: Boolean,
+    selectedUris: Set<String> = emptySet(),
+    onLongPress: (MediaItem) -> Unit = {},
+    onToggleSelection: (MediaItem) -> Unit = {},
     onOpen: (MediaItem) -> Unit
 ) {
     if (items.isEmpty()) return
@@ -2357,6 +2397,9 @@ private fun JustifiedMosaicRow(
                     modifier = Modifier
                         .weight(aspects[index])
                         .height(rowHeight),
+                    selected = item.uri in selectedUris,
+                    onLongPress = { onLongPress(item) },
+                    onToggleSelection = { onToggleSelection(item) },
                     onOpen = onOpen
                 )
             }
@@ -2368,6 +2411,9 @@ private fun JustifiedMosaicRow(
 private fun MosaicMediaItem(
     item: MediaItem,
     modifier: Modifier,
+    selected: Boolean = false,
+    onLongPress: () -> Unit = {},
+    onToggleSelection: () -> Unit = {},
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -2393,7 +2439,10 @@ private fun MosaicMediaItem(
                     shape = RoundedCornerShape(8.dp)
                 )
             )
-            .clickable { onOpen(item) }
+            .combinedClickable(
+                onClick = { if (selected) onToggleSelection() else onOpen(item) },
+                onLongClick = { onLongPress() }
+            )
     ) {
         AsyncImage(
             model = imageRequest,
@@ -2401,6 +2450,20 @@ private fun MosaicMediaItem(
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
+        if (selected) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
+            )
+            Surface(
+                modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.9f))
+            ) {
+                Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.padding(4.dp))
+            }
+        }
         if (item.isVideo) {
             Box(
                 modifier = Modifier
