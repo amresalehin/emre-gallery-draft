@@ -2300,40 +2300,6 @@ private fun AlbumsScreen(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = if (topAlbumCover != null) Color.Black.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clickable { onCreateAlbumClick("") }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Default.Add,
-                                                contentDescription = "New album",
-                                                tint = if (topAlbumCover != null) Color.White else MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                    }
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = if (topAlbumCover != null) Color.Black.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clickable { onFilter("Albums") }
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Default.ArrowForward,
-                                                contentDescription = "View albums",
-                                                tint = if (topAlbumCover != null) Color.White else MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                        }
-                                    }
                                 }
                             }
 
@@ -2347,7 +2313,7 @@ private fun AlbumsScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = if (customAlbums.isEmpty()) "Tap + to create" else "${customAlbums.size} ${if (customAlbums.size == 1) "album" else "albums"}",
+                                    text = if (customAlbums.isEmpty()) "Tap to create" else "${customAlbums.size} ${if (customAlbums.size == 1) "album" else "albums"}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (topAlbumCover != null) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -2441,23 +2407,6 @@ private fun AlbumsScreen(
                                     }
                                 }
 
-                                Surface(
-                                    shape = CircleShape,
-                                    color = if (topFolderCover != null) Color.Black.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clickable { onFilter("Folders") }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.ArrowForward,
-                                            contentDescription = "View folders",
-                                            tint = if (topFolderCover != null) Color.White else MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                    }
-                                }
                             }
 
                             Column {
