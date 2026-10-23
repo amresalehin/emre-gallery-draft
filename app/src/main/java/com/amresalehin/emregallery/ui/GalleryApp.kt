@@ -2859,7 +2859,6 @@ private fun ViewerScreen(
                         )
                     }
                 }
-                ViewerAction(Icons.Default.Add, "Add to", onAddTo)
                 ViewerAction(
                     if (isBin) Icons.Default.Restore else Icons.Default.Delete,
                     if (isBin) "Restore" else "Delete",
