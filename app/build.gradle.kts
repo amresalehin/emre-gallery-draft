@@ -133,7 +133,7 @@ dependencies {
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     // Native Tesseract engine and its JNI libraries are packaged in the APK.
-    implementation("com.rmtheis:tess-two:9.1.0")
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
