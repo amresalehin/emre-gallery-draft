@@ -5109,9 +5109,6 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                 ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
         )
     }
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted -> canReadOriginalLocation = granted }
     var locatedMedia by remember { mutableStateOf<List<Pair<MediaItem, GeoPoint>>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var scanProgress by remember { mutableIntStateOf(0) }
@@ -5142,22 +5139,12 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
         )
     }
 
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
-            locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
-        }
-    }
-
     LaunchedEffect(media, canReadOriginalLocation) {
         // Keep the map responsive while loading the persistent cache. Opening the map must not
         // look like a fresh scan when every photo already has a cached GPS/no-GPS result.
         loading = false
         scanProgress = 0
         scanTotal = 0
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
-            locatedMedia = emptyList()
-            return@LaunchedEffect
-        }
         val photos = media.filterNot { it.isVideo }
         val cached = withContext(Dispatchers.IO) { locationCache.loadAll() }
         // Cached coordinates and cached "no GPS" results both survive app restarts.
@@ -5179,9 +5166,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
             val point = withContext(Dispatchers.IO) {
                 runCatching {
                     context.contentResolver.openInputStream(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && canReadOriginalLocation) {
-                            android.provider.MediaStore.setRequireOriginal(Uri.parse(item.uri))
-                        } else Uri.parse(item.uri)
+                        Uri.parse(item.uri)
                     )?.use { stream ->
                         ExifInterface(stream).latLong?.let { c ->
                             if (c[0].isFinite() && c[1].isFinite() && c[0] in -90.0..90.0 && c[1] in -180.0..180.0) GeoPoint(c[0], c[1]) else null
