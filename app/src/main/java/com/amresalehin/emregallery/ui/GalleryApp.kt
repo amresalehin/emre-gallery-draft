@@ -1643,6 +1643,10 @@ private fun HomeScreen(
         }
     }
 
+    val groupedRows = remember(groups, gridColumns) {
+        groups.map { group -> group to group.items.chunked(gridColumns.coerceIn(1, 6)) }
+    }
+
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
@@ -1755,7 +1759,7 @@ private fun HomeScreen(
                 }
             }
 
-            groups.forEach { group ->
+            groupedRows.forEach { (group, rowChunks) ->
                 if (group.dayLabel.isNotBlank()) {
                     item(key = "header_${group.dayKey}", contentType = "header") {
                         Row(
@@ -1780,7 +1784,6 @@ private fun HomeScreen(
                     }
                 }
 
-                val rowChunks = remember(group.items, gridColumns) { group.items.chunked(gridColumns.coerceIn(1, 6)) }
                 items(
                     count = rowChunks.size,
                     key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
