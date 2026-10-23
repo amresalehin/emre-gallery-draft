@@ -587,13 +587,13 @@ fun GalleryApp() {
                 }
             }
 
-        // Subtle top and bottom edge blur effect (2-3% of screen height each)
+        // Wider top and bottom edge blur across app screens
         if (destination != Destination.VIEWER) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .fillMaxHeight(0.025f)
+                    .fillMaxHeight(0.045f)
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
@@ -610,7 +610,7 @@ fun GalleryApp() {
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .fillMaxHeight(0.025f)
+                    .fillMaxHeight(0.045f)
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
