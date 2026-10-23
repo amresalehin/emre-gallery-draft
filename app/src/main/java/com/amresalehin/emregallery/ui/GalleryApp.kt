@@ -2783,7 +2783,16 @@ private fun ViewerScreen(
         AnimatedContent(
             targetState = item,
             transitionSpec = {
-                val direction = if (targetState.dateTakenMillis >= initialState.dateTakenMillis) 1 else -1
+                // The viewer's navigation order is the order of `items`, not timestamp order.
+                // Timestamps can be equal or out of order, which made the transition suddenly
+                // animate in the opposite direction even when the swipe selected the next item.
+                val initialIndex = items.indexOfFirst { it.uri == initialState.uri }
+                val targetIndex = items.indexOfFirst { it.uri == targetState.uri }
+                val direction = when {
+                    initialIndex >= 0 && targetIndex > initialIndex -> 1
+                    initialIndex >= 0 && targetIndex in 0 until initialIndex -> -1
+                    else -> 1
+                }
                 slideInHorizontally(animationSpec = tween(240), initialOffsetX = { width -> direction * width }) togetherWith
                     slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { width -> -direction * width })
             },
