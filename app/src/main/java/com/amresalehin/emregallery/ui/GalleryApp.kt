@@ -861,6 +861,7 @@ private fun HomeScreen(
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     val scrollbarScope = rememberCoroutineScope()
     var scrollbarDragging by remember { mutableStateOf(false) }
+    var scrollbarDragRemainder by remember { mutableFloatStateOf(0f) }
     val scrollbarThumbColor = MaterialTheme.colorScheme.onSurfaceVariant
     Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
@@ -1029,19 +1030,23 @@ private fun HomeScreen(
                 .width(24.dp)
                 .pointerInput(scrollItems, viewportPx) {
                     detectDragGestures(
-                        onDragStart = { scrollbarDragging = true },
-                        onDragEnd = { scrollbarDragging = false },
-                        onDragCancel = { scrollbarDragging = false },
+                        onDragStart = { scrollbarDragging = true; scrollbarDragRemainder = 0f },
+                        onDragEnd = { scrollbarDragging = false; scrollbarDragRemainder = 0f },
+                        onDragCancel = { scrollbarDragging = false; scrollbarDragRemainder = 0f },
                         onDrag = { change, dragAmount ->
                             change.consume()
                             val currentLayout = homeListState.layoutInfo
                             val count = currentLayout.totalItemsCount
                             val height = currentLayout.viewportSize.height.toFloat()
                             if (count > 0 && height > 0f) {
-                                val itemDelta = (dragAmount.y / height * count).roundToInt()
-                                val target = (homeListState.firstVisibleItemIndex + itemDelta)
-                                    .coerceIn(0, (count - 1).coerceAtLeast(0))
-                                scrollbarScope.launch { homeListState.scrollToItem(target) }
+                                scrollbarDragRemainder += dragAmount.y / height * count
+                                val itemDelta = scrollbarDragRemainder.toInt()
+                                if (itemDelta != 0) {
+                                    scrollbarDragRemainder -= itemDelta
+                                    val target = (homeListState.firstVisibleItemIndex + itemDelta)
+                                        .coerceIn(0, (count - 1).coerceAtLeast(0))
+                                    scrollbarScope.launch { homeListState.scrollToItem(target) }
+                                }
                             }
                         }
                     )
