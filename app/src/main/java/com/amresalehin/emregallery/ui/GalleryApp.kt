@@ -1530,8 +1530,23 @@ private fun HomeViewOptionsBottomSheet(
     var tempSortDirection by remember(sortOrder) { mutableStateOf(initialDirection) }
     var tempGroupBy by remember(groupBy) { mutableStateOf(groupBy.ifBlank { "none" }) }
 
+    val applySelections = {
+        onGridStyleChange(tempGridStyle)
+        onGridColumnsChange(tempGridColumns)
+        val mappedSortOrder = when (tempSortField) {
+            "date_taken" -> if (tempSortDirection == "asc") "date_taken_asc" else "date_taken_desc"
+            "date_added" -> if (tempSortDirection == "asc") "date_added_asc" else "date_added_desc"
+            "name" -> if (tempSortDirection == "asc") "name_asc" else "name_desc"
+            "size" -> if (tempSortDirection == "asc") "size_asc" else "size_desc"
+            else -> "date_taken_desc"
+        }
+        onSortOrderChange(mappedSortOrder)
+        onGroupByChange(tempGroupBy)
+        onDismiss()
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = applySelections,
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
         dragHandle = { BottomSheetDefaults.DragHandle() }
@@ -1558,7 +1573,7 @@ private fun HomeViewOptionsBottomSheet(
                 // Grid Button
                 val isGridSelected = tempGridStyle == "square"
                 Surface(
-                    onClick = { tempGridStyle = "square"; onGridStyleChange("square") },
+                    onClick = { tempGridStyle = "square" },
                     shape = RoundedCornerShape(16.dp),
                     color = if (isGridSelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
                     contentColor = if (isGridSelected) Color.White else MaterialTheme.colorScheme.onSurface,
@@ -1589,7 +1604,7 @@ private fun HomeViewOptionsBottomSheet(
                 // Masonry Button
                 val isMasonrySelected = tempGridStyle == "masonry"
                 Surface(
-                    onClick = { tempGridStyle = "masonry"; onGridStyleChange("masonry") },
+                    onClick = { tempGridStyle = "masonry" },
                     shape = RoundedCornerShape(16.dp),
                     color = if (isMasonrySelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
                     contentColor = if (isMasonrySelected) Color.White else MaterialTheme.colorScheme.onSurface,
@@ -1638,7 +1653,7 @@ private fun HomeViewOptionsBottomSheet(
                 )
                 Slider(
                     value = tempGridColumns.toFloat(),
-                    onValueChange = { tempGridColumns = it.roundToInt(); onGridColumnsChange(it.roundToInt()) },
+                    onValueChange = { tempGridColumns = it.roundToInt() },
                     valueRange = 1f..6f,
                     steps = 4,
                     modifier = Modifier
@@ -1693,13 +1708,9 @@ private fun HomeViewOptionsBottomSheet(
                         onClick = {
                             if (!isSelected) {
                                 tempSortField = field
-                                val mapped = when (field) { "date_taken" -> if (tempSortDirection == "asc") "date_taken_asc" else "date_taken_desc"; "date_added" -> if (tempSortDirection == "asc") "date_added_asc" else "date_added_desc"; "name" -> if (tempSortDirection == "asc") "name_asc" else "name_desc"; "size" -> if (tempSortDirection == "asc") "size_asc" else "size_desc"; else -> "date_taken_desc" }
-                                onSortOrderChange(mapped)
                             } else {
                                 tempSortDirection = if (tempSortDirection == "asc") "desc" else "asc"
                             }
-                            val mapped = when (tempSortField) { "date_taken" -> if (tempSortDirection == "asc") "date_taken_asc" else "date_taken_desc"; "date_added" -> if (tempSortDirection == "asc") "date_added_asc" else "date_added_desc"; "name" -> if (tempSortDirection == "asc") "name_asc" else "name_desc"; "size" -> if (tempSortDirection == "asc") "size_asc" else "size_desc"; else -> "date_taken_desc" }
-                            onSortOrderChange(mapped)
                         },
                         shape = RoundedCornerShape(14.dp),
                         color = if (isSelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1743,7 +1754,6 @@ private fun HomeViewOptionsBottomSheet(
                                             .clickable {
                                                 tempSortField = field
                                                 tempSortDirection = "asc"
-                                                onSortOrderChange(when (field) { "date_taken" -> "date_taken_asc"; "date_added" -> "date_added_asc"; "name" -> "name_asc"; "size" -> "size_asc"; else -> "date_taken_asc" })
                                             },
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -1761,7 +1771,6 @@ private fun HomeViewOptionsBottomSheet(
                                             .clickable {
                                                 tempSortField = field
                                                 tempSortDirection = "desc"
-                                                onSortOrderChange(when (field) { "date_taken" -> "date_taken_desc"; "date_added" -> "date_added_desc"; "name" -> "name_desc"; "size" -> "size_desc"; else -> "date_taken_desc" })
                                             },
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -1813,7 +1822,7 @@ private fun HomeViewOptionsBottomSheet(
                 groupOptions.forEach { (key, label, icon) ->
                     val isSelected = tempGroupBy == key
                     Surface(
-                        onClick = { tempGroupBy = key; onGroupByChange(key) },
+                        onClick = { tempGroupBy = key },
                         shape = RoundedCornerShape(14.dp),
                         color = if (isSelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = if (isSelected) {
@@ -1870,10 +1879,6 @@ private fun HomeViewOptionsBottomSheet(
                         tempSortField = "date_taken"
                         tempSortDirection = "desc"
                         tempGroupBy = "none"
-                        onGridStyleChange("square")
-                        onGridColumnsChange(3)
-                        onSortOrderChange("date_taken_desc")
-                        onGroupByChange("none")
                     },
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.surface,
