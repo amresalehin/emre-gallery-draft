@@ -105,6 +105,7 @@ fun GalleryApp() {
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
+    var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
     var showViewerControls by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
     var searchStage by remember { mutableStateOf(SearchStage.DISCOVERY) }
@@ -276,7 +277,8 @@ fun GalleryApp() {
                     )
                     Destination.MAP -> PhotoMapScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
-                        onBack = { destination = Destination.ALBUMS },
+                        focusItem = mapFocusItem,
+                        onBack = { destination = Destination.ALBUMS; mapFocusItem = null },
                         onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.MAP; destination = Destination.VIEWER }
                     )
                     Destination.DEVICE_FOLDERS -> DeviceFoldersScreen(
@@ -387,7 +389,8 @@ fun GalleryApp() {
                                 destination = previousDestination
                             },
                             onAddTo = { mediaForAddToAlbum = item; showAddToAlbumSheet = true },
-                            onOpenNeighbor = { selectedMedia = it; showDetails = false }
+                            onOpenNeighbor = { selectedMedia = it; showDetails = false },
+                            onOpenMap = { mapFocusItem = item; showDetails = false; destination = Destination.MAP }
                         )
                     }
                 }
@@ -2635,7 +2638,8 @@ private fun ViewerScreen(
     onToggleBin: () -> Unit,
     onToggleArchive: () -> Unit,
     onAddTo: () -> Unit,
-    onOpenNeighbor: (MediaItem) -> Unit
+    onOpenNeighbor: (MediaItem) -> Unit,
+    onOpenMap: () -> Unit
 ) {
     val context = LocalContext.current
     var metadata by remember(item.uri) { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -3042,7 +3046,7 @@ private fun ViewerScreen(
                         item {
                             val locationText = metadata["location"]?.takeIf { it.isNotBlank() }
                                 ?: "Location not available"
-                            DetailCard {
+                            DetailCard(modifier = Modifier.clickable(onClick = onOpenMap)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
@@ -3939,7 +3943,7 @@ private class PhotoHeatmapOverlay(
 }
 
 @Composable
-private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
+private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
     val context = LocalContext.current
     val locationCache = remember(context.applicationContext) { PhotoMapLocationCache(context.applicationContext) }
     var canReadOriginalLocation by remember {
@@ -4036,6 +4040,16 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
         locatedMedia = result.toList()
         scanProgress = uncachedPhotos.size
         loading = false
+    }
+
+    LaunchedEffect(locatedMedia, focusItem) {
+        val target = focusItem ?: return@LaunchedEffect
+        val point = locatedMedia.firstOrNull { it.first.uri == target.uri }?.second ?: return@LaunchedEffect
+        mapRef?.let { map ->
+            map.controller.animateTo(point)
+            map.controller.setZoom(15.0)
+            map.invalidate()
+        }
     }
 
     // Filter the drawer to the current map viewport.
