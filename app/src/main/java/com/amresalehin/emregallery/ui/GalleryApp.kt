@@ -4088,11 +4088,10 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
     fun updateVisibleMapBounds(map: MapView, expanded: Boolean = sheetExpanded) {
         if (map.width <= 0 || map.height <= 0) return
         val density = context.resources.displayMetrics.density
-        // Exclude the blurred top controls and the portion covered by the drawer.
-        // Use the middle of the remaining upper map area rather than the full MapView bounds.
-        val topPx = (142f * density).toInt().coerceIn(0, map.height - 1)
-        val drawerTopPx = (map.height * (if (expanded) 0.22f else 0.57f)).toInt()
-        val bottomPx = drawerTopPx.coerceIn(topPx + 1, map.height)
+        // The map is now a bordered card below the top controls, occupying the upper half.
+        // Use nearly the full card viewport to keep the photo list in sync with visible markers.
+        val topPx = (8f * density).toInt().coerceIn(0, map.height - 1)
+        val bottomPx = (map.height - 8f * density).toInt().coerceIn(topPx + 1, map.height)
         val northWest = map.projection.fromPixels(0, topPx)
         val southEast = map.projection.fromPixels(map.width, bottomPx)
         visibleBounds = org.osmdroid.util.BoundingBox(
@@ -4197,7 +4196,13 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
 
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.56f)
+                .align(Alignment.TopCenter)
+                .padding(top = 92.dp, start = 12.dp, end = 12.dp)
+                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(18.dp))
+                .clip(RoundedCornerShape(18.dp)),
             factory = { ctx ->
                 Configuration.getInstance().userAgentValue = ctx.packageName
                 MapView(ctx).apply {
