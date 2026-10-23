@@ -282,6 +282,21 @@ fun GalleryApp() {
                         onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
                         onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
                     )
+                    Destination.FAVOURITES -> HomeScreen(
+                        media = media.filter { it.uri in favourites && it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
+                        loading = loading,
+                        onPermissionGranted = { refreshMedia() },
+                        albumTitle = "Favourites",
+                        sortOrder = sortOrderPref,
+                        groupBy = groupByPref,
+                        gridColumns = gridColumnsPref,
+                        gridStyle = gridStylePref,
+                        topContentPadding = topContentPadding,
+                        bottomContentPadding = bottomContentPadding,
+                        onClearAlbumFilter = { destination = Destination.ALBUMS },
+                        onAddPhotosToAlbum = null,
+                        onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.FAVOURITES; destination = Destination.VIEWER }
+                    )
                     Destination.MAP -> PhotoMapScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         focusItem = mapFocusItem,
