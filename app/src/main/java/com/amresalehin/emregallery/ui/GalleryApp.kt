@@ -2929,7 +2929,6 @@ private fun ViewerScreen(
                                     onDragEnd = {
                                         when {
                                             totalDragY < -48f && !detailsExpanded -> detailsExpanded = true
-                                            totalDragY > 48f && detailsExpanded -> detailsExpanded = false
                                             totalDragY > 48f -> onToggleDetails()
                                         }
                                     },
