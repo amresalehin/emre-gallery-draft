@@ -1584,8 +1584,8 @@ private fun HomeViewOptionsBottomSheet(
                 Surface(
                     onClick = { tempGridStyle = "square" },
                     shape = RoundedCornerShape(16.dp),
-                    color = if (isGridSelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = if (isGridSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                    color = if (isGridSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (isGridSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .weight(1f)
                         .height(58.dp)
@@ -1615,8 +1615,8 @@ private fun HomeViewOptionsBottomSheet(
                 Surface(
                     onClick = { tempGridStyle = "masonry" },
                     shape = RoundedCornerShape(16.dp),
-                    color = if (isMasonrySelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = if (isMasonrySelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                    color = if (isMasonrySelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = if (isMasonrySelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
                         .weight(1f)
                         .height(58.dp)
