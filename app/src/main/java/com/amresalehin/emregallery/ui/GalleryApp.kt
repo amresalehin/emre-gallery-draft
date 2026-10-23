@@ -5661,82 +5661,8 @@ private fun OcrSettingsScreen(
     onLanguagesChange: (Set<String>) -> Unit,
     onBack: () -> Unit
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var selectedLanguages by remember(currentLanguages) {
         mutableStateOf(if (currentLanguages.isNotEmpty()) currentLanguages else setOf("eng"))
-    }
-    var installedLanguages by remember {
-        mutableStateOf(TesseractOcr.installedLanguages(context))
-    }
-    var cachedResults by remember {
-        mutableIntStateOf(TesseractOcr.cachedResultCount(context))
-    }
-    var preparingModels by remember { mutableStateOf(false) }
-    var scanningPhotos by remember { mutableStateOf(false) }
-    var scanProgress by remember { mutableIntStateOf(0) }
-    var scanTotal by remember { mutableIntStateOf(0) }
-    var scanFailures by remember { mutableIntStateOf(0) }
-    var showClearCacheDialog by remember { mutableStateOf(false) }
-    var statusMessage by remember { mutableStateOf<String?>(null) }
-    var statusError by remember { mutableStateOf(false) }
-
-    fun reloadOcrStatus() {
-        installedLanguages = TesseractOcr.installedLanguages(context)
-        cachedResults = TesseractOcr.cachedResultCount(context)
-    }
-
-    fun startOcrScan() {
-        scanningPhotos = true
-        scanProgress = 0
-        scanTotal = 0
-        scanFailures = 0
-        statusMessage = null
-        statusError = false
-        val photos = media.filterNot { it.isVideo }
-        scope.launch {
-            try {
-                val pending = withContext(Dispatchers.IO) {
-                    photos.filter { item ->
-                        TesseractOcr.readCachedResult(context.applicationContext, Uri.parse(item.uri)) == null
-                    }
-                }
-                scanTotal = pending.size
-                if (pending.isEmpty()) {
-                    statusMessage = "All available photos already have saved OCR results."
-                } else {
-                    pending.forEach { item ->
-                        val succeeded = withContext(Dispatchers.IO) {
-                            runCatching {
-                                val recognized = TesseractOcr.recognize(
-                                    context.applicationContext,
-                                    Uri.parse(item.uri),
-                                    selectedLanguages.toList()
-                                )
-                                TesseractOcr.saveCachedResult(context.applicationContext, Uri.parse(item.uri), recognized)
-                            }.isSuccess
-                        }
-                        scanProgress++
-                        if (!succeeded) scanFailures++
-                        cachedResults = withContext(Dispatchers.IO) {
-                            TesseractOcr.cachedResultCount(context.applicationContext)
-                        }
-                    }
-                    statusError = scanFailures > 0
-                    statusMessage = if (scanFailures == 0) {
-                        "OCR scan completed. Text results are saved on this device."
-                    } else {
-                        "OCR scan completed with $scanFailures failed photo(s). Open a photo to retry OCR."
-                    }
-                }
-                reloadOcrStatus()
-            } catch (e: Exception) {
-                statusError = true
-                statusMessage = e.message ?: "OCR scan failed."
-            } finally {
-                scanningPhotos = false
-            }
-        }
     }
 
     Column(
@@ -5751,219 +5677,102 @@ private fun OcrSettingsScreen(
                 .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
-            Spacer(Modifier.width(4.dp))
-            Column(Modifier.weight(1f)) {
-                Text("OCR configuration", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                Text("On-device Tesseract · 12 trained language models", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
             }
-            IconButton(onClick = { reloadOcrStatus(); statusMessage = null }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh OCR status")
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "OCR configuration",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(
+                onClick = {
+                    val defaults = setOf("eng")
+                    selectedLanguages = defaults
+                    onLanguagesChange(defaults)
+                }
+            ) {
+                Text("Reset")
             }
         }
 
-        Column(
-            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+        Text(
+            "Recognition languages",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            "Choose the languages used to recognize text in photos.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+        )
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.Verified, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("100% Private & Local", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "OCR runs on this device using Tesseract. Language data and recognized text stay in app-private storage.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-            ) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(24.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text("OCR indexing status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.weight(1f))
-                        IconButton(onClick = { reloadOcrStatus() }, enabled = !preparingModels) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Refresh OCR indexing status")
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OcrStatusMetric("Models ready", "${installedLanguages.size} / ${TesseractOcr.supportedLanguages.size}", Modifier.weight(1f))
-                        OcrStatusMetric("Saved text results", cachedResults.toString(), Modifier.weight(1f))
-                    }
-                    Text(
-                        "${selectedLanguages.count { it in installedLanguages }} of ${selectedLanguages.size} selected languages are ready.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (preparingModels || scanningPhotos) {
-                        LinearProgressIndicator(
-                            progress = { if (scanningPhotos && scanTotal > 0) scanProgress.toFloat() / scanTotal else 0f },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text(
-                            if (scanningPhotos) "Scanned $scanProgress of $scanTotal pending photos · $scanFailures failed"
-                            else "Preparing selected language data…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    statusMessage?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall, color = if (statusError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-                    }
-                    Button(
-                        onClick = {
-                            preparingModels = true
-                            statusMessage = null
-                            statusError = false
-                            val languagesToPrepare = (selectedLanguages + "eng").toList()
-                            scope.launch {
-                                try {
-                                    withContext(Dispatchers.IO) {
-                                        TesseractOcr.prepareLanguages(context.applicationContext, languagesToPrepare)
-                                    }
-                                    reloadOcrStatus()
-                                    statusMessage = "Selected language data is ready for OCR."
-                                } catch (e: Exception) {
-                                    statusError = true
-                                    statusMessage = e.message ?: "Could not prepare OCR language data."
-                                } finally {
-                                    preparingModels = false
-                                }
-                            }
-                        },
-                        enabled = !preparingModels && !scanningPhotos,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Download, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (preparingModels) "Preparing…" else "Prepare selected languages")
-                    }
-                    Button(
-                        onClick = { startOcrScan() },
-                        enabled = !preparingModels && !scanningPhotos && media.any { !it.isVideo },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.DocumentScanner, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (scanningPhotos) "Scanning photos…" else "Scan photos for text")
-                    }
-                    Text(
-                        "${media.count { !it.isVideo }} photos available · saved OCR results are skipped",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedButton(
-                        onClick = { showClearCacheDialog = true },
-                        enabled = cachedResults > 0 && !preparingModels && !scanningPhotos,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.DeleteOutline, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Clear saved OCR text")
-                    }
-                }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Recognition languages", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Select one or more languages to recognize.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                TextButton(
+            gridItems(TesseractOcr.supportedLanguages.entries.toList(), key = { it.value }) { entry ->
+                val isSelected = entry.value in selectedLanguages
+                OutlinedCard(
                     onClick = {
-                        val defaultSet = setOf("eng")
-                        selectedLanguages = defaultSet
-                        onLanguagesChange(defaultSet)
+                        val updated = if (isSelected) {
+                            if (selectedLanguages.size > 1) selectedLanguages - entry.value else selectedLanguages
+                        } else {
+                            selectedLanguages + entry.value
+                        }
+                        selectedLanguages = updated
+                        onLanguagesChange(updated)
                     },
-                    enabled = !preparingModels && !scanningPhotos
-                ) { Text("Reset") }
-            }
-
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                modifier = Modifier.fillMaxWidth().heightIn(max = 440.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                userScrollEnabled = false
-            ) {
-                gridItems(TesseractOcr.supportedLanguages.entries.toList(), key = { it.value }) { entry ->
-                    val isSelected = entry.value in selectedLanguages
-                    OutlinedCard(
-                        onClick = {
-                            val updated = if (isSelected) {
-                                if (selectedLanguages.size > 1) selectedLanguages - entry.value else selectedLanguages
-                            } else {
-                                selectedLanguages + entry.value
-                            }
-                            selectedLanguages = updated
-                            onLanguagesChange(updated)
-                            statusMessage = null
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.outlinedCardColors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surface
-                        ),
-                        border = BorderStroke(
-                            width = if (isSelected) 1.5.dp else 1.dp,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                        )
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.outlinedCardColors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surface
+                    ),
+                    border = BorderStroke(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        Text(
+                            entry.key,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            minLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.size(24.dp)
                         ) {
-                            Text(
-                                entry.key,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                textAlign = TextAlign.Center,
-                                maxLines = 2,
-                                minLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    if (isSelected) {
-                                        Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
-                                    } else {
-                                        Text(entry.value.take(2).uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
+                            Box(contentAlignment = Alignment.Center) {
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                } else {
+                                    Text(
+                                        entry.value.take(2).uppercase(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
-                            Text(
-                                if (entry.value in installedLanguages) "Ready" else "Not prepared",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (entry.value in installedLanguages) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1
-                            )
                         }
                     }
                 }
@@ -5981,7 +5790,7 @@ private fun OcrSettingsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "${selectedLanguages.size} of ${TesseractOcr.supportedLanguages.size} active",
+                    "${selectedLanguages.size} active",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium
                 )
@@ -5997,28 +5806,6 @@ private fun OcrSettingsScreen(
                 )
             }
         }
-    }
-
-    if (showClearCacheDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearCacheDialog = false },
-            title = { Text("Clear saved OCR text?") },
-            text = { Text("This deletes ${cachedResults} cached OCR text result(s). It does not delete photos or language models. OCR can be run again on any image.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showClearCacheDialog = false
-                    scope.launch {
-                        val deleted = withContext(Dispatchers.IO) {
-                            TesseractOcr.clearCachedResults(context.applicationContext)
-                        }
-                        reloadOcrStatus()
-                        statusError = false
-                        statusMessage = "Cleared $deleted saved OCR result(s)."
-                    }
-                }) { Text("Clear text") }
-            },
-            dismissButton = { TextButton(onClick = { showClearCacheDialog = false }) { Text("Cancel") } }
-        )
     }
 }
 
