@@ -2499,7 +2499,7 @@ private fun HomeViewOptionsBottomSheet(
     ModalBottomSheet(
         sheetState = sheetState,
         onDismissRequest = applySelections,
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = MaterialTheme.colorScheme.onSurface,
         dragHandle = { BottomSheetDefaults.DragHandle() }
     ) {
