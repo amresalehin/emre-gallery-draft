@@ -26,6 +26,10 @@ object TesseractOcr {
         return File(directory, "${digest}.txt")
     }
 
+    /** Returns true only when an OCR result for this exact media URI is cached. */
+    fun hasCachedResult(context: Context, uri: Uri): Boolean =
+        runCatching { cacheFile(context, uri).let { it.isFile && it.length() >= 0L } }.getOrDefault(false)
+
     /** Returns previously recognized text for this media URI, or null if not cached. */
     fun readCachedResult(context: Context, uri: Uri): String? =
         runCatching {
