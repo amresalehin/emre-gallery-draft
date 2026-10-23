@@ -696,7 +696,6 @@ fun GalleryApp() {
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer { translationX = workspaceDragOffsetX }
-                    }
             ) { currentDestination -> renderDestination(currentDestination) }
             }
 
