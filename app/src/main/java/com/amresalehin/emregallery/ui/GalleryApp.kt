@@ -5099,6 +5099,20 @@ private fun satelliteTileSource(): OnlineTileSourceBase = object : OnlineTileSou
             MapTileIndex.getX(pMapTileIndex) + imageFilenameEnding()
 }
 
+private fun nightTileSource(): XYTileSource = XYTileSource(
+    "CartoDBDarkMatter",
+    0,
+    20,
+    256,
+    ".png",
+    arrayOf(
+        "https://a.basemaps.cartocdn.com/dark_all/",
+        "https://b.basemaps.cartocdn.com/dark_all/",
+        "https://c.basemaps.cartocdn.com/dark_all/",
+        "https://d.basemaps.cartocdn.com/dark_all/"
+    )
+)
+
 @Composable
 private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
     val context = LocalContext.current
@@ -5115,6 +5129,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
     var scanTotal by remember { mutableIntStateOf(0) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var mapLayer by remember { mutableStateOf("Standard") }
+    var mapAppearance by remember { mutableStateOf("Day") }
     var showMapLayerMenu by remember { mutableStateOf(false) }
     var sheetExpanded by remember { mutableStateOf(false) }
     var visibleBounds by remember { mutableStateOf<org.osmdroid.util.BoundingBox?>(null) }
@@ -5236,7 +5251,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
             factory = { ctx ->
                 Configuration.getInstance().userAgentValue = ctx.packageName
                 MapView(ctx).apply {
-                    setTileSource(if (mapLayer == "Satellite") satelliteTileSource() else TileSourceFactory.MAPNIK)
+                    setTileSource(when { mapLayer == "Satellite" -> satelliteTileSource(); mapAppearance == "Night" -> nightTileSource(); else -> TileSourceFactory.MAPNIK })
                     setMultiTouchControls(true)
                     controller.setZoom(3.0)
                     controller.setCenter(GeoPoint(20.5937, 78.9629))
@@ -5359,6 +5374,37 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                             mapRef?.invalidate()
                             showMapLayerMenu = false
                         }
+                    )
+                }
+            }
+            Surface(
+                onClick = {
+                    mapAppearance = if (mapAppearance == "Day") "Night" else "Day"
+                    mapRef?.let { map ->
+                        if (mapLayer == "Standard") {
+                            map.setTileSource(if (mapAppearance == "Night") nightTileSource() else TileSourceFactory.MAPNIK)
+                        }
+                        map.invalidate()
+                    }
+                },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+                shadowElevation = 4.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        if (mapAppearance == "Day") Icons.Default.DarkMode else Icons.Default.LightMode,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        if (mapAppearance == "Day") "Night" else "Day",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
