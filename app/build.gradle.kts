@@ -27,18 +27,9 @@ android {
 
     sourceSets.getByName("main").assets.srcDir(generatedOcrAssets)
 
-    signingConfigs {
-        create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
-    }
-
     buildTypes {
+        // Use Android Gradle Plugin's generated debug keystore in CI and local builds.
         debug {
-            signingConfig = signingConfigs.getByName("debugConfig")
         }
         release {
             isMinifyEnabled = false
