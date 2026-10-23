@@ -3,7 +3,7 @@
     <style name="Theme.EmreGallery" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#24364b</item>
+        <item name="android:colorAccent">#777777</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
