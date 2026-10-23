@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -684,21 +685,68 @@ fun GalleryApp() {
         }
         }
                 if (showSidePanel) {
+            val drawerWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 304.dp.toPx() }
+            val drawerOffsetX = remember { Animatable(0f) }
+            val drawerScope = rememberCoroutineScope()
+            val velocityTracker = remember { VelocityTracker() }
+            val scrimAlpha = (1f - (kotlin.math.abs(drawerOffsetX.value) / drawerWidthPx).coerceIn(0f, 1f)) * 0.42f
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.38f))
+                    .background(Color.Black.copy(alpha = scrimAlpha))
                     .clickable { showSidePanel = false }
                     .pointerInput(showSidePanel) {
-                        var horizontalDistance = 0f
                         detectHorizontalDragGestures(
-                            onDragStart = { horizontalDistance = 0f },
-                            onHorizontalDrag = { _, dragAmount -> horizontalDistance += dragAmount },
-                            onDragEnd = {
-                                if (horizontalDistance <= -72.dp.toPx()) showSidePanel = false
-                                horizontalDistance = 0f
+                            onDragStart = {
+                                velocityTracker.resetTracking()
                             },
-                            onDragCancel = { horizontalDistance = 0f }
+                            onHorizontalDrag = { change, dragAmount ->
+                                velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                drawerScope.launch {
+                                    val next = (drawerOffsetX.value + dragAmount).coerceIn(-drawerWidthPx, 0f)
+                                    drawerOffsetX.snapTo(next)
+                                }
+                            },
+                            onDragEnd = {
+                                val velocityX = velocityTracker.calculateVelocity().x
+                                val current = drawerOffsetX.value
+                                if (current < -72.dp.toPx() || velocityX < -700f) {
+                                    drawerScope.launch {
+                                        drawerOffsetX.animateTo(
+                                            targetValue = -drawerWidthPx,
+                                            initialVelocity = velocityX,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        )
+                                        showSidePanel = false
+                                        drawerOffsetX.snapTo(0f)
+                                    }
+                                } else {
+                                    drawerScope.launch {
+                                        drawerOffsetX.animateTo(
+                                            targetValue = 0f,
+                                            initialVelocity = velocityX,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                    }
+                                }
+                            },
+                            onDragCancel = {
+                                drawerScope.launch {
+                                    drawerOffsetX.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    )
+                                }
+                            }
                         )
                     }
                     .testTag("side_panel_scrim")
@@ -708,6 +756,7 @@ fun GalleryApp() {
                         .align(Alignment.CenterStart)
                         .fillMaxHeight()
                         .width(304.dp)
+                        .graphicsLayer { translationX = drawerOffsetX.value }
                         .clickable { /* Keep taps inside the drawer from dismissing it. */ }
                         .testTag("side_panel"),
                     shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
@@ -3787,8 +3836,12 @@ private fun ViewerScreen(
     LaunchedEffect(showDetails) {
         if (!showDetails) detailsExpanded = false
     }
-    var dragOffsetX by remember { mutableFloatStateOf(0f) }
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val dragOffsetX = remember { Animatable(0f) }
+    val dragOffsetY = remember { Animatable(0f) }
+    LaunchedEffect(item.uri) {
+        dragOffsetX.snapTo(0f)
+        dragOffsetY.snapTo(0f)
+    }
     val share: () -> Unit = {
         runCatching {
             context.startActivity(
@@ -3804,11 +3857,16 @@ private fun ViewerScreen(
         }
     }
 
+    val currentOffsetX = dragOffsetX.value
+    val currentOffsetY = dragOffsetY.value
+    val dismissFraction = (kotlin.math.abs(currentOffsetY) / 540f).coerceIn(0f, 1f)
+    val backdropAlpha = (1f - dismissFraction * 0.70f).coerceIn(0.30f, 1f)
+
     Box(
         Modifier
             .fillMaxSize()
-            // Keep the viewer canvas consistent with the user's selected app theme.
-            .background(MaterialTheme.colorScheme.background)
+            // Keep the viewer canvas consistent with the user's selected app theme and animate backdrop alpha on drag
+            .background(MaterialTheme.colorScheme.background.copy(alpha = backdropAlpha))
             .pointerInput(item.uri) {
                 detectTapGestures(
                     onTap = { onToggleControls() },
@@ -3817,112 +3875,188 @@ private fun ViewerScreen(
             }
             .pointerInput(items, item.uri, showDetails) {
                 val horizontalSwipeThreshold = 104.dp.toPx()
+                val verticalDismissThreshold = 120.dp.toPx()
                 val verticalDetailsThreshold = 72.dp.toPx()
                 val touchSlop = viewConfiguration.touchSlop
                 val containerWidthPx = size.width.toFloat()
+                val containerHeightPx = size.height.toFloat()
                 var totalX = 0f
                 var totalY = 0f
                 var horizontalSwipeLocked = false
+                var verticalSwipeLocked = false
+                val velocityTracker = VelocityTracker()
                 detectDragGestures(
                     onDragStart = {
                         totalX = 0f
                         totalY = 0f
                         horizontalSwipeLocked = false
-                        dragOffsetX = 0f
-                        dragOffsetY = 0f
+                        verticalSwipeLocked = false
+                        velocityTracker.resetTracking()
+                        ocrScope.launch {
+                            dragOffsetX.snapTo(0f)
+                            dragOffsetY.snapTo(0f)
+                        }
                     },
                     onDrag = { change, dragAmount ->
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
                         totalX += dragAmount.x
                         totalY += dragAmount.y
                         val absX = kotlin.math.abs(totalX)
                         val absY = kotlin.math.abs(totalY)
-                        // Only move the image once the gesture is clearly horizontal.
-                        // Small finger jitter and diagonal/vertical drags won't page media.
-                        if (!horizontalSwipeLocked && absX > touchSlop && absX > absY * 1.35f) {
-                            horizontalSwipeLocked = true
+                        if (!horizontalSwipeLocked && !verticalSwipeLocked) {
+                            if (absX > touchSlop && absX > absY * 1.35f && !showDetails) {
+                                horizontalSwipeLocked = true
+                            } else if (absY > touchSlop && absY > absX * 1.2f) {
+                                verticalSwipeLocked = true
+                            }
                         }
                         if (horizontalSwipeLocked && !showDetails) {
-                            dragOffsetX = totalX
                             change.consume()
-                        } else {
-                            dragOffsetX = 0f
-                            dragOffsetY = totalY
-                            if (absY > touchSlop && absY > absX * 1.2f) change.consume()
+                            ocrScope.launch { dragOffsetX.snapTo(totalX) }
+                        } else if (verticalSwipeLocked) {
+                            change.consume()
+                            ocrScope.launch { dragOffsetY.snapTo(totalY) }
                         }
                     },
                     onDragEnd = {
-                        val absY = kotlin.math.abs(totalY)
+                        val velocity = velocityTracker.calculateVelocity()
+                        val velocityX = velocity.x
+                        val velocityY = velocity.y
                         val absX = kotlin.math.abs(totalX)
-                        if (horizontalSwipeLocked && !showDetails && absX > horizontalSwipeThreshold) {
+                        val absY = kotlin.math.abs(totalY)
+                        if (horizontalSwipeLocked && !showDetails && (absX > horizontalSwipeThreshold || kotlin.math.abs(velocityX) > 900f)) {
+                            val isNext = if (kotlin.math.abs(velocityX) > 900f) velocityX < 0 else totalX < 0
                             val index = items.indexOfFirst { it.uri == item.uri }
-                            val targetIndex = if (totalX < 0) index + 1 else index - 1
+                            val targetIndex = if (isNext) index + 1 else index - 1
                             val targetItem = items.getOrNull(targetIndex)
                             if (index >= 0 && targetItem != null) {
-                                // Finish the same finger-tracked motion before switching the
-                                // selected item. This avoids snapping back and then starting a
-                                // separate page animation.
-                                val exitOffset = if (totalX < 0) -containerWidthPx else containerWidthPx
+                                val exitOffset = if (isNext) -containerWidthPx else containerWidthPx
                                 ocrScope.launch {
-                                    animate(
-                                        initialValue = dragOffsetX,
+                                    dragOffsetX.animateTo(
                                         targetValue = exitOffset,
-                                        animationSpec = tween(durationMillis = 170, easing = FastOutSlowInEasing)
-                                    ) { value, _ -> dragOffsetX = value }
+                                        initialVelocity = velocityX,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    )
                                     onOpenNeighbor(targetItem)
-                                    dragOffsetX = 0f
+                                    dragOffsetX.snapTo(0f)
                                 }
                             } else {
-                                dragOffsetX = 0f
+                                ocrScope.launch {
+                                    dragOffsetX.animateTo(
+                                        targetValue = 0f,
+                                        initialVelocity = velocityX,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    )
+                                }
                             }
-                        } else if (!horizontalSwipeLocked && absY > verticalDetailsThreshold) {
+                        } else if (verticalSwipeLocked && !showDetails && (totalY > verticalDismissThreshold || velocityY > 1000f)) {
+                            // Fluid momentum-based dismissal down with spring exit!
+                            ocrScope.launch {
+                                dragOffsetY.animateTo(
+                                    targetValue = containerHeightPx,
+                                    initialVelocity = velocityY,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                )
+                                onBack()
+                            }
+                        } else if (verticalSwipeLocked && absY > verticalDetailsThreshold) {
                             if (totalY < 0 && !showDetails) onToggleDetails()
                             else if (totalY > 0 && showDetails) onToggleDetails()
-                            dragOffsetX = 0f
-                        } else {
-                            // A cancelled/short swipe returns smoothly to the current media.
                             ocrScope.launch {
-                                animate(
-                                    initialValue = dragOffsetX,
+                                dragOffsetY.animateTo(
                                     targetValue = 0f,
-                                    animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                                ) { value, _ -> dragOffsetX = value }
+                                    initialVelocity = velocityY,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioLowBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                            }
+                        } else {
+                            // Spring back with momentum
+                            ocrScope.launch {
+                                launch {
+                                    dragOffsetX.animateTo(
+                                        targetValue = 0f,
+                                        initialVelocity = velocityX,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    )
+                                }
+                                launch {
+                                    dragOffsetY.animateTo(
+                                        targetValue = 0f,
+                                        initialVelocity = velocityY,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        )
+                                    )
+                                }
                             }
                         }
-                        dragOffsetY = 0f
                     },
                     onDragCancel = {
-                        dragOffsetX = 0f
-                        dragOffsetY = 0f
+                        ocrScope.launch {
+                            launch {
+                                dragOffsetX.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                            }
+                            launch {
+                                dragOffsetY.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                )
+                            }
+                        }
                     }
                 )
             }
     ) {
         val currentIndex = items.indexOfFirst { it.uri == item.uri }
         val swipeNeighbor = when {
-            dragOffsetX < 0f -> items.getOrNull(currentIndex + 1)
-            dragOffsetX > 0f -> items.getOrNull(currentIndex - 1)
+            currentOffsetX < 0f -> items.getOrNull(currentIndex + 1)
+            currentOffsetX > 0f -> items.getOrNull(currentIndex - 1)
             else -> null
         }
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val widthPx = constraints.maxWidth.toFloat()
             // Show the adjacent image sliding in from the edge underneath the image
             // being dragged, so the gesture tracks the user's finger.
-            swipeNeighbor?.takeIf { !showDetails && !item.isVideo && !it.isVideo && kotlin.math.abs(dragOffsetX) > 0f }?.let { neighbor ->
+            swipeNeighbor?.takeIf { !showDetails && !item.isVideo && !it.isVideo && kotlin.math.abs(currentOffsetX) > 0f }?.let { neighbor ->
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(Uri.parse(neighbor.uri))
                         .size(Size.ORIGINAL)
                         .precision(Precision.EXACT)
                         .diskCacheKey("${neighbor.uri}:viewer-original")
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .memoryCacheKey("${neighbor.uri}:viewer-original")
-                        .diskCacheKey("${neighbor.uri}:viewer-original")
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .memoryCacheKey("${neighbor.uri}:viewer-original")
                         .crossfade(false)
                         .build(),
                     contentDescription = neighbor.name,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().graphicsLayer {
-                        translationX = (if (dragOffsetX < 0f) widthPx else -widthPx) + dragOffsetX
+                        translationX = (if (currentOffsetX < 0f) widthPx else -widthPx) + currentOffsetX
                     }
                 )
             }
@@ -3932,7 +4066,15 @@ private fun ViewerScreen(
             // Do not launch a second slide after the swipe completes; that causes a visible snap.
             transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
             label = "viewer_media_transition",
-            modifier = Modifier.fillMaxSize().graphicsLayer { translationX = dragOffsetX }
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                translationX = currentOffsetX
+                translationY = currentOffsetY
+                val scale = (1f - dismissFraction * 0.28f).coerceIn(0.72f, 1f)
+                scaleX = scale
+                scaleY = scale
+                clip = dismissFraction > 0.02f
+                shape = RoundedCornerShape((dismissFraction * 28f).dp)
+            }
         ) { currentItem ->
             if (currentItem.isVideo) {
                 androidx.compose.ui.viewinterop.AndroidView(
@@ -4153,6 +4295,11 @@ private fun ViewerScreen(
             )
         }
 
+        val sheetDragOffsetY = remember { Animatable(0f) }
+        LaunchedEffect(showDetails) {
+            sheetDragOffsetY.snapTo(0f)
+        }
+
         // Smooth slide-up details panel with drag-down dismiss
         AnimatedVisibility(
             visible = showDetails,
@@ -4169,7 +4316,8 @@ private fun ViewerScreen(
             Surface(
                 Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(if (detailsExpanded) .90f else .50f),
+                    .fillMaxHeight(if (detailsExpanded) .90f else .50f)
+                    .graphicsLayer { translationY = sheetDragOffsetY.value.coerceAtLeast(0f) },
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 4.dp,
@@ -4182,19 +4330,70 @@ private fun ViewerScreen(
                             .fillMaxWidth()
                             .padding(top = 10.dp, bottom = 4.dp)
                             .pointerInput(showDetails, detailsExpanded) {
-                                var totalDragY = 0f
+                                val velocityTracker = VelocityTracker()
                                 detectDragGestures(
-                                    onDragStart = { totalDragY = 0f },
+                                    onDragStart = {
+                                        velocityTracker.resetTracking()
+                                        ocrScope.launch { sheetDragOffsetY.snapTo(0f) }
+                                    },
                                     onDragEnd = {
-                                        when {
-                                            totalDragY < -48f && !detailsExpanded -> detailsExpanded = true
-                                            totalDragY > 48f -> onToggleDetails()
+                                        val velocityY = velocityTracker.calculateVelocity().y
+                                        ocrScope.launch {
+                                            when {
+                                                (sheetDragOffsetY.value > 60.dp.toPx() || velocityY > 750f) -> {
+                                                    sheetDragOffsetY.animateTo(
+                                                        targetValue = 600f,
+                                                        initialVelocity = velocityY,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                                            stiffness = Spring.StiffnessMediumLow
+                                                        )
+                                                    )
+                                                    onToggleDetails()
+                                                    sheetDragOffsetY.snapTo(0f)
+                                                }
+                                                (sheetDragOffsetY.value < -48f || velocityY < -750f) && !detailsExpanded -> {
+                                                    detailsExpanded = true
+                                                    sheetDragOffsetY.animateTo(
+                                                        targetValue = 0f,
+                                                        initialVelocity = velocityY,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioLowBouncy,
+                                                            stiffness = Spring.StiffnessMedium
+                                                        )
+                                                    )
+                                                }
+                                                else -> {
+                                                    sheetDragOffsetY.animateTo(
+                                                        targetValue = 0f,
+                                                        initialVelocity = velocityY,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessMedium
+                                                        )
+                                                    )
+                                                }
+                                            }
                                         }
                                     },
-                                    onDragCancel = { totalDragY = 0f }
+                                    onDragCancel = {
+                                        ocrScope.launch {
+                                            sheetDragOffsetY.animateTo(
+                                                targetValue = 0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMedium
+                                                )
+                                            )
+                                        }
+                                    }
                                 ) { change, dragAmount ->
                                     change.consume()
-                                    totalDragY += dragAmount.y
+                                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                    ocrScope.launch {
+                                        val next = (sheetDragOffsetY.value + dragAmount.y).coerceAtLeast(-80f)
+                                        sheetDragOffsetY.snapTo(next)
+                                    }
                                 }
                             },
                         contentAlignment = Alignment.Center
