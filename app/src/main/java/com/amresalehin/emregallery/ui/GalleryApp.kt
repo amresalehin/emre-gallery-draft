@@ -3905,8 +3905,8 @@ private class PhotoMapLocationCache(context: android.content.Context) :
 }
 
 /**
- * Draws a lightweight on-device heatmap from photo GPS points.
- * Each location contributes a soft radial gradient; overlapping locations become hotter.
+ * Draws a Google Maps-inspired density heatmap from photo GPS points.
+ * Cool blue/cyan indicates sparse locations; green/yellow/red indicates increasing density.
  */
 private class PhotoHeatmapOverlay(
     private val points: List<GeoPoint>
@@ -3915,21 +3915,27 @@ private class PhotoHeatmapOverlay(
 
     override fun draw(canvas: android.graphics.Canvas, mapView: MapView, shadow: Boolean) {
         super.draw(canvas, mapView, shadow)
-        if (shadow || points.isEmpty()) return
+        if (shadow || points.isEmpty() || mapView.width <= 0 || mapView.height <= 0) return
 
         val projection = mapView.projection
         val screenPoint = android.graphics.Point()
+        // Scale the kernel with zoom so clusters remain legible without covering the whole map.
         val radius = when {
-            mapView.zoomLevelDouble >= 14.0 -> 34f
-            mapView.zoomLevelDouble >= 10.0 -> 44f
-            else -> 58f
+            mapView.zoomLevelDouble >= 14.0 -> 26f
+            mapView.zoomLevelDouble >= 10.0 -> 36f
+            else -> 48f
         }
+        // Multicolour density ramp: transparent blue at the edges, then cyan, green,
+        // yellow and red at the hottest centre. Low per-point opacity lets clusters build.
         val colors = intArrayOf(
-            android.graphics.Color.argb(150, 220, 30, 30),
-            android.graphics.Color.argb(95, 255, 120, 0),
-            android.graphics.Color.argb(0, 255, 210, 0)
+            android.graphics.Color.argb(0, 0, 80, 255),
+            android.graphics.Color.argb(42, 0, 120, 255),
+            android.graphics.Color.argb(62, 0, 220, 255),
+            android.graphics.Color.argb(78, 0, 220, 100),
+            android.graphics.Color.argb(96, 255, 230, 0),
+            android.graphics.Color.argb(118, 255, 45, 20)
         )
-        val stops = floatArrayOf(0f, 0.42f, 1f)
+        val stops = floatArrayOf(0f, 0.28f, 0.48f, 0.66f, 0.82f, 1f)
 
         points.forEach { geoPoint ->
             projection.toPixels(geoPoint, screenPoint)
