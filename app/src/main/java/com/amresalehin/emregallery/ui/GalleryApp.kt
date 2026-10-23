@@ -6354,7 +6354,6 @@ private fun IndexingMetric(label: String, value: String, modifier: Modifier = Mo
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PeopleScreen(
     media: List<MediaItem>,
@@ -6362,177 +6361,158 @@ private fun PeopleScreen(
     onOpenMedia: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val store = remember { FaceClusterStore(context.applicationContext) }
-    val indexer = remember { FaceIndexingRepository(context.applicationContext) }
     val photoByUri = remember(media) { media.associateBy { it.uri } }
-    var modelReady by remember { mutableStateOf(BuffaloLFaceEngine.isModelInstalled(context)) }
     var clusters by remember { mutableStateOf(store.summaries()) }
-    var indexedCount by remember { mutableIntStateOf(store.indexedMediaCount()) }
-    var indexedFaces by remember { mutableIntStateOf(store.indexedFaceCount()) }
-    var busy by remember { mutableStateOf(false) }
-    var showLicenseDialog by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var progress by remember { mutableStateOf<FaceIndexingProgress?>(null) }
     var selectedCluster by remember { mutableStateOf<String?>(null) }
     var renameCluster by remember { mutableStateOf<String?>(null) }
     var renameValue by remember { mutableStateOf("") }
 
     fun reload() {
         clusters = store.summaries()
-        indexedCount = store.indexedMediaCount()
-        indexedFaces = store.indexedFaceCount()
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
             modifier = Modifier.fillMaxWidth().statusBarsPadding()
-                .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 10.dp),
+                .padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = { if (selectedCluster == null) onBack() else selectedCluster = null }) {
                 Icon(Icons.Default.ArrowBack, contentDescription = if (selectedCluster == null) "Back to Albums" else "Back to people")
             }
-            Column(Modifier.weight(1f)) {
-                Text(selectedCluster?.let { id -> clusters.firstOrNull { it.id == id }?.displayName ?: "Person" } ?: "People & pets", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                Text("On-device face grouping", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = selectedCluster?.let { id -> clusters.firstOrNull { it.id == id }?.displayName ?: "Person" } ?: "People & pets",
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            IconButton(onClick = { reload() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh people")
             }
-            IconButton(onClick = { reload() }, enabled = !busy) { Icon(Icons.Default.Refresh, contentDescription = "Refresh people") }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-        if (busy) {
-            LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(progress?.let { "Indexed ${it.processed} of ${it.total} photos · ${it.facesFound} faces found" } ?: "Preparing on-device face recognition…",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        errorMessage?.let { Text(it, modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
+
         if (selectedCluster == null) {
-            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                item {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow
-                    ) {
+            if (clusters.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "No people found",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(112.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    gridItems(clusters, key = { it.id }) { cluster ->
                         Column(
-                            modifier = Modifier.fillMaxWidth().padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            modifier = Modifier.fillMaxWidth().clickable { selectedCluster = cluster.id },
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (cluster.sampleUri != null) {
+                                AsyncImage(
+                                    model = cluster.sampleUri,
+                                    contentDescription = cluster.displayName,
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
                                 Surface(
-                                    modifier = Modifier.size(42.dp),
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.secondaryContainer
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Default.Face, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                                        Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(36.dp))
                                     }
                                 }
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("People & pets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        "$indexedCount of ${media.count { !it.isVideo }} photos scanned · $indexedFaces faces",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
                             }
-                            Button(
-                                onClick = {
-                                    if (modelReady) {
-                                        busy = true
-                                        errorMessage = null
-                                        scope.launch {
-                                            try {
-                                                progress = null
-                                                val result = indexer.indexNewMedia(media, store) { value -> scope.launch { progress = value } }
-                                                busy = false
-                                                progress = result
-                                                reload()
-                                            } catch (e: Exception) {
-                                                busy = false
-                                                errorMessage = e.message ?: "Face indexing failed."
-                                            }
-                                        }
-                                    } else showLicenseDialog = true
-                                },
-                                enabled = !busy,
-                                modifier = Modifier.fillMaxWidth()
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                cluster.displayName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "${cluster.faceCount} photos",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(
+                                onClick = { renameCluster = cluster.id; renameValue = cluster.displayName },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                             ) {
-                                Icon(if (modelReady) Icons.Default.Face else Icons.Default.Download, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text(if (modelReady) "Scan new photos" else "Set up face recognition")
-                            }
-                            if (!modelReady) {
-                                Text(
-                                    "Runs on-device. Model download is about 326 MB; pretrained weights are for non-commercial research use.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-                if (clusters.isEmpty()) {
-                    item { Box(Modifier.fillMaxWidth().padding(vertical = 30.dp), contentAlignment = Alignment.Center) { Text("Your detected people will appear here after scanning.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
-                } else {
-                    items(clusters, key = { it.id }) { cluster ->
-                        Surface(modifier = Modifier.fillMaxWidth().clickable { selectedCluster = cluster.id }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))) {
-                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (cluster.sampleUri != null) AsyncImage(model = cluster.sampleUri, contentDescription = cluster.displayName, modifier = Modifier.size(68.dp).clip(CircleShape), contentScale = ContentScale.Crop)
-                                else Surface(Modifier.size(68.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Face, null) } }
-                                Spacer(Modifier.width(14.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(cluster.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                    Text("${cluster.faceCount} face${if (cluster.faceCount == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                IconButton(onClick = { renameCluster = cluster.id; renameValue = cluster.displayName }) { Icon(Icons.Default.Edit, contentDescription = "Rename ${cluster.displayName}") }
-                                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Rename", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
                 }
             }
         } else {
-            val faceRows = remember(selectedCluster, indexedFaces, clusters) { selectedCluster?.let { store.facesForCluster(it) }.orEmpty() }
+            val faceRows = remember(selectedCluster, clusters) {
+                selectedCluster?.let { store.facesForCluster(it) }.orEmpty()
+            }
             val groupedMedia = faceRows.mapNotNull { photoByUri[it.mediaUri] }.distinctBy { it.uri }
-            LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.weight(1f), contentPadding = PaddingValues(3.dp, 8.dp, 3.dp, 24.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                gridItems(groupedMedia, key = { it.uri }) { item ->
-                    AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(Uri.parse(item.uri)).crossfade(false).build(), contentDescription = item.name, modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onOpenMedia(item) }, contentScale = ContentScale.Crop)
+            if (groupedMedia.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No photos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(2.dp, 4.dp, 2.dp, 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    gridItems(groupedMedia, key = { it.uri }) { item ->
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(Uri.parse(item.uri)).crossfade(false).build(),
+                            contentDescription = item.name,
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onOpenMedia(item) },
+                            contentScale = ContentScale.Crop
+                        )
+                    }
                 }
             }
         }
     }
 
-    if (showLicenseDialog) {
-        AlertDialog(
-            onDismissRequest = { showLicenseDialog = false },
-            title = { Text("Download buffalo_l?") },
-            text = { Text("The official InsightFace buffalo_l pretrained pack includes face detection, recognition, 2D/3D landmarks, and gender/age models. Its pretrained weights are licensed for non-commercial research use. The archive is about 326 MB and installation needs about 500 MB free. Download only if these terms fit your use; processing is local to this device.") },
-            confirmButton = { TextButton(onClick = {
-                showLicenseDialog = false
-                busy = true
-                errorMessage = null
-                scope.launch {
-                    try {
-                        indexer.downloadModel()
-                        modelReady = true
-                        reload()
-                    } catch (e: Exception) {
-                        errorMessage = e.message ?: "Model download failed."
-                    } finally { busy = false }
-                }
-            }) { Text("Agree & download") } },
-            dismissButton = { TextButton(onClick = { showLicenseDialog = false }) { Text("Cancel") } }
-        )
-    }
     if (renameCluster != null) {
         AlertDialog(
             onDismissRequest = { renameCluster = null },
             title = { Text("Rename person") },
-            text = { OutlinedTextField(value = renameValue, onValueChange = { renameValue = it }, singleLine = true, label = { Text("Name") }) },
-            confirmButton = { TextButton(onClick = { store.renameCluster(renameCluster!!, renameValue); renameCluster = null; reload() }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { renameCluster = null }) { Text("Cancel") } }
+            text = {
+                OutlinedTextField(
+                    value = renameValue,
+                    onValueChange = { renameValue = it },
+                    singleLine = true,
+                    label = { Text("Name") }
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    store.renameCluster(renameCluster!!, renameValue.trim())
+                    renameCluster = null
+                    reload()
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameCluster = null }) { Text("Cancel") }
+            }
         )
     }
 }
