@@ -3604,7 +3604,27 @@ private fun ViewerScreen(
     onOpenMap: () -> Unit
 ) {
     val context = LocalContext.current
+    val videoPlayer = remember(item.uri, item.isVideo) {
+        if (item.isVideo) androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.parse(item.uri)))
+            prepare()
+            playWhenReady = true
+        } else null
+    }
+    DisposableEffect(videoPlayer) {
+        onDispose { videoPlayer?.release() }
+    }
+    var videoPosition by remember(item.uri) { mutableLongStateOf(0L) }
+    var videoDuration by remember(item.uri) { mutableLongStateOf(0L) }
+    var videoMuted by remember(item.uri) { mutableStateOf(false) }
     var metadata by remember(item.uri) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(videoPlayer, item.uri) {
+        while (videoPlayer != null) {
+            videoPosition = videoPlayer.currentPosition.coerceAtLeast(0L)
+            videoDuration = videoPlayer.duration.takeIf { it > 0L } ?: 0L
+            kotlinx.coroutines.delay(250)
+        }
+    }
     var ocrText by remember(item.uri) { mutableStateOf("") }
     var ocrError by remember(item.uri) { mutableStateOf<String?>(null) }
     var ocrBusy by remember(item.uri) { mutableStateOf(false) }
@@ -3779,22 +3799,15 @@ private fun ViewerScreen(
                 androidx.compose.ui.viewinterop.AndroidView(
                     factory = { vc ->
                         androidx.media3.ui.PlayerView(vc).apply {
-                            player = androidx.media3.exoplayer.ExoPlayer.Builder(vc).build().also { p ->
-                                p.setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.parse(currentItem.uri)))
-                                p.prepare()
-                                p.playWhenReady = true
-                            }
-                            // Keep Media3 controls visible for exactly as long as the
-                            // gallery's floating viewer controls are visible. This avoids
-                            // the player bubbles timing out while the gallery actions remain.
-                            controllerShowTimeoutMs = 0
-                            useController = showControls
+                            player = videoPlayer
+                            useController = false
+                            setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                         }
                     },
                     modifier = Modifier.fillMaxSize(),
                     update = {
-                        it.controllerShowTimeoutMs = 0
-                        it.useController = showControls
+                        it.player = videoPlayer
+                        it.useController = false
                     }
                 )
             } else {
@@ -3865,6 +3878,63 @@ private fun ViewerScreen(
             }
         }
 
+        if (showControls && !showDetails && item.isVideo && videoPlayer != null) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 18.dp)
+                    .padding(bottom = 76.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                IconButton(
+                    onClick = {
+                        if (videoPlayer.isPlaying) videoPlayer.pause() else videoPlayer.play()
+                    },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        if (videoPlayer.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (videoPlayer.isPlaying) "Pause video" else "Play video"
+                    )
+                }
+                Text(
+                    text = "${videoPosition / 60000}:${((videoPosition / 1000) % 60).toString().padStart(2, '0')}",
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1
+                )
+                Slider(
+                    value = videoPosition.toFloat().coerceAtMost(videoDuration.coerceAtLeast(1L).toFloat()),
+                    onValueChange = { videoPosition = it.toLong() },
+                    onValueChangeFinished = { videoPlayer.seekTo(videoPosition) },
+                    valueRange = 0f..videoDuration.coerceAtLeast(1L).toFloat(),
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "${videoDuration / 60000}:${((videoDuration / 1000) % 60).toString().padStart(2, '0')}",
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1
+                )
+                IconButton(
+                    onClick = {
+                        videoMuted = !videoMuted
+                        videoPlayer.volume = if (videoMuted) 0f else 1f
+                    },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        if (videoMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                        contentDescription = if (videoMuted) "Unmute video" else "Mute video"
+                    )
+                }
+            }
+        }
+
         if (showControls && !showDetails) {
             Row(
                 Modifier
@@ -3886,10 +3956,7 @@ private fun ViewerScreen(
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    // Video player controls occupy the bottom edge of PlayerView.
-                    // Lift gallery actions above that control strip for videos only.
-                    .padding(horizontal = 8.dp, vertical = 12.dp)
-                    .padding(bottom = if (item.isVideo) 104.dp else 0.dp),
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 ViewerAction(Icons.Default.Tune, "Edit") {
