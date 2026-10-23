@@ -1,5 +1,6 @@
 import java.net.URL
 import java.net.HttpURLConnection
+import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
@@ -97,8 +98,74 @@ val prepareBundledOcrData by tasks.registering {
     }
 }
 
+val bundledFaceModelNames = listOf(
+    "det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx", "1k3d68.onnx", "genderage.onnx"
+)
+val generatedFaceModelDir = generatedOcrAssets.map { it.dir("face-models/buffalo_l") }
+val prepareBundledFaceModel by tasks.registering {
+    outputs.dir(generatedFaceModelDir)
+    outputs.upToDateWhen {
+        bundledFaceModelNames.all { name ->
+            generatedFaceModelDir.get().asFile.resolve(name).let { it.isFile && it.length() >= 1024 * 1024 }
+        }
+    }
+    doLast {
+        val modelDir = generatedFaceModelDir.get().asFile
+        if (!modelDir.exists() && !modelDir.mkdirs()) {
+            error("Could not create generated buffalo_l assets directory: $modelDir")
+        }
+        val missing = bundledFaceModelNames.filter { name ->
+            modelDir.resolve(name).let { !it.isFile || it.length() < 1024 * 1024 }
+        }
+        if (missing.isNotEmpty()) {
+            val archive = layout.buildDirectory.file("tmp/buffalo_l.zip").get().asFile
+            archive.parentFile.mkdirs()
+            val connection = URL(
+                "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
+            ).openConnection() as HttpURLConnection
+            connection.connectTimeout = 20000
+            connection.readTimeout = 180000
+            connection.instanceFollowRedirects = true
+            try {
+                connection.connect()
+                if (connection.responseCode !in 200..299) {
+                    error("Could not download buffalo_l model pack (HTTP ${connection.responseCode}).")
+                }
+                connection.inputStream.use { input ->
+                    archive.outputStream().buffered().use { output -> input.copyTo(output) }
+                }
+            } finally {
+                connection.disconnect()
+            }
+
+            ZipFile(archive).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    if (entry.isDirectory) continue
+                    val name = entry.name.substringAfterLast('/')
+                    if (name in bundledFaceModelNames || name.contains("LICENSE", ignoreCase = true)) {
+                        zip.getInputStream(entry).use { input ->
+                            modelDir.resolve(name).outputStream().buffered().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                }
+            }
+            archive.delete()
+        }
+        val invalid = bundledFaceModelNames.filter { name ->
+            modelDir.resolve(name).let { !it.isFile || it.length() < 1024 * 1024 }
+        }
+        if (invalid.isNotEmpty()) {
+            error("Incomplete buffalo_l model pack; missing or invalid: ${invalid.joinToString()}")
+        }
+    }
+}
+
 tasks.named("preBuild").configure {
-    dependsOn(prepareBundledOcrData)
+    dependsOn(prepareBundledOcrData, prepareBundledFaceModel)
 }
 
 dependencies {
