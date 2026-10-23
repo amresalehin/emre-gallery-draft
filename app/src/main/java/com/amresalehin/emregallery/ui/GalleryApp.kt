@@ -190,9 +190,12 @@ fun GalleryApp() {
     }
     LaunchedEffect(Unit) { if (hasMediaPermission(context)) refreshMedia() }
 
-    if (destination != Destination.HOME || albumFilter != null) {
+    if (destination != Destination.HOME || albumFilter != null || showSidePanel) {
         androidx.activity.compose.BackHandler {
             when {
+                showSidePanel -> {
+                    showSidePanel = false
+                }
                 destination == Destination.VIEWER && showDetails -> {
                     showDetails = false
                 }
