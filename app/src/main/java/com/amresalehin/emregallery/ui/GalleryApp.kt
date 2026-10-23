@@ -27,11 +27,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.input.pointer.calculateCentroid
-import androidx.compose.ui.input.pointer.calculatePan
-import androidx.compose.ui.input.pointer.calculateZoom
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -55,7 +51,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -96,18 +91,10 @@ import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceIndexingProgress
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
-import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -133,10 +120,6 @@ fun GalleryApp() {
     val mediaRepository = remember { MediaRepository(context.contentResolver) }
     var destination by remember { mutableStateOf(Destination.HOME) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
-    val workspacePages = remember { listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) }
-    var workspaceDragOffsetX by remember { mutableFloatStateOf(0f) }
-    var workspacePreviewDestination by remember { mutableStateOf<Destination?>(null) }
-    var skipWorkspaceAnimatedTransition by remember { mutableStateOf(false) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
@@ -301,7 +284,93 @@ fun GalleryApp() {
     val topContentPadding = statusBarTop + 68.dp
     val bottomContentPadding = navBarBottom + 88.dp
 
-    val renderDestination: @Composable (Destination) -> Unit = { currentDestination ->
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AnimatedContent(
+                targetState = destination,
+                transitionSpec = {
+                    val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
+                    val initialIndex = mainPages.indexOf(initialState)
+                    val targetIndex = mainPages.indexOf(targetState)
+                    if (targetState == Destination.VIEWER) {
+                        (fadeIn(animationSpec = tween(260)) + scaleIn(initialScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)))
+                            .togetherWith(fadeOut(animationSpec = tween(180)))
+                    } else if (initialState == Destination.VIEWER) {
+                        fadeIn(animationSpec = tween(200))
+                            .togetherWith(fadeOut(animationSpec = tween(240) ) + scaleOut(targetScale = 0.96f, animationSpec = tween(240, easing = FastOutLinearInEasing)))
+                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex > initialIndex) {
+                        (slideInHorizontally(
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> width }
+                        ) + fadeIn(animationSpec = tween(220)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> -width / 4 }
+                                ) + fadeOut(animationSpec = tween(220))
+                            )
+                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex < initialIndex) {
+                        (slideInHorizontally(
+                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> -width }
+                        ) + fadeIn(animationSpec = tween(220)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> width / 4 }
+                                ) + fadeOut(animationSpec = tween(220))
+                            )
+                    } else {
+                        fadeIn(animationSpec = tween(200)).togetherWith(fadeOut(animationSpec = tween(160)))
+                    }
+                },
+                label = "destination_screen_transition",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(destination, showSidePanel) {
+                        val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
+                        var horizontalDistance = 0f
+                        var startedAtLeftEdge = false
+                        val swipeThreshold = 72.dp.toPx()
+                        val edgeWidth = 32.dp.toPx()
+                        if (!showSidePanel && destination in mainPages) {
+                            detectHorizontalDragGestures(
+                                onDragStart = { offset ->
+                                    horizontalDistance = 0f
+                                    startedAtLeftEdge = offset.x <= edgeWidth
+                                },
+                                onHorizontalDrag = { _, dragAmount ->
+                                    horizontalDistance += dragAmount
+                                },
+                                onDragEnd = {
+                                    if (destination == Destination.HOME &&
+                                        startedAtLeftEdge &&
+                                        horizontalDistance >= swipeThreshold
+                                    ) {
+                                        showSidePanel = true
+                                    } else if (kotlin.math.abs(horizontalDistance) >= swipeThreshold) {
+                                        val currentIndex = mainPages.indexOf(destination)
+                                        val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
+                                        if (nextIndex in mainPages.indices) {
+                                            destination = mainPages[nextIndex]
+                                            albumFilter = null
+                                        }
+                                    }
+                                    horizontalDistance = 0f
+                                    startedAtLeftEdge = false
+                                },
+                                onDragCancel = {
+                                    horizontalDistance = 0f
+                                    startedAtLeftEdge = false
+                                }
+                            )
+                        }
+                    }
+            ) { currentDestination ->
                 when (currentDestination) {
                     Destination.HOME -> HomeScreen(
                         media = visibleMedia,
@@ -451,7 +520,10 @@ fun GalleryApp() {
                     )
                     Destination.INDEXING_STATUS -> IndexingStatusScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
-                        ocrLanguages = ocrLanguagesPref
+                        loading = loading,
+                        onBack = { destination = Destination.SETTINGS },
+                        onRefreshMedia = { refreshMedia() },
+                        onOpenPeople = { destination = Destination.PEOPLE }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
                         onBack = { destination = Destination.SETTINGS }
@@ -520,188 +592,6 @@ fun GalleryApp() {
                         )
                     }
                 }
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
-        contentColor = MaterialTheme.colorScheme.onBackground
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clipToBounds()
-                    .pointerInput(destination, showSidePanel) {
-                        val mainPages = workspacePages
-                        var horizontalDistance = 0f
-                        var startedAtLeftEdge = false
-                        val swipeThreshold = 72.dp.toPx()
-                        val edgeWidth = 32.dp.toPx()
-                        val viewportWidthPx = size.width.toFloat()
-
-                        if (!showSidePanel && destination in mainPages) {
-                            detectHorizontalDragGestures(
-                                onDragStart = { offset ->
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = offset.x <= edgeWidth
-                                    workspaceDragOffsetX = 0f
-                                    workspacePreviewDestination = null
-                                },
-                                onHorizontalDrag = { change, dragAmount ->
-                                    horizontalDistance += dragAmount.x
-                                    val isDrawerEdgeDrag = destination == Destination.HOME &&
-                                        startedAtLeftEdge && horizontalDistance > 0f
-                                    if (!isDrawerEdgeDrag) {
-                                        val currentIndex = mainPages.indexOf(destination)
-                                        val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
-                                        val nextPage = mainPages.getOrNull(nextIndex)
-                                        if (nextPage != null) {
-                                            workspacePreviewDestination = nextPage
-                                            workspaceDragOffsetX = horizontalDistance.coerceIn(
-                                                -viewportWidthPx, viewportWidthPx
-                                            )
-                                        } else {
-                                            // A bounded, rubber-band response at the ends of the workspace list.
-                                            workspacePreviewDestination = null
-                                            workspaceDragOffsetX = (horizontalDistance * 0.18f).coerceIn(-viewportWidthPx * 0.22f, viewportWidthPx * 0.22f)
-                                        }
-                                        change.consume()
-                                    } else {
-                                        workspacePreviewDestination = null
-                                        workspaceDragOffsetX = 0f
-                                    }
-                                },
-                                onDragEnd = {
-                                    val isDrawerEdgeDrag = destination == Destination.HOME &&
-                                        startedAtLeftEdge && horizontalDistance >= swipeThreshold
-                                    val currentIndex = mainPages.indexOf(destination)
-                                    val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
-                                    val nextPage = mainPages.getOrNull(nextIndex)
-                                    if (isDrawerEdgeDrag) {
-                                        showSidePanel = true
-                                        workspaceDragOffsetX = 0f
-                                        workspacePreviewDestination = null
-                                    } else if (
-                                        kotlin.math.abs(horizontalDistance) >= swipeThreshold &&
-                                        nextPage != null
-                                    ) {
-                                        val targetOffset = if (horizontalDistance < 0f) -viewportWidthPx else viewportWidthPx
-                                        val targetPage = nextPage
-                                        scope.launch {
-                                            animate(
-                                                initialValue = workspaceDragOffsetX,
-                                                targetValue = targetOffset,
-                                                animationSpec = tween(180, easing = FastOutSlowInEasing)
-                                            ) { value, _ -> workspaceDragOffsetX = value }
-
-                                            // The preview is now exactly aligned with the viewport.
-                                            // Swap the logical destination without starting a second
-                                            // independent slide animation (which would cause a snap).
-                                            skipWorkspaceAnimatedTransition = true
-                                            destination = targetPage
-                                            albumFilter = null
-                                            workspacePreviewDestination = null
-                                            workspaceDragOffsetX = 0f
-                                            withFrameNanos { }
-                                            skipWorkspaceAnimatedTransition = false
-                                        }
-                                    } else {
-                                        scope.launch {
-                                            animate(
-                                                initialValue = workspaceDragOffsetX,
-                                                targetValue = 0f,
-                                                animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                                            ) { value, _ -> workspaceDragOffsetX = value }
-                                            workspacePreviewDestination = null
-                                        }
-                                    }
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = false
-                                },
-                                onDragCancel = {
-                                    scope.launch {
-                                        animate(
-                                            initialValue = workspaceDragOffsetX,
-                                            targetValue = 0f,
-                                            animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                                        ) { value, _ -> workspaceDragOffsetX = value }
-                                        workspacePreviewDestination = null
-                                    }
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = false
-                                }
-                            )
-                        }
-                    }
-            ) {
-                val previewDestination = workspacePreviewDestination
-                if (previewDestination != null && kotlin.math.abs(workspaceDragOffsetX) > 0.1f) {
-                    Box(Modifier.fillMaxSize().clipToBounds()) {
-                        Box(
-                            Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    translationX = if (workspaceDragOffsetX < 0f) {
-                                        size.width + workspaceDragOffsetX
-                                    } else {
-                                        -size.width + workspaceDragOffsetX
-                                    }
-                                }
-                                .background(MaterialTheme.colorScheme.background)
-                        ) {
-                            renderDestination(previewDestination)
-                        }
-                    }
-                }
-
-                AnimatedContent(
-                targetState = destination,
-                transitionSpec = {
-                    val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
-                    val initialIndex = mainPages.indexOf(initialState)
-                    val targetIndex = mainPages.indexOf(targetState)
-                    if (skipWorkspaceAnimatedTransition &&
-                        initialState in workspacePages && targetState in workspacePages
-                    ) {
-                        EnterTransition.None togetherWith ExitTransition.None
-                    } else if (targetState == Destination.VIEWER) {
-                        (fadeIn(animationSpec = tween(260)) + scaleIn(initialScale = 0.96f, animationSpec = tween(260, easing = FastOutSlowInEasing)))
-                            .togetherWith(fadeOut(animationSpec = tween(180)))
-                    } else if (initialState == Destination.VIEWER) {
-                        fadeIn(animationSpec = tween(200))
-                            .togetherWith(fadeOut(animationSpec = tween(240) ) + scaleOut(targetScale = 0.96f, animationSpec = tween(240, easing = FastOutLinearInEasing)))
-                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex > initialIndex) {
-                        (slideInHorizontally(
-                            animationSpec = tween(320, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> width }
-                        ) + fadeIn(animationSpec = tween(220)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> -width / 4 }
-                                ) + fadeOut(animationSpec = tween(220))
-                            )
-                    } else if (initialIndex >= 0 && targetIndex >= 0 && targetIndex < initialIndex) {
-                        (slideInHorizontally(
-                            animationSpec = tween(320, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> -width }
-                        ) + fadeIn(animationSpec = tween(220)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> width / 4 }
-                                ) + fadeOut(animationSpec = tween(220))
-                            )
-                    } else {
-                        fadeIn(animationSpec = tween(200)).togetherWith(fadeOut(animationSpec = tween(160)))
-                    }
-                },
-                label = "destination_screen_transition",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { translationX = workspaceDragOffsetX }
-            ) { currentDestination -> renderDestination(currentDestination) }
             }
 
         // Wider top and bottom edge blur across app screens
@@ -1725,7 +1615,7 @@ private fun HomeScreen(
     val homeScope = rememberCoroutineScope()
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
-    val pinchScaleAnimation = remember { Animatable(1f) }
+    var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
     val itemBounds = remember { mutableStateMapOf<String, Rect>() }
     var dragSelectionActive by remember { mutableStateOf(false) }
@@ -1778,56 +1668,18 @@ private fun HomeScreen(
     ) {
     LazyColumn(
         state = homeListState,
-        modifier = Modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                scaleX = pinchScaleAnimation.value
-                scaleY = pinchScaleAnimation.value
-            }
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    var gestureZoom = 1f
-                    var didPinch = false
-                    var multiTouchStarted = false
-                    do {
-                        val event = awaitPointerEvent()
-                        val pressedCount = event.changes.count { it.pressed }
-                        if (pressedCount >= 2) {
-                            multiTouchStarted = true
-                            val zoom = event.calculateZoom()
-                            if (zoom.isFinite() && zoom > 0f && zoom != 1f) {
-                                gestureZoom = (gestureZoom * zoom).coerceIn(0.72f, 1.38f)
-                                pinchScaleAnimation.snapTo(gestureZoom)
-                                didPinch = true
-                                event.changes.forEach { if (it.pressed) it.consume() }
-                            }
-                        }
-                    } while (
-                        event.changes.any { it.pressed } &&
-                            (!multiTouchStarted || event.changes.count { it.pressed } >= 2)
-                    )
-
-                    if (didPinch) {
-                        // Resolve the grid density only after the fingers lift. The visual
-                        // scale remains continuous while the gesture is active.
-                        when {
-                            gestureZoom < 0.90f -> {
-                                val steps = if (gestureZoom < 0.80f) 2 else 1
-                                pinchGridColumns = (pinchGridColumns + steps).coerceAtMost(6)
-                            }
-                            gestureZoom > 1.10f -> {
-                                val steps = if (gestureZoom > 1.25f) 2 else 1
-                                pinchGridColumns = (pinchGridColumns - steps).coerceAtLeast(1)
-                            }
-                        }
-                        pinchScaleAnimation.animateTo(
-                            targetValue = 1f,
-                            animationSpec = spring(stiffness = Spring.StiffnessMedium)
-                        )
-                    }
+        modifier = Modifier.fillMaxSize().pointerInput(pinchGridColumns) {
+            detectTransformGestures { _, _, zoom, _ ->
+                pinchZoomRemainder *= zoom
+                if (pinchZoomRemainder < 0.88f) {
+                    pinchGridColumns = (pinchGridColumns + 1).coerceAtMost(6)
+                    pinchZoomRemainder = 1f
+                } else if (pinchZoomRemainder > 1.12f) {
+                    pinchGridColumns = (pinchGridColumns - 1).coerceAtLeast(1)
+                    pinchZoomRemainder = 1f
                 }
-            },
+            }
+        },
         contentPadding = PaddingValues(
             start = 12.dp,
             end = 12.dp,
@@ -3931,8 +3783,6 @@ private fun ViewerScreen(
     }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    var viewerScale by remember(item.uri) { mutableFloatStateOf(1f) }
-    var viewerTranslation by remember(item.uri) { mutableStateOf(Offset.Zero) }
     val share: () -> Unit = {
         runCatching {
             context.startActivity(
@@ -4109,80 +3959,7 @@ private fun ViewerScreen(
                         .crossfade(false)
                         .build(),
                     contentDescription = currentItem.name,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = viewerScale
-                            scaleY = viewerScale
-                            translationX = viewerTranslation.x
-                            translationY = viewerTranslation.y
-                        }
-                        .pointerInput(currentItem.uri) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                var didPinch = false
-                                var multiTouchStarted = false
-                                do {
-                                    val event = awaitPointerEvent()
-                                    val pressedCount = event.changes.count { it.pressed }
-                                    if (pressedCount >= 2) {
-                                        multiTouchStarted = true
-                                        val zoom = event.calculateZoom()
-                                        val pan = event.calculatePan()
-                                        val centroid = event.calculateCentroid(useCurrent = true)
-                                        if (zoom.isFinite() && zoom > 0f &&
-                                            (kotlin.math.abs(zoom - 1f) > 0.001f || pan != Offset.Zero)
-                                        ) {
-                                            val oldScale = viewerScale
-                                            viewerScale = (oldScale * zoom).coerceIn(0.40f, 5f)
-                                            // Compensate for the layer's centre pivot so the
-                                            // image tracks the pinch focal point, not just its centre.
-                                            val effectiveZoom = viewerScale / oldScale.coerceAtLeast(0.001f)
-                                            viewerTranslation = Offset(
-                                                viewerTranslation.x + pan.x +
-                                                    (centroid.x - size.width / 2f) * (1f - effectiveZoom),
-                                                viewerTranslation.y + pan.y +
-                                                    (centroid.y - size.height / 2f) * (1f - effectiveZoom)
-                                            )
-                                            didPinch = true
-                                            event.changes.forEach { if (it.pressed) it.consume() }
-                                        }
-                                    }
-                                } while (
-                                    event.changes.any { it.pressed } &&
-                                        (!multiTouchStarted || event.changes.count { it.pressed } >= 2)
-                                )
-
-                                if (didPinch) {
-                                    if (viewerScale < 0.70f) {
-                                        // A sufficiently small pinch dismisses the viewer.
-                                        viewerScale = 1f
-                                        viewerTranslation = Offset.Zero
-                                        onBack()
-                                    } else if (viewerScale < 1f) {
-                                        // An incomplete dismiss gesture returns to full size.
-                                        val startScale = viewerScale
-                                        val startX = viewerTranslation.x
-                                        val startY = viewerTranslation.y
-                                        ocrScope.launch {
-                                            launch {
-                                                animate(startX, 0f, spring(stiffness = Spring.StiffnessMedium)) { value, _ ->
-                                                    viewerTranslation = Offset(value, viewerTranslation.y)
-                                                }
-                                            }
-                                            launch {
-                                                animate(startY, 0f, spring(stiffness = Spring.StiffnessMedium)) { value, _ ->
-                                                    viewerTranslation = Offset(viewerTranslation.x, value)
-                                                }
-                                            }
-                                            animate(startScale, 1f, spring(stiffness = Spring.StiffnessMedium)) { value, _ ->
-                                                viewerScale = value
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        },
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
             }
@@ -4648,16 +4425,9 @@ private fun ViewerScreen(
                                     ) {
                                         Icon(
                                             Icons.Default.DocumentScanner,
-                                            contentDescription = null,
+                                            contentDescription = "Recognized text",
                                             modifier = Modifier.size(20.dp),
                                             tint = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(Modifier.width(10.dp))
-                                        Text(
-                                            "OCR",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.Medium,
-                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Spacer(Modifier.weight(1f))
                                         IconButton(
@@ -4696,8 +4466,8 @@ private fun ViewerScreen(
                                                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                             } else {
                                                 Icon(
-                                                    Icons.Default.PlayArrow,
-                                                    contentDescription = if (ocrText.isBlank()) "Run OCR" else "Run OCR again"
+                                                    Icons.Default.DocumentScanner,
+                                                    contentDescription = if (ocrText.isBlank()) "Recognize text" else "Recognize again"
                                                 )
                                             }
                                         }
@@ -6548,349 +6318,35 @@ private fun SettingsScreen(
 }
 
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun IndexingStatusScreen(
     media: List<MediaItem>,
-    ocrLanguages: Set<String>
+    loading: Boolean,
+    onBack: () -> Unit,
+    onRefreshMedia: () -> Unit,
+    onOpenPeople: () -> Unit
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val photos = remember(media) { media.filterNot { it.isVideo } }
-    val photoUris = remember(photos) { photos.map { it.uri } }
-    val faceStore = remember { FaceClusterStore(context.applicationContext) }
-    val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val pageBackground = if (lightAppearance) Color(0xFFF4F4F4) else MaterialTheme.colorScheme.background
-
-    var countsReady by remember { mutableStateOf(false) }
-    var ocrProcessed by remember { mutableIntStateOf(0) }
-    var faceProcessed by remember { mutableIntStateOf(0) }
-    var ocrItemsPerMinute by remember { mutableIntStateOf(0) }
-    var faceItemsPerMinute by remember { mutableIntStateOf(0) }
-
-    var ocrRunning by remember { mutableStateOf(false) }
-    var ocrPaused by remember { mutableStateOf(false) }
-    var ocrJob by remember { mutableStateOf<Job?>(null) }
-    var ocrRunToken by remember { mutableIntStateOf(0) }
-    val ocrPauseSignal = remember { MutableStateFlow(false) }
-
-    var faceRunning by remember { mutableStateOf(false) }
-    var facePaused by remember { mutableStateOf(false) }
-    var faceJob by remember { mutableStateOf<Job?>(null) }
-    var faceRunToken by remember { mutableIntStateOf(0) }
-    val facePauseSignal = remember { MutableStateFlow(false) }
-
-    LaunchedEffect(photoUris) {
-        countsReady = false
-        val initialCounts = withContext(Dispatchers.IO) {
-            val ocrCount = photos.count { item ->
-                TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
-            }
-            val faceCount = faceStore.indexedMediaCount(photoUris)
-            ocrCount to faceCount
-        }
-        ocrProcessed = initialCounts.first.coerceIn(0, photos.size)
-        faceProcessed = initialCounts.second.coerceIn(0, photos.size)
-        countsReady = true
-    }
-
-    fun itemsPerMinute(processedThisRun: Int, startedAtMillis: Long): Int {
-        if (processedThisRun <= 0) return 0
-        val elapsed = (System.currentTimeMillis() - startedAtMillis).coerceAtLeast(1_000L)
-        return ((processedThisRun * 60_000.0) / elapsed).roundToInt().coerceAtLeast(1)
-    }
-
-    fun toggleOcr() {
-        if (!countsReady || photos.isEmpty() || ocrProcessed >= photos.size && !ocrRunning) return
-        if (ocrRunning) {
-            ocrPaused = !ocrPaused
-            ocrPauseSignal.value = ocrPaused
-            return
-        }
-
-        val runToken = ocrRunToken + 1
-        ocrRunToken = runToken
-        val baseProcessed = ocrProcessed
-        val startedAt = System.currentTimeMillis()
-        ocrPauseSignal.value = false
-        ocrPaused = false
-        ocrRunning = true
-        ocrJob = scope.launch {
-            var attempted = 0
-            try {
-                val pending = withContext(Dispatchers.IO) {
-                    photos.filterNot { item ->
-                        TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
-                    }
-                }
-                for (item in pending) {
-                    ocrPauseSignal.first { isPaused -> !isPaused }
-                    currentCoroutineContext().ensureActive()
-                    var finishedAttempt = false
-                    try {
-                        val uri = Uri.parse(item.uri)
-                        val recognized = withContext(Dispatchers.IO) {
-                            TesseractOcr.recognize(context, uri, ocrLanguages.toList().ifEmpty { listOf("eng") })
-                        }
-                        withContext(Dispatchers.IO) {
-                            TesseractOcr.saveCachedResult(context, uri, recognized)
-                        }
-                        finishedAttempt = true
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        // Continue past an unreadable image so a single bad file cannot
-                        // block the rest of the library from being scanned.
-                        finishedAttempt = true
-                    } finally {
-                        if (finishedAttempt) {
-                            attempted++
-                            if (ocrRunToken == runToken) {
-                                ocrProcessed = (baseProcessed + attempted).coerceAtMost(photos.size)
-                                ocrItemsPerMinute = itemsPerMinute(attempted, startedAt)
-                            }
-                        }
-                    }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } finally {
-                if (ocrRunToken == runToken) {
-                    ocrRunning = false
-                    ocrPaused = false
-                    ocrPauseSignal.value = false
-                    ocrJob = null
-                    // Use the cache as the source of truth after a normal finish.
-                    if (attempted == photos.size - baseProcessed) {
-                        ocrProcessed = withContext(NonCancellable + Dispatchers.IO) {
-                            photos.count { item ->
-                                TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
-                            }
-                        }.coerceIn(0, photos.size)
-                    }
-                }
-            }
-        }
-    }
-
-    fun stopOcr() {
-        ocrRunToken++
-        ocrPauseSignal.value = false
-        ocrJob?.cancel()
-        ocrJob = null
-        ocrRunning = false
-        ocrPaused = false
-    }
-
-    fun toggleFaceFinding() {
-        if (!countsReady || photos.isEmpty() || faceProcessed >= photos.size && !faceRunning) return
-        if (faceRunning) {
-            facePaused = !facePaused
-            facePauseSignal.value = facePaused
-            return
-        }
-
-        val runToken = faceRunToken + 1
-        faceRunToken = runToken
-        val baseProcessed = faceProcessed
-        val startedAt = System.currentTimeMillis()
-        facePauseSignal.value = false
-        facePaused = false
-        faceRunning = true
-        faceJob = scope.launch {
-            try {
-                FaceIndexingRepository(context.applicationContext).indexNewMedia(
-                    media = photos,
-                    store = faceStore,
-                    onProgress = { progress ->
-                        withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
-                            if (faceRunToken == runToken) {
-                                faceProcessed = (baseProcessed + progress.processed).coerceAtMost(photos.size)
-                                faceItemsPerMinute = itemsPerMinute(progress.processed, startedAt)
-                            }
-                        }
-                    },
-                    awaitIfResumed = {
-                        facePauseSignal.first { isPaused -> !isPaused }
-                        currentCoroutineContext().ensureActive()
-                    }
-                )
-                if (faceRunToken == runToken) {
-                    faceProcessed = withContext(NonCancellable + Dispatchers.IO) {
-                        faceStore.indexedMediaCount(photoUris)
-                    }.coerceIn(0, photos.size)
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // Keep current progress visible; Play retries failed and unindexed images.
-            } finally {
-                if (faceRunToken == runToken) {
-                    faceRunning = false
-                    facePaused = false
-                    facePauseSignal.value = false
-                    faceJob = null
-                }
-            }
-        }
-    }
-
-    fun stopFaceFinding() {
-        faceRunToken++
-        facePauseSignal.value = false
-        faceJob?.cancel()
-        faceJob = null
-        faceRunning = false
-        facePaused = false
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(pageBackground)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        IndexingProgressCard(
-            title = "OCR",
-            icon = Icons.Default.DocumentScanner,
-            processed = ocrProcessed,
-            total = photos.size,
-            itemsPerMinute = ocrItemsPerMinute,
-            running = ocrRunning,
-            paused = ocrPaused,
-            enabled = countsReady && photos.isNotEmpty() && (ocrRunning || ocrProcessed < photos.size),
-            onPlayPause = ::toggleOcr,
-            onStop = ::stopOcr
-        )
-        IndexingProgressCard(
-            title = "Face Finding",
-            icon = Icons.Default.Face,
-            processed = faceProcessed,
-            total = photos.size,
-            itemsPerMinute = faceItemsPerMinute,
-            running = faceRunning,
-            paused = facePaused,
-            enabled = countsReady && photos.isNotEmpty() && (faceRunning || faceProcessed < photos.size),
-            onPlayPause = ::toggleFaceFinding,
-            onStop = ::stopFaceFinding
-        )
-    }
-}
-
-@Composable
-private fun IndexingProgressCard(
-    title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    processed: Int,
-    total: Int,
-    itemsPerMinute: Int,
-    running: Boolean,
-    paused: Boolean,
-    enabled: Boolean,
-    onPlayPause: () -> Unit,
-    onStop: () -> Unit
-) {
-    val colors = MaterialTheme.colorScheme
-    val progress = if (total > 0) (processed.toFloat() / total).coerceIn(0f, 1f) else 0f
-    val percent = (progress * 100f).roundToInt()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (colors.background.luminance() > 0.5f) Color.White else colors.surface)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = colors.onSurface)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = colors.onSurface, maxLines = 1)
-                Text(
-                    "${NumberFormat.getIntegerInstance(Locale.getDefault()).format(processed)} / ${NumberFormat.getIntegerInstance(Locale.getDefault()).format(total)} images",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "$percent%",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.onSurface
-            )
-        }
-
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(CircleShape),
-            color = colors.onSurface,
-            trackColor = if (colors.background.luminance() > 0.5f) Color(0xFFE2E2E2) else colors.onSurface.copy(alpha = 0.16f)
-        )
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "$itemsPerMinute items/min",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            IndexingControlButton(
-                icon = if (running && !paused) Icons.Default.Pause else Icons.Default.PlayArrow,
-                description = when {
-                    running && !paused -> "Pause $title"
-                    running && paused -> "Resume $title"
-                    else -> "Start $title"
-                },
-                enabled = enabled,
-                onClick = onPlayPause
-            )
-            Spacer(Modifier.width(8.dp))
-            IndexingControlButton(
-                icon = Icons.Default.Stop,
-                description = "Stop $title",
-                enabled = running,
-                onClick = onStop
-            )
-        }
-    }
-}
-
-@Composable
-private fun IndexingControlButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    description: String,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    val colors = MaterialTheme.colorScheme
     Box(
         modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(
-                (if (colors.background.luminance() > 0.5f) Color(0xFFF0F0F0) else colors.onSurface.copy(alpha = 0.10f))
-                    .copy(alpha = if (enabled) 1f else 0.65f)
-            )
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
+            .fillMaxSize()
+            .statusBarsPadding()
     ) {
-        Icon(
-            icon,
-            contentDescription = description,
-            modifier = Modifier.size(18.dp),
-            tint = colors.onSurface.copy(alpha = if (enabled) 1f else 0.45f)
-        )
+        Surface(
+            modifier = Modifier
+                .padding(start = 16.dp, top = 12.dp)
+                .size(48.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            tonalElevation = 3.dp,
+            shadowElevation = 3.dp
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            }
+        }
     }
 }
-
 
 @Composable
 private fun IndexingMetric(label: String, value: String, modifier: Modifier = Modifier) {
@@ -6913,170 +6369,155 @@ private fun PeopleScreen(
     onOpenMedia: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val store = remember { FaceClusterStore(context.applicationContext) }
     val photoByUri = remember(media) { media.associateBy { it.uri } }
-    var clusters by remember { mutableStateOf(emptyList<com.amresalehin.emregallery.face.FaceClusterSummary>()) }
+    var clusters by remember { mutableStateOf(store.summaries()) }
     var selectedCluster by remember { mutableStateOf<String?>(null) }
     var renameCluster by remember { mutableStateOf<String?>(null) }
     var renameValue by remember { mutableStateOf("") }
-    var searchQuery by remember { mutableStateOf("") }
-    var showPets by remember { mutableStateOf(false) }
 
     fun reload() {
         clusters = store.summaries()
     }
 
-    LaunchedEffect(store) { reload() }
-
-    val filteredClusters = remember(clusters, searchQuery) {
-        clusters.filter { it.displayName.contains(searchQuery.trim(), ignoreCase = true) }
-    }
-    val activeCluster = clusters.firstOrNull { it.id == selectedCluster }
-
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        if (selectedCluster != null) {
+            Surface(
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                tonalElevation = 2.dp
+            ) {
+                Text(
+                    clusters.firstOrNull { it.id == selectedCluster }?.displayName ?: "Person",
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Surface(
+            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 16.dp, top = 8.dp).size(48.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            tonalElevation = 3.dp,
+            shadowElevation = 3.dp
+        ) {
+            IconButton(onClick = { if (selectedCluster == null) onBack() else selectedCluster = null }) {
+                Icon(Icons.Default.ArrowBack, contentDescription = if (selectedCluster == null) "Back to Albums" else "Back to people")
+            }
+        }
+        Surface(
+            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(end = 16.dp, top = 8.dp).size(48.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+            tonalElevation = 3.dp,
+            shadowElevation = 3.dp
+        ) {
+            IconButton(onClick = { reload() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh people")
+            }
+        }
+
+        Box(Modifier.fillMaxSize().padding(top = 4.dp)) {
         if (selectedCluster == null) {
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            if (clusters.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "People & pets",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold
+                        "No people found",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    IconButton(onClick = { reload() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh people")
-                    }
                 }
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    placeholder = { Text("Search people") },
-                    shape = RoundedCornerShape(28.dp)
-                )
-                Spacer(Modifier.height(12.dp))
-                ScrollableTabRow(
-                    selectedTabIndex = if (showPets) 1 else 0,
-                    edgePadding = 16.dp,
-                    divider = {}
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(112.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
-                    Tab(selected = !showPets, onClick = { showPets = false }, text = { Text("People") })
-                    Tab(selected = showPets, onClick = { showPets = true }, text = { Text("Pets") })
-                }
-                if (showPets) {
-                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Pets, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("Pet recognition isn't available yet", style = MaterialTheme.typography.titleMedium)
-                            Text("Pet groups will appear here when pet detection and grouping are implemented.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                } else if (filteredClusters.isEmpty()) {
-                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(if (clusters.isEmpty()) "No people indexed yet" else "No matching people", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                if (clusters.isEmpty()) "Run Face Finding from Index Status to discover people in your photos."
-                                else "Try a different name.",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(112.dp),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(18.dp)
-                    ) {
-                        gridItems(filteredClusters, key = { it.id }) { cluster ->
-                            Column(
-                                modifier = Modifier.fillMaxWidth().clickable { selectedCluster = cluster.id },
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                if (cluster.sampleUri != null) {
-                                    AsyncImage(
-                                        model = cluster.sampleUri,
-                                        contentDescription = cluster.displayName,
-                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                } else {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHighest
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(36.dp))
-                                        }
+                    gridItems(clusters, key = { it.id }) { cluster ->
+                        Column(
+                            modifier = Modifier.fillMaxWidth().clickable { selectedCluster = cluster.id },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            if (cluster.sampleUri != null) {
+                                AsyncImage(
+                                    model = cluster.sampleUri,
+                                    contentDescription = cluster.displayName,
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(36.dp))
                                     }
                                 }
-                                Spacer(Modifier.height(8.dp))
-                                Text(cluster.displayName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${cluster.faceCount} photos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                cluster.displayName,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                "${cluster.faceCount} photos",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            TextButton(
+                                onClick = { renameCluster = cluster.id; renameValue = cluster.displayName },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text("Rename", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
                 }
             }
         } else {
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            val faceRows = remember(selectedCluster, clusters) {
+                selectedCluster?.let { store.facesForCluster(it) }.orEmpty()
+            }
+            val groupedMedia = faceRows.mapNotNull { photoByUri[it.mediaUri] }.distinctBy { it.uri }
+            if (groupedMedia.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No photos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(2.dp, 4.dp, 2.dp, 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
-                    IconButton(onClick = { selectedCluster = null }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back to people")
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(activeCluster?.displayName ?: "Person", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${activeCluster?.faceCount ?: 0} faces", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClick = { reload() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh person")
-                    }
-                    IconButton(onClick = { activeCluster?.let { renameCluster = it.id; renameValue = it.displayName } }) {
-                        Icon(Icons.Default.Edit, contentDescription = "Rename person")
-                    }
-                }
-                val faceRows = remember(selectedCluster, clusters) {
-                    selectedCluster?.let { store.facesForCluster(it) }.orEmpty()
-                }
-                val groupedMedia = faceRows.mapNotNull { photoByUri[it.mediaUri] }.distinctBy { it.uri }
-                if (groupedMedia.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("No photos found for this person", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(2.dp, 4.dp, 2.dp, 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        gridItems(groupedMedia, key = { it.uri }) { item ->
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(Uri.parse(item.uri)).crossfade(false).build(),
-                                contentDescription = item.name,
-                                modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onOpenMedia(item) },
-                                contentScale = ContentScale.Crop
-                            )
-                        }
+                    gridItems(groupedMedia, key = { it.uri }) { item ->
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(Uri.parse(item.uri)).crossfade(false).build(),
+                            contentDescription = item.name,
+                            modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onOpenMedia(item) },
+                            contentScale = ContentScale.Crop
+                        )
                     }
                 }
             }
         }
+    }
     }
 
     if (renameCluster != null) {

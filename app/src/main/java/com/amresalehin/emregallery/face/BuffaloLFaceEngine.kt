@@ -474,9 +474,14 @@ class BuffaloLFaceEngine private constructor(
         }
 
         fun open(context: Context): BuffaloLFaceEngine {
-            if (!isModelInstalled(context)) installBundledModel(context)
+            if (!isModelInstalled(context)) {
+                runCatching { installBundledModel(context) }
+            }
+            if (!isModelInstalled(context)) {
+                runCatching { downloadModel(context) }
+            }
             check(isModelInstalled(context)) {
-                "The complete buffalo_l pack is not installed. Rebuild the app with the bundled model assets."
+                "The complete buffalo_l pack is not installed."
             }
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             val options = OrtSession.SessionOptions().apply {

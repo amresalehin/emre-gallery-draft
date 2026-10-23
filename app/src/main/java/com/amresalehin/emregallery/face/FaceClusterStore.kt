@@ -208,20 +208,6 @@ class FaceClusterStore(context: Context) :
         readableDatabase.rawQuery("SELECT COUNT(*) FROM indexed_media WHERE status='done'", null)
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
-    /** Counts successfully indexed media only within the supplied library scope. */
-    @Synchronized
-    fun indexedMediaCount(mediaUris: List<String>): Int {
-        val uniqueUris = mediaUris.distinct()
-        if (uniqueUris.isEmpty()) return 0
-        return uniqueUris.chunked(800).sumOf { batch ->
-            val placeholders = batch.joinToString(",") { "?" }
-            readableDatabase.rawQuery(
-                "SELECT COUNT(*) FROM indexed_media WHERE status='done' AND media_uri IN ($placeholders)",
-                batch.toTypedArray()
-            ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
-        }
-    }
-
     @Synchronized
     fun indexedFaceCount(): Int =
         readableDatabase.rawQuery("SELECT COUNT(*) FROM faces", null)

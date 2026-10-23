@@ -26,10 +26,6 @@ object TesseractOcr {
         return File(directory, "${digest}.txt")
     }
 
-    /** Returns true only when an OCR result for this exact media URI is cached. */
-    fun hasCachedResult(context: Context, uri: Uri): Boolean =
-        runCatching { cacheFile(context, uri).let { it.isFile && it.length() >= 0L } }.getOrDefault(false)
-
     /** Returns previously recognized text for this media URI, or null if not cached. */
     fun readCachedResult(context: Context, uri: Uri): String? =
         runCatching {
@@ -184,10 +180,39 @@ object TesseractOcr {
         }
         val temporary = File(parent, "$code.traineddata.tmp_${System.currentTimeMillis()}")
         try {
-            context.assets.open("tessdata/$code.traineddata").use { input ->
-                temporary.outputStream().use { output -> input.copyTo(output) }
+            var loaded = false
+            try {
+                context.assets.open("tessdata/$code.traineddata").use { input ->
+                    temporary.outputStream().use { output -> input.copyTo(output) }
+                }
+                loaded = temporary.length() >= 1024
+            } catch (_: Exception) {
+                loaded = false
             }
-            if (temporary.length() < 1024) error("Bundled $code language data is missing or incomplete.")
+
+            if (!loaded) {
+                // Download on-demand from official tessdata_fast repository
+                val connection = java.net.URL(
+                    "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$code.traineddata"
+                ).openConnection() as java.net.HttpURLConnection
+                connection.connectTimeout = 15000
+                connection.readTimeout = 45000
+                connection.instanceFollowRedirects = true
+                try {
+                    connection.connect()
+                    if (connection.responseCode == java.net.HttpURLConnection.HTTP_OK) {
+                        connection.inputStream.use { input ->
+                            temporary.outputStream().use { output -> input.copyTo(output) }
+                        }
+                    } else {
+                        error("HTTP ${connection.responseCode}")
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }
+
+            if (temporary.length() < 1024) error("Language data for '$code' is missing or incomplete.")
             if (destination.exists()) {
                 destination.delete()
             }
@@ -198,7 +223,7 @@ object TesseractOcr {
         } catch (e: Exception) {
             temporary.delete()
             throw IllegalStateException(
-                "Bundled OCR data for '$code' is unavailable: ${e.message}",
+                "OCR data for '$code' is unavailable: ${e.message}",
                 e
             )
         }

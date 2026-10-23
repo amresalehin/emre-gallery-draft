@@ -3,10 +3,7 @@ package com.amresalehin.emregallery.face
 import android.content.Context
 import android.net.Uri
 import com.amresalehin.emregallery.data.MediaItem
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 data class FaceIndexingProgress(
@@ -25,8 +22,7 @@ class FaceIndexingRepository(private val context: Context) {
     suspend fun indexNewMedia(
         media: List<MediaItem>,
         store: FaceClusterStore,
-        onProgress: suspend (FaceIndexingProgress) -> Unit = {},
-        awaitIfResumed: suspend () -> Unit = {}
+        onProgress: (FaceIndexingProgress) -> Unit = {}
     ): FaceIndexingProgress = withContext(Dispatchers.IO) {
         val photos = media.filterNot { it.isVideo }
         val pending = photos.filterNot { store.isMediaIndexed(it.uri) }
@@ -36,11 +32,7 @@ class FaceIndexingRepository(private val context: Context) {
         var engine: BuffaloLFaceEngine? = null
         try {
             if (pending.isNotEmpty()) engine = BuffaloLFaceEngine.open(context)
-            for (item in pending) {
-                // Pause and stop take effect between images. A currently-running native ONNX
-                // inference is allowed to finish before the next checkpoint.
-                awaitIfResumed()
-                currentCoroutineContext().ensureActive()
+            pending.forEach { item ->
                 try {
                     val detections = engine!!.embed(Uri.parse(item.uri))
                     detections.forEach { face ->
@@ -48,8 +40,6 @@ class FaceIndexingRepository(private val context: Context) {
                     }
                     store.markMediaIndexed(item.uri, detections.size)
                     facesFound += detections.size
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
                 } catch (_: Exception) {
                     store.markMediaFailed(item.uri)
                     failed++
