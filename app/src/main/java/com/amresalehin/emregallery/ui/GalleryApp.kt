@@ -520,6 +520,7 @@ fun GalleryApp() {
                         onOpenPeople = { destination = Destination.PEOPLE }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
+                        media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         currentLanguages = ocrLanguagesPref,
                         onLanguagesChange = { newLangs ->
                             scope.launch { prefs.setOcrLanguages(newLangs) }
@@ -5655,6 +5656,7 @@ private fun DeviceFoldersScreen(
 
 @Composable
 private fun OcrSettingsScreen(
+    media: List<MediaItem>,
     currentLanguages: Set<String>,
     onLanguagesChange: (Set<String>) -> Unit,
     onBack: () -> Unit
@@ -5671,6 +5673,10 @@ private fun OcrSettingsScreen(
         mutableIntStateOf(TesseractOcr.cachedResultCount(context))
     }
     var preparingModels by remember { mutableStateOf(false) }
+    var scanningPhotos by remember { mutableStateOf(false) }
+    var scanProgress by remember { mutableIntStateOf(0) }
+    var scanTotal by remember { mutableIntStateOf(0) }
+    var scanFailures by remember { mutableIntStateOf(0) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var statusError by remember { mutableStateOf(false) }
@@ -5678,6 +5684,59 @@ private fun OcrSettingsScreen(
     fun reloadOcrStatus() {
         installedLanguages = TesseractOcr.installedLanguages(context)
         cachedResults = TesseractOcr.cachedResultCount(context)
+    }
+
+    fun startOcrScan() {
+        scanningPhotos = true
+        scanProgress = 0
+        scanTotal = 0
+        scanFailures = 0
+        statusMessage = null
+        statusError = false
+        val photos = media.filterNot { it.isVideo }
+        scope.launch {
+            try {
+                val pending = withContext(Dispatchers.IO) {
+                    photos.filter { item ->
+                        TesseractOcr.readCachedResult(context.applicationContext, Uri.parse(item.uri)) == null
+                    }
+                }
+                scanTotal = pending.size
+                if (pending.isEmpty()) {
+                    statusMessage = "All available photos already have saved OCR results."
+                } else {
+                    pending.forEach { item ->
+                        val succeeded = withContext(Dispatchers.IO) {
+                            runCatching {
+                                val recognized = TesseractOcr.recognize(
+                                    context.applicationContext,
+                                    Uri.parse(item.uri),
+                                    selectedLanguages.toList()
+                                )
+                                TesseractOcr.saveCachedResult(context.applicationContext, Uri.parse(item.uri), recognized)
+                            }.isSuccess
+                        }
+                        scanProgress++
+                        if (!succeeded) scanFailures++
+                        cachedResults = withContext(Dispatchers.IO) {
+                            TesseractOcr.cachedResultCount(context.applicationContext)
+                        }
+                    }
+                    statusError = scanFailures > 0
+                    statusMessage = if (scanFailures == 0) {
+                        "OCR scan completed. Text results are saved on this device."
+                    } else {
+                        "OCR scan completed with $scanFailures failed photo(s). Open a photo to retry OCR."
+                    }
+                }
+                reloadOcrStatus()
+            } catch (e: Exception) {
+                statusError = true
+                statusMessage = e.message ?: "OCR scan failed."
+            } finally {
+                scanningPhotos = false
+            }
+        }
     }
 
     Column(
@@ -5754,9 +5813,17 @@ private fun OcrSettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (preparingModels) {
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Text("Preparing selected language data…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (preparingModels || scanningPhotos) {
+                        LinearProgressIndicator(
+                            progress = { if (scanningPhotos && scanTotal > 0) scanProgress.toFloat() / scanTotal else 0f },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text(
+                            if (scanningPhotos) "Scanned $scanProgress of $scanTotal pending photos · $scanFailures failed"
+                            else "Preparing selected language data…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     statusMessage?.let {
                         Text(it, style = MaterialTheme.typography.bodySmall, color = if (statusError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
@@ -5782,7 +5849,7 @@ private fun OcrSettingsScreen(
                                 }
                             }
                         },
-                        enabled = !preparingModels,
+                        enabled = !preparingModels && !scanningPhotos,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.DownloadDone, contentDescription = null)
@@ -5816,7 +5883,7 @@ private fun OcrSettingsScreen(
                         selectedLanguages = defaultSet
                         onLanguagesChange(defaultSet)
                     },
-                    enabled = !preparingModels
+                    enabled = !preparingModels && !scanningPhotos
                 ) { Text("Reset") }
             }
 
