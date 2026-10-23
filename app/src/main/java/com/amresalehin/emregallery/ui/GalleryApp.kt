@@ -85,6 +85,7 @@ import java.util.Date
 import java.util.Locale
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
@@ -4023,6 +4024,18 @@ private class PhotoHeatmapOverlay(
     }
 }
 
+private fun satelliteTileSource(): XYTileSource = XYTileSource(
+    "EsriWorldImagery",
+    1,
+    19,
+    256,
+    ".jpg",
+    arrayOf(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/"
+    ),
+    "Esri World Imagery"
+)
+
 @Composable
 private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
     val context = LocalContext.current
@@ -4041,6 +4054,8 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
     var scanProgress by remember { mutableIntStateOf(0) }
     var scanTotal by remember { mutableIntStateOf(0) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
+    var mapLayer by remember { mutableStateOf("Standard") }
+    var showMapLayerMenu by remember { mutableStateOf(false) }
     var sheetExpanded by remember { mutableStateOf(false) }
     var visibleBounds by remember { mutableStateOf<org.osmdroid.util.BoundingBox?>(null) }
     var mapFramed by remember { mutableStateOf(false) }
@@ -4163,7 +4178,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
             factory = { ctx ->
                 Configuration.getInstance().userAgentValue = ctx.packageName
                 MapView(ctx).apply {
-                    setTileSource(TileSourceFactory.MAPNIK)
+                    setTileSource(if (mapLayer == "Satellite") satelliteTileSource() else TileSourceFactory.MAPNIK)
                     setMultiTouchControls(true)
                     controller.setZoom(3.0)
                     controller.setCenter(GeoPoint(20.5937, 78.9629))
@@ -4219,6 +4234,51 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Surface(onClick = onBack, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+            Box {
+                Surface(
+                    onClick = { showMapLayerMenu = true },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+                    shadowElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Layers, contentDescription = "Map layers", tint = MaterialTheme.colorScheme.primary)
+                        Text(mapLayer, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
+                        Icon(Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                DropdownMenu(
+                    expanded = showMapLayerMenu,
+                    onDismissRequest = { showMapLayerMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Standard map") },
+                        leadingIcon = { Icon(Icons.Default.Map, contentDescription = null) },
+                        trailingIcon = { if (mapLayer == "Standard") Icon(Icons.Default.Check, contentDescription = "Selected") },
+                        onClick = {
+                            mapLayer = "Standard"
+                            mapRef?.setTileSource(TileSourceFactory.MAPNIK)
+                            mapRef?.invalidate()
+                            showMapLayerMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Satellite") },
+                        leadingIcon = { Icon(Icons.Default.SatelliteAlt, contentDescription = null) },
+                        trailingIcon = { if (mapLayer == "Satellite") Icon(Icons.Default.Check, contentDescription = "Selected") },
+                        onClick = {
+                            mapLayer = "Satellite"
+                            mapRef?.setTileSource(satelliteTileSource())
+                            mapRef?.invalidate()
+                            showMapLayerMenu = false
+                        }
+                    )
+                }
             }
             Surface(
                 onClick = {
