@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -50,6 +51,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -57,6 +59,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.testTag
@@ -1608,6 +1612,10 @@ private fun HomeScreen(
     val context = LocalContext.current
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     val selectionMode = selectedUris.isNotEmpty()
+    val itemBounds = remember { mutableStateMapOf<String, Rect>() }
+    var dragSelectionActive by remember { mutableStateOf(false) }
+    var lastDragUri by remember { mutableStateOf<String?>(null) }
+    val homeRootBounds = remember { mutableStateOf<Rect?>(null) }
     var granted by remember { mutableStateOf(hasMediaPermission(context)) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val hasPermission = hasMediaPermission(context)
@@ -1650,7 +1658,9 @@ private fun HomeScreen(
     }
 
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier.fillMaxSize().onGloballyPositioned { homeRootBounds.value = it.boundsInRoot() }
+    ) {
     LazyColumn(
         state = homeListState,
         modifier = Modifier.fillMaxSize(),
@@ -1827,8 +1837,25 @@ private fun HomeScreen(
                         rowIndex = rowIndex,
                         isSquare = (gridStyle == "square"),
                         selectedUris = selectedUris,
-                        onLongPress = { item -> selectedUris = selectedUris + item.uri },
+                        onLongPress = { item -> selectedUris = selectedUris + item.uri; dragSelectionActive = true; lastDragUri = item.uri },
                         onToggleSelection = { item -> selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri },
+                        onDragSelect = { item, rootPosition ->
+                            if (dragSelectionActive) {
+                                val hit = itemBounds.entries.firstOrNull { (_, bounds) -> bounds.contains(rootPosition) }?.key
+                                if (hit != null && hit != lastDragUri) {
+                                    selectedUris = selectedUris + hit
+                                    lastDragUri = hit
+                                }
+                                val root = homeRootBounds.value
+                                if (root != null) {
+                                    val edge = 56.dp.value * context.resources.displayMetrics.density
+                                    if (rootPosition.y < root.top + edge) scope.launch { homeListState.scrollBy(-22f) }
+                                    else if (rootPosition.y > root.bottom - edge) scope.launch { homeListState.scrollBy(22f) }
+                                }
+                            }
+                        },
+                        onDragEnd = { dragSelectionActive = false; lastDragUri = null },
+                        onBoundsChanged = { item, bounds -> itemBounds[item.uri] = bounds },
                         onOpen = { item -> if (selectionMode) { selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri } else onOpen(item) }
                     )
                 }
@@ -2361,6 +2388,9 @@ private fun JustifiedMosaicRow(
     selectedUris: Set<String> = emptySet(),
     onLongPress: (MediaItem) -> Unit = {},
     onToggleSelection: (MediaItem) -> Unit = {},
+    onDragSelect: (MediaItem, Offset) -> Unit = { _, _ -> },
+    onDragEnd: () -> Unit = {},
+    onBoundsChanged: (MediaItem, Rect) -> Unit = { _, _ -> },
     onOpen: (MediaItem) -> Unit
 ) {
     if (items.isEmpty()) return
@@ -2400,6 +2430,9 @@ private fun JustifiedMosaicRow(
                     selected = item.uri in selectedUris,
                     onLongPress = { onLongPress(item) },
                     onToggleSelection = { onToggleSelection(item) },
+                    onDragSelect = { position -> onDragSelect(item, position) },
+                    onDragEnd = onDragEnd,
+                    onBoundsChanged = { bounds -> onBoundsChanged(item, bounds) },
                     onOpen = onOpen
                 )
             }
@@ -2414,6 +2447,9 @@ private fun MosaicMediaItem(
     selected: Boolean = false,
     onLongPress: () -> Unit = {},
     onToggleSelection: () -> Unit = {},
+    onDragSelect: (Offset) -> Unit = {},
+    onDragEnd: () -> Unit = {},
+    onBoundsChanged: (Rect) -> Unit = {},
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -2428,8 +2464,13 @@ private fun MosaicMediaItem(
             .build()
     }
 
+    var tileBounds by remember(item.uri) { mutableStateOf<Rect?>(null) }
     Box(
-        modifier = modifier
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            val bounds = coordinates.boundsInRoot()
+            tileBounds = bounds
+            onBoundsChanged(bounds)
+        }
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(
@@ -2443,6 +2484,24 @@ private fun MosaicMediaItem(
                 onClick = { if (selected) onToggleSelection() else onOpen(item) },
                 onLongClick = { onLongPress() }
             )
+            .pointerInput(item.uri, tileBounds) {
+                var dragging = false
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { position ->
+                        dragging = true
+                        onLongPress()
+                        val bounds = tileBounds
+                        if (bounds != null) onDragSelect(Offset(bounds.left + position.x, bounds.top + position.y))
+                    },
+                    onDragEnd = { if (dragging) onDragEnd(); dragging = false },
+                    onDragCancel = { if (dragging) onDragEnd(); dragging = false },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val bounds = tileBounds
+                        if (bounds != null) onDragSelect(Offset(bounds.left + change.position.x, bounds.top + change.position.y))
+                    }
+                )
+            }
     ) {
         AsyncImage(
             model = imageRequest,
