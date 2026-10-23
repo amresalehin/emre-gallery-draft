@@ -27,7 +27,6 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.calculateCentroid
@@ -1620,13 +1619,7 @@ private fun HomeScreen(
     val homeScope = rememberCoroutineScope()
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
-    var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
-    var pinchPreviewScale by remember { mutableFloatStateOf(1f) }
-    val animatedPinchPreviewScale by animateFloatAsState(
-        targetValue = pinchPreviewScale,
-        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-        label = "grid_pinch_scale"
-    )
+    val pinchScaleAnimation = remember { Animatable(1f) }
     val selectionMode = selectedUris.isNotEmpty()
     val itemBounds = remember { mutableStateMapOf<String, Rect>() }
     var dragSelectionActive by remember { mutableStateOf(false) }
@@ -1682,8 +1675,8 @@ private fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
-                scaleX = animatedPinchPreviewScale
-                scaleY = animatedPinchPreviewScale
+                scaleX = pinchScaleAnimation.value
+                scaleY = pinchScaleAnimation.value
             }
             .pointerInput(Unit) {
                 awaitEachGesture {
@@ -1696,7 +1689,7 @@ private fun HomeScreen(
                             val zoom = event.calculateZoom()
                             if (zoom.isFinite() && zoom > 0f && zoom != 1f) {
                                 gestureZoom = (gestureZoom * zoom).coerceIn(0.72f, 1.38f)
-                                pinchPreviewScale = gestureZoom
+                                pinchScaleAnimation.snapTo(gestureZoom)
                                 didPinch = true
                                 event.changes.forEach { if (it.pressed) it.consume() }
                             }
@@ -1716,8 +1709,10 @@ private fun HomeScreen(
                                 pinchGridColumns = (pinchGridColumns - steps).coerceAtLeast(1)
                             }
                         }
-                        pinchZoomRemainder = 1f
-                        pinchPreviewScale = 1f
+                        pinchScaleAnimation.animateTo(
+                            targetValue = 1f,
+                            animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                        )
                     }
                 }
             },
