@@ -6913,155 +6913,170 @@ private fun PeopleScreen(
     onOpenMedia: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val store = remember { FaceClusterStore(context.applicationContext) }
     val photoByUri = remember(media) { media.associateBy { it.uri } }
-    var clusters by remember { mutableStateOf(store.summaries()) }
+    var clusters by remember { mutableStateOf(emptyList<com.amresalehin.emregallery.face.FaceClusterSummary>()) }
     var selectedCluster by remember { mutableStateOf<String?>(null) }
     var renameCluster by remember { mutableStateOf<String?>(null) }
     var renameValue by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
+    var showPets by remember { mutableStateOf(false) }
 
     fun reload() {
         clusters = store.summaries()
     }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        if (selectedCluster != null) {
-            Surface(
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                tonalElevation = 2.dp
-            ) {
-                Text(
-                    clusters.firstOrNull { it.id == selectedCluster }?.displayName ?: "Person",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-        Surface(
-            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 16.dp, top = 8.dp).size(48.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-            tonalElevation = 3.dp,
-            shadowElevation = 3.dp
-        ) {
-            IconButton(onClick = { if (selectedCluster == null) onBack() else selectedCluster = null }) {
-                Icon(Icons.Default.ArrowBack, contentDescription = if (selectedCluster == null) "Back to Albums" else "Back to people")
-            }
-        }
-        Surface(
-            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(end = 16.dp, top = 8.dp).size(48.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-            tonalElevation = 3.dp,
-            shadowElevation = 3.dp
-        ) {
-            IconButton(onClick = { reload() }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh people")
-            }
-        }
+    LaunchedEffect(store) { reload() }
 
-        Box(Modifier.fillMaxSize().padding(top = 4.dp)) {
+    val filteredClusters = remember(clusters, searchQuery) {
+        clusters.filter { it.displayName.contains(searchQuery.trim(), ignoreCase = true) }
+    }
+    val activeCluster = clusters.firstOrNull { it.id == selectedCluster }
+
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (selectedCluster == null) {
-            if (clusters.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize().padding(24.dp),
-                    contentAlignment = Alignment.Center
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "No people found",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        "People & pets",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold
                     )
+                    IconButton(onClick = { reload() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh people")
+                    }
                 }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(112.dp),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    placeholder = { Text("Search people") },
+                    shape = RoundedCornerShape(28.dp)
+                )
+                Spacer(Modifier.height(12.dp))
+                ScrollableTabRow(
+                    selectedTabIndex = if (showPets) 1 else 0,
+                    edgePadding = 16.dp,
+                    divider = {}
                 ) {
-                    gridItems(clusters, key = { it.id }) { cluster ->
-                        Column(
-                            modifier = Modifier.fillMaxWidth().clickable { selectedCluster = cluster.id },
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            if (cluster.sampleUri != null) {
-                                AsyncImage(
-                                    model = cluster.sampleUri,
-                                    contentDescription = cluster.displayName,
-                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Surface(
-                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(36.dp))
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
+                    Tab(selected = !showPets, onClick = { showPets = false }, text = { Text("People") })
+                    Tab(selected = showPets, onClick = { showPets = true }, text = { Text("Pets") })
+                }
+                if (showPets) {
+                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Pets, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Pet recognition isn't available yet", style = MaterialTheme.typography.titleMedium)
+                            Text("Pet groups will appear here when pet detection and grouping are implemented.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else if (filteredClusters.isEmpty()) {
+                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if (clusters.isEmpty()) "No people indexed yet" else "No matching people", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                cluster.displayName,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                "${cluster.faceCount} photos",
-                                style = MaterialTheme.typography.bodySmall,
+                                if (clusters.isEmpty()) "Run Face Finding from Index Status to discover people in your photos."
+                                else "Try a different name.",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            TextButton(
-                                onClick = { renameCluster = cluster.id; renameValue = cluster.displayName },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        }
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(112.dp),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                    ) {
+                        gridItems(filteredClusters, key = { it.id }) { cluster ->
+                            Column(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedCluster = cluster.id },
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("Rename", style = MaterialTheme.typography.labelMedium)
+                                if (cluster.sampleUri != null) {
+                                    AsyncImage(
+                                        model = cluster.sampleUri,
+                                        contentDescription = cluster.displayName,
+                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(36.dp))
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Text(cluster.displayName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${cluster.faceCount} photos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
             }
         } else {
-            val faceRows = remember(selectedCluster, clusters) {
-                selectedCluster?.let { store.facesForCluster(it) }.orEmpty()
-            }
-            val groupedMedia = faceRows.mapNotNull { photoByUri[it.mediaUri] }.distinctBy { it.uri }
-            if (groupedMedia.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No photos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(2.dp, 4.dp, 2.dp, 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    gridItems(groupedMedia, key = { it.uri }) { item ->
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(Uri.parse(item.uri)).crossfade(false).build(),
-                            contentDescription = item.name,
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onOpenMedia(item) },
-                            contentScale = ContentScale.Crop
-                        )
+                    IconButton(onClick = { selectedCluster = null }) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back to people")
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(activeCluster?.displayName ?: "Person", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("${activeCluster?.faceCount ?: 0} faces", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClick = { reload() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh person")
+                    }
+                    IconButton(onClick = { activeCluster?.let { renameCluster = it.id; renameValue = it.displayName } }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Rename person")
+                    }
+                }
+                val faceRows = remember(selectedCluster, clusters) {
+                    selectedCluster?.let { store.facesForCluster(it) }.orEmpty()
+                }
+                val groupedMedia = faceRows.mapNotNull { photoByUri[it.mediaUri] }.distinctBy { it.uri }
+                if (groupedMedia.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No photos found for this person", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(2.dp, 4.dp, 2.dp, 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        gridItems(groupedMedia, key = { it.uri }) { item ->
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(Uri.parse(item.uri)).crossfade(false).build(),
+                                contentDescription = item.name,
+                                modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onOpenMedia(item) },
+                                contentScale = ContentScale.Crop
+                            )
+                        }
                     }
                 }
             }
         }
-    }
     }
 
     if (renameCluster != null) {
