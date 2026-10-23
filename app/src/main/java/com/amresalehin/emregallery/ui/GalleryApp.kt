@@ -1610,6 +1610,7 @@ private fun HomeScreen(
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
+    val homeScope = rememberCoroutineScope()
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     val selectionMode = selectedUris.isNotEmpty()
     val itemBounds = remember { mutableStateMapOf<String, Rect>() }
@@ -1849,8 +1850,8 @@ private fun HomeScreen(
                                 val root = homeRootBounds.value
                                 if (root != null) {
                                     val edge = 56.dp.value * context.resources.displayMetrics.density
-                                    if (rootPosition.y < root.top + edge) scope.launch { homeListState.scrollBy(-22f) }
-                                    else if (rootPosition.y > root.bottom - edge) scope.launch { homeListState.scrollBy(22f) }
+                                    if (rootPosition.y < root.top + edge) homeScope.launch { homeListState.scrollBy(-22f) }
+                                    else if (rootPosition.y > root.bottom - edge) homeScope.launch { homeListState.scrollBy(22f) }
                                 }
                             }
                         },
