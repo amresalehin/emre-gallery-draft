@@ -376,7 +376,7 @@ fun GalleryApp() {
                         gridStyle = gridStylePref,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onClearAlbumFilter = { albumFilter = null },
+                        onClearAlbumFilter = { albumFilter = null; destination = albumFilterReturnDestination },
                         onAddPhotosToAlbum = if (activeCustomAlbum != null) { { showAddPhotosPickerForAlbum = activeCustomAlbum } } else null,
                         onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.HOME; destination = Destination.VIEWER }
                     )
