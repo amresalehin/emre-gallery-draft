@@ -6129,8 +6129,7 @@ private fun PeopleScreen(
     val store = remember { FaceClusterStore(context.applicationContext) }
     val indexer = remember { FaceIndexingRepository(context.applicationContext) }
     val photoByUri = remember(media) { media.associateBy { it.uri } }
-    val modelFile = java.io.File(context.filesDir, "face-models/buffalo_l/w600k_r50.onnx")
-    var modelReady by remember { mutableStateOf(modelFile.isFile && modelFile.length() > 50L * 1024 * 1024) }
+    var modelReady by remember { mutableStateOf(BuffaloLFaceEngine.isModelInstalled(context)) }
     var clusters by remember { mutableStateOf(store.summaries()) }
     var indexedCount by remember { mutableIntStateOf(store.indexedMediaCount()) }
     var indexedFaces by remember { mutableIntStateOf(store.indexedFaceCount()) }
@@ -6200,7 +6199,7 @@ private fun PeopleScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text(if (modelReady) "Scan new photos" else "Download buffalo_l model")
                             }
-                            if (!modelReady) Text("Downloads the official ~326 MB model archive; only the recognition model is retained. Use Wi-Fi and ensure sufficient storage.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (!modelReady) Text("Downloads and retains all five ONNX models in the official ~326 MB buffalo_l pack. Use Wi-Fi and ensure sufficient storage.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -6239,7 +6238,7 @@ private fun PeopleScreen(
         AlertDialog(
             onDismissRequest = { showLicenseDialog = false },
             title = { Text("Download buffalo_l?") },
-            text = { Text("The official InsightFace pretrained weights are licensed for non-commercial research use. The model archive is about 326 MB. Download only if these terms fit your use; model inference and face grouping run locally.") },
+            text = { Text("The official InsightFace buffalo_l pretrained pack includes face detection, recognition, 2D/3D landmarks, and gender/age models. Its pretrained weights are licensed for non-commercial research use. The archive is about 326 MB. Download only if these terms fit your use; processing is local to this device.") },
             confirmButton = { TextButton(onClick = {
                 showLicenseDialog = false
                 busy = true
