@@ -3882,6 +3882,49 @@ private class PhotoMapLocationCache(context: android.content.Context) :
     }
 }
 
+/**
+ * Draws a lightweight on-device heatmap from photo GPS points.
+ * Each location contributes a soft radial gradient; overlapping locations become hotter.
+ */
+private class PhotoHeatmapOverlay(
+    private val points: List<GeoPoint>
+) : org.osmdroid.views.overlay.Overlay() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    override fun draw(canvas: android.graphics.Canvas, mapView: MapView, shadow: Boolean) {
+        super.draw(canvas, mapView, shadow)
+        if (shadow || points.isEmpty()) return
+
+        val projection = mapView.projection
+        val screenPoint = android.graphics.Point()
+        val radius = when {
+            mapView.zoomLevelDouble >= 14.0 -> 34f
+            mapView.zoomLevelDouble >= 10.0 -> 44f
+            else -> 58f
+        }
+        val colors = intArrayOf(
+            android.graphics.Color.argb(150, 220, 30, 30),
+            android.graphics.Color.argb(95, 255, 120, 0),
+            android.graphics.Color.argb(0, 255, 210, 0)
+        )
+        val stops = floatArrayOf(0f, 0.42f, 1f)
+
+        points.forEach { geoPoint ->
+            projection.toPixels(geoPoint, screenPoint)
+            paint.shader = android.graphics.RadialGradient(
+                screenPoint.x.toFloat(),
+                screenPoint.y.toFloat(),
+                radius,
+                colors,
+                stops,
+                android.graphics.Shader.TileMode.CLAMP
+            )
+            canvas.drawCircle(screenPoint.x.toFloat(), screenPoint.y.toFloat(), radius, paint)
+        }
+        paint.shader = null
+    }
+}
+
 @Composable
 private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
     val context = LocalContext.current
@@ -3988,15 +4031,8 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
             update = { map ->
                 mapRef = map
                 map.overlays.clear()
-                locatedMedia.forEach { (item, point) ->
-                    Marker(map).apply {
-                        position = point
-                        title = item.name
-                        subDescription = "Tap to open photo"
-                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                        setOnMarkerClickListener { _, _ -> onOpen(item); true }
-                        map.overlays.add(this)
-                    }
+                if (locatedMedia.isNotEmpty()) {
+                    map.overlays.add(PhotoHeatmapOverlay(locatedMedia.map { it.second }))
                 }
                 if (locatedMedia.isNotEmpty()) {
                     val points = locatedMedia.map { it.second }
