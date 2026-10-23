@@ -80,6 +80,9 @@ import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ocr.TesseractOcr
+import com.amresalehin.emregallery.face.FaceClusterStore
+import com.amresalehin.emregallery.face.FaceIndexingRepository
+import com.amresalehin.emregallery.face.FaceIndexingProgress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -97,7 +100,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 
-private enum class Destination { HOME, ALBUMS, FAVOURITES, BIN, VIDEOS, RECENTLY_ADDED, LOCKED_FOLDER, ARCHIVE, MAP, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, OCR_SETTINGS, ABOUT, SEARCH, VIEWER }
+private enum class Destination { HOME, ALBUMS, FAVOURITES, BIN, VIDEOS, RECENTLY_ADDED, LOCKED_FOLDER, ARCHIVE, MAP, PEOPLE, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, OCR_SETTINGS, ABOUT, SEARCH, VIEWER }
 private enum class SearchStage { DISCOVERY, TYPING, RESULTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -212,7 +215,7 @@ fun GalleryApp() {
                     destination = mapReturnDestination
                     mapFocusItem = null
                 }
-                destination in listOf(Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG, Destination.FAVOURITES, Destination.BIN, Destination.VIDEOS, Destination.RECENTLY_ADDED, Destination.LOCKED_FOLDER, Destination.ARCHIVE) -> {
+                destination in listOf(Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG, Destination.FAVOURITES, Destination.BIN, Destination.VIDEOS, Destination.RECENTLY_ADDED, Destination.LOCKED_FOLDER, Destination.ARCHIVE, Destination.PEOPLE) -> {
                     destination = Destination.ALBUMS
                 }
                 destination in listOf(Destination.LIBRARY_OVERVIEW, Destination.OCR_SETTINGS, Destination.ABOUT) -> {
@@ -452,6 +455,11 @@ fun GalleryApp() {
                         onBack = { destination = Destination.ALBUMS },
                         onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.ARCHIVE; destination = Destination.VIEWER },
                         onUnarchive = { item -> scope.launch { prefs.setArchived(item.uri, false) } }
+                    )
+                    Destination.PEOPLE -> PeopleScreen(
+                        media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
+                        onBack = { destination = Destination.ALBUMS },
+                        onOpenMedia = { item -> selectedMedia = item; showViewerControls = false; showDetails = false; previousDestination = Destination.PEOPLE; destination = Destination.VIEWER }
                     )
                     Destination.MAP -> PhotoMapScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
@@ -731,6 +739,7 @@ fun GalleryApp() {
                             Triple(Destination.LOCKED_FOLDER, "Locked folder", Icons.Default.Lock),
                             Triple(Destination.ARCHIVE, "Archive", Icons.Default.Archive),
                             Triple(Destination.BIN, "Bin", Icons.Default.Delete),
+                            Triple(Destination.PEOPLE, "People & pets", Icons.Default.Face),
                             Triple(Destination.MAP, "Map & Places", Icons.Default.Map),
                             Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings)
                         )
@@ -6106,6 +6115,158 @@ private fun SettingsScreen(
     }
 }
 
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PeopleScreen(
+    media: List<MediaItem>,
+    onBack: () -> Unit,
+    onOpenMedia: (MediaItem) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val store = remember { FaceClusterStore(context.applicationContext) }
+    val indexer = remember { FaceIndexingRepository(context.applicationContext) }
+    val photoByUri = remember(media) { media.associateBy { it.uri } }
+    val modelFile = java.io.File(context.filesDir, "face-models/buffalo_l/w600k_r50.onnx")
+    var modelReady by remember { mutableStateOf(modelFile.isFile && modelFile.length() > 50L * 1024 * 1024) }
+    var clusters by remember { mutableStateOf(store.summaries()) }
+    var indexedCount by remember { mutableIntStateOf(store.indexedMediaCount()) }
+    var indexedFaces by remember { mutableIntStateOf(store.indexedFaceCount()) }
+    var busy by remember { mutableStateOf(false) }
+    var showLicenseDialog by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var progress by remember { mutableStateOf<FaceIndexingProgress?>(null) }
+    var selectedCluster by remember { mutableStateOf<String?>(null) }
+    var renameCluster by remember { mutableStateOf<String?>(null) }
+    var renameValue by remember { mutableStateOf("") }
+
+    fun reload() {
+        clusters = store.summaries()
+        indexedCount = store.indexedMediaCount()
+        indexedFaces = store.indexedFaceCount()
+    }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding()
+                .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = if (selectedCluster == null) onBack else { { selectedCluster = null } }) {
+                Icon(Icons.Default.ArrowBack, contentDescription = if (selectedCluster == null) "Back to Albums" else "Back to people")
+            }
+            Column(Modifier.weight(1f)) {
+                Text(selectedCluster?.let { id -> clusters.firstOrNull { it.id == id }?.displayName ?: "Person" } ?: "People & pets", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("On-device face grouping", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = { reload() }, enabled = !busy) { Icon(Icons.Default.Refresh, contentDescription = "Refresh people") }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+        if (busy) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text(progress?.let { "Indexed ${it.processed} of ${it.total} photos · ${it.facesFound} faces found" } ?: "Preparing on-device face recognition…",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        errorMessage?.let { Text(it, modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
+        if (selectedCluster == null) {
+            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                item {
+                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Private, on-device recognition", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text("Face embeddings and groups are stored locally. The buffalo_l recognition model is downloaded only when you choose to enable it. Its official pretrained weights are licensed for non-commercial research use.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Indexed $indexedCount of ${media.count { !it.isVideo }} photos · $indexedFaces faces", style = MaterialTheme.typography.bodyMedium)
+                            Button(onClick = {
+                                if (modelReady) {
+                                    busy = true
+                                    errorMessage = null
+                                    scope.launch {
+                                        try {
+                                            progress = null
+                                            val result = indexer.indexNewMedia(media, store) { value -> scope.launch { progress = value } }
+                                            busy = false
+                                            progress = result
+                                            reload()
+                                        } catch (e: Exception) {
+                                            busy = false
+                                            errorMessage = e.message ?: "Face indexing failed."
+                                        }
+                                    }
+                                } else showLicenseDialog = true
+                            }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                                Icon(if (modelReady) Icons.Default.Face else Icons.Default.Download, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (modelReady) "Scan new photos" else "Download buffalo_l model")
+                            }
+                            if (!modelReady) Text("Downloads the official ~326 MB model archive; only the recognition model is retained. Use Wi-Fi and ensure sufficient storage.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                if (clusters.isEmpty()) {
+                    item { Box(Modifier.fillMaxWidth().padding(vertical = 30.dp), contentAlignment = Alignment.Center) { Text("Your detected people will appear here after scanning.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+                } else {
+                    items(clusters, key = { it.id }) { cluster ->
+                        Surface(modifier = Modifier.fillMaxWidth().clickable { selectedCluster = cluster.id }, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (cluster.sampleUri != null) AsyncImage(model = cluster.sampleUri, contentDescription = cluster.displayName, modifier = Modifier.size(68.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                                else Surface(Modifier.size(68.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Face, null) } }
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(cluster.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                    Text("${cluster.faceCount} face${if (cluster.faceCount == 1) "" else "s"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                IconButton(onClick = { renameCluster = cluster.id; renameValue = cluster.displayName }) { Icon(Icons.Default.Edit, contentDescription = "Rename ${cluster.displayName}") }
+                                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            val faceRows = remember(selectedCluster, indexedFaces, clusters) { selectedCluster?.let { store.facesForCluster(it) }.orEmpty() }
+            val groupedMedia = faceRows.mapNotNull { photoByUri[it.mediaUri] }.distinctBy { it.uri }
+            LazyVerticalGrid(columns = GridCells.Fixed(3), modifier = Modifier.weight(1f), contentPadding = PaddingValues(3.dp, 8.dp, 3.dp, 24.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                gridItems(groupedMedia, key = { it.uri }) { item ->
+                    AsyncImage(model = ImageRequest.Builder(LocalContext.current).data(Uri.parse(item.uri)).crossfade(false).build(), contentDescription = item.name, modifier = Modifier.fillMaxWidth().aspectRatio(1f).clickable { onOpenMedia(item) }, contentScale = ContentScale.Crop)
+                }
+            }
+        }
+    }
+
+    if (showLicenseDialog) {
+        AlertDialog(
+            onDismissRequest = { showLicenseDialog = false },
+            title = { Text("Download buffalo_l?") },
+            text = { Text("The official InsightFace pretrained weights are licensed for non-commercial research use. The model archive is about 326 MB. Download only if these terms fit your use; model inference and face grouping run locally.") },
+            confirmButton = { TextButton(onClick = {
+                showLicenseDialog = false
+                busy = true
+                errorMessage = null
+                scope.launch {
+                    try {
+                        indexer.downloadModel()
+                        modelReady = true
+                        reload()
+                    } catch (e: Exception) {
+                        errorMessage = e.message ?: "Model download failed."
+                    } finally { busy = false }
+                }
+            }) { Text("Agree & download") } },
+            dismissButton = { TextButton(onClick = { showLicenseDialog = false }) { Text("Cancel") } }
+        )
+    }
+    if (renameCluster != null) {
+        AlertDialog(
+            onDismissRequest = { renameCluster = null },
+            title = { Text("Rename person") },
+            text = { OutlinedTextField(value = renameValue, onValueChange = { renameValue = it }, singleLine = true, label = { Text("Name") }) },
+            confirmButton = { TextButton(onClick = { store.renameCluster(renameCluster!!, renameValue); renameCluster = null; reload() }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { renameCluster = null }) { Text("Cancel") } }
+        )
+    }
+}
 
 private fun reverseGeocodeLocation(context: android.content.Context, latitude: Double, longitude: Double): String? {
     if (!android.location.Geocoder.isPresent()) return null
