@@ -3912,42 +3912,112 @@ private class PhotoHeatmapOverlay(
     private val points: List<GeoPoint>
 ) : org.osmdroid.views.overlay.Overlay() {
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private data class ScreenPoint(val x: Float, val y: Float)
 
     override fun draw(canvas: android.graphics.Canvas, mapView: MapView, shadow: Boolean) {
         super.draw(canvas, mapView, shadow)
         if (shadow || points.isEmpty() || mapView.width <= 0 || mapView.height <= 0) return
 
         val projection = mapView.projection
-        val screenPoint = android.graphics.Point()
-        // Scale the kernel with zoom so clusters remain legible without covering the whole map.
-        val radius = when {
-            mapView.zoomLevelDouble >= 14.0 -> 26f
-            mapView.zoomLevelDouble >= 10.0 -> 36f
-            else -> 48f
+        val projected = android.graphics.Point()
+        // Keep the influence radius in screen pixels. Geographic distances therefore
+        // naturally shrink/grow on screen as the user zooms, changing the local density.
+        val radius = 38f
+        val neighbourRadius = 42f
+        val neighbourRadiusSquared = neighbourRadius * neighbourRadius
+        val margin = radius.toInt()
+        val screenPoints = points.mapNotNull { point ->
+            projection.toPixels(point, projected)
+            val x = projected.x.toFloat()
+            val y = projected.y.toFloat()
+            if (x < -margin || x > mapView.width + margin ||
+                y < -margin || y > mapView.height + margin
+            ) null else ScreenPoint(x, y)
         }
-        // Multicolour density ramp: transparent blue at the edges, then cyan, green,
-        // yellow and red at the hottest centre. Low per-point opacity lets clusters build.
-        val colors = intArrayOf(
-            android.graphics.Color.argb(0, 0, 80, 255),
-            android.graphics.Color.argb(42, 0, 120, 255),
-            android.graphics.Color.argb(62, 0, 220, 255),
-            android.graphics.Color.argb(78, 0, 220, 100),
-            android.graphics.Color.argb(96, 255, 230, 0),
-            android.graphics.Color.argb(118, 255, 45, 20)
-        )
-        val stops = floatArrayOf(0f, 0.28f, 0.48f, 0.66f, 0.82f, 1f)
+        if (screenPoints.isEmpty()) return
 
-        points.forEach { geoPoint ->
-            projection.toPixels(geoPoint, screenPoint)
+        // Spatial buckets avoid comparing every point with every other point on large
+        // libraries. Density is the number of photo locations within 42 screen pixels.
+        val cellSize = neighbourRadius.toInt()
+        fun cellKey(x: Int, y: Int): Long =
+            (x.toLong() shl 32) xor (y.toLong() and 0xffffffffL)
+
+        val buckets = HashMap<Long, MutableList<Int>>()
+        screenPoints.forEachIndexed { index, point ->
+            val cellX = kotlin.math.floor(point.x / cellSize).toInt()
+            val cellY = kotlin.math.floor(point.y / cellSize).toInt()
+            buckets.getOrPut(cellKey(cellX, cellY)) { mutableListOf() }.add(index)
+        }
+
+        val densities = IntArray(screenPoints.size)
+        screenPoints.forEachIndexed { index, point ->
+            val cellX = kotlin.math.floor(point.x / cellSize).toInt()
+            val cellY = kotlin.math.floor(point.y / cellSize).toInt()
+            var count = 0
+            for (dy in -1..1) {
+                for (dx in -1..1) {
+                    buckets[cellKey(cellX + dx, cellY + dy)]?.forEach { otherIndex ->
+                        val other = screenPoints[otherIndex]
+                        val deltaX = point.x - other.x
+                        val deltaY = point.y - other.y
+                        if (deltaX * deltaX + deltaY * deltaY <= neighbourRadiusSquared) count++
+                    }
+                }
+            }
+            densities[index] = count
+        }
+
+        fun densityColor(count: Int): Int {
+            // Google Maps-inspired progression: blue/cyan for sparse points,
+            // green for moderate clusters, yellow/orange/red for dense clusters.
+            val stops = intArrayOf(
+                android.graphics.Color.rgb(0, 105, 255),
+                android.graphics.Color.rgb(0, 220, 255),
+                android.graphics.Color.rgb(0, 220, 110),
+                android.graphics.Color.rgb(255, 230, 0),
+                android.graphics.Color.rgb(255, 135, 0),
+                android.graphics.Color.rgb(245, 35, 25)
+            )
+            val thresholds = intArrayOf(1, 2, 4, 7, 12, 20)
+            if (count <= thresholds.first()) return stops.first()
+            if (count >= thresholds.last()) return stops.last()
+            val upper = thresholds.indexOfFirst { count <= it }
+            val lower = upper - 1
+            val fraction = (count - thresholds[lower]).toFloat() /
+                (thresholds[upper] - thresholds[lower]).toFloat()
+            val a = stops[lower]
+            val b = stops[upper]
+            fun channel(color: Int, shift: Int) = (color shr shift) and 0xff
+            val red = (channel(a, 16) + (channel(b, 16) - channel(a, 16)) * fraction).toInt()
+            val green = (channel(a, 8) + (channel(b, 8) - channel(a, 8)) * fraction).toInt()
+            val blue = (channel(a, 0) + (channel(b, 0) - channel(a, 0)) * fraction).toInt()
+            return android.graphics.Color.rgb(red, green, blue)
+        }
+
+        screenPoints.forEachIndexed { index, point ->
+            val color = densityColor(densities[index])
             paint.shader = android.graphics.RadialGradient(
-                screenPoint.x.toFloat(),
-                screenPoint.y.toFloat(),
+                point.x,
+                point.y,
                 radius,
-                colors,
-                stops,
+                intArrayOf(
+                    android.graphics.Color.argb(150,
+                        android.graphics.Color.red(color),
+                        android.graphics.Color.green(color),
+                        android.graphics.Color.blue(color)),
+                    android.graphics.Color.argb(70,
+                        android.graphics.Color.red(color),
+                        android.graphics.Color.green(color),
+                        android.graphics.Color.blue(color)),
+                    android.graphics.Color.argb(0,
+                        android.graphics.Color.red(color),
+                        android.graphics.Color.green(color),
+                        android.graphics.Color.blue(color))
+                ),
+                floatArrayOf(0f, 0.55f, 1f),
                 android.graphics.Shader.TileMode.CLAMP
             )
-            canvas.drawCircle(screenPoint.x.toFloat(), screenPoint.y.toFloat(), radius, paint)
+            canvas.drawCircle(point.x, point.y, radius, paint)
         }
         paint.shader = null
     }
