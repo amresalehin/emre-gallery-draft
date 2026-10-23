@@ -3642,85 +3642,12 @@ private fun ViewerScreen(
                             }
                         }
 
-                        // Card 7: Actual device metadata and file properties
-                        item {
-                            val deviceName = listOf(metadata["make"], metadata["model"])
-                                .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
-                                .distinct()
-                                .joinToString(" ")
-                                .ifBlank { "Device not recorded" }
-                            DetailCard {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            Icons.Default.PhotoCamera,
-                                            contentDescription = "Device info",
-                                            modifier = Modifier.size(22.dp),
-                                            tint = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(Modifier.width(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = deviceName,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = "Device",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        Icon(
-                                            Icons.Default.ChevronRight,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(
-                                                text = if (item.width > 0 && item.height > 0) "${item.width} × ${item.height}" else "Not available",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1
-                                            )
-                                            Text("Dimensions", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                        VerticalDivider(modifier = Modifier.height(28.dp).padding(horizontal = 8.dp))
-                                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(
-                                                text = if (item.sizeBytes > 0) formatBytes(item.sizeBytes) else "Not available",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1
-                                            )
-                                            Text("File size", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
                         // Card 8: Combined EXIF and XMP metadata, showing only available values
                         item {
-                            val metadataRows = remember(metadata, item.uri, item.dateTakenMillis, item.dateAddedSeconds) {
+                            val metadataRows = remember(metadata, item.uri, item.dateTakenMillis, item.dateAddedSeconds, item.width, item.height, item.sizeBytes) {
                                 val rows = listOf(
+                                    "Dimensions" to (if (item.width > 0 && item.height > 0) "${item.width} × ${item.height} px" else null),
+                                    "File size" to item.sizeBytes.takeIf { it > 0 }?.let { formatBytes(it) },
                                     "Device manufacturer" to metadata["make"],
                                     "Device model" to metadata["model"],
                                     "Aperture" to metadata["aperture"],
