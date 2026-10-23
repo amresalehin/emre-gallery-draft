@@ -3760,11 +3760,18 @@ private fun ViewerScreen(
                                 p.prepare()
                                 p.playWhenReady = true
                             }
-                            useController = true
+                            // Keep Media3 controls visible for exactly as long as the
+                            // gallery's floating viewer controls are visible. This avoids
+                            // the player bubbles timing out while the gallery actions remain.
+                            controllerShowTimeoutMs = 0
+                            useController = showControls
                         }
                     },
                     modifier = Modifier.fillMaxSize(),
-                    update = { it.useController = showControls }
+                    update = {
+                        it.controllerShowTimeoutMs = 0
+                        it.useController = showControls
+                    }
                 )
             } else {
                 // The grid requests small decodes for the same MediaStore URI. Give the
@@ -3855,7 +3862,10 @@ private fun ViewerScreen(
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                    // Video player controls occupy the bottom edge of PlayerView.
+                    // Lift gallery actions above that control strip for videos only.
+                    .padding(horizontal = 8.dp, vertical = 12.dp)
+                    .padding(bottom = if (item.isVideo) 104.dp else 0.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {
                 ViewerAction(Icons.Default.Tune, "Edit") {
