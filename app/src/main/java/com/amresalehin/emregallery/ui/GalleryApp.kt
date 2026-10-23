@@ -491,7 +491,6 @@ fun GalleryApp() {
                         total = media.size,
                         onMenuClick = { showSidePanel = true },
                         theme = themePref,
-                        ocrLanguageCount = ocrLanguagesPref.size,
                         topContentPadding = statusBarTop + 14.dp,
                         bottomContentPadding = bottomContentPadding,
                         onTheme = { scope.launch { prefs.setTheme(it) } },
@@ -5939,7 +5938,6 @@ private fun LibraryMetricCard(title: String, value: String, icon: androidx.compo
 private fun SettingsScreen(
     total: Int,
     theme: String,
-    ocrLanguageCount: Int = 1,
     topContentPadding: Dp,
     bottomContentPadding: Dp,
     onTheme: (String) -> Unit,
@@ -5954,7 +5952,6 @@ private fun SettingsScreen(
         "Theme" to Icons.Default.Palette,
         "Tools" to Icons.Default.Build,
         "Intelligence" to Icons.Default.Psychology,
-        "OCR" to Icons.Default.DocumentScanner,
         "Indexing Status" to Icons.Default.Storage,
         "Duplicates or Similar" to Icons.Default.Collections,
         "Permissions" to Icons.Default.Lock,
@@ -6012,7 +6009,6 @@ private fun SettingsScreen(
                                     when (label) {
                                         "Library overview" -> "$total media items indexed"
                                         "Intelligence" -> "AI providers not configured"
-                                        "OCR" -> "$ocrLanguageCount active language${if (ocrLanguageCount == 1) "" else "s"} · On-device Tesseract"
                                         "Indexing Status" -> "Local MediaStore scan"
                                         "Duplicates or Similar" -> "Detection engine not configured"
                                         "About" -> "Emre Gallery · 0.1.0"
