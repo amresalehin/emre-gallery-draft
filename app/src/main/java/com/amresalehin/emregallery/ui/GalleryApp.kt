@@ -1584,8 +1584,9 @@ private fun HomeViewOptionsBottomSheet(
                 Surface(
                     onClick = { tempGridStyle = "square" },
                     shape = RoundedCornerShape(16.dp),
-                    color = if (isGridSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = if (isGridSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                    color = if (isGridSelected) { if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF454545) else Color(0xFFE5E5E5) } else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    border = if (isGridSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
                     modifier = Modifier
                         .weight(1f)
                         .height(58.dp)
@@ -1615,8 +1616,9 @@ private fun HomeViewOptionsBottomSheet(
                 Surface(
                     onClick = { tempGridStyle = "masonry" },
                     shape = RoundedCornerShape(16.dp),
-                    color = if (isMasonrySelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = if (isMasonrySelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                    color = if (isMasonrySelected) { if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color(0xFF454545) else Color(0xFFE5E5E5) } else MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    border = if (isMasonrySelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)) else null,
                     modifier = Modifier
                         .weight(1f)
                         .height(58.dp)
