@@ -165,7 +165,7 @@ fun GalleryApp() {
                     destination = mapReturnDestination
                     mapFocusItem = null
                 }
-                destination in listOf(Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG) -> {
+                destination in listOf(Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG, Destination.FAVOURITES) -> {
                     destination = Destination.ALBUMS
                 }
                 destination in listOf(Destination.LIBRARY_OVERVIEW, Destination.OCR_SETTINGS, Destination.ABOUT) -> {
@@ -273,7 +273,7 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> { mapReturnDestination = Destination.ALBUMS; mapFocusItem = null; destination = Destination.MAP }; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; destination = Destination.HOME } } },
+                        onFilter = { when (it) { "Map" -> { mapReturnDestination = Destination.ALBUMS; mapFocusItem = null; destination = Destination.MAP }; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; "Favourites" -> { albumFilter = null; destination = Destination.FAVOURITES }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; destination = Destination.HOME } } },
                         onOpen = { selectedMedia = it; previousDestination = Destination.ALBUMS; destination = Destination.VIEWER },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
