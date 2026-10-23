@@ -101,7 +101,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 
-private enum class Destination { HOME, ALBUMS, FAVOURITES, BIN, VIDEOS, RECENTLY_ADDED, LOCKED_FOLDER, ARCHIVE, MAP, PEOPLE, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, OCR_SETTINGS, ABOUT, SEARCH, VIEWER }
+private enum class Destination { HOME, ALBUMS, FAVOURITES, BIN, VIDEOS, RECENTLY_ADDED, LOCKED_FOLDER, ARCHIVE, MAP, PEOPLE, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, INDEXING_STATUS, OCR_SETTINGS, ABOUT, SEARCH, VIEWER }
 private enum class SearchStage { DISCOVERY, TYPING, RESULTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -219,7 +219,7 @@ fun GalleryApp() {
                 destination in listOf(Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG, Destination.FAVOURITES, Destination.BIN, Destination.VIDEOS, Destination.RECENTLY_ADDED, Destination.LOCKED_FOLDER, Destination.ARCHIVE, Destination.PEOPLE) -> {
                     destination = Destination.ALBUMS
                 }
-                destination in listOf(Destination.LIBRARY_OVERVIEW, Destination.OCR_SETTINGS, Destination.ABOUT) -> {
+                destination in listOf(Destination.LIBRARY_OVERVIEW, Destination.INDEXING_STATUS, Destination.OCR_SETTINGS, Destination.ABOUT) -> {
                     destination = Destination.SETTINGS
                 }
                 else -> destination = Destination.HOME
@@ -499,6 +499,7 @@ fun GalleryApp() {
                         onSettings = { label ->
                             when (label) {
                                 "Library overview" -> destination = Destination.LIBRARY_OVERVIEW
+                                "Indexing Status" -> destination = Destination.INDEXING_STATUS
                                 "About" -> destination = Destination.ABOUT
                                 "OCR" -> destination = Destination.OCR_SETTINGS
                             }
@@ -510,6 +511,13 @@ fun GalleryApp() {
                         loading = loading,
                         onBack = { destination = Destination.SETTINGS },
                         onRefresh = { refreshMedia() }
+                    )
+                    Destination.INDEXING_STATUS -> IndexingStatusScreen(
+                        media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
+                        loading = loading,
+                        onBack = { destination = Destination.SETTINGS },
+                        onRefreshMedia = { refreshMedia() },
+                        onOpenPeople = { destination = Destination.PEOPLE }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
                         currentLanguages = ocrLanguagesPref,
@@ -6198,6 +6206,255 @@ private fun SettingsScreen(
     }
 }
 
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun IndexingStatusScreen(
+    media: List<MediaItem>,
+    loading: Boolean,
+    onBack: () -> Unit,
+    onRefreshMedia: () -> Unit,
+    onOpenPeople: () -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val store = remember { FaceClusterStore(context.applicationContext) }
+    val indexer = remember { FaceIndexingRepository(context.applicationContext) }
+    var modelReady by remember { mutableStateOf(BuffaloLFaceEngine.isModelInstalled(context)) }
+    var indexedPhotos by remember { mutableIntStateOf(store.indexedMediaCount()) }
+    var indexedFaces by remember { mutableIntStateOf(store.indexedFaceCount()) }
+    var failedPhotos by remember { mutableIntStateOf(store.failedMediaCount()) }
+    var peopleCount by remember { mutableIntStateOf(store.summaries().size) }
+    var busy by remember { mutableStateOf(false) }
+    var showLicenseDialog by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var progress by remember { mutableStateOf<FaceIndexingProgress?>(null) }
+
+    val photoCount = media.count { !it.isVideo }
+    val videoCount = media.count { it.isVideo }
+    val remainingPhotos = (photoCount - indexedPhotos).coerceAtLeast(0)
+
+    fun reloadStats() {
+        indexedPhotos = store.indexedMediaCount()
+        indexedFaces = store.indexedFaceCount()
+        failedPhotos = store.failedMediaCount()
+        peopleCount = store.summaries().size
+        modelReady = BuffaloLFaceEngine.isModelInstalled(context)
+    }
+
+    fun startFaceIndexing() {
+        busy = true
+        errorMessage = null
+        progress = null
+        scope.launch {
+            try {
+                val result = indexer.indexNewMedia(media, store) { value ->
+                    scope.launch { progress = value }
+                }
+                progress = result
+                reloadStats()
+            } catch (e: Exception) {
+                errorMessage = e.message ?: "People indexing failed."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    LaunchedEffect(media) { reloadStats() }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding()
+                .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back to Settings")
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Indexing Status", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("Local library and on-device recognition", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton(onClick = {
+                reloadStats()
+                onRefreshMedia()
+            }, enabled = !busy) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh indexing status")
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(24.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Text("Media library", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.weight(1f))
+                        if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    }
+                    Text(
+                        if (loading) "Scanning media accessible on this device…" else "MediaStore scan is ready",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        IndexingMetric("Photos", photoCount.toString(), Modifier.weight(1f))
+                        IndexingMetric("Videos", videoCount.toString(), Modifier.weight(1f))
+                        IndexingMetric("Total", media.size.toString(), Modifier.weight(1f))
+                    }
+                    OutlinedButton(onClick = onRefreshMedia, enabled = !loading && !busy, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (loading) "Scanning…" else "Rescan device media")
+                    }
+                }
+            }
+
+            Text("People and Pet", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.size(44.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Face, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("People recognition", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(if (modelReady) "On-device model installed" else "Model not downloaded", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(
+                            if (modelReady) Icons.Default.CheckCircle else Icons.Default.Download,
+                            contentDescription = null,
+                            tint = if (modelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        IndexingMetric("Photos indexed", "$indexedPhotos / $photoCount", Modifier.weight(1f))
+                        IndexingMetric("Faces found", indexedFaces.toString(), Modifier.weight(1f))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        IndexingMetric("People groups", peopleCount.toString(), Modifier.weight(1f))
+                        IndexingMetric("Failed photos", failedPhotos.toString(), Modifier.weight(1f))
+                    }
+                    Text(
+                        if (remainingPhotos == 0 && photoCount > 0) "All available photos have been indexed."
+                        else "$remainingPhotos photo${if (remainingPhotos == 1) "" else "s"} still need indexing. Previously indexed photos are skipped on subsequent scans.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (busy) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text(
+                            progress?.let { "Processed ${it.processed} of ${it.total} photos · ${it.facesFound} faces found · ${it.failed} failures" }
+                                ?: "Preparing face recognition…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    errorMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    Button(
+                        onClick = { if (modelReady) startFaceIndexing() else showLicenseDialog = true },
+                        enabled = !busy && !loading,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(if (modelReady) Icons.Default.PlayArrow else Icons.Default.Download, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (!modelReady) "Download recognition model" else if (remainingPhotos == 0) "Check for new photos" else "Index people in photos")
+                    }
+                    OutlinedButton(onClick = onOpenPeople, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Groups, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Open People & pets")
+                    }
+                    Text(
+                        "Recognition runs locally. The official buffalo_l pretrained weights are licensed for non-commercial research use; review the terms before downloading.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.Top) {
+                    Icon(Icons.Default.Pets, contentDescription = null, modifier = Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(12.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text("Pet recognition", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Not available yet", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            "Pet detection and pet grouping are not implemented in the current indexing engine. No pet scan has been run, so pet counts are not available.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showLicenseDialog) {
+        AlertDialog(
+            onDismissRequest = { showLicenseDialog = false },
+            title = { Text("Download buffalo_l model?") },
+            text = { Text("The official InsightFace buffalo_l pretrained pack is about 326 MB and installation needs about 500 MB free. Its pretrained weights are licensed for non-commercial research use. Download only if these terms fit your use. Model download and photo processing happen on this device.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLicenseDialog = false
+                    busy = true
+                    errorMessage = null
+                    scope.launch {
+                        try {
+                            indexer.downloadModel()
+                            modelReady = true
+                            busy = false
+                            startFaceIndexing()
+                        } catch (e: Exception) {
+                            errorMessage = e.message ?: "Model download failed."
+                            busy = false
+                        }
+                    }
+                }) { Text("Agree & download") }
+            },
+            dismissButton = { TextButton(onClick = { showLicenseDialog = false }) { Text("Cancel") } }
+        )
+    }
+}
+
+@Composable
+private fun IndexingMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
