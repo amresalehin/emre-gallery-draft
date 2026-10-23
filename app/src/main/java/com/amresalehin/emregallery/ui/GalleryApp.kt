@@ -4184,7 +4184,26 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
             shadowElevation = 12.dp
         ) {
             Column(Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxWidth().clickable { sheetExpanded = !sheetExpanded }.padding(top = 10.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.fillMaxWidth()
+                        .pointerInput(sheetExpanded) {
+                            var verticalDrag = 0f
+                            detectDragGestures(
+                                onDragEnd = {
+                                    if (verticalDrag < -30f) sheetExpanded = true
+                                    else if (verticalDrag > 30f) sheetExpanded = false
+                                    verticalDrag = 0f
+                                },
+                                onDragCancel = { verticalDrag = 0f }
+                            ) { change, dragAmount ->
+                                verticalDrag += dragAmount.y
+                                change.consume()
+                            }
+                        }
+                        .clickable { sheetExpanded = !sheetExpanded }
+                        .padding(top = 10.dp, bottom = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Box(Modifier.width(38.dp).height(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f)))
                 }
                 Row(
