@@ -3825,24 +3825,39 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
     val context = LocalContext.current
     var locatedMedia by remember { mutableStateOf<List<Pair<MediaItem, GeoPoint>>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var scanProgress by remember { mutableIntStateOf(0) }
+    var scanTotal by remember { mutableIntStateOf(0) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var sheetExpanded by remember { mutableStateOf(false) }
     val dayFormat = remember { SimpleDateFormat("EEEE", Locale.getDefault()) }
 
     LaunchedEffect(media) {
         loading = true
-        locatedMedia = withContext(Dispatchers.IO) {
-            media.mapNotNull { item ->
-                if (item.isVideo) return@mapNotNull null
+        scanProgress = 0
+        scanTotal = media.count { !it.isVideo }
+        locatedMedia = emptyList()
+        val result = mutableListOf<Pair<MediaItem, GeoPoint>>()
+        val photos = media.filterNot { it.isVideo }
+        photos.forEachIndexed { index, item ->
+            val point = withContext(Dispatchers.IO) {
                 runCatching {
                     context.contentResolver.openInputStream(Uri.parse(item.uri))?.use { stream ->
                         ExifInterface(stream).latLong?.let { c ->
-                            if (c[0].isFinite() && c[1].isFinite() && c[0] in -90.0..90.0 && c[1] in -180.0..180.0) item to GeoPoint(c[0], c[1]) else null
+                            if (c[0].isFinite() && c[1].isFinite() && c[0] in -90.0..90.0 && c[1] in -180.0..180.0) GeoPoint(c[0], c[1]) else null
                         }
                     }
                 }.getOrNull()
             }
+            if (point != null) result.add(item to point)
+            // Publish progress regularly so large libraries never look frozen.
+            if ((index + 1) % 12 == 0 || index == photos.lastIndex) {
+                locatedMedia = result.toList()
+                scanProgress = index + 1
+                kotlinx.coroutines.yield()
+            }
         }
+        locatedMedia = result.toList()
+        scanProgress = scanTotal
         loading = false
     }
 
@@ -3926,7 +3941,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(12.dp))
-                Text("Finding photos on the map…")
+                Text(if (scanTotal > 0) "Reading photo locations… $scanProgress / $scanTotal" else "Preparing map…")
             }
         }
 
@@ -3941,7 +3956,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                     Box(Modifier.width(38.dp).height(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f)))
                 }
                 Text(
-                    if (loading) "Finding photos…" else "%,d photos".format(Locale.getDefault(), locatedMedia.size),
+                    if (loading) "Reading locations · $scanProgress / $scanTotal" else "%,d photos".format(Locale.getDefault(), locatedMedia.size),
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.headlineSmall,
