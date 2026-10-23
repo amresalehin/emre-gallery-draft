@@ -3707,6 +3707,48 @@ private fun ViewerScreen(
         }
         }
 
+        // Soft edge shading gives the floating viewer controls depth without
+        // dimming the photo itself. It fades away with the controls.
+        AnimatedVisibility(
+            visible = showControls && !showDetails,
+            enter = fadeIn(animationSpec = tween(260)),
+            exit = fadeOut(animationSpec = tween(220)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(190.dp)
+                        .align(Alignment.TopCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.42f),
+                                    Color.Black.copy(alpha = 0.20f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(210.dp)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.18f),
+                                    Color.Black.copy(alpha = 0.40f)
+                                )
+                            )
+                        )
+                )
+            }
+        }
+
         if (showControls && !showDetails) {
             Row(
                 Modifier
