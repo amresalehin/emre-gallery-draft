@@ -3,6 +3,9 @@ package com.amresalehin.emregallery.face
 import android.content.Context
 import android.net.Uri
 import com.amresalehin.emregallery.data.MediaItem
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -22,7 +25,8 @@ class FaceIndexingRepository(private val context: Context) {
     suspend fun indexNewMedia(
         media: List<MediaItem>,
         store: FaceClusterStore,
-        onProgress: (FaceIndexingProgress) -> Unit = {}
+        onProgress: suspend (FaceIndexingProgress) -> Unit = {},
+        awaitIfResumed: suspend () -> Unit = {}
     ): FaceIndexingProgress = withContext(Dispatchers.IO) {
         val photos = media.filterNot { it.isVideo }
         val pending = photos.filterNot { store.isMediaIndexed(it.uri) }
@@ -32,7 +36,11 @@ class FaceIndexingRepository(private val context: Context) {
         var engine: BuffaloLFaceEngine? = null
         try {
             if (pending.isNotEmpty()) engine = BuffaloLFaceEngine.open(context)
-            pending.forEach { item ->
+            for (item in pending) {
+                // Pause and cancellation take effect between images; an in-flight native
+                // inference is allowed to complete before the next checkpoint.
+                awaitIfResumed()
+                currentCoroutineContext().ensureActive()
                 try {
                     val detections = engine!!.embed(Uri.parse(item.uri))
                     detections.forEach { face ->
@@ -40,6 +48,8 @@ class FaceIndexingRepository(private val context: Context) {
                     }
                     store.markMediaIndexed(item.uri, detections.size)
                     facesFound += detections.size
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (_: Exception) {
                     store.markMediaFailed(item.uri)
                     failed++
