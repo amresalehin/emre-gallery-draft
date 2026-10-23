@@ -4192,7 +4192,13 @@ private fun ViewerScreen(
                                             }
                                         },
                                         enabled = !item.isVideo && !ocrBusy && ocrLanguages.isNotEmpty(),
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            contentColor = MaterialTheme.colorScheme.onSurface,
+                                            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     ) {
                                         if (ocrBusy) {
                                             CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -4219,7 +4225,14 @@ private fun ViewerScreen(
                                                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                                                     clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Recognized text", ocrText))
                                                 },
-                                                modifier = Modifier.align(Alignment.End)
+                                                modifier = Modifier.align(Alignment.End),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                                ),
+                                                border = BorderStroke(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.outlineVariant
+                                                )
                                             ) {
                                                 Icon(Icons.Default.ContentCopy, contentDescription = null)
                                                 Spacer(Modifier.width(6.dp))
