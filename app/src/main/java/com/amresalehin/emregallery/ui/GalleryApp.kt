@@ -96,10 +96,18 @@ import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceIndexingProgress
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
+import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -443,10 +451,7 @@ fun GalleryApp() {
                     )
                     Destination.INDEXING_STATUS -> IndexingStatusScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
-                        loading = loading,
-                        onBack = { destination = Destination.SETTINGS },
-                        onRefreshMedia = { refreshMedia() },
-                        onOpenPeople = { destination = Destination.PEOPLE }
+                        ocrLanguages = ocrLanguagesPref
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
                         onBack = { destination = Destination.SETTINGS }
@@ -6536,35 +6541,344 @@ private fun SettingsScreen(
 }
 
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun IndexingStatusScreen(
     media: List<MediaItem>,
-    loading: Boolean,
-    onBack: () -> Unit,
-    onRefreshMedia: () -> Unit,
-    onOpenPeople: () -> Unit
+    ocrLanguages: Set<String>
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-    ) {
-        Surface(
-            modifier = Modifier
-                .padding(start = 16.dp, top = 12.dp)
-                .size(48.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-            tonalElevation = 3.dp,
-            shadowElevation = 3.dp
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val photos = remember(media) { media.filterNot { it.isVideo } }
+    val photoUris = remember(photos) { photos.map { it.uri } }
+    val faceStore = remember { FaceClusterStore(context.applicationContext) }
+
+    var countsReady by remember { mutableStateOf(false) }
+    var ocrProcessed by remember { mutableIntStateOf(0) }
+    var faceProcessed by remember { mutableIntStateOf(0) }
+    var ocrItemsPerMinute by remember { mutableIntStateOf(0) }
+    var faceItemsPerMinute by remember { mutableIntStateOf(0) }
+
+    var ocrRunning by remember { mutableStateOf(false) }
+    var ocrPaused by remember { mutableStateOf(false) }
+    var ocrJob by remember { mutableStateOf<Job?>(null) }
+    var ocrRunToken by remember { mutableIntStateOf(0) }
+    val ocrPauseSignal = remember { MutableStateFlow(false) }
+
+    var faceRunning by remember { mutableStateOf(false) }
+    var facePaused by remember { mutableStateOf(false) }
+    var faceJob by remember { mutableStateOf<Job?>(null) }
+    var faceRunToken by remember { mutableIntStateOf(0) }
+    val facePauseSignal = remember { MutableStateFlow(false) }
+
+    LaunchedEffect(photoUris) {
+        countsReady = false
+        val initialCounts = withContext(Dispatchers.IO) {
+            val ocrCount = photos.count { item ->
+                TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
+            }
+            val faceCount = faceStore.indexedMediaCount(photoUris)
+            ocrCount to faceCount
+        }
+        ocrProcessed = initialCounts.first.coerceIn(0, photos.size)
+        faceProcessed = initialCounts.second.coerceIn(0, photos.size)
+        countsReady = true
+    }
+
+    fun itemsPerMinute(processedThisRun: Int, startedAtMillis: Long): Int {
+        if (processedThisRun <= 0) return 0
+        val elapsed = (System.currentTimeMillis() - startedAtMillis).coerceAtLeast(1_000L)
+        return ((processedThisRun * 60_000.0) / elapsed).roundToInt().coerceAtLeast(1)
+    }
+
+    fun toggleOcr() {
+        if (!countsReady || photos.isEmpty() || ocrProcessed >= photos.size && !ocrRunning) return
+        if (ocrRunning) {
+            ocrPaused = !ocrPaused
+            ocrPauseSignal.value = ocrPaused
+            return
+        }
+
+        val runToken = ocrRunToken + 1
+        ocrRunToken = runToken
+        val baseProcessed = ocrProcessed
+        val startedAt = System.currentTimeMillis()
+        ocrPauseSignal.value = false
+        ocrPaused = false
+        ocrRunning = true
+        ocrJob = scope.launch {
+            var attempted = 0
+            try {
+                val pending = withContext(Dispatchers.IO) {
+                    photos.filterNot { item ->
+                        TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
+                    }
+                }
+                for (item in pending) {
+                    ocrPauseSignal.first { isPaused -> !isPaused }
+                    currentCoroutineContext().ensureActive()
+                    var finishedAttempt = false
+                    try {
+                        val uri = Uri.parse(item.uri)
+                        val recognized = withContext(Dispatchers.IO) {
+                            TesseractOcr.recognize(context, uri, ocrLanguages.toList().ifEmpty { listOf("eng") })
+                        }
+                        withContext(Dispatchers.IO) {
+                            TesseractOcr.saveCachedResult(context, uri, recognized)
+                        }
+                        finishedAttempt = true
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // Continue past an unreadable image so a single bad file cannot
+                        // block the rest of the library from being scanned.
+                        finishedAttempt = true
+                    } finally {
+                        if (finishedAttempt) {
+                            attempted++
+                            if (ocrRunToken == runToken) {
+                                ocrProcessed = (baseProcessed + attempted).coerceAtMost(photos.size)
+                                ocrItemsPerMinute = itemsPerMinute(attempted, startedAt)
+                            }
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } finally {
+                if (ocrRunToken == runToken) {
+                    ocrRunning = false
+                    ocrPaused = false
+                    ocrPauseSignal.value = false
+                    ocrJob = null
+                    // Use the cache as the source of truth after a normal finish.
+                    if (attempted == photos.size - baseProcessed) {
+                        ocrProcessed = withContext(NonCancellable + Dispatchers.IO) {
+                            photos.count { item ->
+                                TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
+                            }
+                        }.coerceIn(0, photos.size)
+                    }
+                }
             }
         }
     }
+
+    fun stopOcr() {
+        ocrRunToken++
+        ocrPauseSignal.value = false
+        ocrJob?.cancel()
+        ocrJob = null
+        ocrRunning = false
+        ocrPaused = false
+    }
+
+    fun toggleFaceFinding() {
+        if (!countsReady || photos.isEmpty() || faceProcessed >= photos.size && !faceRunning) return
+        if (faceRunning) {
+            facePaused = !facePaused
+            facePauseSignal.value = facePaused
+            return
+        }
+
+        val runToken = faceRunToken + 1
+        faceRunToken = runToken
+        val baseProcessed = faceProcessed
+        val startedAt = System.currentTimeMillis()
+        facePauseSignal.value = false
+        facePaused = false
+        faceRunning = true
+        faceJob = scope.launch {
+            try {
+                FaceIndexingRepository(context.applicationContext).indexNewMedia(
+                    media = photos,
+                    store = faceStore,
+                    onProgress = { progress ->
+                        withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                            if (faceRunToken == runToken) {
+                                faceProcessed = (baseProcessed + progress.processed).coerceAtMost(photos.size)
+                                faceItemsPerMinute = itemsPerMinute(progress.processed, startedAt)
+                            }
+                        }
+                    },
+                    awaitIfResumed = {
+                        facePauseSignal.first { isPaused -> !isPaused }
+                        currentCoroutineContext().ensureActive()
+                    }
+                )
+                if (faceRunToken == runToken) {
+                    faceProcessed = withContext(NonCancellable + Dispatchers.IO) {
+                        faceStore.indexedMediaCount(photoUris)
+                    }.coerceIn(0, photos.size)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Keep current progress visible; Play retries failed and unindexed images.
+            } finally {
+                if (faceRunToken == runToken) {
+                    faceRunning = false
+                    facePaused = false
+                    facePauseSignal.value = false
+                    faceJob = null
+                }
+            }
+        }
+    }
+
+    fun stopFaceFinding() {
+        faceRunToken++
+        facePauseSignal.value = false
+        faceJob?.cancel()
+        faceJob = null
+        faceRunning = false
+        facePaused = false
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        IndexingProgressCard(
+            title = "OCR",
+            icon = Icons.Default.DocumentScanner,
+            processed = ocrProcessed,
+            total = photos.size,
+            itemsPerMinute = ocrItemsPerMinute,
+            running = ocrRunning,
+            paused = ocrPaused,
+            enabled = countsReady && photos.isNotEmpty() && (ocrRunning || ocrProcessed < photos.size),
+            onPlayPause = ::toggleOcr,
+            onStop = ::stopOcr
+        )
+        IndexingProgressCard(
+            title = "Face Finding",
+            icon = Icons.Default.Face,
+            processed = faceProcessed,
+            total = photos.size,
+            itemsPerMinute = faceItemsPerMinute,
+            running = faceRunning,
+            paused = facePaused,
+            enabled = countsReady && photos.isNotEmpty() && (faceRunning || faceProcessed < photos.size),
+            onPlayPause = ::toggleFaceFinding,
+            onStop = ::stopFaceFinding
+        )
+    }
 }
+
+@Composable
+private fun IndexingProgressCard(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    processed: Int,
+    total: Int,
+    itemsPerMinute: Int,
+    running: Boolean,
+    paused: Boolean,
+    enabled: Boolean,
+    onPlayPause: () -> Unit,
+    onStop: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val progress = if (total > 0) (processed.toFloat() / total).coerceIn(0f, 1f) else 0f
+    val percent = (progress * 100f).roundToInt()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(colors.surface)
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = colors.onSurface)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, color = colors.onSurface, maxLines = 1)
+                Text(
+                    "${NumberFormat.getIntegerInstance(Locale.getDefault()).format(processed)} / ${NumberFormat.getIntegerInstance(Locale.getDefault()).format(total)} images",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "$percent%",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onSurface
+            )
+        }
+
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(CircleShape),
+            color = colors.onSurface,
+            trackColor = colors.onSurface.copy(alpha = 0.12f)
+        )
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "$itemsPerMinute items/min",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            IndexingControlButton(
+                icon = if (running && !paused) Icons.Default.Pause else Icons.Default.PlayArrow,
+                description = when {
+                    running && !paused -> "Pause $title"
+                    running && paused -> "Resume $title"
+                    else -> "Start $title"
+                },
+                enabled = enabled,
+                onClick = onPlayPause
+            )
+            Spacer(Modifier.width(8.dp))
+            IndexingControlButton(
+                icon = Icons.Default.Stop,
+                description = "Stop $title",
+                enabled = running,
+                onClick = onStop
+            )
+        }
+    }
+}
+
+@Composable
+private fun IndexingControlButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(colors.surfaceVariant.copy(alpha = if (enabled) 1f else 0.65f))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = description,
+            modifier = Modifier.size(18.dp),
+            tint = colors.onSurface.copy(alpha = if (enabled) 1f else 0.45f)
+        )
+    }
+}
+
 
 @Composable
 private fun IndexingMetric(label: String, value: String, modifier: Modifier = Modifier) {
