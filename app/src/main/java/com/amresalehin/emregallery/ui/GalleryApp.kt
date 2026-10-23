@@ -4225,10 +4225,26 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
             },
             update = { map ->
                 mapRef = map
-                if (locatedMedia.isNotEmpty() && !mapFramed) {
+                if (locatedMedia.isNotEmpty() && !mapFramed && map.width > 0 && map.height > 0) {
                     val points = locatedMedia.map { it.second }
-                    val bounds = org.osmdroid.util.BoundingBox(points.maxOf { it.latitude }, points.maxOf { it.longitude }, points.minOf { it.latitude }, points.minOf { it.longitude })
-                    runCatching { map.zoomToBoundingBox(bounds, true, 48) }
+                    val north = points.maxOf { it.latitude }
+                    val south = points.minOf { it.latitude }
+                    val east = points.maxOf { it.longitude }
+                    val west = points.minOf { it.longitude }
+                    val bounds = org.osmdroid.util.BoundingBox(north, east, south, west)
+                    runCatching {
+                        // A single point or near-identical coordinates create a zero-size
+                        // bounding box, which osmdroid can interpret as a request for max zoom.
+                        if (points.size == 1 || (north - south) < 0.01 && (east - west) < 0.01) {
+                            map.controller.setCenter(points.first())
+                            map.controller.setZoom(5.0)
+                        } else {
+                            map.zoomToBoundingBox(bounds, true, 48)
+                            // Avoid an extreme close-up when all photos are concentrated
+                            // in a small area; users can zoom in manually afterward.
+                            if (map.zoomLevelDouble > 14.0) map.controller.setZoom(14.0)
+                        }
+                    }
                     mapFramed = true
                 }
                 map.overlays.removeAll { it is PhotoHeatmapOverlay }
