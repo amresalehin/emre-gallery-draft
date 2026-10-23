@@ -106,6 +106,7 @@ fun GalleryApp() {
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
     var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
+    var mapReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var showViewerControls by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
     var searchStage by remember { mutableStateOf(SearchStage.DISCOVERY) }
@@ -158,7 +159,11 @@ fun GalleryApp() {
                     albumFilter = null
                     destination = albumFilterReturnDestination
                 }
-                destination in listOf(Destination.MAP, Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG) -> {
+                destination == Destination.MAP -> {
+                    destination = mapReturnDestination
+                    mapFocusItem = null
+                }
+                destination in listOf(Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG) -> {
                     destination = Destination.ALBUMS
                 }
                 destination in listOf(Destination.LIBRARY_OVERVIEW, Destination.OCR_SETTINGS, Destination.ABOUT) -> {
@@ -266,7 +271,7 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> destination = Destination.MAP; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; destination = Destination.HOME } } },
+                        onFilter = { when (it) { "Map" -> { mapReturnDestination = Destination.ALBUMS; mapFocusItem = null; destination = Destination.MAP }; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; destination = Destination.HOME } } },
                         onOpen = { selectedMedia = it; previousDestination = Destination.ALBUMS; destination = Destination.VIEWER },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -278,7 +283,7 @@ fun GalleryApp() {
                     Destination.MAP -> PhotoMapScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         focusItem = mapFocusItem,
-                        onBack = { destination = Destination.ALBUMS; mapFocusItem = null },
+                        onBack = { destination = mapReturnDestination; mapFocusItem = null },
                         onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.MAP; destination = Destination.VIEWER }
                     )
                     Destination.DEVICE_FOLDERS -> DeviceFoldersScreen(
@@ -390,7 +395,7 @@ fun GalleryApp() {
                             },
                             onAddTo = { mediaForAddToAlbum = item; showAddToAlbumSheet = true },
                             onOpenNeighbor = { selectedMedia = it; showDetails = false },
-                            onOpenMap = { mapFocusItem = item; showDetails = false; destination = Destination.MAP }
+                            onOpenMap = { mapFocusItem = item; mapReturnDestination = Destination.VIEWER; showDetails = false; destination = Destination.MAP }
                         )
                     }
                 }
