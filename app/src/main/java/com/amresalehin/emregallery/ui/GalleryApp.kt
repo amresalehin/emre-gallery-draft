@@ -91,7 +91,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 
-private enum class Destination { HOME, ALBUMS, FAVOURITES, MAP, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, OCR_SETTINGS, ABOUT, SEARCH, VIEWER }
+private enum class Destination { HOME, ALBUMS, FAVOURITES, BIN, MAP, DEVICE_FOLDERS, ALBUM_CATALOG, SETTINGS, LIBRARY_OVERVIEW, OCR_SETTINGS, ABOUT, SEARCH, VIEWER }
 private enum class SearchStage { DISCOVERY, TYPING, RESULTS }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -165,7 +165,7 @@ fun GalleryApp() {
                     destination = mapReturnDestination
                     mapFocusItem = null
                 }
-                destination in listOf(Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG, Destination.FAVOURITES) -> {
+                destination in listOf(Destination.DEVICE_FOLDERS, Destination.ALBUM_CATALOG, Destination.FAVOURITES, Destination.BIN) -> {
                     destination = Destination.ALBUMS
                 }
                 destination in listOf(Destination.LIBRARY_OVERVIEW, Destination.OCR_SETTINGS, Destination.ABOUT) -> {
@@ -273,7 +273,7 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> { mapReturnDestination = Destination.ALBUMS; mapFocusItem = null; destination = Destination.MAP }; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; "Favourites" -> { albumFilter = null; destination = Destination.FAVOURITES }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; destination = Destination.HOME } } },
+                        onFilter = { when (it) { "Map" -> { mapReturnDestination = Destination.ALBUMS; mapFocusItem = null; destination = Destination.MAP }; "Folders" -> destination = Destination.DEVICE_FOLDERS; "Albums" -> destination = Destination.ALBUM_CATALOG; "Favourites" -> { albumFilter = null; destination = Destination.FAVOURITES }; "Bin" -> { albumFilter = null; destination = Destination.BIN }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; destination = Destination.HOME } } },
                         onOpen = { selectedMedia = it; previousDestination = Destination.ALBUMS; destination = Destination.VIEWER },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -296,6 +296,21 @@ fun GalleryApp() {
                         onClearAlbumFilter = { destination = Destination.ALBUMS },
                         onAddPhotosToAlbum = null,
                         onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.FAVOURITES; destination = Destination.VIEWER }
+                    )
+                    Destination.BIN -> HomeScreen(
+                        media = media.filter { it.uri in inBin },
+                        loading = loading,
+                        onPermissionGranted = { refreshMedia() },
+                        albumTitle = "Bin",
+                        sortOrder = sortOrderPref,
+                        groupBy = groupByPref,
+                        gridColumns = gridColumnsPref,
+                        gridStyle = gridStylePref,
+                        topContentPadding = topContentPadding,
+                        bottomContentPadding = bottomContentPadding,
+                        onClearAlbumFilter = { destination = Destination.ALBUMS },
+                        onAddPhotosToAlbum = null,
+                        onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.BIN; destination = Destination.VIEWER }
                     )
                     Destination.MAP -> PhotoMapScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
