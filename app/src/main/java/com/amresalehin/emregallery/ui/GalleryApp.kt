@@ -629,8 +629,6 @@ fun GalleryApp() {
                         .align(Alignment.CenterStart)
                         .fillMaxHeight()
                         .width(304.dp)
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
                         .clickable { /* Keep taps inside the drawer from dismissing it. */ }
                         .testTag("side_panel"),
                     shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
@@ -641,6 +639,8 @@ fun GalleryApp() {
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
+                            .statusBarsPadding()
+                            .navigationBarsPadding()
                             .verticalScroll(rememberScrollState())
                             .padding(horizontal = 16.dp, vertical = 18.dp)
                     ) {
