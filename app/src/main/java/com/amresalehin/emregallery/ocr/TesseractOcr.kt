@@ -23,7 +23,7 @@ object TesseractOcr {
         if (!directory.exists() && !directory.mkdirs()) {
             error("Could not create OCR result cache.")
         }
-        return File(directory, "$"+"digest.txt")
+        return File(directory, "${digest}.txt")
     }
 
     /** Returns previously recognized text for this media URI, or null if not cached. */
@@ -35,7 +35,7 @@ object TesseractOcr {
     /** Atomically persists OCR output so it survives viewer navigation and app restarts. */
     fun saveCachedResult(context: Context, uri: Uri, text: String) {
         val target = cacheFile(context, uri)
-        val temporary = File(target.parentFile, "$"+"{target.name}.tmp")
+        val temporary = File(target.parentFile, "${target.name}.tmp")
         try {
             temporary.writeText(text, Charsets.UTF_8)
             if (!temporary.renameTo(target)) {
