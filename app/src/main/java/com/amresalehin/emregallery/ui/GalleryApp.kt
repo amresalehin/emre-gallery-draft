@@ -3944,6 +3944,8 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
     var scanTotal by remember { mutableIntStateOf(0) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var sheetExpanded by remember { mutableStateOf(false) }
+    var visibleBounds by remember { mutableStateOf<org.osmdroid.util.BoundingBox?>(null) }
+    var mapFramed by remember { mutableStateOf(false) }
     val dayFormat = remember { SimpleDateFormat("EEEE", Locale.getDefault()) }
 
     LaunchedEffect(Unit) {
@@ -4004,8 +4006,21 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
         loading = false
     }
 
-    val dayGroups = remember(locatedMedia) {
-        locatedMedia.groupBy { (item, _) ->
+    // Filter the drawer to the current map viewport.
+    val viewportMedia = remember(locatedMedia, visibleBounds) {
+        val bounds = visibleBounds
+        if (bounds == null) locatedMedia else locatedMedia.filter { (_, point) ->
+            point.latitude <= bounds.latNorth && point.latitude >= bounds.latSouth &&
+                if (bounds.lonWest <= bounds.lonEast) {
+                    point.longitude >= bounds.lonWest && point.longitude <= bounds.lonEast
+                } else {
+                    point.longitude >= bounds.lonWest || point.longitude <= bounds.lonEast
+                }
+        }
+    }
+
+    val dayGroups = remember(viewportMedia) {
+        viewportMedia.groupBy { (item, _) ->
             val millis = if (item.dateTakenMillis > 0) item.dateTakenMillis else item.dateAddedSeconds * 1000
             dayFormat.format(Date(millis))
         }.entries.sortedByDescending { entry ->
@@ -4026,19 +4041,29 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                     controller.setZoom(3.0)
                     controller.setCenter(GeoPoint(20.5937, 78.9629))
                     mapRef = this
+                    addMapListener(object : org.osmdroid.events.MapListener {
+                        override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
+                            visibleBounds = boundingBox
+                            return true
+                        }
+                        override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
+                            visibleBounds = boundingBox
+                            return true
+                        }
+                    })
                 }
             },
             update = { map ->
                 mapRef = map
-                map.overlays.clear()
-                if (locatedMedia.isNotEmpty()) {
-                    map.overlays.add(PhotoHeatmapOverlay(locatedMedia.map { it.second }))
-                }
-                if (locatedMedia.isNotEmpty()) {
+                if (locatedMedia.isNotEmpty() && !mapFramed) {
                     val points = locatedMedia.map { it.second }
                     val bounds = org.osmdroid.util.BoundingBox(points.maxOf { it.latitude }, points.maxOf { it.longitude }, points.minOf { it.latitude }, points.minOf { it.longitude })
                     runCatching { map.zoomToBoundingBox(bounds, true, 48) }
+                    mapFramed = true
                 }
+                map.overlays.removeAll { it is PhotoHeatmapOverlay }
+                if (locatedMedia.isNotEmpty()) map.overlays.add(PhotoHeatmapOverlay(locatedMedia.map { it.second }))
+                visibleBounds = map.boundingBox
                 map.invalidate()
             }
         )
@@ -4116,7 +4141,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                     Box(Modifier.width(38.dp).height(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f)))
                 }
                 Text(
-                    "%,d photos".format(Locale.getDefault(), locatedMedia.size),
+                    "%,d photos in this area".format(Locale.getDefault(), viewportMedia.size),
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp),
                     textAlign = TextAlign.Center,
                     style = MaterialTheme.typography.headlineSmall,
@@ -4129,6 +4154,13 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                         Spacer(Modifier.height(8.dp))
                         Text("No photos with GPS data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                         Text("Only images containing embedded location coordinates appear on this map.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else if (!loading && viewportMedia.isEmpty()) {
+                    Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Map, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        Text("No photos in this area", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Zoom out or move the map to see photos from another area.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
