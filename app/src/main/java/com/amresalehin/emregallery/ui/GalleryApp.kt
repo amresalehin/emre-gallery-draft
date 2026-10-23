@@ -28,6 +28,11 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.calculateCentroid
+import androidx.compose.ui.input.pointer.calculatePan
+import androidx.compose.ui.input.pointer.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -1616,6 +1621,12 @@ private fun HomeScreen(
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
+    var pinchPreviewScale by remember { mutableFloatStateOf(1f) }
+    val animatedPinchPreviewScale by animateFloatAsState(
+        targetValue = pinchPreviewScale,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "grid_pinch_scale"
+    )
     val selectionMode = selectedUris.isNotEmpty()
     val itemBounds = remember { mutableStateMapOf<String, Rect>() }
     var dragSelectionActive by remember { mutableStateOf(false) }
@@ -1668,18 +1679,48 @@ private fun HomeScreen(
     ) {
     LazyColumn(
         state = homeListState,
-        modifier = Modifier.fillMaxSize().pointerInput(pinchGridColumns) {
-            detectTransformGestures { _, _, zoom, _ ->
-                pinchZoomRemainder *= zoom
-                if (pinchZoomRemainder < 0.88f) {
-                    pinchGridColumns = (pinchGridColumns + 1).coerceAtMost(6)
-                    pinchZoomRemainder = 1f
-                } else if (pinchZoomRemainder > 1.12f) {
-                    pinchGridColumns = (pinchGridColumns - 1).coerceAtLeast(1)
-                    pinchZoomRemainder = 1f
-                }
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                scaleX = animatedPinchPreviewScale
+                scaleY = animatedPinchPreviewScale
             }
-        },
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    var gestureZoom = 1f
+                    var didPinch = false
+                    do {
+                        val event = awaitPointerEvent()
+                        if (event.changes.count { it.pressed } >= 2) {
+                            val zoom = event.calculateZoom()
+                            if (zoom.isFinite() && zoom > 0f && zoom != 1f) {
+                                gestureZoom = (gestureZoom * zoom).coerceIn(0.72f, 1.38f)
+                                pinchPreviewScale = gestureZoom
+                                didPinch = true
+                                event.changes.forEach { if (it.pressed) it.consume() }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
+
+                    if (didPinch) {
+                        // Resolve the grid density only after the fingers lift. The visual
+                        // scale remains continuous while the gesture is active.
+                        when {
+                            gestureZoom < 0.90f -> {
+                                val steps = if (gestureZoom < 0.80f) 2 else 1
+                                pinchGridColumns = (pinchGridColumns + steps).coerceAtMost(6)
+                            }
+                            gestureZoom > 1.10f -> {
+                                val steps = if (gestureZoom > 1.25f) 2 else 1
+                                pinchGridColumns = (pinchGridColumns - steps).coerceAtLeast(1)
+                            }
+                        }
+                        pinchZoomRemainder = 1f
+                        pinchPreviewScale = 1f
+                    }
+                }
+            },
         contentPadding = PaddingValues(
             start = 12.dp,
             end = 12.dp,
@@ -3783,6 +3824,8 @@ private fun ViewerScreen(
     }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var viewerScale by remember(item.uri) { mutableFloatStateOf(1f) }
+    var viewerTranslation by remember(item.uri) { mutableStateOf(Offset.Zero) }
     val share: () -> Unit = {
         runCatching {
             context.startActivity(
@@ -3959,7 +4002,74 @@ private fun ViewerScreen(
                         .crossfade(false)
                         .build(),
                     contentDescription = currentItem.name,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = viewerScale
+                            scaleY = viewerScale
+                            translationX = viewerTranslation.x
+                            translationY = viewerTranslation.y
+                        }
+                        .pointerInput(currentItem.uri) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                var didPinch = false
+                                do {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.count { it.pressed } >= 2) {
+                                        val zoom = event.calculateZoom()
+                                        val pan = event.calculatePan()
+                                        val centroid = event.calculateCentroid(useCurrent = true)
+                                        if (zoom.isFinite() && zoom > 0f &&
+                                            (kotlin.math.abs(zoom - 1f) > 0.001f || pan != Offset.Zero)
+                                        ) {
+                                            val oldScale = viewerScale
+                                            viewerScale = (oldScale * zoom).coerceIn(0.40f, 5f)
+                                            // Compensate for the layer's centre pivot so the
+                                            // image tracks the pinch focal point, not just its centre.
+                                            val effectiveZoom = viewerScale / oldScale.coerceAtLeast(0.001f)
+                                            viewerTranslation = Offset(
+                                                viewerTranslation.x + pan.x +
+                                                    (centroid.x - size.width / 2f) * (1f - effectiveZoom),
+                                                viewerTranslation.y + pan.y +
+                                                    (centroid.y - size.height / 2f) * (1f - effectiveZoom)
+                                            )
+                                            didPinch = true
+                                            event.changes.forEach { if (it.pressed) it.consume() }
+                                        }
+                                    }
+                                } while (event.changes.any { it.pressed })
+
+                                if (didPinch) {
+                                    if (viewerScale < 0.70f) {
+                                        // A sufficiently small pinch dismisses the viewer.
+                                        viewerScale = 1f
+                                        viewerTranslation = Offset.Zero
+                                        onBack()
+                                    } else if (viewerScale < 1f) {
+                                        // An incomplete dismiss gesture returns to full size.
+                                        val startScale = viewerScale
+                                        val startX = viewerTranslation.x
+                                        val startY = viewerTranslation.y
+                                        ocrScope.launch {
+                                            launch {
+                                                animate(startX, 0f, spring(stiffness = Spring.StiffnessMedium)) { value, _ ->
+                                                    viewerTranslation = Offset(value, viewerTranslation.y)
+                                                }
+                                            }
+                                            launch {
+                                                animate(startY, 0f, spring(stiffness = Spring.StiffnessMedium)) { value, _ ->
+                                                    viewerTranslation = Offset(viewerTranslation.x, value)
+                                                }
+                                            }
+                                            animate(startScale, 1f, spring(stiffness = Spring.StiffnessMedium)) { value, _ ->
+                                                viewerScale = value
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
                     contentScale = ContentScale.Fit
                 )
             }
