@@ -2681,33 +2681,51 @@ private fun ViewerScreen(
                 )
             }
             .pointerInput(items, item.uri, showDetails) {
+                val horizontalSwipeThreshold = 104.dp.toPx()
+                val verticalDetailsThreshold = 72.dp.toPx()
+                val touchSlop = viewConfiguration.touchSlop
+                var totalX = 0f
+                var totalY = 0f
+                var horizontalSwipeLocked = false
                 detectDragGestures(
                     onDragStart = {
+                        totalX = 0f
+                        totalY = 0f
+                        horizontalSwipeLocked = false
                         dragOffsetX = 0f
                         dragOffsetY = 0f
                     },
                     onDrag = { change, dragAmount ->
-                        change.consume()
-                        dragOffsetX += dragAmount.x
-                        dragOffsetY += dragAmount.y
+                        totalX += dragAmount.x
+                        totalY += dragAmount.y
+                        val absX = kotlin.math.abs(totalX)
+                        val absY = kotlin.math.abs(totalY)
+                        // Only move the image once the gesture is clearly horizontal.
+                        // Small finger jitter and diagonal/vertical drags won't page media.
+                        if (!horizontalSwipeLocked && absX > touchSlop && absX > absY * 1.35f) {
+                            horizontalSwipeLocked = true
+                        }
+                        if (horizontalSwipeLocked && !showDetails) {
+                            dragOffsetX = totalX
+                            change.consume()
+                        } else {
+                            dragOffsetX = 0f
+                            dragOffsetY = totalY
+                            if (absY > touchSlop && absY > absX * 1.2f) change.consume()
+                        }
                     },
                     onDragEnd = {
-                        val absY = kotlin.math.abs(dragOffsetY)
-                        val absX = kotlin.math.abs(dragOffsetX)
-                        if (absY > absX) {
-                            if (dragOffsetY < -45f && !showDetails) {
-                                onToggleDetails()
-                            } else if (dragOffsetY > 45f && showDetails) {
-                                onToggleDetails()
+                        val absY = kotlin.math.abs(totalY)
+                        val absX = kotlin.math.abs(totalX)
+                        if (horizontalSwipeLocked && !showDetails && absX > horizontalSwipeThreshold) {
+                            val index = items.indexOfFirst { it.uri == item.uri }
+                            if (index != -1) {
+                                val targetIndex = if (totalX < 0) index + 1 else index - 1
+                                items.getOrNull(targetIndex)?.let(onOpenNeighbor)
                             }
-                        } else {
-                            if (!showDetails && absX > 60f) {
-                                val index = items.indexOfFirst { it.uri == item.uri }
-                                if (index != -1) {
-                                    val targetIndex = if (dragOffsetX < 0) index + 1 else index - 1
-                                    items.getOrNull(targetIndex)?.let(onOpenNeighbor)
-                                }
-                            }
+                        } else if (!horizontalSwipeLocked && absY > verticalDetailsThreshold) {
+                            if (totalY < 0 && !showDetails) onToggleDetails()
+                            else if (totalY > 0 && showDetails) onToggleDetails()
                         }
                         dragOffsetX = 0f
                         dragOffsetY = 0f
