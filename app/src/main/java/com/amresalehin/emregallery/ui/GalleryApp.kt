@@ -4187,13 +4187,24 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                 Box(Modifier.fillMaxWidth().clickable { sheetExpanded = !sheetExpanded }.padding(top = 10.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
                     Box(Modifier.width(38.dp).height(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .55f)))
                 }
-                Text(
-                    "%,d photos in this area".format(Locale.getDefault(), viewportMedia.size),
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Normal
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "%,d photos in this area".format(Locale.getDefault(), viewportMedia.size),
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Normal
+                    )
+                    IconButton(onClick = { sheetExpanded = !sheetExpanded }) {
+                        Icon(
+                            if (sheetExpanded) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                            contentDescription = if (sheetExpanded) "Collapse photo drawer" else "Expand photo drawer"
+                        )
+                    }
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .6f))
                 if (!loading && locatedMedia.isEmpty()) {
                     Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
