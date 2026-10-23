@@ -1397,7 +1397,7 @@ private fun MosaicMediaItem(
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .then(
                 Modifier.border(
-                    width = 1.dp,
+                    width = 2.dp,
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f),
                     shape = RoundedCornerShape(8.dp)
                 )
@@ -1465,7 +1465,7 @@ private fun MediaGridItem(
             .aspectRatio(aspect)
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
+            .border(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
             .clickable { onOpen(item) }
     ) {
         AsyncImage(
