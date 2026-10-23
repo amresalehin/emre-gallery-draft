@@ -58,6 +58,16 @@ android {
 val prepareBundledOcrData by tasks.registering {
     val outputDir = generatedOcrAssets.map { it.dir("tessdata") }
     outputs.dir(outputDir)
+    // The output directory may exist even when one or more trained-data files
+    // were deleted or left incomplete. Re-run the task unless every required
+    // language asset is present and non-trivial.
+    outputs.upToDateWhen {
+        bundledOcrLanguages.all { code ->
+            outputDir.get().asFile.resolve("$code.traineddata").let { file ->
+                file.isFile && file.length() >= 1024
+            }
+        }
+    }
     doLast {
         val tessdataDir = outputDir.get().asFile
         if (!tessdataDir.exists() && !tessdataDir.mkdirs()) {
