@@ -699,7 +699,6 @@ fun GalleryApp() {
                     }
             ) { currentDestination -> renderDestination(currentDestination) }
             }
-            }
 
         // Wider top and bottom edge blur across app screens
         if (destination != Destination.VIEWER) {
