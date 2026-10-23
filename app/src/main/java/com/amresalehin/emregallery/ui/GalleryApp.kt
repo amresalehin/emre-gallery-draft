@@ -3827,8 +3827,8 @@ private fun ViewerScreen(
         }
         }
 
-        // Soft edge shading gives the floating viewer controls depth without
-        // dimming the photo itself. It fades away with the controls.
+        // Wider, stronger edge shading extends down to the floating actions
+        // when controls appear, while keeping the centre of the photo unobscured.
         AnimatedVisibility(
             visible = showControls && !showDetails,
             enter = fadeIn(animationSpec = tween(260)),
@@ -3837,7 +3837,7 @@ private fun ViewerScreen(
         ) {
             Box(Modifier.fillMaxSize()) {
                 BoxWithConstraints(Modifier.fillMaxSize()) {
-                    val edgeShadeHeight = maxHeight * 0.07f
+                    val edgeShadeHeight = maxHeight * 0.22f
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -3846,8 +3846,9 @@ private fun ViewerScreen(
                             .background(
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        Color.Black.copy(alpha = 0.32f),
-                                        Color.Black.copy(alpha = 0.12f),
+                                        Color.Black.copy(alpha = 0.62f),
+                                        Color.Black.copy(alpha = 0.38f),
+                                        Color.Black.copy(alpha = 0.16f),
                                         Color.Transparent
                                     )
                                 )
@@ -3862,8 +3863,9 @@ private fun ViewerScreen(
                                 Brush.verticalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        Color.Black.copy(alpha = 0.12f),
-                                        Color.Black.copy(alpha = 0.32f)
+                                        Color.Black.copy(alpha = 0.16f),
+                                        Color.Black.copy(alpha = 0.42f),
+                                        Color.Black.copy(alpha = 0.68f)
                                     )
                                 )
                             )
