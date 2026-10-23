@@ -3002,6 +3002,26 @@ private fun ViewerScreen(
                 Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = .45f))
+                    // Tapping outside dismisses the sheet; vertical swipes on the
+                    // exposed viewer area expand or dismiss it without touching the panel.
+                    .pointerInput(showDetails, detailsExpanded) {
+                        var totalDragY = 0f
+                        detectDragGestures(
+                            onDragStart = { totalDragY = 0f },
+                            onDragEnd = {
+                                when {
+                                    totalDragY < -72.dp.toPx() && !detailsExpanded -> detailsExpanded = true
+                                    totalDragY > 72.dp.toPx() -> onToggleDetails()
+                                }
+                            },
+                            onDragCancel = { totalDragY = 0f }
+                        ) { change, dragAmount ->
+                            totalDragY += dragAmount.y
+                            if (kotlin.math.abs(totalDragY) > viewConfiguration.touchSlop) {
+                                change.consume()
+                            }
+                        }
+                    }
                     .clickable { onToggleDetails() }
             )
         }
