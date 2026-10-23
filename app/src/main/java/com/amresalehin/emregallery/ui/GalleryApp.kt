@@ -4376,9 +4376,14 @@ private fun ViewerScreen(
                             }
                         }
 
-                        // Card 5: People
+                        // Card 5: People detected in this specific photo.
                         item {
-                            val people = listOf("Abbu", "Nowshin", "Amma", "Tanzil")
+                            val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
+                            val detectedPeople = remember(item.uri) {
+                                faceStore.summaries().filter { cluster ->
+                                    faceStore.facesForCluster(cluster.id).any { face -> face.mediaUri == item.uri }
+                                }
+                            }
                             DetailCard {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -4386,90 +4391,73 @@ private fun ViewerScreen(
                                 ) {
                                     Icon(
                                         Icons.Default.PersonOutline,
-                                        contentDescription = "People",
+                                        contentDescription = "People detected in this photo",
                                         modifier = Modifier.size(22.dp),
                                         tint = MaterialTheme.colorScheme.onSurface
                                     )
                                     Spacer(Modifier.width(12.dp))
-                                    Row(
+                                    Column(
                                         modifier = Modifier.weight(1f),
-                                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        people.forEachIndexed { idx, personName ->
-                                            val avatarCandidate = items.getOrNull(idx)
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Surface(
-                                                    shape = CircleShape,
-                                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                                                    modifier = Modifier.size(46.dp)
-                                                ) {
-                                                    if (avatarCandidate != null) {
-                                                        AsyncImage(
-                                                            model = ImageRequest.Builder(LocalContext.current)
-                                                                .data(Uri.parse(avatarCandidate.uri))
-                                                                .size(120, 120)
-                                                                .crossfade(false)
-                                                                .build(),
-                                                            contentDescription = personName,
-                                                            modifier = Modifier.fillMaxSize(),
-                                                            contentScale = ContentScale.Crop
-                                                        )
-                                                    } else {
-                                                        Box(contentAlignment = Alignment.Center) {
-                                                            Text(
-                                                                text = personName.take(1),
-                                                                style = MaterialTheme.typography.titleMedium,
-                                                                fontWeight = FontWeight.Bold,
-                                                                color = MaterialTheme.colorScheme.onSurface
+                                        Text(
+                                            text = "People",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (detectedPeople.isEmpty()) {
+                                            Text(
+                                                text = "No recognized people in this photo. Scan photos in People & pets to identify faces.",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        } else {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                detectedPeople.forEach { person ->
+                                                    Column(
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        modifier = Modifier.widthIn(max = 76.dp)
+                                                    ) {
+                                                        val sampleUri = person.sampleUri
+                                                        if (sampleUri != null) {
+                                                            AsyncImage(
+                                                                model = ImageRequest.Builder(context)
+                                                                    .data(Uri.parse(sampleUri))
+                                                                    .size(120, 120)
+                                                                    .crossfade(false)
+                                                                    .build(),
+                                                                contentDescription = person.displayName,
+                                                                modifier = Modifier.size(46.dp).clip(CircleShape),
+                                                                contentScale = ContentScale.Crop
                                                             )
+                                                        } else {
+                                                            Surface(
+                                                                shape = CircleShape,
+                                                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                                modifier = Modifier.size(46.dp)
+                                                            ) {
+                                                                Box(contentAlignment = Alignment.Center) {
+                                                                    Icon(Icons.Default.Face, contentDescription = null)
+                                                                }
+                                                            }
                                                         }
+                                                        Spacer(Modifier.height(4.dp))
+                                                        Text(
+                                                            text = person.displayName,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurface,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
                                                     }
                                                 }
-                                                Spacer(Modifier.height(4.dp))
-                                                Text(
-                                                    text = personName,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                    maxLines = 1
-                                                )
                                             }
-                                        }
-
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                                                modifier = Modifier
-                                                    .size(46.dp)
-                                                    .clickable { }
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        Icons.Default.Add,
-                                                        contentDescription = "Add person",
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                }
-                                            }
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(
-                                                text = "Add",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
                                         }
                                     }
-                                    Spacer(Modifier.width(8.dp))
-                                    Icon(
-                                        Icons.Default.ChevronRight,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        modifier = Modifier.size(20.dp)
-                                    )
                                 }
                             }
                         }
