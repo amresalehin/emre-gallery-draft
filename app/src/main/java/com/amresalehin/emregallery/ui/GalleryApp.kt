@@ -2325,28 +2325,45 @@ private fun AlbumsScreen(
                         .clickable { onFilter("Folders") }
                         .testTag("folders_section_card")
                 ) {
-                    val topFolder = folders.firstOrNull()
-                    val topFolderCover = topFolder?.value?.firstOrNull()
+                    val folderPreview = folders.take(4)
 
                     Box(modifier = Modifier.fillMaxSize()) {
-                        if (topFolderCover != null) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(Uri.parse(topFolderCover.uri))
-                                    .size(360, 360)
-                                    .crossfade(false)
-                                    .memoryCacheKey("${topFolderCover.uri}_folder_cover")
-                                    .build(),
-                                contentDescription = topFolder.key.substringAfterLast('/'),
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .clip(RoundedCornerShape(20.dp)),
-                                contentScale = ContentScale.Crop
-                            )
+                        if (folderPreview.isNotEmpty()) {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
+                                modifier = Modifier.fillMaxSize(),
+                                userScrollEnabled = false,
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                gridItems(folderPreview, key = { it.key }) { folder ->
+                                    val cover = folder.value.firstOrNull()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(90.dp)
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                    ) {
+                                        if (cover != null) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(Uri.parse(cover.uri))
+                                                    .size(240, 240)
+                                                    .crossfade(false)
+                                                    .memoryCacheKey("${cover.uri}_folder_cover")
+                                                    .build(),
+                                                contentDescription = folder.key.substringAfterLast('/'),
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.45f))
+                                    .background(Color.Black.copy(alpha = 0.42f))
                             )
                         }
 
@@ -2406,7 +2423,7 @@ private fun AlbumsScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = if (topFolder != null) "${topFolder.value.size} items" else "${folders.size} folders",
+                                    text = "${folders.size} ${if (folders.size == 1) "folder" else "folders"} · ${normalMedia.size} items",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (topFolderCover != null) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
