@@ -1612,6 +1612,8 @@ private fun HomeScreen(
     val context = LocalContext.current
     val homeScope = rememberCoroutineScope()
     var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
+    var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
     val itemBounds = remember { mutableStateMapOf<String, Rect>() }
     var dragSelectionActive by remember { mutableStateOf(false) }
@@ -1654,8 +1656,8 @@ private fun HomeScreen(
         }
     }
 
-    val groupedRows = remember(groups, gridColumns) {
-        groups.map { group -> group to group.items.chunked(gridColumns.coerceIn(1, 6)) }
+    val groupedRows = remember(groups, pinchGridColumns) {
+        groups.map { group -> group to group.items.chunked(pinchGridColumns.coerceIn(1, 6)) }
     }
 
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -1664,7 +1666,18 @@ private fun HomeScreen(
     ) {
     LazyColumn(
         state = homeListState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().pointerInput(pinchGridColumns) {
+            detectTransformGestures { _, _, zoom, _ ->
+                pinchZoomRemainder *= zoom
+                if (pinchZoomRemainder < 0.88f) {
+                    pinchGridColumns = (pinchGridColumns + 1).coerceAtMost(6)
+                    pinchZoomRemainder = 1f
+                } else if (pinchZoomRemainder > 1.12f) {
+                    pinchGridColumns = (pinchGridColumns - 1).coerceAtLeast(1)
+                    pinchZoomRemainder = 1f
+                }
+            }
+        },
         contentPadding = PaddingValues(
             start = 12.dp,
             end = 12.dp,
@@ -1754,7 +1767,7 @@ private fun HomeScreen(
         if (loading && sortedMedia.isEmpty()) {
             item {
                 HomeScreenSkeleton(
-                    gridColumns = gridColumns,
+                    gridColumns = pinchGridColumns,
                     gridStyle = gridStyle,
                     showMemories = albumTitle == null
                 )
