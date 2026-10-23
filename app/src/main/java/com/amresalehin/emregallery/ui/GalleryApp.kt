@@ -2520,23 +2520,6 @@ private fun AlbumsScreen(
                                 }
                             }
 
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clickable { onFilter("Places") }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.ArrowForward,
-                                        contentDescription = "Open map",
-                                        tint = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
                         }
 
                         Text(
