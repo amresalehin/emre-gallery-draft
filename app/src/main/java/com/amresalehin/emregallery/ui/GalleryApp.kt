@@ -3820,6 +3820,22 @@ private fun MetaKeyValueRow(key: String, value: String) {
     }
 }
 
+// Process-wide cache: reopening the Map page reuses both GPS hits and "no GPS" results.
+private object PhotoMapLocationCache {
+    private val points = mutableMapOf<String, GeoPoint?>()
+
+    @Synchronized
+    fun contains(uri: String): Boolean = points.containsKey(uri)
+
+    @Synchronized
+    fun get(uri: String): GeoPoint? = points[uri]
+
+    @Synchronized
+    fun put(uri: String, point: GeoPoint?) {
+        points[uri] = point
+    }
+}
+
 @Composable
 private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
     val context = LocalContext.current
@@ -3834,11 +3850,23 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
     LaunchedEffect(media) {
         loading = true
         scanProgress = 0
-        scanTotal = media.count { !it.isVideo }
-        locatedMedia = emptyList()
-        val result = mutableListOf<Pair<MediaItem, GeoPoint>>()
         val photos = media.filterNot { it.isVideo }
-        photos.forEachIndexed { index, item ->
+        val uncachedCount = photos.count { !PhotoMapLocationCache.contains(it.uri) }
+        scanTotal = uncachedCount
+        // Populate immediately from cache, then inspect only newly seen photo URIs.
+        locatedMedia = photos.mapNotNull { item ->
+            if (PhotoMapLocationCache.contains(item.uri)) {
+                PhotoMapLocationCache.get(item.uri)?.let { item to it }
+            } else null
+        }
+        if (uncachedCount == 0) {
+            loading = false
+            return@LaunchedEffect
+        }
+
+        val result = locatedMedia.toMutableList()
+        var scanned = 0
+        photos.filterNot { PhotoMapLocationCache.contains(it.uri) }.forEach { item ->
             val point = withContext(Dispatchers.IO) {
                 runCatching {
                     context.contentResolver.openInputStream(Uri.parse(item.uri))?.use { stream ->
@@ -3848,16 +3876,18 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                     }
                 }.getOrNull()
             }
+            PhotoMapLocationCache.put(item.uri, point)
             if (point != null) result.add(item to point)
-            // Publish progress regularly so large libraries never look frozen.
-            if ((index + 1) % 12 == 0 || index == photos.lastIndex) {
+            scanned++
+            // Publish progress regularly so the first scan remains responsive.
+            if (scanned % 12 == 0 || scanned == uncachedCount) {
                 locatedMedia = result.toList()
-                scanProgress = index + 1
+                scanProgress = scanned
                 kotlinx.coroutines.yield()
             }
         }
         locatedMedia = result.toList()
-        scanProgress = scanTotal
+        scanProgress = uncachedCount
         loading = false
     }
 
