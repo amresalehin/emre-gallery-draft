@@ -2865,7 +2865,6 @@ private fun ViewerScreen(
                     if (isBin) "Restore" else "Delete",
                     onToggleBin
                 )
-                ViewerAction(Icons.Default.MoreHoriz, "More") { showMore = true }
             }
 
         }
