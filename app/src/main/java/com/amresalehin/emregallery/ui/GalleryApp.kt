@@ -2332,21 +2332,6 @@ private fun AlbumsScreen(
                                                     )
                                             )
                                         }
-                                        Column(
-                                            modifier = Modifier
-                                                .align(Alignment.BottomStart)
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                                        ) {
-                                            Text(
-                                                album.name,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = if (cover != null) Color.White else MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
                                     }
                                 }
                             }
