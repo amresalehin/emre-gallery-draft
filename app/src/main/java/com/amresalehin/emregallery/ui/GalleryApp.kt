@@ -520,11 +520,6 @@ fun GalleryApp() {
                         onOpenPeople = { destination = Destination.PEOPLE }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
-                        media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
-                        currentLanguages = ocrLanguagesPref,
-                        onLanguagesChange = { newLangs ->
-                            scope.launch { prefs.setOcrLanguages(newLangs) }
-                        },
                         onBack = { destination = Destination.SETTINGS }
                     )
                     Destination.ABOUT -> AboutScreen(
@@ -5656,15 +5651,8 @@ private fun DeviceFoldersScreen(
 
 @Composable
 private fun OcrSettingsScreen(
-    media: List<MediaItem>,
-    currentLanguages: Set<String>,
-    onLanguagesChange: (Set<String>) -> Unit,
     onBack: () -> Unit
 ) {
-    var selectedLanguages by remember(currentLanguages) {
-        mutableStateOf(if (currentLanguages.isNotEmpty()) currentLanguages else setOf("eng"))
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -5686,125 +5674,6 @@ private fun OcrSettingsScreen(
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold
             )
-            Spacer(Modifier.weight(1f))
-            TextButton(
-                onClick = {
-                    val defaults = setOf("eng")
-                    selectedLanguages = defaults
-                    onLanguagesChange(defaults)
-                }
-            ) {
-                Text("Reset")
-            }
-        }
-
-        Text(
-            "Recognition languages",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            "Choose the languages used to recognize text in photos.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
-        )
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            gridItems(TesseractOcr.supportedLanguages.entries.toList(), key = { it.value }) { entry ->
-                val isSelected = entry.value in selectedLanguages
-                OutlinedCard(
-                    onClick = {
-                        val updated = if (isSelected) {
-                            if (selectedLanguages.size > 1) selectedLanguages - entry.value else selectedLanguages
-                        } else {
-                            selectedLanguages + entry.value
-                        }
-                        selectedLanguages = updated
-                        onLanguagesChange(updated)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.outlinedCardColors(
-                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surface
-                    ),
-                    border = BorderStroke(
-                        width = if (isSelected) 1.5.dp else 1.dp,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            entry.key,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            minLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Surface(
-                            shape = CircleShape,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                if (isSelected) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                } else {
-                                    Text(
-                                        entry.value.take(2).uppercase(),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "${selectedLanguages.size} active",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    selectedLanguages.joinToString(", ") { code ->
-                        TesseractOcr.supportedLanguages.entries.firstOrNull { it.value == code }?.key ?: code
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 200.dp)
-                )
-            }
         }
     }
 }
