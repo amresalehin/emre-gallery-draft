@@ -2893,9 +2893,9 @@ private fun HomeViewOptionsBottomSheet(
                         tempGroupBy = "none"
                     },
                     shape = CircleShape,
-                    color = if (MaterialTheme.colorScheme.background.luminance() < 0.5f) Color.White else MaterialTheme.colorScheme.surface,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
                     contentColor = MaterialTheme.colorScheme.onSurface,
-                    border = BorderStroke(1.dp, Color(0xFFDCDCE0)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
                         .height(48.dp)
                         .testTag("reset_view_options_button")
