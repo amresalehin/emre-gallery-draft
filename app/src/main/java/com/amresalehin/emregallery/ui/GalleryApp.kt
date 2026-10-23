@@ -2,6 +2,9 @@ package com.amresalehin.emregallery.ui
 
 import android.Manifest
 import android.content.Intent
+import android.content.ContentValues
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -3820,25 +3823,67 @@ private fun MetaKeyValueRow(key: String, value: String) {
     }
 }
 
-// Process-wide cache: reopening the Map page reuses both GPS hits and "no GPS" results.
-private object PhotoMapLocationCache {
-    private val points = mutableMapOf<String, GeoPoint?>()
+// Persistent SQLite cache for photo GPS metadata, including photos with no GPS coordinates.
+private class PhotoMapLocationCache(context: android.content.Context) :
+    SQLiteOpenHelper(context.applicationContext, "photo_map_locations.db", null, 1) {
+
+    data class CachedLocation(val point: GeoPoint?)
+
+    override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE photo_locations (uri TEXT PRIMARY KEY NOT NULL, latitude REAL, longitude REAL)"
+        )
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // Version 1 is the initial schema. Add migrations here if the schema changes.
+    }
 
     @Synchronized
-    fun contains(uri: String): Boolean = points.containsKey(uri)
+    fun loadAll(): Map<String, CachedLocation> {
+        val result = mutableMapOf<String, CachedLocation>()
+        readableDatabase.query(
+            "photo_locations", arrayOf("uri", "latitude", "longitude"),
+            null, null, null, null, null
+        ).use { cursor ->
+            val uriColumn = cursor.getColumnIndexOrThrow("uri")
+            val latitudeColumn = cursor.getColumnIndexOrThrow("latitude")
+            val longitudeColumn = cursor.getColumnIndexOrThrow("longitude")
+            while (cursor.moveToNext()) {
+                val uri = cursor.getString(uriColumn)
+                val point = if (cursor.isNull(latitudeColumn) || cursor.isNull(longitudeColumn)) {
+                    null
+                } else {
+                    GeoPoint(cursor.getDouble(latitudeColumn), cursor.getDouble(longitudeColumn))
+                }
+                result[uri] = CachedLocation(point)
+            }
+        }
+        return result
+    }
 
     @Synchronized
-    fun get(uri: String): GeoPoint? = points[uri]
-
-    @Synchronized
-    fun put(uri: String, point: GeoPoint?) {
-        points[uri] = point
+    fun save(uri: String, point: GeoPoint?) {
+        val values = ContentValues().apply {
+            put("uri", uri)
+            if (point == null) {
+                putNull("latitude")
+                putNull("longitude")
+            } else {
+                put("latitude", point.latitude)
+                put("longitude", point.longitude)
+            }
+        }
+        writableDatabase.insertWithOnConflict(
+            "photo_locations", null, values, SQLiteDatabase.CONFLICT_REPLACE
+        )
     }
 }
 
 @Composable
 private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (MediaItem) -> Unit) {
     val context = LocalContext.current
+    val locationCache = remember(context.applicationContext) { PhotoMapLocationCache(context.applicationContext) }
     var locatedMedia by remember { mutableStateOf<List<Pair<MediaItem, GeoPoint>>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var scanProgress by remember { mutableIntStateOf(0) }
@@ -3851,22 +3896,21 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
         loading = true
         scanProgress = 0
         val photos = media.filterNot { it.isVideo }
-        val uncachedCount = photos.count { !PhotoMapLocationCache.contains(it.uri) }
-        scanTotal = uncachedCount
-        // Populate immediately from cache, then inspect only newly seen photo URIs.
+        val cached = withContext(Dispatchers.IO) { locationCache.loadAll() }
+        // Cached coordinates and cached "no GPS" results both survive app restarts.
         locatedMedia = photos.mapNotNull { item ->
-            if (PhotoMapLocationCache.contains(item.uri)) {
-                PhotoMapLocationCache.get(item.uri)?.let { item to it }
-            } else null
+            cached[item.uri]?.point?.let { item to it }
         }
-        if (uncachedCount == 0) {
+        val uncachedPhotos = photos.filterNot { cached.containsKey(it.uri) }
+        scanTotal = uncachedPhotos.size
+        if (uncachedPhotos.isEmpty()) {
             loading = false
             return@LaunchedEffect
         }
 
         val result = locatedMedia.toMutableList()
         var scanned = 0
-        photos.filterNot { PhotoMapLocationCache.contains(it.uri) }.forEach { item ->
+        uncachedPhotos.forEach { item ->
             val point = withContext(Dispatchers.IO) {
                 runCatching {
                     context.contentResolver.openInputStream(Uri.parse(item.uri))?.use { stream ->
@@ -3876,11 +3920,11 @@ private fun PhotoMapScreen(media: List<MediaItem>, onBack: () -> Unit, onOpen: (
                     }
                 }.getOrNull()
             }
-            PhotoMapLocationCache.put(item.uri, point)
+            withContext(Dispatchers.IO) { locationCache.save(item.uri, point) }
             if (point != null) result.add(item to point)
             scanned++
             // Publish progress regularly so the first scan remains responsive.
-            if (scanned % 12 == 0 || scanned == uncachedCount) {
+            if (scanned % 12 == 0 || scanned == uncachedPhotos.size) {
                 locatedMedia = result.toList()
                 scanProgress = scanned
                 kotlinx.coroutines.yield()
