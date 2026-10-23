@@ -6409,34 +6409,67 @@ private fun PeopleScreen(
         if (selectedCluster == null) {
             LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(16.dp, 14.dp, 16.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
-                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Private, on-device recognition", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            Text("Face embeddings and groups are stored locally. The buffalo_l recognition model is downloaded only when you choose to enable it. Its official pretrained weights are licensed for non-commercial research use.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("Indexed $indexedCount of ${media.count { !it.isVideo }} photos · $indexedFaces faces", style = MaterialTheme.typography.bodyMedium)
-                            Button(onClick = {
-                                if (modelReady) {
-                                    busy = true
-                                    errorMessage = null
-                                    scope.launch {
-                                        try {
-                                            progress = null
-                                            val result = indexer.indexNewMedia(media, store) { value -> scope.launch { progress = value } }
-                                            busy = false
-                                            progress = result
-                                            reload()
-                                        } catch (e: Exception) {
-                                            busy = false
-                                            errorMessage = e.message ?: "Face indexing failed."
-                                        }
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    modifier = Modifier.size(42.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Default.Face, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
                                     }
-                                } else showLicenseDialog = true
-                            }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("People & pets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "$indexedCount of ${media.count { !it.isVideo }} photos scanned · $indexedFaces faces",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Button(
+                                onClick = {
+                                    if (modelReady) {
+                                        busy = true
+                                        errorMessage = null
+                                        scope.launch {
+                                            try {
+                                                progress = null
+                                                val result = indexer.indexNewMedia(media, store) { value -> scope.launch { progress = value } }
+                                                busy = false
+                                                progress = result
+                                                reload()
+                                            } catch (e: Exception) {
+                                                busy = false
+                                                errorMessage = e.message ?: "Face indexing failed."
+                                            }
+                                        }
+                                    } else showLicenseDialog = true
+                                },
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Icon(if (modelReady) Icons.Default.Face else Icons.Default.Download, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (modelReady) "Scan new photos" else "Download buffalo_l model")
+                                Text(if (modelReady) "Scan new photos" else "Set up face recognition")
                             }
-                            if (!modelReady) Text("Downloads and retains all five ONNX models in the official buffalo_l pack. The archive is about 326 MB; keep at least 500 MB free for installation.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (!modelReady) {
+                                Text(
+                                    "Runs on-device. Model download is about 326 MB; pretrained weights are for non-commercial research use.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
