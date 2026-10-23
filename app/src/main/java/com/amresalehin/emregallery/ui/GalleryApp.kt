@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -764,8 +765,31 @@ private fun HomeScreen(
         }
     }
 
+    val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        state = homeListState,
+        modifier = Modifier.fillMaxSize().drawWithContent {
+            drawContent()
+            val layout = homeListState.layoutInfo
+            val totalItems = layout.totalItemsCount
+            val visibleItems = layout.visibleItemsInfo
+            if (totalItems > 0 && visibleItems.isNotEmpty() && layout.viewportSize.height > 0 &&
+                (visibleItems.first().index > 0 || visibleItems.last().index < totalItems - 1)
+            ) {
+                val viewportHeight = layout.viewportSize.height.toFloat()
+                val contentHeight = (layout.totalItemsCount.toFloat() / visibleItems.size.coerceAtLeast(1)) * viewportHeight
+                val thumbHeight = (viewportHeight * viewportHeight / contentHeight).coerceIn(36.dp.toPx(), viewportHeight)
+                val scrollFraction = (homeListState.firstVisibleItemIndex.toFloat() /
+                    (totalItems - visibleItems.size).coerceAtLeast(1)).coerceIn(0f, 1f)
+                val thumbTop = (viewportHeight - thumbHeight) * scrollFraction
+                drawRoundRect(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    topLeft = Offset(size.width - 3.dp.toPx(), thumbTop),
+                    size = androidx.compose.ui.geometry.Size(2.dp.toPx(), thumbHeight),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+                )
+            }
+        },
         contentPadding = PaddingValues(
             start = 12.dp,
             end = 12.dp,
