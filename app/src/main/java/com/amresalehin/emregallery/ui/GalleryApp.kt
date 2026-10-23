@@ -1683,9 +1683,12 @@ private fun HomeScreen(
                     awaitFirstDown(requireUnconsumed = false)
                     var gestureZoom = 1f
                     var didPinch = false
+                    var multiTouchStarted = false
                     do {
                         val event = awaitPointerEvent()
-                        if (event.changes.count { it.pressed } >= 2) {
+                        val pressedCount = event.changes.count { it.pressed }
+                        if (pressedCount >= 2) {
+                            multiTouchStarted = true
                             val zoom = event.calculateZoom()
                             if (zoom.isFinite() && zoom > 0f && zoom != 1f) {
                                 gestureZoom = (gestureZoom * zoom).coerceIn(0.72f, 1.38f)
@@ -1694,7 +1697,10 @@ private fun HomeScreen(
                                 event.changes.forEach { if (it.pressed) it.consume() }
                             }
                         }
-                    } while (event.changes.any { it.pressed })
+                    } while (
+                        event.changes.any { it.pressed } &&
+                            (!multiTouchStarted || event.changes.count { it.pressed } >= 2)
+                    )
 
                     if (didPinch) {
                         // Resolve the grid density only after the fingers lift. The visual
@@ -4009,9 +4015,12 @@ private fun ViewerScreen(
                             awaitEachGesture {
                                 awaitFirstDown(requireUnconsumed = false)
                                 var didPinch = false
+                                var multiTouchStarted = false
                                 do {
                                     val event = awaitPointerEvent()
-                                    if (event.changes.count { it.pressed } >= 2) {
+                                    val pressedCount = event.changes.count { it.pressed }
+                                    if (pressedCount >= 2) {
+                                        multiTouchStarted = true
                                         val zoom = event.calculateZoom()
                                         val pan = event.calculatePan()
                                         val centroid = event.calculateCentroid(useCurrent = true)
@@ -4033,7 +4042,10 @@ private fun ViewerScreen(
                                             event.changes.forEach { if (it.pressed) it.consume() }
                                         }
                                     }
-                                } while (event.changes.any { it.pressed })
+                                } while (
+                                    event.changes.any { it.pressed } &&
+                                        (!multiTouchStarted || event.changes.count { it.pressed } >= 2)
+                                )
 
                                 if (didPinch) {
                                     if (viewerScale < 0.70f) {
