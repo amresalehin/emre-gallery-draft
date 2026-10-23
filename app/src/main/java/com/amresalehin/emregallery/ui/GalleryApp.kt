@@ -2551,6 +2551,14 @@ private fun HomeViewOptionsBottomSheet(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp
                         )
+                        if (isGridSelected) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "Selected",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
@@ -2583,6 +2591,14 @@ private fun HomeViewOptionsBottomSheet(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 16.sp
                         )
+                        if (isMasonrySelected) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = "Selected",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
