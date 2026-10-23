@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -117,6 +118,7 @@ fun GalleryApp() {
     val groupByPref by prefs.groupBy.collectAsStateWithLifecycle(initialValue = "day")
     val gridColumnsPref by prefs.gridColumns.collectAsStateWithLifecycle(initialValue = 3)
     val gridStylePref by prefs.gridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
+    val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
@@ -291,6 +293,7 @@ fun GalleryApp() {
                     Destination.SETTINGS -> SettingsScreen(
                         total = media.size,
                         theme = themePref,
+                        ocrLanguageCount = ocrLanguagesPref.size,
                         topContentPadding = statusBarTop + 14.dp,
                         bottomContentPadding = bottomContentPadding,
                         onTheme = { scope.launch { prefs.setTheme(it) } },
@@ -311,6 +314,10 @@ fun GalleryApp() {
                         onRefresh = { refreshMedia() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
+                        currentLanguages = ocrLanguagesPref,
+                        onLanguagesChange = { newLangs ->
+                            scope.launch { prefs.setOcrLanguages(newLangs) }
+                        },
                         onBack = { destination = Destination.SETTINGS }
                     )
                     Destination.ABOUT -> AboutScreen(
@@ -334,6 +341,7 @@ fun GalleryApp() {
                         ViewerScreen(
                             item = item,
                             items = visibleMedia.ifEmpty { listOf(item) },
+                            defaultOcrLanguages = ocrLanguagesPref,
                             favourite = item.uri in favourites,
                             isHidden = item.uri in hidden,
                             isBin = item.uri in inBin,
@@ -2666,6 +2674,7 @@ private fun ViewerScreen(
     item: MediaItem,
     items: List<MediaItem>,
     customAlbums: List<CustomAlbum>,
+    defaultOcrLanguages: Set<String> = setOf("eng"),
     customTags: Set<String>,
     customPeople: Set<String>,
     onAddTag: (String) -> Unit,
@@ -2691,7 +2700,10 @@ private fun ViewerScreen(
     var ocrText by remember(item.uri) { mutableStateOf("") }
     var ocrError by remember(item.uri) { mutableStateOf<String?>(null) }
     var ocrBusy by remember(item.uri) { mutableStateOf(false) }
-    val ocrLanguages = remember(item.uri) { mutableStateListOf("eng") }
+    val ocrLanguages = remember(item.uri, defaultOcrLanguages) {
+        val initial = if (defaultOcrLanguages.isNotEmpty()) defaultOcrLanguages else setOf("eng")
+        mutableStateListOf(*initial.toTypedArray())
+    }
     val ocrScope = rememberCoroutineScope()
     LaunchedEffect(item.uri) {
         metadata = withContext(Dispatchers.IO) {
@@ -4212,68 +4224,176 @@ private fun DeviceFoldersScreen(
 }
 
 @Composable
-private fun OcrSettingsScreen(onBack: () -> Unit) {
-    var selectedLanguages by remember { mutableStateOf(setOf("eng")) }
+private fun OcrSettingsScreen(
+    currentLanguages: Set<String>,
+    onLanguagesChange: (Set<String>) -> Unit,
+    onBack: () -> Unit
+) {
+    var selectedLanguages by remember(currentLanguages) {
+        mutableStateOf(if (currentLanguages.isNotEmpty()) currentLanguages else setOf("eng"))
+    }
+
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(horizontal = 16.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back") }
-            Text("OCR configuration", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(4.dp))
+            Column(Modifier.weight(1f)) {
+                Text("OCR configuration", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("On-device Tesseract · 12 trained language models", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        Text("Languages", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Verified,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("100% Private & Local", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Models are packaged in the app. Optical character recognition runs directly on CPU without cloud calls.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Default recognition languages", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            TextButton(
+                onClick = {
+                    val defaultSet = setOf("eng")
+                    selectedLanguages = defaultSet
+                    onLanguagesChange(defaultSet)
+                }
+            ) {
+                Text("Reset")
+            }
+        }
+
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 12.dp)
+            contentPadding = PaddingValues(bottom = 16.dp)
         ) {
-            gridItems(TesseractOcr.supportedLanguages.entries.toList()) { entry ->
-                ElevatedCard(
+            gridItems(TesseractOcr.supportedLanguages.entries.toList(), key = { it.value }) { entry ->
+                val isSelected = entry.value in selectedLanguages
+                OutlinedCard(
                     onClick = {
-                        selectedLanguages = if (entry.value in selectedLanguages) {
+                        val updated = if (isSelected) {
                             if (selectedLanguages.size > 1) selectedLanguages - entry.value else selectedLanguages
-                        } else selectedLanguages + entry.value
+                        } else {
+                            selectedLanguages + entry.value
+                        }
+                        selectedLanguages = updated
+                        onLanguagesChange(updated)
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.outlinedCardColors(
+                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surface
+                    ),
+                    border = BorderStroke(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                    )
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
                             entry.key,
                             style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                             textAlign = TextAlign.Center,
                             maxLines = 2,
                             minLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Checkbox(
-                            checked = entry.value in selectedLanguages,
-                            onCheckedChange = { checked ->
-                                selectedLanguages = if (checked) selectedLanguages + entry.value
-                                else if (selectedLanguages.size > 1) selectedLanguages - entry.value else selectedLanguages
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (isSelected) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                } else {
+                                    Text(
+                                        entry.value.take(2).uppercase(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
-                        )
+                        }
                     }
                 }
             }
         }
-        Text(
-            "${selectedLanguages.size} selected",
-            modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.End
-        )
+
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "${selectedLanguages.size} of ${TesseractOcr.supportedLanguages.size} active",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    selectedLanguages.joinToString(", ") { code ->
+                        TesseractOcr.supportedLanguages.entries.firstOrNull { it.value == code }?.key ?: code
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 200.dp)
+                )
+            }
+        }
     }
 }
 
@@ -4511,6 +4631,7 @@ private fun LibraryMetricCard(title: String, value: String, icon: androidx.compo
 private fun SettingsScreen(
     total: Int,
     theme: String,
+    ocrLanguageCount: Int = 1,
     topContentPadding: Dp,
     bottomContentPadding: Dp,
     onTheme: (String) -> Unit,
@@ -4529,7 +4650,7 @@ private fun SettingsScreen(
         ) {
             items(entries) { (label, icon) ->
                 if (label == "Theme") ElevatedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Row(verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, Modifier.size(30.dp)); Spacer(Modifier.width(14.dp)); Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }; Spacer(Modifier.height(12.dp)); SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) { listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEachIndexed { index, (key, name) -> SegmentedButton(selected = theme == key, onClick = { onTheme(key) }, shape = SegmentedButtonDefaults.itemShape(index, 3)) { Text(name) } } } } }
-                else ElevatedCard(onClick = { if (label == "Library overview" || label == "Indexing Status") onRefresh(); if (label == "Permissions") onPermissionSettings(); onSettings(label) }, modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(horizontal = 18.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, Modifier.size(30.dp)); Spacer(Modifier.width(18.dp)); Column(Modifier.weight(1f)) { Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium); Text(when (label) { "Library overview" -> "$total media items indexed"; "Intelligence" -> "AI providers not configured"; "OCR" -> "Engine not configured"; "Indexing Status" -> "Local MediaStore scan"; "Duplicates or Similar" -> "Detection engine not configured"; "About" -> "Emre Gallery · 0.1.0"; "Tools" -> "Local library tools"; else -> "Manage access" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } }
+                else ElevatedCard(onClick = { if (label == "Library overview" || label == "Indexing Status") onRefresh(); if (label == "Permissions") onPermissionSettings(); onSettings(label) }, modifier = Modifier.fillMaxWidth()) { Row(Modifier.padding(horizontal = 18.dp, vertical = 20.dp), verticalAlignment = Alignment.CenterVertically) { Icon(icon, null, Modifier.size(30.dp)); Spacer(Modifier.width(18.dp)); Column(Modifier.weight(1f)) { Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium); Text(when (label) { "Library overview" -> "$total media items indexed"; "Intelligence" -> "AI providers not configured"; "OCR" -> "$ocrLanguageCount active language${if (ocrLanguageCount == 1) "" else "s"} · On-device Tesseract"; "Indexing Status" -> "Local MediaStore scan"; "Duplicates or Similar" -> "Detection engine not configured"; "About" -> "Emre Gallery · 0.1.0"; "Tools" -> "Local library tools"; else -> "Manage access" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }; Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) } }
             }
         }
     }

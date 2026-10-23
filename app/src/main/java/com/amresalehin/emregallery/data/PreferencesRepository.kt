@@ -29,6 +29,7 @@ class PreferencesRepository(private val context: Context) {
     private val groupByKey = stringPreferencesKey("group_by")
     private val gridColumnsKey = stringPreferencesKey("grid_columns")
     private val gridStyleKey = stringPreferencesKey("grid_style")
+    private val ocrLanguagesKey = stringSetPreferencesKey("ocr_languages")
 
     val favourites: Flow<Set<String>> = context.galleryDataStore.data.map { it[favouritesKey] ?: emptySet() }
     val hidden: Flow<Set<String>> = context.galleryDataStore.data.map { it[hiddenKey] ?: emptySet() }
@@ -47,6 +48,7 @@ class PreferencesRepository(private val context: Context) {
     val groupBy: Flow<String> = context.galleryDataStore.data.map { it[groupByKey] ?: "day" }
     val gridColumns: Flow<Int> = context.galleryDataStore.data.map { it[gridColumnsKey]?.toIntOrNull() ?: 3 }
     val gridStyle: Flow<String> = context.galleryDataStore.data.map { it[gridStyleKey] ?: "masonry" }
+    val ocrLanguages: Flow<Set<String>> = context.galleryDataStore.data.map { it[ocrLanguagesKey] ?: setOf("eng") }
 
     val customAlbums: Flow<List<CustomAlbum>> = context.galleryDataStore.data.map { prefs ->
         val raw = prefs[customAlbumsKey] ?: "[]"
@@ -165,6 +167,7 @@ class PreferencesRepository(private val context: Context) {
     suspend fun setGroupBy(value: String) = context.galleryDataStore.edit { it[groupByKey] = value }
     suspend fun setGridColumns(value: Int) = context.galleryDataStore.edit { it[gridColumnsKey] = value.toString() }
     suspend fun setGridStyle(value: String) = context.galleryDataStore.edit { it[gridStyleKey] = value }
+    suspend fun setOcrLanguages(languages: Set<String>) = context.galleryDataStore.edit { it[ocrLanguagesKey] = languages }
 
     private val mediaTagsKey = stringPreferencesKey("media_custom_tags")
     private val mediaPeopleKey = stringPreferencesKey("media_custom_people")

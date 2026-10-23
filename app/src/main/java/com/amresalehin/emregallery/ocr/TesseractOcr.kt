@@ -3,14 +3,16 @@ package com.amresalehin.emregallery.ocr
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import com.googlecode.tesseract.android.TessBaseAPI
 import java.io.File
+import java.io.InputStream
 
 /**
- * Fully on-device OCR.
- * The Tesseract native engine is packaged by tess-two, and traineddata files are bundled
- * into the APK at build time. OCR does not need a network connection at first use.
+ * Fully on-device OCR using Tesseract (tess-two).
+ * Traineddata files are bundled into APK assets and extracted to internal storage on demand.
  */
 object TesseractOcr {
     val supportedLanguages = linkedMapOf(
@@ -36,8 +38,10 @@ object TesseractOcr {
             error("Could not create OCR language-data directory.")
         }
 
-        languageCodes.distinct().forEach { code ->
-            require(code in supportedLanguages.values) { "Unsupported OCR language: $code" }
+        val validCodes = languageCodes.distinct().filter { it in supportedLanguages.values }
+        require(validCodes.isNotEmpty()) { "No supported OCR languages selected." }
+
+        validCodes.forEach { code ->
             val destination = File(tessdataDir, "$code.traineddata")
             if (!destination.exists() || destination.length() < 1024) {
                 copyBundledTrainedData(context, code, destination)
@@ -47,9 +51,24 @@ object TesseractOcr {
         val bitmap = decodeBitmap(context, uri)
         val engine = TessBaseAPI()
         try {
-            if (!engine.init(baseDir.absolutePath, languageCodes.distinct().joinToString("+"))) {
-                error("Tesseract could not initialize the bundled language data.")
+            val combinedLangs = validCodes.joinToString("+")
+            var initialized = engine.init(baseDir.absolutePath, combinedLangs)
+            if (!initialized && validCodes.size > 1) {
+                // Fallback to primary requested language if combined initialization fails
+                initialized = engine.init(baseDir.absolutePath, validCodes.first())
             }
+            if (!initialized) {
+                // Fallback to English if available
+                val engFile = File(tessdataDir, "eng.traineddata")
+                if (!engFile.exists() || engFile.length() < 1024) {
+                    copyBundledTrainedData(context, "eng", engFile)
+                }
+                initialized = engine.init(baseDir.absolutePath, "eng")
+            }
+            if (!initialized) {
+                error("Tesseract could not initialize OCR engine for language(s): $combinedLangs")
+            }
+            engine.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
             engine.setImage(bitmap)
             return engine.getUTF8Text().orEmpty().trim()
         } finally {
@@ -59,45 +78,99 @@ object TesseractOcr {
     }
 
     private fun copyBundledTrainedData(context: Context, code: String, destination: File) {
-        val temporary = File(destination.parentFile, "$code.traineddata.tmp")
+        val parent = destination.parentFile ?: error("Invalid destination parent directory")
+        if (!parent.exists() && !parent.mkdirs()) {
+            error("Could not create directory for language: $code")
+        }
+        val temporary = File(parent, "$code.traineddata.tmp_${System.currentTimeMillis()}")
         try {
             context.assets.open("tessdata/$code.traineddata").use { input ->
                 temporary.outputStream().use { output -> input.copyTo(output) }
             }
             if (temporary.length() < 1024) error("Bundled $code language data is missing or incomplete.")
-            if (!temporary.renameTo(destination)) {
+            if (destination.exists()) {
                 destination.delete()
-                if (!temporary.renameTo(destination)) error("Could not install bundled $code language data.")
+            }
+            if (!temporary.renameTo(destination)) {
+                temporary.copyTo(destination, overwrite = true)
+                temporary.delete()
             }
         } catch (e: Exception) {
             temporary.delete()
             throw IllegalStateException(
-                "Bundled OCR data for $code is unavailable. Rebuild the app so the OCR data is included.",
+                "Bundled OCR data for '$code' is unavailable: ${e.message}",
                 e
             )
-        } finally {
-            temporary.delete()
         }
     }
 
     private fun decodeBitmap(context: Context, uri: Uri): Bitmap {
-        val resolver = context.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        // BitmapFactory intentionally returns null when inJustDecodeBounds is true.
-        // Do not use that return value to decide whether the stream opened successfully.
-        val boundsStream = resolver.openInputStream(uri)
-            ?: error("Cannot open this media item. Check that Emre Gallery still has permission to access it.")
-        boundsStream.use { stream -> BitmapFactory.decodeStream(stream, null, bounds) }
+        openStream(context, uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, bounds)
+        } ?: error("Cannot open this media item. Check that Emre Gallery has permission to access it.")
+
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
             error("This file is not a readable image. Try another image format.")
         }
+
         var sample = 1
         while (bounds.outWidth / sample > 2200 || bounds.outHeight / sample > 2200) sample *= 2
         val options = BitmapFactory.Options().apply {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-            ?: error("Could not decode this image. Check the file permissions and image format.")
+
+        val decoded = openStream(context, uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, options)
+        } ?: error("Could not decode this image. Check the file permissions and format.")
+
+        // Read EXIF orientation to ensure upright text recognition
+        val orientation = runCatching {
+            openStream(context, uri)?.use { stream ->
+                ExifInterface(stream).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
+            }
+        }.getOrNull() ?: ExifInterface.ORIENTATION_NORMAL
+
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        }
+
+        val orientedBitmap = if (!matrix.isIdentity) {
+            val rotated = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+            if (rotated != decoded) decoded.recycle()
+            rotated
+        } else {
+            decoded
+        }
+
+        // Tesseract requires a software ARGB_8888 bitmap
+        return if (orientedBitmap.config != Bitmap.Config.ARGB_8888) {
+            val softwareBitmap = orientedBitmap.copy(Bitmap.Config.ARGB_8888, false)
+            orientedBitmap.recycle()
+            softwareBitmap ?: orientedBitmap
+        } else {
+            orientedBitmap
+        }
+    }
+
+    private fun openStream(context: Context, uri: Uri): InputStream? {
+        return runCatching {
+            if (uri.scheme == null || uri.scheme == "file") {
+                val path = uri.path ?: uri.toString()
+                val file = File(path)
+                if (file.exists()) file.inputStream() else context.contentResolver.openInputStream(uri)
+            } else {
+                context.contentResolver.openInputStream(uri)
+            }
+        }.getOrNull()
     }
 }
