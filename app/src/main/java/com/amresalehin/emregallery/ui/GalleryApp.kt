@@ -83,6 +83,8 @@ import coil.request.ImageRequest
 import coil.request.CachePolicy
 import coil.size.Size
 import coil.size.Precision
+import androidx.compose.ui.res.painterResource
+import com.amresalehin.emregallery.R
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
@@ -782,7 +784,12 @@ fun GalleryApp() {
                                 modifier = Modifier.size(48.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(27.dp))
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_app_logo),
+                                        contentDescription = "Emre Gallery logo",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(28.dp)
+                                    )
                                 }
                             }
                             Spacer(Modifier.width(12.dp))
@@ -936,8 +943,8 @@ private fun PermissionState(onRequest: () -> Unit) {
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Default.PhotoLibrary,
-                            contentDescription = null,
+                            painter = painterResource(R.drawable.ic_app_logo),
+                            contentDescription = "Emre Gallery logo",
                             modifier = Modifier.size(54.dp),
                             tint = MaterialTheme.colorScheme.onPrimaryContainer
                         )
@@ -6189,7 +6196,12 @@ private fun AboutScreen(onBack: () -> Unit) {
                             modifier = Modifier.size(84.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(44.dp))
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_app_logo),
+                                    contentDescription = "Emre Gallery logo",
+                                    modifier = Modifier.size(44.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
                             }
                         }
                         Spacer(Modifier.height(16.dp))
