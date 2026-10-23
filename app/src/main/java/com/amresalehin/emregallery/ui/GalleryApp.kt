@@ -2673,6 +2673,10 @@ private fun ViewerScreen(
     }
     fun meta(key: String): String = metadata[key]?.takeIf { it.isNotBlank() } ?: "Not available"
     var showMore by remember { mutableStateOf(false) }
+    var detailsExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(showDetails) {
+        if (!showDetails) detailsExpanded = false
+    }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     val share: () -> Unit = {
@@ -2906,7 +2910,7 @@ private fun ViewerScreen(
             Surface(
                 Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(.75f),
+                    .fillMaxHeight(if (detailsExpanded) .90f else .75f),
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 4.dp,
@@ -2918,12 +2922,16 @@ private fun ViewerScreen(
                         Modifier
                             .fillMaxWidth()
                             .padding(top = 10.dp, bottom = 4.dp)
-                            .pointerInput(showDetails) {
+                            .pointerInput(showDetails, detailsExpanded) {
                                 var totalDragY = 0f
                                 detectDragGestures(
                                     onDragStart = { totalDragY = 0f },
                                     onDragEnd = {
-                                        if (totalDragY > 48f) onToggleDetails()
+                                        when {
+                                            totalDragY < -48f && !detailsExpanded -> detailsExpanded = true
+                                            totalDragY > 48f && detailsExpanded -> detailsExpanded = false
+                                            totalDragY > 48f -> onToggleDetails()
+                                        }
                                     },
                                     onDragCancel = { totalDragY = 0f }
                                 ) { change, dragAmount ->
