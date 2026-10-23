@@ -1,6 +1,6 @@
 {
   "name": "Emre Gallery",
-  "description": "A media gallery application for browsing photos and videos",
+  "description": "A feature-rich gallery app with OCR, photo map, albums, and video playback.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

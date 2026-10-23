@@ -3,9 +3,10 @@ package com.amresalehin.emregallery
 import android.app.Application
 import coil.Coil
 import coil.ImageLoader
+import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import coil.decode.VideoFrameDecoder
+import java.io.File
 
 class GalleryApplication : Application() {
     override fun onCreate() {
@@ -19,8 +20,8 @@ class GalleryApplication : Application() {
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(250L * 1024 * 1024)
+                    .directory(File(cacheDir, "image_cache"))
+                    .maxSizeBytes(262144000L)
                     .build()
             }
             .components {

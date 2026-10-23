@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
     android:height="108dp"
+    android:width="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Four separate white blades, meeting at the centre. -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,54 L54,20 C54,18 55.5,17 58,17 C76,17 91,32 91,50 C91,68 76,83 54,83 Z" />
+        android:fillColor="#ffffff"
+        android:pathData="M54,54 L54,20 C54,18 55.5,17 58,17 C76,17 91,32 91,50 C91,68 76,83 54,83 Z"/>
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,54 L20,54 C18,54 17,52.5 17,50 C17,32 32,17 50,17 C68,17 83,32 83,54 Z" />
+        android:fillColor="#ffffff"
+        android:pathData="M54,54 L20,54 C18,54 17,52.5 17,50 C17,32 32,17 50,17 C68,17 83,32 83,54 Z"/>
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,54 L88,54 C90,54 91,55.5 91,58 C91,76 76,91 58,91 C40,91 25,76 25,54 Z" />
+        android:fillColor="#ffffff"
+        android:pathData="M54,54 L88,54 C90,54 91,55.5 91,58 C91,76 76,91 58,91 C40,91 25,76 25,54 Z"/>
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,54 L54,88 C54,90 52.5,91 50,91 C32,91 17,76 17,58 C17,40 32,25 54,25 Z" />
+        android:fillColor="#ffffff"
+        android:pathData="M54,54 L54,88 C54,90 52.5,91 50,91 C32,91 17,76 17,58 C17,40 32,25 54,25 Z"/>
 </vector>

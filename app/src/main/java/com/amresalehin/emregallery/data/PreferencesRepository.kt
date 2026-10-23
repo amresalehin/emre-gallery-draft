@@ -1,10 +1,11 @@
 package com.amresalehin.emregallery.data
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -13,10 +14,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-private val Context.galleryDataStore by preferencesDataStore(name = "emre_gallery")
+val Context.galleryDataStore: DataStore<Preferences> by preferencesDataStore(name = "emre_gallery")
 
-/** Small local settings store. Media items are represented by stable content URI strings. */
 class PreferencesRepository(private val context: Context) {
+
     private val favouritesKey = stringSetPreferencesKey("favourites")
     private val hiddenKey = stringSetPreferencesKey("hidden")
     private val binKey = stringSetPreferencesKey("bin")
@@ -30,62 +31,149 @@ class PreferencesRepository(private val context: Context) {
     private val gridColumnsKey = stringPreferencesKey("grid_columns")
     private val gridStyleKey = stringPreferencesKey("grid_style")
     private val ocrLanguagesKey = stringSetPreferencesKey("ocr_languages")
+    private val mediaTagsKey = stringPreferencesKey("media_custom_tags")
+    private val mediaPeopleKey = stringPreferencesKey("media_custom_people")
 
-    val favourites: Flow<Set<String>> = context.galleryDataStore.data.map { it[favouritesKey] ?: emptySet() }
-    val hidden: Flow<Set<String>> = context.galleryDataStore.data.map { it[hiddenKey] ?: emptySet() }
-    val bin: Flow<Set<String>> = context.galleryDataStore.data.map { it[binKey] ?: emptySet() }
-    val archive: Flow<Set<String>> = context.galleryDataStore.data.map { it[archiveKey] ?: emptySet() }
-    val recentSearches: Flow<List<String>> = context.galleryDataStore.data.map { prefs ->
-        runCatching {
-            val array = JSONArray(prefs[searchesKey] ?: JSONArray((prefs[legacySearchesKey] ?: emptySet()).sorted()).toString())
-            (0 until array.length())
-                .mapNotNull { index -> array.optString(index).trim().takeIf { it.isNotBlank() } }
-                .distinct()
-        }.getOrDefault(emptyList())
+    val favourites: Flow<Set<String>> = context.galleryDataStore.data.map {
+        it[favouritesKey] ?: emptySet()
     }
-    val theme: Flow<String> = context.galleryDataStore.data.map { it[themeKey] ?: "system" }
-    val sortOrder: Flow<String> = context.galleryDataStore.data.map { it[sortOrderKey] ?: "date_desc" }
-    val groupBy: Flow<String> = context.galleryDataStore.data.map { it[groupByKey] ?: "day" }
-    val gridColumns: Flow<Int> = context.galleryDataStore.data.map { it[gridColumnsKey]?.toIntOrNull() ?: 3 }
-    val gridStyle: Flow<String> = context.galleryDataStore.data.map { it[gridStyleKey] ?: "masonry" }
-    val ocrLanguages: Flow<Set<String>> = context.galleryDataStore.data.map { it[ocrLanguagesKey] ?: setOf("eng") }
+
+    val hidden: Flow<Set<String>> = context.galleryDataStore.data.map {
+        it[hiddenKey] ?: emptySet()
+    }
+
+    val bin: Flow<Set<String>> = context.galleryDataStore.data.map {
+        it[binKey] ?: emptySet()
+    }
+
+    val archive: Flow<Set<String>> = context.galleryDataStore.data.map {
+        it[archiveKey] ?: emptySet()
+    }
+
+    val recentSearches: Flow<List<String>> = context.galleryDataStore.data.map { prefs ->
+        val rawV2 = prefs[searchesKey]
+        if (rawV2 != null) {
+            try {
+                val array = JSONArray(rawV2)
+                val list = mutableListOf<String>()
+                for (i in 0 until array.length()) {
+                    list.add(array.getString(i))
+                }
+                list
+            } catch (e: Exception) {
+                emptyList()
+            }
+        } else {
+            prefs[legacySearchesKey]?.toList()?.sorted() ?: emptyList()
+        }
+    }
+
+    val theme: Flow<String> = context.galleryDataStore.data.map {
+        it[themeKey] ?: "system"
+    }
+
+    val sortOrder: Flow<String> = context.galleryDataStore.data.map {
+        it[sortOrderKey] ?: "date_desc"
+    }
+
+    val groupBy: Flow<String> = context.galleryDataStore.data.map {
+        it[groupByKey] ?: "date"
+    }
+
+    val gridColumns: Flow<Int> = context.galleryDataStore.data.map {
+        it[gridColumnsKey]?.toIntOrNull() ?: 3
+    }
+
+    val gridStyle: Flow<String> = context.galleryDataStore.data.map {
+        it[gridStyleKey] ?: "square"
+    }
+
+    val ocrLanguages: Flow<Set<String>> = context.galleryDataStore.data.map {
+        it[ocrLanguagesKey] ?: setOf("eng")
+    }
 
     val customAlbums: Flow<List<CustomAlbum>> = context.galleryDataStore.data.map { prefs ->
         val raw = prefs[customAlbumsKey] ?: "[]"
-        runCatching {
-            val array = JSONArray(raw)
+        try {
+            val jsonArray = JSONArray(raw)
             val list = mutableListOf<CustomAlbum>()
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val id = obj.optString("id", UUID.randomUUID().toString())
-                val name = obj.optString("name", "Untitled")
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                val id = obj.optString("id", "")
+                val name = obj.optString("name", "")
                 val parentPath = obj.optString("parentPath", "")
-                val urisArr = obj.optJSONArray("mediaUris")
+                val urisArray = obj.optJSONArray("mediaUris")
                 val uris = mutableSetOf<String>()
-                if (urisArr != null) {
-                    for (j in 0 until urisArr.length()) {
-                        uris.add(urisArr.getString(j))
+                if (urisArray != null) {
+                    for (j in 0 until urisArray.length()) {
+                        uris.add(urisArray.getString(j))
                     }
                 }
-                list.add(CustomAlbum(id = id, name = name, parentPath = parentPath, mediaUris = uris))
+                if (id.isNotEmpty() && name.isNotEmpty()) {
+                    list.add(CustomAlbum(id, name, parentPath, uris))
+                }
             }
             list
-        }.getOrDefault(emptyList())
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
-    private suspend fun saveCustomAlbums(albums: List<CustomAlbum>) {
+    val customTagsMap: Flow<Map<String, Set<String>>> = context.galleryDataStore.data.map { prefs ->
+        val raw = prefs[mediaTagsKey] ?: "{}"
+        try {
+            val obj = JSONObject(raw)
+            val map = mutableMapOf<String, Set<String>>()
+            for (key in obj.keys()) {
+                val arr = obj.getJSONArray(key)
+                val set = mutableSetOf<String>()
+                for (i in 0 until arr.length()) {
+                    set.add(arr.getString(i))
+                }
+                map[key] = set
+            }
+            map
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    val customPeopleMap: Flow<Map<String, Set<String>>> = context.galleryDataStore.data.map { prefs ->
+        val raw = prefs[mediaPeopleKey] ?: "{}"
+        try {
+            val obj = JSONObject(raw)
+            val map = mutableMapOf<String, Set<String>>()
+            for (key in obj.keys()) {
+                val arr = obj.getJSONArray(key)
+                val set = mutableSetOf<String>()
+                for (i in 0 until arr.length()) {
+                    set.add(arr.getString(i))
+                }
+                map[key] = set
+            }
+            map
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    suspend fun saveCustomAlbums(albums: List<CustomAlbum>) {
         val array = JSONArray()
-        albums.forEach { album ->
+        for (album in albums) {
             val obj = JSONObject()
             obj.put("id", album.id)
             obj.put("name", album.name)
             obj.put("parentPath", album.parentPath)
             val urisArr = JSONArray()
-            album.mediaUris.forEach { urisArr.put(it) }
+            for (uri in album.mediaUris) {
+                urisArr.put(uri)
+            }
             obj.put("mediaUris", urisArr)
             array.put(obj)
         }
-        context.galleryDataStore.edit { it[customAlbumsKey] = array.toString() }
+        context.galleryDataStore.edit { prefs ->
+            prefs[customAlbumsKey] = array.toString()
+        }
     }
 
     suspend fun createCustomAlbum(name: String, parentPath: String = ""): CustomAlbum {
@@ -93,7 +181,8 @@ class PreferencesRepository(private val context: Context) {
         val newAlbum = CustomAlbum(
             id = UUID.randomUUID().toString(),
             name = name.trim(),
-            parentPath = parentPath.trim()
+            parentPath = parentPath.trim(),
+            mediaUris = emptySet()
         )
         saveCustomAlbums(current + newAlbum)
         return newAlbum
@@ -125,118 +214,127 @@ class PreferencesRepository(private val context: Context) {
         })
     }
 
-    suspend fun toggleFavourite(uri: String) = context.galleryDataStore.edit {
-        val values = (it[favouritesKey] ?: emptySet()).toMutableSet()
-        if (!values.add(uri)) values.remove(uri)
-        it[favouritesKey] = values
-    }
-    suspend fun setHidden(uri: String, hidden: Boolean) = context.galleryDataStore.edit {
-        val values = (it[hiddenKey] ?: emptySet()).toMutableSet()
-        if (hidden) values.add(uri) else values.remove(uri)
-        it[hiddenKey] = values
-    }
-    suspend fun setInBin(uri: String, inBin: Boolean) = context.galleryDataStore.edit {
-        val values = (it[binKey] ?: emptySet()).toMutableSet()
-        if (inBin) values.add(uri) else values.remove(uri)
-        it[binKey] = values
-    }
-    suspend fun setArchived(uri: String, archived: Boolean) = context.galleryDataStore.edit {
-        val values = (it[archiveKey] ?: emptySet()).toMutableSet()
-        if (archived) values.add(uri) else values.remove(uri)
-        it[archiveKey] = values
-    }
-    suspend fun addRecentSearch(query: String) {
-        val normalized = query.trim()
-        if (normalized.isBlank()) return
+    suspend fun toggleFavourite(uri: String) {
         context.galleryDataStore.edit { prefs ->
-            val existing = runCatching {
-                val array = JSONArray(prefs[searchesKey] ?: JSONArray((prefs[legacySearchesKey] ?: emptySet()).sorted()).toString())
-                (0 until array.length()).mapNotNull { index ->
-                    array.optString(index).trim().takeIf { it.isNotBlank() }
-                }
-            }.getOrDefault(emptyList())
-            val updated = (listOf(normalized) + existing.filterNot { it.equals(normalized, ignoreCase = true) })
-                .distinctBy { it.lowercase(java.util.Locale.ROOT) }
-                .take(12)
-            prefs[searchesKey] = JSONArray(updated).toString()
+            val set = (prefs[favouritesKey] ?: emptySet()).toMutableSet()
+            if (!set.add(uri)) {
+                set.remove(uri)
+            }
+            prefs[favouritesKey] = set
         }
     }
-    suspend fun clearRecentSearches() = context.galleryDataStore.edit { it.remove(searchesKey) }
-    suspend fun setTheme(value: String) = context.galleryDataStore.edit { it[themeKey] = value }
-    suspend fun setSortOrder(value: String) = context.galleryDataStore.edit { it[sortOrderKey] = value }
-    suspend fun setGroupBy(value: String) = context.galleryDataStore.edit { it[groupByKey] = value }
-    suspend fun setGridColumns(value: Int) = context.galleryDataStore.edit { it[gridColumnsKey] = value.toString() }
-    suspend fun setGridStyle(value: String) = context.galleryDataStore.edit { it[gridStyleKey] = value }
-    suspend fun setOcrLanguages(languages: Set<String>) = context.galleryDataStore.edit { it[ocrLanguagesKey] = languages }
 
-    private val mediaTagsKey = stringPreferencesKey("media_custom_tags")
-    private val mediaPeopleKey = stringPreferencesKey("media_custom_people")
+    suspend fun setHidden(uri: String, hiddenVal: Boolean) {
+        context.galleryDataStore.edit { prefs ->
+            val set = (prefs[hiddenKey] ?: emptySet()).toMutableSet()
+            if (hiddenVal) set.add(uri) else set.remove(uri)
+            prefs[hiddenKey] = set
+        }
+    }
 
-    val customTagsMap: Flow<Map<String, Set<String>>> = context.galleryDataStore.data.map { prefs ->
-        val raw = prefs[mediaTagsKey] ?: "{}"
-        runCatching {
-            val obj = JSONObject(raw)
-            val map = mutableMapOf<String, Set<String>>()
-            obj.keys().forEach { uri ->
-                val arr = obj.getJSONArray(uri)
-                val set = mutableSetOf<String>()
-                for (i in 0 until arr.length()) set.add(arr.getString(i))
-                map[uri] = set
-            }
-            map
-        }.getOrDefault(emptyMap())
+    suspend fun setInBin(uri: String, inBin: Boolean) {
+        context.galleryDataStore.edit { prefs ->
+            val set = (prefs[binKey] ?: emptySet()).toMutableSet()
+            if (inBin) set.add(uri) else set.remove(uri)
+            prefs[binKey] = set
+        }
+    }
+
+    suspend fun setArchived(uri: String, archivedVal: Boolean) {
+        context.galleryDataStore.edit { prefs ->
+            val set = (prefs[archiveKey] ?: emptySet()).toMutableSet()
+            if (archivedVal) set.add(uri) else set.remove(uri)
+            prefs[archiveKey] = set
+        }
+    }
+
+    suspend fun addRecentSearch(query: String) {
+        val normalized = query.trim()
+        if (normalized.isEmpty()) return
+        context.galleryDataStore.edit { prefs ->
+            val list = try {
+                val raw = prefs[searchesKey]
+                if (raw != null) {
+                    val arr = JSONArray(raw)
+                    val result = mutableListOf<String>()
+                    for (i in 0 until arr.length()) result.add(arr.getString(i))
+                    result
+                } else {
+                    prefs[legacySearchesKey]?.toMutableList() ?: mutableListOf()
+                }
+            } catch (e: Exception) {
+                mutableListOf()
+            }.toMutableList()
+
+            list.remove(normalized)
+            list.add(0, normalized)
+            val trimmed = list.take(20)
+            prefs[searchesKey] = JSONArray(trimmed).toString()
+        }
+    }
+
+    suspend fun clearRecentSearches() {
+        context.galleryDataStore.edit { prefs ->
+            prefs.remove(searchesKey)
+            prefs.remove(legacySearchesKey)
+        }
+    }
+
+    suspend fun setTheme(value: String) {
+        context.galleryDataStore.edit { it[themeKey] = value }
+    }
+
+    suspend fun setSortOrder(value: String) {
+        context.galleryDataStore.edit { it[sortOrderKey] = value }
+    }
+
+    suspend fun setGroupBy(value: String) {
+        context.galleryDataStore.edit { it[groupByKey] = value }
+    }
+
+    suspend fun setGridColumns(value: Int) {
+        context.galleryDataStore.edit { it[gridColumnsKey] = value.toString() }
+    }
+
+    suspend fun setGridStyle(value: String) {
+        context.galleryDataStore.edit { it[gridStyleKey] = value }
+    }
+
+    suspend fun setOcrLanguages(languages: Set<String>) {
+        context.galleryDataStore.edit { it[ocrLanguagesKey] = languages }
     }
 
     suspend fun addTagForMedia(uri: String, tag: String) {
         val trimmed = tag.trim()
-        if (trimmed.isBlank()) return
+        if (trimmed.isEmpty()) return
         context.galleryDataStore.edit { prefs ->
             val raw = prefs[mediaTagsKey] ?: "{}"
-            val obj = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
+            val obj = try { JSONObject(raw) } catch (e: Exception) { JSONObject() }
+            val arr = obj.optJSONArray(uri) ?: JSONArray()
             val existing = mutableSetOf<String>()
-            if (obj.has(uri)) {
-                val arr = obj.getJSONArray(uri)
-                for (i in 0 until arr.length()) existing.add(arr.getString(i))
+            for (i in 0 until arr.length()) existing.add(arr.getString(i))
+            if (existing.add(trimmed)) {
+                val newArr = JSONArray(existing)
+                obj.put(uri, newArr)
+                prefs[mediaTagsKey] = obj.toString()
             }
-            existing.add(trimmed)
-            val newArr = JSONArray()
-            existing.forEach { newArr.put(it) }
-            obj.put(uri, newArr)
-            prefs[mediaTagsKey] = obj.toString()
         }
-    }
-
-    val customPeopleMap: Flow<Map<String, Set<String>>> = context.galleryDataStore.data.map { prefs ->
-        val raw = prefs[mediaPeopleKey] ?: "{}"
-        runCatching {
-            val obj = JSONObject(raw)
-            val map = mutableMapOf<String, Set<String>>()
-            obj.keys().forEach { uri ->
-                val arr = obj.getJSONArray(uri)
-                val set = mutableSetOf<String>()
-                for (i in 0 until arr.length()) set.add(arr.getString(i))
-                map[uri] = set
-            }
-            map
-        }.getOrDefault(emptyMap())
     }
 
     suspend fun addPersonForMedia(uri: String, person: String) {
         val trimmed = person.trim()
-        if (trimmed.isBlank()) return
+        if (trimmed.isEmpty()) return
         context.galleryDataStore.edit { prefs ->
             val raw = prefs[mediaPeopleKey] ?: "{}"
-            val obj = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
+            val obj = try { JSONObject(raw) } catch (e: Exception) { JSONObject() }
+            val arr = obj.optJSONArray(uri) ?: JSONArray()
             val existing = mutableSetOf<String>()
-            if (obj.has(uri)) {
-                val arr = obj.getJSONArray(uri)
-                for (i in 0 until arr.length()) existing.add(arr.getString(i))
+            for (i in 0 until arr.length()) existing.add(arr.getString(i))
+            if (existing.add(trimmed)) {
+                val newArr = JSONArray(existing)
+                obj.put(uri, newArr)
+                prefs[mediaPeopleKey] = obj.toString()
             }
-            existing.add(trimmed)
-            val newArr = JSONArray()
-            existing.forEach { newArr.put(it) }
-            obj.put(uri, newArr)
-            prefs[mediaPeopleKey] = obj.toString()
         }
     }
 }

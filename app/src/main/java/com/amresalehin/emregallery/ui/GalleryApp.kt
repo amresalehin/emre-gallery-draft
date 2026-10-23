@@ -43,6 +43,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -136,6 +137,15 @@ fun GalleryApp() {
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
+    fun refreshMedia() {
+        if (!hasMediaPermission(context)) return
+        loading = true
+        scope.launch {
+            media = withContext(Dispatchers.IO) { runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList()) }
+            loading = false
+        }
+    }
+    LaunchedEffect(Unit) { if (hasMediaPermission(context)) refreshMedia() }
     val permanentDeleteLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -179,16 +189,6 @@ fun GalleryApp() {
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     var mediaForAddToAlbum by remember { mutableStateOf<MediaItem?>(null) }
     var showAddPhotosPickerForAlbum by remember { mutableStateOf<CustomAlbum?>(null) }
-
-    fun refreshMedia() {
-        if (!hasMediaPermission(context)) return
-        loading = true
-        scope.launch {
-            media = withContext(Dispatchers.IO) { runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList()) }
-            loading = false
-        }
-    }
-    LaunchedEffect(Unit) { if (hasMediaPermission(context)) refreshMedia() }
 
     if (destination != Destination.HOME || albumFilter != null || showSidePanel) {
         androidx.activity.compose.BackHandler {
@@ -1025,7 +1025,7 @@ private fun BinScreen(
                                     model = ImageRequest.Builder(LocalContext.current)
                                         .data(Uri.parse(item.uri))
                                         .crossfade(true)
-                                        .size(Size(480, 480))
+                                        .size(Size(720, 720))
                                         .precision(Precision.INEXACT)
                                         .build(),
                                     contentDescription = item.name,
@@ -1162,7 +1162,7 @@ private fun LockedFolderScreen(
                                     model = ImageRequest.Builder(LocalContext.current)
                                         .data(Uri.parse(item.uri))
                                         .crossfade(true)
-                                        .size(Size(480, 480))
+                                        .size(Size(720, 720))
                                         .precision(Precision.INEXACT)
                                         .build(),
                                     contentDescription = item.name,
@@ -1287,7 +1287,7 @@ private fun FavouritesScreen(
                                     model = ImageRequest.Builder(LocalContext.current)
                                         .data(Uri.parse(item.uri))
                                         .crossfade(true)
-                                        .size(Size(480, 480))
+                                        .size(Size(720, 720))
                                         .precision(Precision.INEXACT)
                                         .build(),
                                     contentDescription = item.name,
@@ -1411,7 +1411,7 @@ private fun ArchiveScreen(
                                     model = ImageRequest.Builder(LocalContext.current)
                                         .data(Uri.parse(item.uri))
                                         .crossfade(true)
-                                        .size(Size(480, 480))
+                                        .size(Size(720, 720))
                                         .precision(Precision.INEXACT)
                                         .build(),
                                     contentDescription = item.name,
@@ -2297,7 +2297,7 @@ private fun MediaGridItem(
     val imageRequest = remember(item.uri) {
         ImageRequest.Builder(context)
             .data(Uri.parse(item.uri))
-            .size(540, 540)
+            .size(720, 720)
             .crossfade(false)
             .memoryCacheKey("${item.uri}_thumb")
             .build()
@@ -3377,7 +3377,7 @@ private fun SearchScreen(query: String, stage: SearchStage, results: List<MediaI
                             AsyncImage(
                                 model = ImageRequest.Builder(LocalContext.current)
                                     .data(Uri.parse(item.uri))
-                                    .size(300, 300)
+                                    .size(600, 600)
                                     .crossfade(false)
                                     .memoryCacheKey("${item.uri}_thumb")
                                     .build(),
@@ -4790,7 +4790,7 @@ private fun satelliteTileSource(): OnlineTileSourceBase = object : OnlineTileSou
     override fun getTileURLString(pMapTileIndex: Long): String =
         baseUrl + MapTileIndex.getZoom(pMapTileIndex) + "/" +
             MapTileIndex.getY(pMapTileIndex) + "/" +
-            MapTileIndex.getX(pMapTileIndex) + imageFilenameEnding
+            MapTileIndex.getX(pMapTileIndex) + imageFilenameEnding()
 }
 
 @Composable

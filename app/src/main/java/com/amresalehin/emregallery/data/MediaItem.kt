@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery.data
 
-/** Immutable item exposed to the UI; [uri] is the stable ContentResolver URI. */
 data class MediaItem(
     val id: Long,
     val uri: String,
@@ -13,5 +12,5 @@ data class MediaItem(
     val height: Int,
     val relativePath: String,
     val isVideo: Boolean,
-    val durationMillis: Long = 0L,
+    val durationMillis: Long = 0L
 )
