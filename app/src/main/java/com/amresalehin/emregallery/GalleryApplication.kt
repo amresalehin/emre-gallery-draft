@@ -5,6 +5,7 @@ import coil.Coil
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import coil.video.VideoFrameDecoder
 
 class GalleryApplication : Application() {
     override fun onCreate() {
@@ -21,6 +22,9 @@ class GalleryApplication : Application() {
                     .directory(cacheDir.resolve("image_cache"))
                     .maxSizeBytes(250L * 1024 * 1024)
                     .build()
+            }
+            .components {
+                add(VideoFrameDecoder.Factory())
             }
             .crossfade(true)
             .respectCacheHeaders(false)
