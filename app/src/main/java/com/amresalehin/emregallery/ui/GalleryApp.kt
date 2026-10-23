@@ -21,6 +21,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
@@ -5991,8 +5992,45 @@ private fun SettingsScreen(
     var query by remember { mutableStateOf("") }
     val entries = listOf("Library overview" to Icons.Default.PhotoLibrary, "Theme" to Icons.Default.Palette, "Tools" to Icons.Default.Build, "Intelligence" to Icons.Default.Psychology, "OCR" to Icons.Default.DocumentScanner, "Indexing Status" to Icons.Default.Storage, "Duplicates or Similar" to Icons.Default.Collections, "Permissions" to Icons.Default.Lock, "About" to Icons.Default.Info).filter { it.first.contains(query, true) }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Spacer(Modifier.height(topContentPadding))
-        OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp), placeholder = { Text("Search settings…") }, leadingIcon = { IconButton(onClick = onMenuClick) { Icon(Icons.Default.Menu, contentDescription = "Open navigation menu") } }, trailingIcon = { Icon(Icons.Default.Search, contentDescription = "Search settings") }, shape = CircleShape, singleLine = true)
+        Spacer(Modifier.statusBarsPadding().height(8.dp))
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 4.dp,
+            shadowElevation = 8.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            modifier = Modifier.fillMaxWidth().height(52.dp).padding(bottom = 0.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize().padding(start = 4.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onMenuClick, modifier = Modifier.size(44.dp)) {
+                    Icon(Icons.Default.Menu, contentDescription = "Open navigation menu", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = "Search settings",
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.width(12.dp))
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    if (query.isEmpty()) {
+                        Text("Search settings…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    }
+                    BasicTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(bottom = bottomContentPadding)
