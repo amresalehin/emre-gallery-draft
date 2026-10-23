@@ -1736,6 +1736,13 @@ private fun HomeScreen(
             }
             if (albumTitle == null) {
                 item { MemoriesStrip(sortedMedia, onOpen) }
+                item {
+                    HorizontalDivider(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                        thickness = 1.dp
+                    )
+                }
             }
 
             groups.forEach { group ->
