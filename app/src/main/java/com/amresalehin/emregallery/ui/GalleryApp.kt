@@ -291,7 +291,32 @@ fun GalleryApp() {
                     }
                 },
                 label = "destination_screen_transition",
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(destination, showSidePanel) {
+                        val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
+                        if (destination in mainPages && !showSidePanel) {
+                            var horizontalDistance = 0f
+                            val swipeThreshold = 72.dp.toPx()
+                            detectHorizontalDragGestures(
+                                onHorizontalDrag = { _, dragAmount ->
+                                    horizontalDistance += dragAmount
+                                },
+                                onDragEnd = {
+                                    if (kotlin.math.abs(horizontalDistance) >= swipeThreshold) {
+                                        val currentIndex = mainPages.indexOf(destination)
+                                        val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
+                                        if (nextIndex in mainPages.indices) {
+                                            destination = mainPages[nextIndex]
+                                            albumFilter = null
+                                        }
+                                    }
+                                    horizontalDistance = 0f
+                                },
+                                onDragCancel = { horizontalDistance = 0f }
+                            )
+                        }
+                    }
             ) { currentDestination ->
                 when (currentDestination) {
                     Destination.HOME -> HomeScreen(
