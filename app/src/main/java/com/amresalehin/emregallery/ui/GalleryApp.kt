@@ -2700,6 +2700,7 @@ private fun ViewerScreen(
                 val horizontalSwipeThreshold = 104.dp.toPx()
                 val verticalDetailsThreshold = 72.dp.toPx()
                 val touchSlop = viewConfiguration.touchSlop
+                val containerWidthPx = size.width.toFloat()
                 var totalX = 0f
                 var totalY = 0f
                 var horizontalSwipeLocked = false
@@ -2735,15 +2736,39 @@ private fun ViewerScreen(
                         val absX = kotlin.math.abs(totalX)
                         if (horizontalSwipeLocked && !showDetails && absX > horizontalSwipeThreshold) {
                             val index = items.indexOfFirst { it.uri == item.uri }
-                            if (index != -1) {
-                                val targetIndex = if (totalX < 0) index + 1 else index - 1
-                                items.getOrNull(targetIndex)?.let(onOpenNeighbor)
+                            val targetIndex = if (totalX < 0) index + 1 else index - 1
+                            val targetItem = items.getOrNull(targetIndex)
+                            if (index >= 0 && targetItem != null) {
+                                // Finish the same finger-tracked motion before switching the
+                                // selected item. This avoids snapping back and then starting a
+                                // separate page animation.
+                                val exitOffset = if (totalX < 0) -containerWidthPx else containerWidthPx
+                                ocrScope.launch {
+                                    animate(
+                                        initialValue = dragOffsetX,
+                                        targetValue = exitOffset,
+                                        animationSpec = tween(durationMillis = 170, easing = FastOutSlowInEasing)
+                                    ) { value, _ -> dragOffsetX = value }
+                                    onOpenNeighbor(targetItem)
+                                    dragOffsetX = 0f
+                                }
+                            } else {
+                                dragOffsetX = 0f
                             }
                         } else if (!horizontalSwipeLocked && absY > verticalDetailsThreshold) {
                             if (totalY < 0 && !showDetails) onToggleDetails()
                             else if (totalY > 0 && showDetails) onToggleDetails()
+                            dragOffsetX = 0f
+                        } else {
+                            // A cancelled/short swipe returns smoothly to the current media.
+                            ocrScope.launch {
+                                animate(
+                                    initialValue = dragOffsetX,
+                                    targetValue = 0f,
+                                    animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                                ) { value, _ -> dragOffsetX = value }
+                            }
                         }
-                        dragOffsetX = 0f
                         dragOffsetY = 0f
                     },
                     onDragCancel = {
@@ -2782,20 +2807,9 @@ private fun ViewerScreen(
             }
         AnimatedContent(
             targetState = item,
-            transitionSpec = {
-                // The viewer's navigation order is the order of `items`, not timestamp order.
-                // Timestamps can be equal or out of order, which made the transition suddenly
-                // animate in the opposite direction even when the swipe selected the next item.
-                val initialIndex = items.indexOfFirst { it.uri == initialState.uri }
-                val targetIndex = items.indexOfFirst { it.uri == targetState.uri }
-                val direction = when {
-                    initialIndex >= 0 && targetIndex > initialIndex -> 1
-                    initialIndex >= 0 && targetIndex in 0 until initialIndex -> -1
-                    else -> 1
-                }
-                slideInHorizontally(animationSpec = tween(240), initialOffsetX = { width -> direction * width }) togetherWith
-                    slideOutHorizontally(animationSpec = tween(240), targetOffsetX = { width -> -direction * width })
-            },
+            // Horizontal movement is handled by the finger-tracked current/neighbor layers.
+            // Do not launch a second slide after the swipe completes; that causes a visible snap.
+            transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
             label = "viewer_media_transition",
             modifier = Modifier.fillMaxSize().graphicsLayer { translationX = dragOffsetX }
         ) { currentItem ->
