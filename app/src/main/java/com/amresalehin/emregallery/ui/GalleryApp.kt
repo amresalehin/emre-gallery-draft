@@ -5099,7 +5099,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Surface(onClick = onBack, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.onSurface)
             }
             Box {
                 Surface(
@@ -5113,7 +5113,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Layers, contentDescription = "Map layers", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.Layers, contentDescription = "Map layers", tint = MaterialTheme.colorScheme.onSurface)
                         Text(mapLayer, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
                         Icon(Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -5171,7 +5171,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                             Icons.Default.MyLocation,
                             contentDescription = "Focus photos",
                             modifier = Modifier.padding(14.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -5186,7 +5186,7 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                 shadowElevation = 8.dp
             ) {
                 Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(32.dp))
                     Spacer(Modifier.height(8.dp))
                     Text("Allow photo location access", style = MaterialTheme.typography.titleMedium)
                     Text(
