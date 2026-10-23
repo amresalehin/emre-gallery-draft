@@ -2,6 +2,11 @@ package com.amresalehin.emregallery
 
 import android.app.Application
 import coil.Coil
+import com.amresalehin.emregallery.face.BuffaloLFaceEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
@@ -32,5 +37,11 @@ class GalleryApplication : Application() {
             .allowHardware(true)
             .build()
         Coil.setImageLoader(imageLoader)
+
+        // The buffalo_l weights are bundled with the APK. Copy them into app-private storage
+        // off the main thread so face recognition is ready without a separate download action.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching { BuffaloLFaceEngine.installBundledModel(this@GalleryApplication) }
+        }
     }
 }
