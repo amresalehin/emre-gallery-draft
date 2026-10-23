@@ -1718,7 +1718,10 @@ private fun HomeViewOptionsBottomSheet(
         onDismiss()
     }
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
+        sheetState = sheetState,
         onDismissRequest = applySelections,
         containerColor = MaterialTheme.colorScheme.surface,
         contentColor = MaterialTheme.colorScheme.onSurface,
