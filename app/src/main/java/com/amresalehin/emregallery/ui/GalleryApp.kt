@@ -11,6 +11,7 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.IntentSenderRequest
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -133,6 +134,44 @@ fun GalleryApp() {
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
+    var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
+    val permanentDeleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val deletedUris = pendingPermanentDeleteUris
+        pendingPermanentDeleteUris = emptyList()
+        if (result.resultCode == android.app.Activity.RESULT_OK && deletedUris.isNotEmpty()) {
+            scope.launch {
+                deletedUris.forEach { prefs.setInBin(it, false) }
+                refreshMedia()
+            }
+        }
+    }
+
+    fun permanentlyDelete(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        val itemUris = items.map { it.uri }.distinct()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            runCatching {
+                val request = android.provider.MediaStore.createDeleteRequest(
+                    context.contentResolver,
+                    itemUris.map { Uri.parse(it) }
+                )
+                pendingPermanentDeleteUris = itemUris
+                permanentDeleteLauncher.launch(IntentSenderRequest.Builder(request.intentSender).build())
+            }
+        } else {
+            scope.launch {
+                val deleted = withContext(Dispatchers.IO) {
+                    itemUris.filter { uri ->
+                        runCatching { context.contentResolver.delete(Uri.parse(uri), null, null) > 0 }.getOrDefault(false)
+                    }
+                }
+                deleted.forEach { prefs.setInBin(it, false) }
+                refreshMedia()
+            }
+        }
+    }
 
     var showCreateAlbumDialog by remember { mutableStateOf(false) }
     var createAlbumPresetParent by remember { mutableStateOf("") }
@@ -299,20 +338,13 @@ fun GalleryApp() {
                         onAddPhotosToAlbum = null,
                         onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.FAVOURITES; destination = Destination.VIEWER }
                     )
-                    Destination.BIN -> HomeScreen(
-                        media = media.filter { it.uri in inBin },
-                        loading = loading,
-                        onPermissionGranted = { refreshMedia() },
-                        albumTitle = "Bin",
-                        sortOrder = sortOrderPref,
-                        groupBy = groupByPref,
-                        gridColumns = gridColumnsPref,
-                        gridStyle = gridStylePref,
-                        topContentPadding = topContentPadding,
-                        bottomContentPadding = bottomContentPadding,
-                        onClearAlbumFilter = { destination = Destination.ALBUMS },
-                        onAddPhotosToAlbum = null,
-                        onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.BIN; destination = Destination.VIEWER }
+                    Destination.BIN -> BinScreen(
+                        items = media.filter { it.uri in inBin },
+                        onBack = { destination = Destination.ALBUMS },
+                        onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; previousDestination = Destination.BIN; destination = Destination.VIEWER },
+                        onRestore = { item -> scope.launch { prefs.setInBin(item.uri, false) } },
+                        onDeletePermanently = { item -> permanentlyDelete(listOf(item)) },
+                        onEmptyBin = { items -> permanentlyDelete(items) }
                     )
                     Destination.VIDEOS -> HomeScreen(
                         media = media.filter { it.isVideo && it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
@@ -803,6 +835,153 @@ private fun FloatingNavigationBar(
                 }
             }
         }
+    }
+}
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BinScreen(
+    items: List<MediaItem>,
+    onBack: () -> Unit,
+    onOpen: (MediaItem) -> Unit,
+    onRestore: (MediaItem) -> Unit,
+    onDeletePermanently: (MediaItem) -> Unit,
+    onEmptyBin: (List<MediaItem>) -> Unit
+) {
+    var confirmEmptyBin by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding()
+                .padding(start = 8.dp, end = 12.dp, top = 8.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back to Albums")
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Bin", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${items.size} ${if (items.size == 1) "item" else "items"} · Restore or permanently delete",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = { confirmEmptyBin = true }, enabled = items.isNotEmpty()) {
+                Icon(Icons.Default.DeleteForever, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("Empty bin")
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+        if (items.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = null,
+                        modifier = Modifier.size(76.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text("Bin is empty", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Photos and videos you move to the Bin will appear here.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 28.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                gridItems(items, key = { it.uri }) { item ->
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                    ) {
+                        Column {
+                            Box {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(Uri.parse(item.uri))
+                                        .crossfade(true)
+                                        .size(Size(480, 480))
+                                        .precision(Precision.INEXACT)
+                                        .build(),
+                                    contentDescription = item.name,
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                                        .clickable { onOpen(item) },
+                                    contentScale = ContentScale.Crop
+                                )
+                                if (item.isVideo) {
+                                    Icon(
+                                        Icons.Default.PlayCircle,
+                                        contentDescription = "Video",
+                                        modifier = Modifier.align(Alignment.Center).size(36.dp),
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 9.dp)) {
+                                Text(
+                                    item.name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    FilledTonalButton(
+                                        onClick = { onRestore(item) },
+                                        modifier = Modifier.weight(1f).height(36.dp),
+                                        contentPadding = PaddingValues(horizontal = 6.dp)
+                                    ) {
+                                        Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("Restore", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    }
+                                    IconButton(onClick = { onDeletePermanently(item) }, modifier = Modifier.size(36.dp)) {
+                                        Icon(
+                                            Icons.Default.DeleteForever,
+                                            contentDescription = "Delete ${item.name} permanently",
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (confirmEmptyBin) {
+        AlertDialog(
+            onDismissRequest = { confirmEmptyBin = false },
+            icon = { Icon(Icons.Default.DeleteForever, contentDescription = null) },
+            title = { Text("Empty Bin?") },
+            text = { Text("Permanently delete all ${items.size} items in the Bin from this device? This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmEmptyBin = false
+                    onEmptyBin(items)
+                }) { Text("Delete permanently", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmEmptyBin = false }) { Text("Cancel") } }
+        )
     }
 }
 
