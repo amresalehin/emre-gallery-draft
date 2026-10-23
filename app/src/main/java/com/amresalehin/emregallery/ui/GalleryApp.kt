@@ -2906,7 +2906,7 @@ private fun ViewerScreen(
             Surface(
                 Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(.90f),
+                    .fillMaxHeight(.75f),
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 4.dp,
