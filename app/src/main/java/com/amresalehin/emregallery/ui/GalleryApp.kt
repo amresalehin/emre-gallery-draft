@@ -71,6 +71,7 @@ import androidx.exifinterface.media.ExifInterface
 import android.location.Geocoder
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.request.CachePolicy
 import coil.size.Size
 import coil.size.Precision
 import com.amresalehin.emregallery.data.CustomAlbum
@@ -1995,7 +1996,9 @@ private fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
                             .data(Uri.parse(cover.uri))
                             .size(264, 368)
                             .crossfade(false)
-                            .memoryCacheKey("${cover.uri}_memory_story")
+                            .diskCacheKey("${cover.uri}_memory_story")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${cover.uri}_memory_story")
                             .build(),
                         contentDescription = title,
                         modifier = Modifier.fillMaxSize(),
@@ -2310,6 +2313,8 @@ private fun MosaicMediaItem(
             .data(Uri.parse(item.uri))
             .size(720, 720)
             .crossfade(false)
+            .diskCacheKey("${item.uri}_thumb")
+            .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCacheKey("${item.uri}_thumb")
             .build()
     }
@@ -2378,6 +2383,8 @@ private fun MediaGridItem(
             .data(Uri.parse(item.uri))
             .size(720, 720)
             .crossfade(false)
+            .diskCacheKey("${item.uri}_thumb")
+            .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCacheKey("${item.uri}_thumb")
             .build()
     }
@@ -3064,7 +3071,9 @@ private fun AlbumsScreen(
                                                     .data(Uri.parse(cover.uri))
                                                     .size(240, 160)
                                                     .crossfade(false)
-                                                    .memoryCacheKey("${cover.uri}_album_collection_cover")
+                                                    .diskCacheKey("${cover.uri}_album_collection_cover")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${cover.uri}_album_collection_cover")
                                                     .build(),
                                                 contentDescription = "Preview of ${album.name}",
                                                 modifier = Modifier.fillMaxSize(),
@@ -3166,7 +3175,9 @@ private fun AlbumsScreen(
                                                     .data(Uri.parse(cover.uri))
                                                     .size(240, 160)
                                                     .crossfade(false)
-                                                    .memoryCacheKey("${cover.uri}_folder_collection_cover")
+                                                    .diskCacheKey("${cover.uri}_folder_collection_cover")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${cover.uri}_folder_collection_cover")
                                                     .build(),
                                                 contentDescription = "Preview of ${folder.key.substringAfterLast('/')}",
                                                 modifier = Modifier.fillMaxSize(),
@@ -3382,7 +3393,9 @@ private fun FolderCard(name: String, items: List<MediaItem>, onClick: () -> Unit
                         .data(Uri.parse(it.uri))
                         .size(300, 300)
                         .crossfade(false)
-                        .memoryCacheKey("${it.uri}_thumb")
+                        .diskCacheKey("${it.uri}_thumb")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${it.uri}_thumb")
                         .build(),
                     contentDescription = name,
                     modifier = Modifier.fillMaxSize(),
@@ -3434,7 +3447,9 @@ private fun SearchScreen(query: String, stage: SearchStage, results: List<MediaI
                                         .data(Uri.parse(item.uri))
                                         .size(150, 150)
                                         .crossfade(false)
-                                        .memoryCacheKey("${item.uri}_search_icon")
+                                        .diskCacheKey("${item.uri}_search_icon")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${item.uri}_search_icon")
                                         .build(),
                                     contentDescription = null,
                                     modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
@@ -3458,7 +3473,9 @@ private fun SearchScreen(query: String, stage: SearchStage, results: List<MediaI
                                     .data(Uri.parse(item.uri))
                                     .size(600, 600)
                                     .crossfade(false)
-                                    .memoryCacheKey("${item.uri}_thumb")
+                                    .diskCacheKey("${item.uri}_thumb")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${item.uri}_thumb")
                                     .build(),
                                 item.name,
                                 Modifier.fillMaxSize(),
@@ -3652,7 +3669,9 @@ private fun ViewerScreen(
                         .data(Uri.parse(neighbor.uri))
                         .size(Size.ORIGINAL)
                         .precision(Precision.EXACT)
-                        .memoryCacheKey("${neighbor.uri}:viewer-original")
+                        .diskCacheKey("${neighbor.uri}:viewer-original")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${neighbor.uri}:viewer-original")
                         .diskCacheKey("${neighbor.uri}:viewer-original")
                         .crossfade(false)
                         .build(),
@@ -3695,7 +3714,9 @@ private fun ViewerScreen(
                         .data(Uri.parse(currentItem.uri))
                         .size(Size.ORIGINAL)
                         .precision(Precision.EXACT)
-                        .memoryCacheKey("${currentItem.uri}:viewer-original")
+                        .diskCacheKey("${currentItem.uri}:viewer-original")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${currentItem.uri}:viewer-original")
                         .diskCacheKey("${currentItem.uri}:viewer-original")
                         .crossfade(false)
                         .build(),
@@ -5409,7 +5430,9 @@ private fun AlbumCatalogScreen(
                                             .data(Uri.parse(cover.uri))
                                             .size(240, 240)
                                             .crossfade(false)
-                                            .memoryCacheKey("${cover.uri}_album_catalog")
+                                            .diskCacheKey("${cover.uri}_album_catalog")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${cover.uri}_album_catalog")
                                             .build(),
                                         contentDescription = album.name,
                                         modifier = Modifier.fillMaxSize(),
@@ -5509,7 +5532,9 @@ private fun DeviceFoldersScreen(
                                             .data(Uri.parse(cover.uri))
                                             .size(240, 240)
                                             .crossfade(false)
-                                            .memoryCacheKey("${cover.uri}_device_folder")
+                                            .diskCacheKey("${cover.uri}_device_folder")
+            .diskCachePolicy(CachePolicy.ENABLED)
+            .memoryCacheKey("${cover.uri}_device_folder")
                                             .build(),
                                         contentDescription = "Folder preview",
                                         modifier = Modifier.fillMaxSize(),
