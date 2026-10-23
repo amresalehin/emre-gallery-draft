@@ -349,6 +349,55 @@ class BuffaloLFaceEngine private constructor(
             }
         }
 
+        /**
+         * Installs the model pack shipped in the APK assets into app-private storage.
+         * The copy runs on a background dispatcher during startup, and open() retries it
+         * if face indexing starts before the startup copy has completed.
+         */
+        fun installBundledModel(context: Context) {
+            if (isModelInstalled(context)) return
+            val modelDir = File(context.filesDir, "face-models/buffalo_l")
+            if (!modelDir.exists() && !modelDir.mkdirs()) {
+                error("Cannot create face model directory.")
+            }
+            val availableBytes = StatFs(modelDir.absolutePath).availableBytes
+            check(availableBytes >= MIN_FREE_SPACE_BYTES) {
+                "At least 500 MB of free storage is recommended to install the bundled buffalo_l model."
+            }
+
+            REQUIRED_MODELS.forEach { name ->
+                val target = modelDir.resolve(name)
+                if (target.isFile && target.length() > 1024 * 1024) return@forEach
+                val temporary = modelDir.resolve("$name.installing")
+                try {
+                    context.assets.open("face-models/buffalo_l/$name").use { input ->
+                        temporary.outputStream().buffered().use { output -> input.copyTo(output) }
+                    }
+                    check(temporary.length() > 1024 * 1024) {
+                        "Bundled buffalo_l model file is incomplete: $name"
+                    }
+                    if (target.exists()) target.delete()
+                    if (!temporary.renameTo(target)) temporary.copyTo(target, overwrite = true)
+                } finally {
+                    temporary.delete()
+                }
+            }
+
+            runCatching {
+                context.assets.list("face-models/buffalo_l").orEmpty()
+                    .filter { it.contains("LICENSE", ignoreCase = true) }
+                    .forEach { name ->
+                        val target = modelDir.resolve(name)
+                        if (!target.exists()) {
+                            context.assets.open("face-models/buffalo_l/$name").use { input ->
+                                target.outputStream().buffered().use { output -> input.copyTo(output) }
+                            }
+                        }
+                    }
+            }
+            check(isModelInstalled(context)) { "Bundled buffalo_l model installation failed validation." }
+        }
+
         /** Explicit, resumable-in-the-sense-of-retryable download; all pack files are installed. */
         fun downloadModel(context: Context, onProgress: (Long, Long) -> Unit = { _, _ -> }) {
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
@@ -424,8 +473,9 @@ class BuffaloLFaceEngine private constructor(
         }
 
         fun open(context: Context): BuffaloLFaceEngine {
+            if (!isModelInstalled(context)) installBundledModel(context)
             check(isModelInstalled(context)) {
-                "The complete buffalo_l pack is not installed. Download it from People settings first."
+                "The complete buffalo_l pack is not installed. Rebuild the app with the bundled model assets."
             }
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             val options = OrtSession.SessionOptions().apply {
