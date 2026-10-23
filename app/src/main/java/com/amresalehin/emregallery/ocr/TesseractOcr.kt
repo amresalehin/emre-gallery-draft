@@ -62,6 +62,45 @@ object TesseractOcr {
         "Japanese" to "jpn"
     )
 
+    /** Returns selected traineddata files that are already extracted and usable. */
+    fun installedLanguages(context: Context): Set<String> {
+        val directory = File(context.filesDir, "tesseract/tessdata")
+        return supportedLanguages.values.filterTo(mutableSetOf()) { code ->
+            File(directory, "$code.traineddata").let { it.isFile && it.length() >= 1024 }
+        }
+    }
+
+    /** Extracts bundled language models to private storage before OCR is requested. */
+    fun prepareLanguages(context: Context, languageCodes: List<String>) {
+        val directory = File(context.filesDir, "tesseract/tessdata")
+        if (!directory.exists() && !directory.mkdirs()) {
+            error("Could not create OCR language-data directory.")
+        }
+        languageCodes.distinct().filter { it in supportedLanguages.values }.forEach { code ->
+            val destination = File(directory, "$code.traineddata")
+            if (!destination.isFile || destination.length() < 1024) {
+                copyBundledTrainedData(context, code, destination)
+            }
+        }
+        // English is used as a fallback by the recognition engine.
+        val english = File(directory, "eng.traineddata")
+        if (!english.isFile || english.length() < 1024) {
+            copyBundledTrainedData(context, "eng", english)
+        }
+    }
+
+    fun cachedResultCount(context: Context): Int =
+        File(context.filesDir, "ocr-results").listFiles()
+            ?.count { it.isFile && it.extension == "txt" } ?: 0
+
+    fun clearCachedResults(context: Context): Int {
+        val directory = File(context.filesDir, "ocr-results")
+        val files = directory.listFiles()?.filter { it.isFile && it.extension == "txt" }.orEmpty()
+        var deleted = 0
+        files.forEach { if (it.delete()) deleted++ }
+        return deleted
+    }
+
     fun recognize(context: Context, uri: Uri, languageCodes: List<String>): String {
         require(languageCodes.isNotEmpty()) { "Choose at least one OCR language." }
         val baseDir = File(context.filesDir, "tesseract")
