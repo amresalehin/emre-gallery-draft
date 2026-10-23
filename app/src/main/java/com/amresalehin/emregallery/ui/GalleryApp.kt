@@ -3700,9 +3700,37 @@ private fun ViewerScreen(
 }
 
 @Composable
-private fun ViewerButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) { IconButton(onClick = onClick, modifier = Modifier.padding(horizontal = 3.dp).background(Color.White.copy(alpha = .92f), CircleShape)) { Icon(icon, label, tint = Color(0xFF121212)) } }
+private fun ViewerButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.padding(horizontal = 3.dp)
+            .background(scheme.surfaceContainerHigh.copy(alpha = 0.94f), CircleShape)
+    ) {
+        Icon(icon, label, tint = scheme.onSurface)
+    }
+}
 @Composable
-private fun ViewerAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 4.dp)) { Surface(shape = CircleShape, color = Color.White.copy(alpha = .9f), modifier = Modifier.size(46.dp)) { Box(contentAlignment = Alignment.Center) { Icon(icon, label, tint = Color(0xFF121212)) } }; Spacer(Modifier.height(4.dp)); Text(label, color = Color.White, style = MaterialTheme.typography.labelSmall) } }
+private fun ViewerAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 4.dp)
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = scheme.surfaceContainerHigh.copy(alpha = 0.94f),
+            border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = 0.55f)),
+            modifier = Modifier.size(46.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, label, tint = scheme.onSurface)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = scheme.onSurface, style = MaterialTheme.typography.labelSmall)
+    }
+}
 @Composable
 private fun DetailActionPill(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
