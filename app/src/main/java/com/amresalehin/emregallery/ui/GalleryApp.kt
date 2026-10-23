@@ -1698,11 +1698,11 @@ private fun HomeViewOptionsBottomSheet(
                             }
                         },
                         shape = RoundedCornerShape(14.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceContainer,
+                        color = if (isSelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = if (isSelected) {
                             BorderStroke(2.dp, Color(0xFF141416))
                         } else {
-                            BorderStroke(1.dp, Color(0xFFE5E5EA))
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         },
                         modifier = Modifier
                             .weight(1f)
@@ -1724,13 +1724,13 @@ private fun HomeViewOptionsBottomSheet(
                                     icon,
                                     contentDescription = null,
                                     modifier = Modifier.size(22.dp),
-                                    tint = MaterialTheme.colorScheme.onSurface
+                                    tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
                                 )
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(6.dp))
-                                        .background(if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
+                                        .background(if (isSelected) Color.White.copy(alpha = 0.16f) else Color.Transparent)
                                         .padding(horizontal = 2.dp, vertical = 2.dp)
                                 ) {
                                     Box(
@@ -1746,7 +1746,7 @@ private fun HomeViewOptionsBottomSheet(
                                             Icons.Default.ArrowUpward,
                                             contentDescription = "Ascending",
                                             modifier = Modifier.size(13.dp),
-                                            tint = if (isSelected && tempSortDirection == "asc") Color(0xFF141416) else Color(0xFF8E8E93).copy(alpha = 0.5f)
+                                            tint = if (isSelected && tempSortDirection == "asc") Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                                         )
                                     }
                                     Spacer(Modifier.height(2.dp))
@@ -1763,7 +1763,7 @@ private fun HomeViewOptionsBottomSheet(
                                             Icons.Default.ArrowDownward,
                                             contentDescription = "Descending",
                                             modifier = Modifier.size(13.dp),
-                                            tint = if (isSelected && tempSortDirection == "desc") Color(0xFF141416) else Color(0xFF8E8E93).copy(alpha = 0.5f)
+                                            tint = if (isSelected && tempSortDirection == "desc") Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                                         )
                                     }
                                 }
@@ -1774,7 +1774,7 @@ private fun HomeViewOptionsBottomSheet(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -1809,11 +1809,11 @@ private fun HomeViewOptionsBottomSheet(
                     Surface(
                         onClick = { tempGroupBy = key },
                         shape = RoundedCornerShape(14.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceContainer,
+                        color = if (isSelected) Color(0xFF141416) else MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = if (isSelected) {
                             BorderStroke(2.dp, Color(0xFF141416))
                         } else {
-                            BorderStroke(1.dp, Color(0xFFE5E5EA))
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                         },
                         modifier = Modifier
                             .width(68.dp)
@@ -1831,7 +1831,7 @@ private fun HomeViewOptionsBottomSheet(
                                 icon,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp),
-                                tint = MaterialTheme.colorScheme.onSurface
+                                tint = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
@@ -1840,7 +1840,7 @@ private fun HomeViewOptionsBottomSheet(
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
                                 textAlign = TextAlign.Center
                             )
                         }
