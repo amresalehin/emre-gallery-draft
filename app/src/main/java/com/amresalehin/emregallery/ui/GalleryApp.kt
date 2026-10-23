@@ -5852,13 +5852,27 @@ private fun OcrSettingsScreen(
                         enabled = !preparingModels && !scanningPhotos,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.DownloadDone, contentDescription = null)
+                        Icon(Icons.Default.Download, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text(if (preparingModels) "Preparing…" else "Prepare selected languages")
                     }
+                    Button(
+                        onClick = { startOcrScan() },
+                        enabled = !preparingModels && !scanningPhotos && media.any { !it.isVideo },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.DocumentScanner, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (scanningPhotos) "Scanning photos…" else "Scan photos for text")
+                    }
+                    Text(
+                        "${media.count { !it.isVideo }} photos available · saved OCR results are skipped",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     OutlinedButton(
                         onClick = { showClearCacheDialog = true },
-                        enabled = cachedResults > 0 && !preparingModels,
+                        enabled = cachedResults > 0 && !preparingModels && !scanningPhotos,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Default.DeleteOutline, contentDescription = null)
