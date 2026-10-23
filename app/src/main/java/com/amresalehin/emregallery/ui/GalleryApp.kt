@@ -6551,6 +6551,8 @@ private fun IndexingStatusScreen(
     val photos = remember(media) { media.filterNot { it.isVideo } }
     val photoUris = remember(photos) { photos.map { it.uri } }
     val faceStore = remember { FaceClusterStore(context.applicationContext) }
+    val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
+    val pageBackground = if (lightAppearance) Color(0xFFF4F4F4) else MaterialTheme.colorScheme.background
 
     var countsReady by remember { mutableStateOf(false) }
     var ocrProcessed by remember { mutableIntStateOf(0) }
@@ -6737,7 +6739,7 @@ private fun IndexingStatusScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+            .background(pageBackground)
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(14.dp),
@@ -6791,7 +6793,7 @@ private fun IndexingProgressCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .background(colors.surface)
+            .background(if (colors.background.luminance() > 0.5f) Color.White else colors.surface)
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -6823,7 +6825,7 @@ private fun IndexingProgressCard(
                 .height(4.dp)
                 .clip(CircleShape),
             color = colors.onSurface,
-            trackColor = colors.onSurface.copy(alpha = 0.12f)
+            trackColor = if (colors.background.luminance() > 0.5f) Color(0xFFE2E2E2) else colors.onSurface.copy(alpha = 0.16f)
         )
 
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -6866,7 +6868,10 @@ private fun IndexingControlButton(
         modifier = Modifier
             .size(36.dp)
             .clip(CircleShape)
-            .background(colors.surfaceVariant.copy(alpha = if (enabled) 1f else 0.65f))
+            .background(
+                (if (colors.background.luminance() > 0.5f) Color(0xFFF0F0F0) else colors.onSurface.copy(alpha = 0.10f))
+                    .copy(alpha = if (enabled) 1f else 0.65f)
+            )
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
