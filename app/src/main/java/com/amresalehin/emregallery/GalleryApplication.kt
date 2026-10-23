@@ -5,7 +5,7 @@ import coil.Coil
 import coil.ImageLoader
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import coil.video.VideoFrameDecoder
+import coil.decode.VideoFrameDecoder
 
 class GalleryApplication : Application() {
     override fun onCreate() {

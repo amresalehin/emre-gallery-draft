@@ -859,6 +859,7 @@ private fun HomeScreen(
     }
 
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val scrollbarThumbColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
     LazyColumn(
         state = homeListState,
         modifier = Modifier.fillMaxSize().drawWithContent {
@@ -876,7 +877,7 @@ private fun HomeScreen(
                     (totalItems - visibleItems.size).coerceAtLeast(1)).coerceIn(0f, 1f)
                 val thumbTop = (viewportHeight - thumbHeight) * scrollFraction
                 drawRoundRect(
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                    color = scrollbarThumbColor,
                     topLeft = Offset(size.width - 3.dp.toPx(), thumbTop),
                     size = androidx.compose.ui.geometry.Size(2.dp.toPx(), thumbHeight),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
@@ -2326,6 +2327,8 @@ private fun AlbumsScreen(
                         .testTag("folders_section_card")
                 ) {
                     val folderPreview = folders.take(4)
+                    val topFolder = folders.firstOrNull()
+                    val topFolderCover = topFolder?.value?.firstOrNull()
 
                     Box(modifier = Modifier.fillMaxSize()) {
                         if (folderPreview.isNotEmpty()) {
