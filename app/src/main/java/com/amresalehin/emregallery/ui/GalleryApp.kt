@@ -477,7 +477,9 @@ fun GalleryApp() {
                         }
                     }
                     .pointerInput(destination, showSidePanel) {
-                        if (!showSidePanel && destination == Destination.HOME) {
+                        // Open the navigation drawer with an inward swipe from the
+                        // left edge on any primary screen, not only Home.
+                        if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
                             val edgeWidth = 24.dp.toPx()
                             val slop = viewConfiguration.touchSlop * 2
                             awaitEachGesture {
