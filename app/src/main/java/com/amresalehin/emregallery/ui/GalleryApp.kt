@@ -7988,8 +7988,6 @@ private fun IndexingStatusScreen(
     }
 }
 
-}
-
 private fun IndexingMetric(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
