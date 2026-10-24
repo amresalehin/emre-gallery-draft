@@ -572,9 +572,8 @@ class BuffaloLFaceEngine private constructor(
             if (!isModelInstalled(context)) {
                 runCatching { installBundledModel(context) }
             }
-            if (!isModelInstalled(context)) {
-                runCatching { downloadModel(context) }
-            }
+            // Model downloads are suspendable and are managed by the indexing service.
+            // open() only installs bundled assets synchronously; it never starts network I/O.
             check(isModelInstalled(context)) {
                 "The complete buffalo_l pack is not installed."
             }
