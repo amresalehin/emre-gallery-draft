@@ -6880,6 +6880,7 @@ private fun IndexingStatusScreen(
     }
 
     LaunchedEffect(Unit) {
+        IndexingForegroundService.status(context)
         var wasRunning = false
         while (true) {
             val state = context.getSharedPreferences(IndexingForegroundService.STATE_PREFS, android.content.Context.MODE_PRIVATE)
