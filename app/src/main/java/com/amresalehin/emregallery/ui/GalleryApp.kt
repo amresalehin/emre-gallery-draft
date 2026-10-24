@@ -6751,6 +6751,19 @@ private fun IndexingStatusScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Permission result is reflected by Android notification settings. */ }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val photos = remember(media) { media.filterNot { it.isVideo } }
     val photoUris = remember(photos) { photos.map { it.uri } }
     val faceStore = remember { FaceClusterStore(context.applicationContext) }
