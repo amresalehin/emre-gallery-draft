@@ -74,6 +74,7 @@ class IndexingForegroundService : Service() {
         if (action == ACTION_RESUME) {
             pauseSignal.value = false
             updateState(paused = false)
+            refreshNotification("Resuming")
             return START_NOT_STICKY
         }
         if (action == ACTION_STATUS) {
