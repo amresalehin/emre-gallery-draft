@@ -500,9 +500,9 @@ fun GalleryApp() {
                             }
                         }
                     }
-                    .pointerInput(destination, showSidePanel, selectedMedia, showDetails) {
+                    .pointerInput(destination, showSidePanel) {
                         val mainDestinations = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
-                        if (!showSidePanel && selectedMedia == null && !showDetails && destination in mainDestinations) {
+                        if (!showSidePanel && destination in mainDestinations) {
                             val slop = viewConfiguration.touchSlop * 2f
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
