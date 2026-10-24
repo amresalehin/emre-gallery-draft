@@ -4136,7 +4136,7 @@ private fun ViewerScreen(
                         dragOffsetY.snapTo(nextOffset)
                         // Start revealing the details drawer as soon as an upward swipe is
                         // deliberate, rather than waiting for the finger to lift.
-                        val revealThreshold = viewConfig.touchSlop * 1.25f
+                        val revealThreshold = viewConfig.scaledTouchSlop * 1.25f
                         if (nextOffset < -revealThreshold && !detailsRevealTriggered) {
                             detailsRevealTriggered = true
                             detailsRevealPx = (-nextOffset).coerceIn(0f, detailsSheetHeightPx)
@@ -8109,6 +8109,7 @@ private fun IndexingStatusScreen(
     }
 }
 
+@Composable
 private fun IndexingMetric(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
