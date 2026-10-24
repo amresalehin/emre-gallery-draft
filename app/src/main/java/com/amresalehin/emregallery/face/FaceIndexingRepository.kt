@@ -47,7 +47,9 @@ class FaceIndexingRepository(private val context: Context) {
         store: FaceClusterStore,
         onProgress: suspend (FaceIndexingProgress) -> Unit = {},
         awaitIfResumed: suspend () -> Unit = {},
-        allowNativeFallback: Boolean = false
+        allowNativeFallback: Boolean = false,
+        detectionThreshold: Float = FaceRecognitionSettings.DEFAULT_DETECTION_CONFIDENCE,
+        similarityThreshold: Float = FaceRecognitionSettings.DEFAULT_SIMILARITY_THRESHOLD
     ): FaceIndexingProgress = withContext(Dispatchers.IO) {
         val photos = media.filterNot { it.isVideo }
         val pending = photos.filterNot { store.isMediaIndexed(it.uri) }
@@ -59,7 +61,7 @@ class FaceIndexingRepository(private val context: Context) {
             if (pending.isNotEmpty()) {
                 engine = try {
                     if (BuffaloLFaceEngine.isModelInstalled(context)) {
-                        val bEngine = BuffaloLFaceEngine.open(context)
+                        val bEngine = BuffaloLFaceEngine.open(context, detectionThreshold)
                         activeEngineDescription = "Buffalo_L (InsightFace ONNX 512-d)"
                         lastPrimaryFailure = null
                         bEngine
@@ -85,7 +87,7 @@ class FaceIndexingRepository(private val context: Context) {
                     val activeEngine = engine ?: AndroidNativeFaceEngine(context)
                     val detections = activeEngine.embed(Uri.parse(item.uri))
                     detections.forEach { face ->
-                        store.addFace(item.uri, face.faceIndex, face.embedding)
+                        store.addFace(item.uri, face.faceIndex, face.embedding, similarityThreshold)
                     }
                     store.markMediaIndexed(item.uri, detections.size)
                     facesFound += detections.size
