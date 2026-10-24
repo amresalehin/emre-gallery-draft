@@ -477,6 +477,7 @@ class BuffaloLFaceEngine private constructor(
                 "At least 60 MB of free storage is required to install the complete buffalo_l pack."
             }
             val staging = File(modelDir, "installing").apply { deleteRecursively(); mkdirs() }
+            var responseTotal = -1L
             try {
                 if (connection.responseCode !in 200..299) {
                     error("Could not download buffalo_l model pack (HTTP ${connection.responseCode}).")
@@ -484,6 +485,7 @@ class BuffaloLFaceEngine private constructor(
                 // Content-Length describes the compressed HTTP response. Count bytes at
                 // that stream boundary; counting extracted ZIP entries can exceed 100%.
                 val total = connection.contentLengthLong.coerceAtLeast(-1L)
+                responseTotal = total
                 val compressedInput = CountingInputStream(connection.inputStream) { bytesRead ->
                     // Keep determinate progress below 100% until extraction, validation,
                     // and installation have all completed.
@@ -545,7 +547,7 @@ class BuffaloLFaceEngine private constructor(
             }
             check(isModelInstalled(context)) { "buffalo_l model pack installation failed validation." }
             // Only report 100% once the model files are installed and validated.
-            if (connection.contentLengthLong > 0L) onProgress(connection.contentLengthLong, connection.contentLengthLong)
+            if (responseTotal > 0L) onProgress(responseTotal, responseTotal)
         }
 
         fun open(context: Context): BuffaloLFaceEngine {
