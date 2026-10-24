@@ -6879,6 +6879,7 @@ private fun IndexingStatusScreen(
     }
 
     LaunchedEffect(Unit) {
+        var wasRunning = false
         while (true) {
             val state = context.getSharedPreferences(IndexingForegroundService.STATE_PREFS, android.content.Context.MODE_PRIVATE)
             val task = state.getString(IndexingForegroundService.KEY_TASK, "") ?: ""
@@ -6892,10 +6893,11 @@ private fun IndexingStatusScreen(
                 "model" -> { isDownloadingModel = running; isModelDownloadPaused = paused; downloadStage = state.getString(IndexingForegroundService.KEY_STAGE, "downloading") ?: "downloading"; downloadBytesReceived = state.getLong(IndexingForegroundService.KEY_BYTES, 0L); downloadTotalBytes = state.getLong(IndexingForegroundService.KEY_BYTES_TOTAL, 0L) }
             }
             downloadError = state.getString(IndexingForegroundService.KEY_ERROR, null)
-            if (!running) {
+            if (wasRunning && !running) {
                 if (task == "ocr" || task == "face") refreshCounts()
                 updateEngineState()
             }
+            wasRunning = running
             delay(750)
         }
     }
