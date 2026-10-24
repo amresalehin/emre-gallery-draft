@@ -907,7 +907,7 @@ fun GalleryApp() {
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
-                                        closeSidePanel()
+                                        showSidePanel = false
                                     }
                                 } else {
                                     drawerScope.launch {
