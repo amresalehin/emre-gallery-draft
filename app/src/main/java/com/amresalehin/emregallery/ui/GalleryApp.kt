@@ -77,6 +77,7 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.platform.testTag
@@ -4394,7 +4395,12 @@ private fun ViewerScreen(
                 Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsExpanded) .90f else .50f)
-                    .onSizeChanged { detailsSheetHeightPx = it.height.toFloat() }
+                    .onSizeChanged {
+                        detailsSheetHeightPx = it.height.toFloat()
+                        if (showDetails && !detailsRevealTriggered) {
+                            detailsRevealPx = it.height.toFloat()
+                        }
+                    }
                     .graphicsLayer {
                         translationY = (detailsSheetHeightPx - detailsRevealPx).coerceAtLeast(0f) +
                             sheetDragOffsetY.value.coerceAtLeast(0f)
