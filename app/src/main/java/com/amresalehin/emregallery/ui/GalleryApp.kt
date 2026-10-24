@@ -182,6 +182,8 @@ fun GalleryApp() {
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
+    // Small rubber-band response when a horizontal swipe reaches the first or last main tab.
+    val mainSwipeResistanceX = remember { Animatable(0f) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
     fun refreshMedia() {
         if (!hasMediaPermission(context)) return
@@ -460,6 +462,7 @@ fun GalleryApp() {
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
+                        translationX = mainSwipeResistanceX.value
                         if (isPredictiveBackActive && predictiveBackProgress > 0f) {
                             val p = predictiveBackProgress
                             val scale = 1f - (p * 0.12f)
@@ -511,6 +514,7 @@ fun GalleryApp() {
                                 var totalX = 0f
                                 var totalY = 0f
                                 var navigated = false
+                                var resistedAtBoundary = false
                                 do {
                                     val event = awaitPointerEvent()
                                     val change = event.changes.firstOrNull { it.id == down.id }
@@ -531,10 +535,31 @@ fun GalleryApp() {
                                                 change.consume()
                                                 navigated = true
                                                 navigateTo(nextDestination)
+                                            } else if (!resistedAtBoundary) {
+                                                // At Home's start or Settings' end, give a short
+                                                // native-style rubber-band instead of navigating further.
+                                                resistedAtBoundary = true
+                                                change.consume()
+                                            }
+                                            if (nextDestination == null) {
+                                                val resistance = (totalX * 0.16f).coerceIn(-44f, 44f)
+                                                scope.launch { mainSwipeResistanceX.snapTo(resistance) }
+                                                change.consume()
                                             }
                                         }
                                     }
                                 } while (event.changes.any { it.pressed })
+                                if (!navigated && mainSwipeResistanceX.value != 0f) {
+                                    scope.launch {
+                                        mainSwipeResistanceX.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
