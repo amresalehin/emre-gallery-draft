@@ -6790,6 +6790,11 @@ private fun IndexingStatusScreen(
     var primaryModelFailure by remember { mutableStateOf<String?>(null) }
 
     var isDownloadingModel by remember { mutableStateOf(false) }
+    var isModelDownloadPaused by remember { mutableStateOf(false) }
+    val modelDownloadPauseSignal = remember { MutableStateFlow(false) }
+    var showFaceScanOptions by remember { mutableStateOf(false) }
+    var allowNativeFallback by remember { mutableStateOf(false) }
+    var showFallbackChoice by remember { mutableStateOf(false) }
     var downloadStage by remember { mutableStateOf("downloading") }
     var downloadBytesReceived by remember { mutableLongStateOf(0L) }
     var downloadTotalBytes by remember { mutableLongStateOf(0L) }
@@ -6807,6 +6812,8 @@ private fun IndexingStatusScreen(
         if (isDownloadingModel) return
         isDownloadingModel = true
         downloadError = null
+        isModelDownloadPaused = false
+        modelDownloadPauseSignal.value = false
         downloadStage = "downloading"
         downloadBytesReceived = 0L
         downloadTotalBytes = 0L
@@ -6818,7 +6825,8 @@ private fun IndexingStatusScreen(
                         downloadBytesReceived = received
                         downloadTotalBytes = total
                     },
-                    onStage = { stage -> downloadStage = stage }
+                    onStage = { stage -> downloadStage = stage },
+                    awaitIfResumed = { modelDownloadPauseSignal.first { paused -> !paused } }
                 )
                 withContext(Dispatchers.Main.immediate) {
                     isDownloadingModel = false
@@ -6842,7 +6850,13 @@ private fun IndexingStatusScreen(
         }
     }
 
+    fun toggleModelDownloadPause() {
+        isModelDownloadPaused = !isModelDownloadPaused
+        modelDownloadPauseSignal.value = isModelDownloadPaused
+    }
+
     fun cancelModelDownload() {
+        modelDownloadPauseSignal.value = false
         downloadJob?.cancel()
         downloadJob = null
         isDownloadingModel = false
@@ -6974,6 +6988,10 @@ private fun IndexingStatusScreen(
 
     fun toggleFaceFinding() {
         if (!countsReady || photos.isEmpty() || faceProcessed >= photos.size && !faceRunning) return
+        if (!faceRunning && !isBuffaloLInstalled && !allowNativeFallback) {
+            showFallbackChoice = true
+            return
+        }
         if (faceRunning) {
             facePaused = !facePaused
             facePauseSignal.value = facePaused
@@ -7006,7 +7024,8 @@ private fun IndexingStatusScreen(
                     awaitIfResumed = {
                         facePauseSignal.first { isPaused -> !isPaused }
                         currentCoroutineContext().ensureActive()
-                    }
+                    },
+                    allowNativeFallback = allowNativeFallback
                 )
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -7651,7 +7670,7 @@ private fun IndexingStatusScreen(
                             }
                         }
                         OutlinedButton(
-                            onClick = ::clearAndRescanFaces,
+                            onClick = { showFaceScanOptions = true },
                             enabled = countsReady && photos.isNotEmpty() && !faceRunning,
                             shape = RoundedCornerShape(12.dp)
                         ) {
