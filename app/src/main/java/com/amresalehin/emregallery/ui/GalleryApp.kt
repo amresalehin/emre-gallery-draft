@@ -6782,7 +6782,7 @@ private fun IndexingStatusScreen(
     var faceTotalDetected by remember { mutableIntStateOf(0) }
     var faceFailedCount by remember { mutableIntStateOf(0) }
     var clusterSummaries by remember { mutableStateOf<List<FaceClusterSummary>>(emptyList()) }
-    var clusterThreshold by remember { mutableFloatStateOf(FaceRecognitionSettings.similarityThreshold(context)) }
+    var clusterDistance by remember { mutableFloatStateOf(FaceRecognitionSettings.recognitionDistance(context)) }
     var detectionConfidence by remember { mutableFloatStateOf(FaceRecognitionSettings.detectionConfidence(context)) }
     var minimumGroupFaces by remember { mutableIntStateOf(FaceRecognitionSettings.minGroupFaces(context)) }
     var isClusteringRunning by remember { mutableStateOf(false) }
@@ -7719,7 +7719,7 @@ private fun IndexingStatusScreen(
                         Text("Groups below this size stay indexed but are hidden from People & pets.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
-                    // Similarity Threshold Line Drag Slider
+                    // Recognition Distance Line Drag Slider
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -7727,30 +7727,30 @@ private fun IndexingStatusScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "Similarity Threshold",
+                                "Maximum Recognition Distance",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             val thresholdLabel = when {
-                                clusterThreshold >= 0.62f -> "Strict"
-                                clusterThreshold >= 0.52f -> "Balanced"
+                                clusterDistance <= 0.45f -> "Strict"
+                                clusterDistance <= 0.60f -> "Balanced"
                                 else -> "Loose"
                             }
                             Text(
-                                String.format(Locale.US, "%.2f (%s)", clusterThreshold, thresholdLabel),
+                                String.format(Locale.US, "%.2f (%s)", clusterDistance, thresholdLabel),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
                         Slider(
-                            value = clusterThreshold,
+                            value = clusterDistance,
                             onValueChange = {
-                                clusterThreshold = (it * 100).roundToInt() / 100f
-                                FaceRecognitionSettings.preferences(context).edit().putFloat(FaceRecognitionSettings.KEY_SIMILARITY_THRESHOLD, clusterThreshold).apply()
+                                clusterDistance = (it * 100).roundToInt() / 100f
+                                FaceRecognitionSettings.preferences(context).edit().putFloat(FaceRecognitionSettings.KEY_RECOGNITION_DISTANCE, clusterDistance).apply()
                             },
-                            valueRange = 0.35f..0.75f,
+                            valueRange = 0.25f..0.75f,
                             modifier = Modifier.fillMaxWidth()
                         )
                         Row(
@@ -7758,12 +7758,12 @@ private fun IndexingStatusScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                "Loose (0.35)",
+                                "Strict (0.25)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                "Strict (0.75)",
+                                "Loose (0.75)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -7842,7 +7842,7 @@ private fun IndexingStatusScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Button(
-                            onClick = { runFaceClustering(clusterThreshold) },
+                            onClick = { runFaceClustering(clusterDistance) },
                             enabled = !isClusteringRunning && faceTotalDetected > 0,
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
