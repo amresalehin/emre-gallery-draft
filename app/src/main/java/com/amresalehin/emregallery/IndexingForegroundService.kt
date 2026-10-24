@@ -300,7 +300,11 @@ class IndexingForegroundService : Service() {
 
         private fun command(context: Context, action: String, configure: Intent.() -> Unit = {}) {
             val intent = Intent(context, IndexingForegroundService::class.java).setAction(action).apply(configure)
-            ContextCompat.startForegroundService(context, intent)
+            if (action == ACTION_PAUSE || action == ACTION_RESUME || action == ACTION_CANCEL) {
+                context.startService(intent)
+            } else {
+                ContextCompat.startForegroundService(context, intent)
+            }
         }
 
         fun startOcr(context: Context, languages: List<String>, rescanAll: Boolean = false) =
