@@ -6638,7 +6638,68 @@ private fun IndexingStatusScreen(
     var faceRunToken by remember { mutableIntStateOf(0) }
     val facePauseSignal = remember { MutableStateFlow(false) }
 
+    var isBuffaloLInstalled by remember { mutableStateOf(BuffaloLFaceEngine.isModelInstalled(context)) }
+    var activeEngineName by remember { mutableStateOf("Detecting...") }
+    var primaryModelFailure by remember { mutableStateOf<String?>(null) }
+
+    var isDownloadingModel by remember { mutableStateOf(false) }
+    var downloadBytesReceived by remember { mutableLongStateOf(0L) }
+    var downloadTotalBytes by remember { mutableLongStateOf(0L) }
+    var downloadError by remember { mutableStateOf<String?>(null) }
+    var downloadJob by remember { mutableStateOf<Job?>(null) }
+
+    fun updateEngineState() {
+        val (engine, failure) = FaceIndexingRepository.queryEngineInfo(context)
+        isBuffaloLInstalled = BuffaloLFaceEngine.isModelInstalled(context)
+        activeEngineName = engine
+        primaryModelFailure = failure
+    }
+
+    fun startModelDownload(force: Boolean = false) {
+        if (isDownloadingModel) return
+        isDownloadingModel = true
+        downloadError = null
+        downloadBytesReceived = 0L
+        downloadTotalBytes = 0L
+        downloadJob = scope.launch {
+            try {
+                FaceIndexingRepository(context.applicationContext).downloadModel(
+                    force = force,
+                    onProgress = { received, total ->
+                        downloadBytesReceived = received
+                        downloadTotalBytes = total
+                    }
+                )
+                withContext(Dispatchers.Main.immediate) {
+                    isDownloadingModel = false
+                    downloadError = null
+                    updateEngineState()
+                }
+            } catch (cancelled: CancellationException) {
+                withContext(Dispatchers.Main.immediate) {
+                    isDownloadingModel = false
+                    downloadError = "Download cancelled."
+                    updateEngineState()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main.immediate) {
+                    isDownloadingModel = false
+                    downloadError = e.localizedMessage ?: "Failed to download model."
+                    FaceIndexingRepository.lastPrimaryFailure = downloadError
+                    updateEngineState()
+                }
+            }
+        }
+    }
+
+    fun cancelModelDownload() {
+        downloadJob?.cancel()
+        downloadJob = null
+        isDownloadingModel = false
+    }
+
     fun refreshCounts() {
+        updateEngineState()
         scope.launch {
             countsReady = false
             withContext(Dispatchers.IO) {
@@ -6658,12 +6719,14 @@ private fun IndexingStatusScreen(
                     faceFailedCount = fFailures
                     clusterSummaries = cSummaries
                     countsReady = true
+                    updateEngineState()
                 }
             }
         }
     }
 
     LaunchedEffect(photoUris) {
+        updateEngineState()
         refreshCounts()
     }
 
@@ -7075,6 +7138,12 @@ private fun IndexingStatusScreen(
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    val downloadPercent = if (downloadTotalBytes > 0) {
+                        ((downloadBytesReceived.toFloat() / downloadTotalBytes) * 100f).roundToInt().coerceIn(0, 100)
+                    } else if (downloadBytesReceived > 0) {
+                        ((downloadBytesReceived.toFloat() / (288L * 1024 * 1024)) * 100f).roundToInt().coerceIn(0, 99)
+                    } else 0
+
                     // Header
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -7104,38 +7173,233 @@ private fun IndexingStatusScreen(
                             )
                         }
                         // Status Badge
+
+                        val faceChipLabel = when {
+                            isDownloadingModel -> "Downloading $downloadPercent%"
+                            faceRunning && !facePaused -> "Detecting"
+                            faceRunning && facePaused -> "Paused"
+                            faceProcessed >= photos.size && photos.isNotEmpty() -> "Complete"
+                            downloadError != null -> "Download Failed"
+                            !isBuffaloLInstalled -> "Native Fallback"
+                            primaryModelFailure != null -> "Primary Failed"
+                            else -> "Buffalo_L Ready"
+                        }
+
                         AssistChip(
                             onClick = {},
                             enabled = false,
                             label = {
                                 Text(
-                                    when {
-                                        faceRunning && !facePaused -> "Detecting"
-                                        faceRunning && facePaused -> "Paused"
-                                        faceProcessed >= photos.size && photos.isNotEmpty() -> "Complete"
-                                        else -> "Idle"
-                                    },
+                                    faceChipLabel,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Medium
                                 )
                             },
                             colors = AssistChipDefaults.assistChipColors(
                                 disabledContainerColor = when {
+                                    isDownloadingModel -> MaterialTheme.colorScheme.primaryContainer
                                     faceRunning && !facePaused -> MaterialTheme.colorScheme.primaryContainer
                                     faceRunning && facePaused -> MaterialTheme.colorScheme.secondaryContainer
                                     faceProcessed >= photos.size && photos.isNotEmpty() -> MaterialTheme.colorScheme.tertiaryContainer
-                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                    downloadError != null || (primaryModelFailure != null && isBuffaloLInstalled) -> MaterialTheme.colorScheme.errorContainer
+                                    !isBuffaloLInstalled -> MaterialTheme.colorScheme.surfaceVariant
+                                    else -> MaterialTheme.colorScheme.secondaryContainer
                                 },
                                 disabledLabelColor = when {
+                                    isDownloadingModel -> MaterialTheme.colorScheme.onPrimaryContainer
                                     faceRunning && !facePaused -> MaterialTheme.colorScheme.onPrimaryContainer
                                     faceRunning && facePaused -> MaterialTheme.colorScheme.onSecondaryContainer
                                     faceProcessed >= photos.size && photos.isNotEmpty() -> MaterialTheme.colorScheme.onTertiaryContainer
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    downloadError != null || (primaryModelFailure != null && isBuffaloLInstalled) -> MaterialTheme.colorScheme.onErrorContainer
+                                    !isBuffaloLInstalled -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    else -> MaterialTheme.colorScheme.onSecondaryContainer
                                 }
                             ),
                             border = null,
                             modifier = Modifier.height(28.dp)
                         )
+                    }
+
+                    // Active Engine Status & Model Download
+                    val engineBannerShape = RoundedCornerShape(14.dp)
+                    if (isDownloadingModel) {
+                        Surface(
+                            shape = engineBannerShape,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        "Downloading Buffalo_L Model ($downloadPercent%)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(Modifier.weight(1f))
+                                    TextButton(
+                                        onClick = ::cancelModelDownload,
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("Cancel", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                                val progressFloat = if (downloadTotalBytes > 0) {
+                                    (downloadBytesReceived.toFloat() / downloadTotalBytes).coerceIn(0f, 1f)
+                                } else 0f
+                                if (downloadTotalBytes > 0) {
+                                    LinearProgressIndicator(
+                                        progress = { progressFloat },
+                                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                } else {
+                                    LinearProgressIndicator(
+                                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(
+                                    text = "${formatBytes(downloadBytesReceived)} of ${if (downloadTotalBytes > 0) formatBytes(downloadTotalBytes) else "approx. 288 MB"} downloaded",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else if (!isBuffaloLInstalled) {
+                        Surface(
+                            shape = engineBannerShape,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(
+                                        Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp).padding(top = 2.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "Active Engine: Android Native FaceDetector (Fallback)",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            "Primary Buffalo_L model (288 MB) is not downloaded. Using built-in 128-d face detection. Download Buffalo_L for deep face recognition.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                if (downloadError != null) {
+                                    Text(
+                                        "Download failed: $downloadError",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                                Button(
+                                    onClick = { startModelDownload(force = true) },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Download Buffalo_L (288 MB)")
+                                }
+                            }
+                        }
+                    } else if (primaryModelFailure != null) {
+                        Surface(
+                            shape = engineBannerShape,
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Icon(
+                                        Icons.Default.WarningAmber,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp).padding(top = 2.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "Primary Engine Failed: Buffalo_L",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                        Text(
+                                            "Reason: $primaryModelFailure\nActive engine: Android Native FaceDetector (Fallback)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { startModelDownload(force = true) },
+                                        shape = RoundedCornerShape(10.dp)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Re-download Model")
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Surface(
+                            shape = engineBannerShape,
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        "Active Engine: Buffalo_L (InsightFace ONNX)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        "High-accuracy SCRFD detector + 512-dim ArcFace embeddings active.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // Progress
@@ -7198,7 +7462,7 @@ private fun IndexingStatusScreen(
                     ) {
                         Button(
                             onClick = ::toggleFaceFinding,
-                            enabled = countsReady && photos.isNotEmpty() && (faceRunning || faceProcessed < photos.size),
+                            enabled = countsReady && photos.isNotEmpty() && !isDownloadingModel && (faceRunning || faceProcessed < photos.size),
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         ) {

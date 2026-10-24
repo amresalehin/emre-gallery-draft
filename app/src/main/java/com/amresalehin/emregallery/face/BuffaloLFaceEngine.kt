@@ -21,6 +21,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.FloatBuffer
 import java.util.zip.ZipInputStream
+import kotlinx.coroutines.CancellationException
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -430,10 +431,14 @@ class BuffaloLFaceEngine private constructor(
         }
 
         /** Explicit, resumable-in-the-sense-of-retryable download; all pack files are installed. */
-        fun downloadModel(context: Context, onProgress: (Long, Long) -> Unit = { _, _ -> }) {
+        fun downloadModel(
+            context: Context,
+            force: Boolean = false,
+            onProgress: (Long, Long) -> Unit = { _, _ -> }
+        ) {
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             if (!modelDir.exists() && !modelDir.mkdirs()) error("Cannot create face model directory.")
-            if (isModelInstalled(context)) return
+            if (!force && isModelInstalled(context)) return
             val connection = openConnectionWithRedirects(MODEL_URL)
             val availableBytes = StatFs(modelDir.absolutePath).availableBytes
             check(availableBytes >= MIN_FREE_SPACE_BYTES) {
@@ -449,6 +454,9 @@ class BuffaloLFaceEngine private constructor(
                 ZipInputStream(BufferedInputStream(connection.inputStream)).use { zip ->
                     var entry = zip.nextEntry
                     while (entry != null) {
+                        if (Thread.currentThread().isInterrupted) {
+                            throw CancellationException("Download cancelled.")
+                        }
                         if (!entry.isDirectory) {
                             val name = entry.name.substringAfterLast('/')
                             if (name.endsWith(".onnx") || name.contains("LICENSE", true)) {
@@ -456,6 +464,9 @@ class BuffaloLFaceEngine private constructor(
                                 destination.outputStream().buffered().use { output ->
                                     val buffer = ByteArray(64 * 1024)
                                     while (true) {
+                                        if (Thread.currentThread().isInterrupted) {
+                                            throw CancellationException("Download cancelled.")
+                                        }
                                         val count = zip.read(buffer)
                                         if (count < 0) break
                                         output.write(buffer, 0, count)
@@ -466,6 +477,9 @@ class BuffaloLFaceEngine private constructor(
                             } else {
                                 val buffer = ByteArray(64 * 1024)
                                 while (true) {
+                                    if (Thread.currentThread().isInterrupted) {
+                                        throw CancellationException("Download cancelled.")
+                                    }
                                     val count = zip.read(buffer)
                                     if (count < 0) break
                                     received += count

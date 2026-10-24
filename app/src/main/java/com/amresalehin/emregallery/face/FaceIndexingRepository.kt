@@ -22,6 +22,26 @@ data class FaceIndexingProgress(
  */
 class FaceIndexingRepository(private val context: Context) {
 
+    companion object {
+        @Volatile
+        var activeEngineDescription: String = "Detecting..."
+            private set
+
+        @Volatile
+        var lastPrimaryFailure: String? = null
+
+        fun queryEngineInfo(context: Context): Pair<String, String?> {
+            val installed = BuffaloLFaceEngine.isModelInstalled(context)
+            return if (!installed) {
+                "Android Native FaceDetector (128-d fallback)" to "Buffalo_L model pack not downloaded (using 128-d native fallback)"
+            } else if (lastPrimaryFailure != null) {
+                "Android Native FaceDetector (128-d fallback)" to lastPrimaryFailure
+            } else {
+                "Buffalo_L (InsightFace ONNX 512-d)" to null
+            }
+        }
+    }
+
     suspend fun indexNewMedia(
         media: List<MediaItem>,
         store: FaceClusterStore,
@@ -38,11 +58,18 @@ class FaceIndexingRepository(private val context: Context) {
             if (pending.isNotEmpty()) {
                 engine = try {
                     if (BuffaloLFaceEngine.isModelInstalled(context)) {
-                        BuffaloLFaceEngine.open(context)
+                        val bEngine = BuffaloLFaceEngine.open(context)
+                        activeEngineDescription = "Buffalo_L (InsightFace ONNX 512-d)"
+                        lastPrimaryFailure = null
+                        bEngine
                     } else {
+                        activeEngineDescription = "Android Native FaceDetector (128-d fallback)"
+                        lastPrimaryFailure = "Buffalo_L model pack not downloaded"
                         AndroidNativeFaceEngine(context)
                     }
                 } catch (e: Exception) {
+                    activeEngineDescription = "Android Native FaceDetector (128-d fallback)"
+                    lastPrimaryFailure = "Buffalo_L initialization failed: ${e.localizedMessage ?: e.message ?: "Unknown error"}"
                     AndroidNativeFaceEngine(context)
                 }
             }
@@ -76,8 +103,11 @@ class FaceIndexingRepository(private val context: Context) {
     }
 
     suspend fun downloadModel(
+        force: Boolean = false,
         onProgress: (receivedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
     ) = withContext(Dispatchers.IO) {
-        BuffaloLFaceEngine.downloadModel(context, onProgress)
+        BuffaloLFaceEngine.downloadModel(context, force, onProgress)
+        lastPrimaryFailure = null
+        activeEngineDescription = "Buffalo_L (InsightFace ONNX 512-d)"
     }
 }
