@@ -4040,6 +4040,8 @@ private fun ViewerScreen(
     val minFlingVelocity = viewConfig.scaledMinimumFlingVelocity.toFloat()
     val density = androidx.compose.ui.platform.LocalDensity.current
     var detailsRevealTriggered by remember(item.uri) { mutableStateOf(false) }
+    var detailsRevealPx by remember(item.uri) { mutableFloatStateOf(0f) }
+    var detailsSheetHeightPx by remember(item.uri) { mutableFloatStateOf(0f) }
 
     Box(
         Modifier
@@ -4058,7 +4060,11 @@ private fun ViewerScreen(
                         val revealThreshold = viewConfig.touchSlop * 1.25f
                         if (nextOffset < -revealThreshold && !detailsRevealTriggered) {
                             detailsRevealTriggered = true
+                            detailsRevealPx = (-nextOffset).coerceIn(0f, detailsSheetHeightPx)
                             onToggleDetails()
+                        } else if (detailsRevealTriggered) {
+                            // Drive the drawer from the same finger delta as the media.
+                            detailsRevealPx = (-nextOffset).coerceIn(0f, detailsSheetHeightPx)
                         }
                     }
                 },
@@ -4087,7 +4093,20 @@ private fun ViewerScreen(
                                     stiffness = Spring.StiffnessMedium
                                 )
                             )
-                            if (!detailsRevealTriggered) onToggleDetails()
+                            if (!detailsRevealTriggered) {
+                                onToggleDetails()
+                            } else {
+                                val startReveal = detailsRevealPx
+                                val endReveal = detailsSheetHeightPx
+                                animate(
+                                    initialValue = startReveal,
+                                    targetValue = endReveal,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    )
+                                ) { value, _ -> detailsRevealPx = value }
+                            }
                             detailsRevealTriggered = false
                         }
                     } else {
@@ -4353,15 +4372,18 @@ private fun ViewerScreen(
         val sheetDragOffsetY = remember { Animatable(0f) }
         LaunchedEffect(showDetails) {
             sheetDragOffsetY.snapTo(0f)
+            if (showDetails && !detailsRevealTriggered) {
+                detailsRevealPx = detailsSheetHeightPx
+            } else if (!showDetails) {
+                detailsRevealPx = 0f
+            }
         }
 
-        // Smooth slide-up details panel with drag-down dismiss
+        // Fade the panel in, while its vertical position follows the same upward
+        // drag offset as the media. This avoids a second, competing slide animation.
         AnimatedVisibility(
             visible = showDetails,
-            enter = slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = tween(340, easing = FastOutSlowInEasing)
-            ) + fadeIn(animationSpec = tween(220)),
+            enter = fadeIn(animationSpec = tween(120)),
             exit = slideOutVertically(
                 targetOffsetY = { it },
                 animationSpec = tween(280, easing = FastOutLinearInEasing)
@@ -4372,7 +4394,11 @@ private fun ViewerScreen(
                 Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(if (detailsExpanded) .90f else .50f)
-                    .graphicsLayer { translationY = sheetDragOffsetY.value.coerceAtLeast(0f) },
+                    .onSizeChanged { detailsSheetHeightPx = it.height.toFloat() }
+                    .graphicsLayer {
+                        translationY = (detailsSheetHeightPx - detailsRevealPx).coerceAtLeast(0f) +
+                            sheetDragOffsetY.value.coerceAtLeast(0f)
+                    },
                 shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 4.dp,
