@@ -4039,6 +4039,7 @@ private fun ViewerScreen(
     val viewConfig = ViewConfiguration.get(context)
     val minFlingVelocity = viewConfig.scaledMinimumFlingVelocity.toFloat()
     val density = androidx.compose.ui.platform.LocalDensity.current
+    var detailsRevealTriggered by remember(item.uri) { mutableStateOf(false) }
 
     Box(
         Modifier
@@ -4050,7 +4051,15 @@ private fun ViewerScreen(
                 enabled = !showDetails,
                 state = rememberDraggableState { delta ->
                     ocrScope.launch {
-                        dragOffsetY.snapTo(dragOffsetY.value + delta)
+                        val nextOffset = dragOffsetY.value + delta
+                        dragOffsetY.snapTo(nextOffset)
+                        // Start revealing the details drawer as soon as an upward swipe is
+                        // deliberate, rather than waiting for the finger to lift.
+                        val revealThreshold = viewConfig.touchSlop * 1.25f
+                        if (nextOffset < -revealThreshold && !detailsRevealTriggered) {
+                            detailsRevealTriggered = true
+                            onToggleDetails()
+                        }
                     }
                 },
                 onDragStopped = { velocity ->
@@ -4068,7 +4077,7 @@ private fun ViewerScreen(
                             )
                             onBack()
                         }
-                    } else if (dragOffsetY.value < -detailsDistanceThreshold || velocity < -minFlingVelocity * 1.4f) {
+                    } else if (detailsRevealTriggered || dragOffsetY.value < -detailsDistanceThreshold || velocity < -minFlingVelocity * 1.4f) {
                         ocrScope.launch {
                             dragOffsetY.animateTo(
                                 targetValue = 0f,
@@ -4078,7 +4087,8 @@ private fun ViewerScreen(
                                     stiffness = Spring.StiffnessMedium
                                 )
                             )
-                            onToggleDetails()
+                            if (!detailsRevealTriggered) onToggleDetails()
+                            detailsRevealTriggered = false
                         }
                     } else {
                         ocrScope.launch {
@@ -4090,6 +4100,7 @@ private fun ViewerScreen(
                                     stiffness = Spring.StiffnessMedium
                                 )
                             )
+                            detailsRevealTriggered = false
                         }
                     }
                 }
