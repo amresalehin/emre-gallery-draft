@@ -6890,6 +6890,15 @@ private fun IndexingStatusScreen(
     fun toggleModelDownloadPause() {
         isModelDownloadPaused = !isModelDownloadPaused
         modelDownloadPauseSignal.value = isModelDownloadPaused
+        IndexingForegroundService.startOrUpdate(
+            context,
+            if (downloadStage == "downloading") "Downloading face model" else "Preparing face model",
+            if (isModelDownloadPaused) "Download paused" else "Resuming model preparation…",
+            if (downloadTotalBytes > 0L && downloadStage == "downloading") {
+                (downloadBytesReceived * 100L / downloadTotalBytes).toInt().coerceIn(0, 100)
+            } else -1,
+            if (downloadStage == "downloading") 100 else 0
+        )
     }
 
     fun cancelModelDownload() {
