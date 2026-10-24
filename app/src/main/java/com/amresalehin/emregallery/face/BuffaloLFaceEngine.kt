@@ -81,7 +81,8 @@ interface FaceEngine : AutoCloseable {
 class BuffaloLFaceEngine private constructor(
     private val context: Context,
     private val detectorSession: OrtSession,
-    private val recognitionSession: OrtSession
+    private val recognitionSession: OrtSession,
+    private val detectionThreshold: Float
 ) : FaceEngine {
 
     private data class FaceDetection(val bounds: RectF, val landmarks: FloatArray, val score: Float)
@@ -201,7 +202,7 @@ class BuffaloLFaceEngine private constructor(
             val grid = DETECT_SIZE / stride
             for (i in 0 until count) {
                 val score = scores[i]
-                if (!score.isFinite() || score < DETECTION_THRESHOLD) continue
+                if (!score.isFinite() || score < detectionThreshold) continue
                 val cell = i / 2
                 val cx = (cell % grid) * stride.toFloat()
                 val cy = (cell / grid) * stride.toFloat()
@@ -369,7 +370,6 @@ class BuffaloLFaceEngine private constructor(
         private const val DETECT_SIZE = 640
         private const val RECOGNITION_SIZE = 112
         private const val MIN_FACE_SIZE = 28
-        private const val DETECTION_THRESHOLD = 0.5f
         private const val NMS_THRESHOLD = 0.4f
         private const val MAX_FACES = 100
         private const val MIN_FREE_SPACE_BYTES = 60L * 1024 * 1024
@@ -568,7 +568,7 @@ class BuffaloLFaceEngine private constructor(
             }
         }
 
-        fun open(context: Context): BuffaloLFaceEngine {
+        fun open(context: Context, detectionThreshold: Float = FaceRecognitionSettings.DEFAULT_DETECTION_CONFIDENCE): BuffaloLFaceEngine {
             if (!isModelInstalled(context)) {
                 runCatching { installBundledModel(context) }
             }
@@ -588,7 +588,7 @@ class BuffaloLFaceEngine private constructor(
             val detector = env.createSession(modelDir.resolve("det_10g.onnx").absolutePath, options)
             try {
                 val recognizer = env.createSession(modelDir.resolve("w600k_r50.onnx").absolutePath, options)
-                return BuffaloLFaceEngine(context.applicationContext, detector, recognizer)
+                return BuffaloLFaceEngine(context.applicationContext, detector, recognizer, detectionThreshold.coerceIn(0.30f, 0.90f))
             } catch (error: Throwable) {
                 detector.close()
                 throw error
