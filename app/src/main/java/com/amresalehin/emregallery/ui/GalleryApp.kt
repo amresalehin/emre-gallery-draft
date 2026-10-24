@@ -7968,6 +7968,54 @@ private fun IndexingStatusScreen(
 }
 
 @Composable
+    if (showFaceScanOptions) {
+        AlertDialog(
+            onDismissRequest = { showFaceScanOptions = false },
+            title = { Text("Rescan faces") },
+            text = { Text("Choose whether to scan only photos that have not been indexed, or clear the existing face index and scan every photo again.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFaceScanOptions = false
+                    clearAndRescanFaces()
+                }) { Text("Rescan all") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showFaceScanOptions = false }) { Text("Cancel") }
+                    TextButton(onClick = {
+                        showFaceScanOptions = false
+                        toggleFaceFinding()
+                    }) { Text("Remaining only") }
+                }
+            }
+        )
+    }
+
+    if (showFallbackChoice) {
+        AlertDialog(
+            onDismissRequest = { showFallbackChoice = false },
+            title = { Text("Buffalo_L model unavailable") },
+            text = { Text("Download the Buffalo_L model for higher-quality face recognition, or explicitly choose the built-in Android face detector. The native detector has lower-dimensional embeddings and may group faces less accurately.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showFallbackChoice = false
+                    startModelDownload()
+                }) { Text("Download model") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { showFallbackChoice = false }) { Text("Cancel") }
+                    TextButton(onClick = {
+                        showFallbackChoice = false
+                        allowNativeFallback = true
+                        toggleFaceFinding()
+                    }) { Text("Use native fallback") }
+                }
+            }
+        )
+    }
+}
+
 private fun IndexingMetric(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
