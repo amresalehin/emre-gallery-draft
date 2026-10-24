@@ -7227,29 +7227,6 @@ private fun IndexingStatusScreen(
                         )
                     }
 
-                    // Detection confidence control. Applies to the next face scan.
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Face Detection Confidence", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
-                            Text(String.format(Locale.US, "%.2f", detectionConfidence), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Slider(
-                            value = detectionConfidence,
-                            onValueChange = {
-                                detectionConfidence = (it * 100).roundToInt() / 100f
-                                FaceRecognitionSettings.preferences(context).edit().putFloat(FaceRecognitionSettings.KEY_DETECTION_CONFIDENCE, detectionConfidence).apply()
-                            },
-                            valueRange = 0.30f..0.90f,
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !faceRunning
-                        )
-                        Text("Higher values reject weaker detections. Changes apply to new scans; use Re-scan to reprocess indexed photos.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-
                     // Progress
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(
@@ -7451,6 +7428,29 @@ private fun IndexingStatusScreen(
                             border = null,
                             modifier = Modifier.height(28.dp)
                         )
+                    }
+
+                    // Detection confidence control. Applies to the next face scan.
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Face Detection Confidence", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
+                            Text(String.format(Locale.US, "%.2f", detectionConfidence), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Slider(
+                            value = detectionConfidence,
+                            onValueChange = {
+                                detectionConfidence = (it * 100).roundToInt() / 100f
+                                FaceRecognitionSettings.preferences(context).edit().putFloat(FaceRecognitionSettings.KEY_DETECTION_CONFIDENCE, detectionConfidence).apply()
+                            },
+                            valueRange = 0.30f..0.90f,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !faceRunning
+                        )
+                        Text("Higher values reject weaker detections. Changes apply to new scans; use Re-scan to reprocess indexed photos.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
                     // Active Engine Status & Model Download
