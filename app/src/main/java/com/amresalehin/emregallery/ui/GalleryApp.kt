@@ -4523,7 +4523,7 @@ private fun ViewerScreen(
                                             when {
                                                 (sheetDragOffsetY.value > dismissDist || velocityY > minFling) -> {
                                                     sheetDragOffsetY.animateTo(
-                                                        targetValue = 600f,
+                                                        targetValue = detailsSheetHeightPx.coerceAtLeast(600f),
                                                         initialVelocity = velocityY,
                                                         animationSpec = spring(
                                                             dampingRatio = Spring.DampingRatioNoBouncy,
@@ -4571,8 +4571,9 @@ private fun ViewerScreen(
                                 ) { change, dragAmount ->
                                     change.consume()
                                     velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                    // Keep the drawer attached to the finger continuously.
                                     ocrScope.launch {
-                                        val next = (sheetDragOffsetY.value + dragAmount.y).coerceAtLeast(-80f)
+                                        val next = (sheetDragOffsetY.value + dragAmount.y).coerceAtLeast(0f)
                                         sheetDragOffsetY.snapTo(next)
                                     }
                                 }
