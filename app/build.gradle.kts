@@ -21,11 +21,25 @@ android {
 
     buildTypes {
         debug {
-            // Use the Android Gradle Plugin's default debug signing configuration.
+            // Debug build configuration
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += listOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "/META-INF/INDEX.LIST",
+                "/META-INF/io.netty.versions.properties"
+            )
         }
     }
 
