@@ -4076,10 +4076,7 @@ private fun ViewerScreen(
     }
     fun meta(key: String): String = metadata[key]?.takeIf { it.isNotBlank() } ?: "Not available"
     var showMore by remember { mutableStateOf(false) }
-    var detailsExpanded by remember { mutableStateOf(false) }
-    LaunchedEffect(showDetails) {
-        if (!showDetails) detailsExpanded = false
-    }
+    // The media details drawer has a fixed half-screen height; no expanded state.
     val dragOffsetY = remember { Animatable(0f) }
     LaunchedEffect(item.uri) {
         dragOffsetY.snapTo(0f)
@@ -4438,14 +4435,13 @@ private fun ViewerScreen(
                     .background(Color.Black.copy(alpha = .45f))
                     // Tapping outside dismisses the sheet; vertical swipes on the
                     // exposed viewer area expand or dismiss it without touching the panel.
-                    .pointerInput(showDetails, detailsExpanded) {
+                    .pointerInput(showDetails) {
                         var totalDragY = 0f
                         val dismissThreshold = viewConfiguration.touchSlop * 3.5f
                         detectDragGestures(
                             onDragStart = { totalDragY = 0f },
                             onDragEnd = {
                                 when {
-                                    totalDragY < -dismissThreshold && !detailsExpanded -> detailsExpanded = true
                                     totalDragY > dismissThreshold -> onToggleDetails()
                                 }
                             },
@@ -4485,7 +4481,7 @@ private fun ViewerScreen(
             Surface(
                 Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(if (detailsExpanded) .90f else .50f)
+                    .fillMaxHeight(0.50f)
                     .onSizeChanged {
                         detailsSheetHeightPx = it.height.toFloat()
                         if (showDetails && !detailsRevealTriggered) {
@@ -4507,11 +4503,10 @@ private fun ViewerScreen(
                         Modifier
                             .fillMaxWidth()
                             .padding(top = 10.dp, bottom = 4.dp)
-                            .pointerInput(showDetails, detailsExpanded) {
+                            .pointerInput(showDetails) {
                                 val velocityTracker = VelocityTracker()
                                 val minFling = ViewConfiguration.get(context).scaledMinimumFlingVelocity.toFloat()
                                 val dismissDist = 80.dp.toPx()
-                                val expandDist = 44.dp.toPx()
                                 detectDragGestures(
                                     onDragStart = {
                                         velocityTracker.resetTracking()
@@ -4532,17 +4527,6 @@ private fun ViewerScreen(
                                                     )
                                                     onToggleDetails()
                                                     sheetDragOffsetY.snapTo(0f)
-                                                }
-                                                (sheetDragOffsetY.value < -expandDist || velocityY < -minFling) && !detailsExpanded -> {
-                                                    detailsExpanded = true
-                                                    sheetDragOffsetY.animateTo(
-                                                        targetValue = 0f,
-                                                        initialVelocity = velocityY,
-                                                        animationSpec = spring(
-                                                            dampingRatio = Spring.DampingRatioLowBouncy,
-                                                            stiffness = Spring.StiffnessMedium
-                                                        )
-                                                    )
                                                 }
                                                 else -> {
                                                     sheetDragOffsetY.animateTo(
