@@ -175,6 +175,7 @@ fun GalleryApp() {
     val homeScrollPos by prefs.homeScrollPosition.collectAsStateWithLifecycle(initialValue = Pair(0, 0))
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     var hasRestoredHomeScroll by remember { mutableStateOf(false) }
+    var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -788,8 +789,23 @@ fun GalleryApp() {
                 FloatingNavigationBar(
                     current = destination,
                     onSelect = { dest ->
-                        navigateTo(dest, rememberPrevious = false)
-                        albumFilter = null
+                        if (dest == Destination.HOME) {
+                            val now = android.os.SystemClock.uptimeMillis()
+                            val isDoubleTap = now - lastHomeButtonTapAt in 1..ViewConfiguration.getDoubleTapTimeout().toLong()
+                            lastHomeButtonTapAt = if (isDoubleTap) 0L else now
+                            navigateTo(dest, rememberPrevious = false)
+                            albumFilter = null
+                            if (isDoubleTap) {
+                                scope.launch {
+                                    homeListState.animateScrollToItem(0)
+                                    prefs.saveHomeScrollPosition(0, 0)
+                                }
+                            }
+                        } else {
+                            lastHomeButtonTapAt = 0L
+                            navigateTo(dest, rememberPrevious = false)
+                            albumFilter = null
+                        }
                     }
                 )
             }
