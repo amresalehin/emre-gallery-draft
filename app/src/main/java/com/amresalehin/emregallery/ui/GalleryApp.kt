@@ -118,6 +118,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.text.NumberFormat
@@ -6823,90 +6824,26 @@ private fun IndexingStatusScreen(
     }
 
     fun startModelDownload(force: Boolean = false) {
-        if (isDownloadingModel) return
+        if (isDownloadingModel || ocrRunning || faceRunning) return
         isDownloadingModel = true
-        IndexingForegroundService.startOrUpdate(context, "Preparing face model", "Starting model download…")
-        downloadError = null
         isModelDownloadPaused = false
-        modelDownloadPauseSignal.value = false
+        downloadError = null
         downloadStage = "downloading"
         downloadBytesReceived = 0L
         downloadTotalBytes = 0L
-        downloadJob = scope.launch {
-            try {
-                FaceIndexingRepository(context.applicationContext).downloadModel(
-                    force = force,
-                    onProgress = { received, total ->
-                        downloadBytesReceived = received
-                        downloadTotalBytes = total
-                        IndexingForegroundService.startOrUpdate(
-                            context, "Downloading face model",
-                            if (isModelDownloadPaused) "Download paused" else "${received / (1024 * 1024)} MB of ${(total / (1024 * 1024)).coerceAtLeast(1)} MB",
-                            if (total > 0L) ((received * 100L / total).toInt()).coerceIn(0, 100) else -1,
-                            100
-                        )
-                    },
-                    onStage = { stage ->
-                        downloadStage = stage
-                        if (stage != "downloading") {
-                            IndexingForegroundService.startOrUpdate(
-                                context, "Preparing face model",
-                                when (stage) {
-                                    "extracting" -> "Extracting model archive…"
-                                    "installing" -> "Installing model files…"
-                                    "ready" -> "Face model ready"
-                                    else -> "Preparing model…"
-                                }
-                            )
-                        }
-                    },
-                    awaitIfResumed = { modelDownloadPauseSignal.first { paused -> !paused } }
-                )
-                withContext(Dispatchers.Main.immediate) {
-                    isDownloadingModel = false
-                    downloadError = null
-                    updateEngineState()
-                    if (!ocrRunning && !faceRunning) IndexingForegroundService.stop(context)
-                }
-            } catch (cancelled: CancellationException) {
-                withContext(Dispatchers.Main.immediate) {
-                    isDownloadingModel = false
-                    downloadError = "Download cancelled."
-                    updateEngineState()
-                    if (!ocrRunning && !faceRunning) IndexingForegroundService.stop(context)
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main.immediate) {
-                    isDownloadingModel = false
-                    downloadError = e.localizedMessage ?: "Failed to download model."
-                    FaceIndexingRepository.lastPrimaryFailure = downloadError
-                    updateEngineState()
-                    if (!ocrRunning && !faceRunning) IndexingForegroundService.stop(context)
-                }
-            }
-        }
+        IndexingForegroundService.downloadModel(context, force)
     }
 
     fun toggleModelDownloadPause() {
         isModelDownloadPaused = !isModelDownloadPaused
-        modelDownloadPauseSignal.value = isModelDownloadPaused
-        IndexingForegroundService.startOrUpdate(
-            context,
-            if (downloadStage == "downloading") "Downloading face model" else "Preparing face model",
-            if (isModelDownloadPaused) "Download paused" else "Resuming model preparation…",
-            if (downloadTotalBytes > 0L && downloadStage == "downloading") {
-                (downloadBytesReceived * 100L / downloadTotalBytes).toInt().coerceIn(0, 100)
-            } else -1,
-            if (downloadStage == "downloading") 100 else 0
-        )
+        if (isModelDownloadPaused) IndexingForegroundService.pause(context)
+        else IndexingForegroundService.resume(context)
     }
 
     fun cancelModelDownload() {
-        modelDownloadPauseSignal.value = false
-        downloadJob?.cancel()
-        downloadJob = null
+        IndexingForegroundService.cancel(context)
         isDownloadingModel = false
-        if (!ocrRunning && !faceRunning) IndexingForegroundService.stop(context)
+        isModelDownloadPaused = false
     }
 
     fun refreshCounts() {
@@ -6941,6 +6878,30 @@ private fun IndexingStatusScreen(
         refreshCounts()
     }
 
+    LaunchedEffect(Unit) {
+        while (true) {
+            val state = context.getSharedPreferences(IndexingForegroundService.STATE_PREFS, android.content.Context.MODE_PRIVATE)
+            val task = state.getString(IndexingForegroundService.KEY_TASK, "") ?: ""
+            val running = state.getBoolean(IndexingForegroundService.KEY_RUNNING, false)
+            val paused = state.getBoolean(IndexingForegroundService.KEY_PAUSED, false)
+            val processed = state.getInt(IndexingForegroundService.KEY_PROCESSED, 0)
+            val total = state.getInt(IndexingForegroundService.KEY_TOTAL, 0)
+            when (task) {
+                "ocr" -> { ocrRunning = running; ocrPaused = paused; if (total > 0) ocrProcessed = processed }
+                "face" -> { faceRunning = running; facePaused = paused; if (total > 0) faceProcessed = processed; faceTotalDetected = state.getInt(IndexingForegroundService.KEY_FACES, faceTotalDetected); faceFailedCount = state.getInt(IndexingForegroundService.KEY_FAILED, faceFailedCount) }
+                "model" -> { isDownloadingModel = running; isModelDownloadPaused = paused; downloadStage = state.getString(IndexingForegroundService.KEY_STAGE, "downloading") ?: "downloading"; downloadBytesReceived = state.getLong(IndexingForegroundService.KEY_BYTES, 0L); downloadTotalBytes = state.getLong(IndexingForegroundService.KEY_BYTES_TOTAL, 0L) }
+            }
+            downloadError = state.getString(IndexingForegroundService.KEY_ERROR, null)
+            if (!running) {
+                if (task == "ocr" || task == "face") refreshCounts()
+                updateEngineState()
+            }
+            delay(750)
+        }
+    }
+
+
+
     fun itemsPerMinute(processedThisRun: Int, startedAtMillis: Long): Int {
         if (processedThisRun <= 0) return 0
         val elapsed = (System.currentTimeMillis() - startedAtMillis).coerceAtLeast(1_000L)
@@ -6948,180 +6909,67 @@ private fun IndexingStatusScreen(
     }
 
     fun toggleOcr() {
-        if (!countsReady || photos.isEmpty() || ocrProcessed >= photos.size && !ocrRunning) return
+        if (!countsReady || photos.isEmpty()) return
         if (ocrRunning) {
             ocrPaused = !ocrPaused
-            ocrPauseSignal.value = ocrPaused
+            if (ocrPaused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
             return
         }
-
-        val runToken = ocrRunToken + 1
-        ocrRunToken = runToken
-        val baseProcessed = ocrProcessed
-        val startedAt = System.currentTimeMillis()
-        ocrPauseSignal.value = false
-        ocrPaused = false
+        if (faceRunning || isDownloadingModel) return
+        if (ocrProcessed >= photos.size) return
         ocrRunning = true
-        IndexingForegroundService.startOrUpdate(context, "OCR indexing", "Preparing images…", 0, photos.size)
-        ocrJob = scope.launch {
-            var attempted = 0
-            try {
-                val pending = withContext(Dispatchers.IO) {
-                    photos.filterNot { item ->
-                        TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
-                    }
-                }
-                for (item in pending) {
-                    ocrPauseSignal.first { isPaused -> !isPaused }
-                    currentCoroutineContext().ensureActive()
-                    var finishedAttempt = false
-                    try {
-                        val uri = Uri.parse(item.uri)
-                        val recognized = withContext(Dispatchers.IO) {
-                            TesseractOcr.recognize(context, uri, ocrLanguages.toList().ifEmpty { listOf("eng") })
-                        }
-                        withContext(Dispatchers.IO) {
-                            TesseractOcr.saveCachedResult(context, uri, recognized)
-                        }
-                        finishedAttempt = true
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        finishedAttempt = true
-                    } finally {
-                        if (finishedAttempt) {
-                            attempted++
-                            if (ocrRunToken == runToken) {
-                                ocrProcessed = (baseProcessed + attempted).coerceAtMost(photos.size)
-                                ocrItemsPerMinute = itemsPerMinute(attempted, startedAt)
-                                ocrCachedCount = (ocrCachedCount + 1)
-                                IndexingForegroundService.startOrUpdate(
-                                    context, "OCR indexing",
-                                    "Processed $ocrProcessed of ${photos.size} images",
-                                    ocrProcessed, photos.size
-                                )
-                            }
-                        }
-                    }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } finally {
-                if (ocrRunToken == runToken) {
-                    ocrRunning = false
-                    ocrPaused = false
-                    ocrPauseSignal.value = false
-                    ocrJob = null
-                    refreshCounts()
-                    if (!faceRunning && !isDownloadingModel) IndexingForegroundService.stop(context)
-                }
-            }
-        }
+        ocrPaused = false
+        IndexingForegroundService.startOcr(context, ocrLanguages.toList().ifEmpty { listOf("eng") })
     }
 
     fun stopOcr() {
-        ocrRunToken++
-        ocrPauseSignal.value = false
-        ocrJob?.cancel()
-        ocrJob = null
+        IndexingForegroundService.cancel(context)
         ocrRunning = false
         ocrPaused = false
         refreshCounts()
     }
 
     fun clearAndReindexOcr() {
-        stopOcr()
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                TesseractOcr.clearCachedResults(context)
-            }
-            refreshCounts()
-            toggleOcr()
-        }
+        if (ocrRunning || faceRunning || isDownloadingModel) return
+        ocrRunning = true
+        ocrPaused = false
+        IndexingForegroundService.startOcr(context, ocrLanguages.toList().ifEmpty { listOf("eng") }, rescanAll = true)
     }
 
     fun toggleFaceFinding() {
-        if (!countsReady || photos.isEmpty() || faceProcessed >= photos.size && !faceRunning) return
-        if (!faceRunning && !isBuffaloLInstalled && !allowNativeFallback) {
+        if (!countsReady || photos.isEmpty()) return
+        if (faceRunning) {
+            facePaused = !facePaused
+            if (facePaused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
+            return
+        }
+        if (ocrRunning || isDownloadingModel) return
+        if (faceProcessed >= photos.size) return
+        if (!isBuffaloLInstalled && !allowNativeFallback) {
             showFallbackChoice = true
             return
         }
-        if (faceRunning) {
-            facePaused = !facePaused
-            facePauseSignal.value = facePaused
-            return
-        }
-
-        val runToken = faceRunToken + 1
-        faceRunToken = runToken
-        val baseProcessed = faceProcessed
-        val baseDetected = faceTotalDetected
-        val startedAt = System.currentTimeMillis()
-        facePauseSignal.value = false
-        facePaused = false
         faceRunning = true
-        IndexingForegroundService.startOrUpdate(context, "Face indexing", "Preparing face detector…", 0, photos.size)
-        faceJob = scope.launch {
-            try {
-                FaceIndexingRepository(context.applicationContext).indexNewMedia(
-                    media = photos,
-                    store = faceStore,
-                    onProgress = { progress ->
-                        withContext(Dispatchers.Main.immediate) {
-                            if (faceRunToken == runToken) {
-                                faceProcessed = (baseProcessed + progress.processed).coerceAtMost(photos.size)
-                                faceItemsPerMinute = itemsPerMinute(progress.processed, startedAt)
-                                faceTotalDetected = baseDetected + progress.facesFound
-                                faceFailedCount = progress.failed
-                                IndexingForegroundService.startOrUpdate(
-                                    context, "Face indexing",
-                                    "Processed ${faceProcessed} of ${photos.size} images · ${faceTotalDetected} faces found",
-                                    faceProcessed, photos.size
-                                )
-                            }
-                        }
-                    },
-                    awaitIfResumed = {
-                        facePauseSignal.first { isPaused -> !isPaused }
-                        currentCoroutineContext().ensureActive()
-                    },
-                    allowNativeFallback = allowNativeFallback
-                )
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-            } finally {
-                if (faceRunToken == runToken) {
-                    faceRunning = false
-                    facePaused = false
-                    facePauseSignal.value = false
-                    faceJob = null
-                    refreshCounts()
-                    if (!ocrRunning && !isDownloadingModel) IndexingForegroundService.stop(context)
-                }
-            }
-        }
+        facePaused = false
+        IndexingForegroundService.startFace(context, allowNative = allowNativeFallback)
     }
 
     fun stopFaceFinding() {
-        faceRunToken++
-        facePauseSignal.value = false
-        faceJob?.cancel()
-        faceJob = null
+        IndexingForegroundService.cancel(context)
         faceRunning = false
         facePaused = false
         refreshCounts()
     }
 
     fun clearAndRescanFaces() {
-        stopFaceFinding()
-        scope.launch {
-            withContext(Dispatchers.IO) {
-                faceStore.clearAllFaceData()
-            }
-            refreshCounts()
-            toggleFaceFinding()
+        if (ocrRunning || faceRunning || isDownloadingModel) return
+        if (!isBuffaloLInstalled && !allowNativeFallback) {
+            showFallbackChoice = true
+            return
         }
+        faceRunning = true
+        facePaused = false
+        IndexingForegroundService.startFace(context, rescanAll = true, allowNative = allowNativeFallback)
     }
 
     fun runFaceClustering(threshold: Float) {
