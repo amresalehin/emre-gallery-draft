@@ -463,11 +463,12 @@ class BuffaloLFaceEngine private constructor(
         }
 
         /** Explicit, resumable-in-the-sense-of-retryable download; all pack files are installed. */
-        fun downloadModel(
+        suspend fun downloadModel(
             context: Context,
             force: Boolean = false,
             onProgress: (Long, Long) -> Unit = { _, _ -> },
-            onStage: (String) -> Unit = {}
+            onStage: (String) -> Unit = {},
+            awaitIfResumed: suspend () -> Unit = {}
         ) {
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             if (!modelDir.exists() && !modelDir.mkdirs()) error("Cannot create face model directory.")
@@ -493,6 +494,7 @@ class BuffaloLFaceEngine private constructor(
                     archive.outputStream().buffered().use { output ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
+                            awaitIfResumed()
                             if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
                             val count = input.read(buffer)
                             if (count < 0) break
@@ -511,6 +513,7 @@ class BuffaloLFaceEngine private constructor(
                 ZipInputStream(BufferedInputStream(archive.inputStream())).use { zip ->
                     var entry = zip.nextEntry
                     while (entry != null) {
+                        awaitIfResumed()
                         if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
                         if (!entry.isDirectory) {
                             val name = entry.name.substringAfterLast('/')
@@ -519,6 +522,7 @@ class BuffaloLFaceEngine private constructor(
                                 destination.outputStream().buffered().use { output ->
                                     val buffer = ByteArray(64 * 1024)
                                     while (true) {
+                                        awaitIfResumed()
                                         if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
                                         val count = zip.read(buffer)
                                         if (count < 0) break
@@ -528,6 +532,7 @@ class BuffaloLFaceEngine private constructor(
                             } else {
                                 val buffer = ByteArray(64 * 1024)
                                 while (true) {
+                                    awaitIfResumed()
                                     if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
                                     if (zip.read(buffer) < 0) break
                                 }
@@ -544,6 +549,7 @@ class BuffaloLFaceEngine private constructor(
 
                 onStage("installing")
                 REQUIRED_MODELS.forEach { name ->
+                    awaitIfResumed()
                     if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
                     val source = staging.resolve(name)
                     val target = modelDir.resolve(name)
