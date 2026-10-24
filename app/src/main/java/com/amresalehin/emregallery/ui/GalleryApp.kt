@@ -107,6 +107,7 @@ import com.amresalehin.emregallery.ocr.TesseractOcr
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceClusterSummary
+import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceIndexingProgress
 import kotlinx.coroutines.CancellationException
@@ -6781,7 +6782,9 @@ private fun IndexingStatusScreen(
     var faceTotalDetected by remember { mutableIntStateOf(0) }
     var faceFailedCount by remember { mutableIntStateOf(0) }
     var clusterSummaries by remember { mutableStateOf<List<FaceClusterSummary>>(emptyList()) }
-    var clusterThreshold by remember { mutableFloatStateOf(0.55f) }
+    var clusterThreshold by remember { mutableFloatStateOf(FaceRecognitionSettings.similarityThreshold(context)) }
+    var detectionConfidence by remember { mutableFloatStateOf(FaceRecognitionSettings.detectionConfidence(context)) }
+    var minimumGroupFaces by remember { mutableIntStateOf(FaceRecognitionSettings.minGroupFaces(context)) }
     var isClusteringRunning by remember { mutableStateOf(false) }
     var clusterStatusMessage by remember { mutableStateOf<String?>(null) }
 
@@ -7103,6 +7106,29 @@ private fun IndexingStatusScreen(
                             border = null,
                             modifier = Modifier.height(28.dp)
                         )
+                    }
+
+                    // Detection confidence control. Applies to the next face scan.
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Face Detection Confidence", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
+                            Text(String.format(Locale.US, "%.2f", detectionConfidence), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Slider(
+                            value = detectionConfidence,
+                            onValueChange = {
+                                detectionConfidence = (it * 100).roundToInt() / 100f
+                                FaceRecognitionSettings.preferences(context).edit().putFloat(FaceRecognitionSettings.KEY_DETECTION_CONFIDENCE, detectionConfidence).apply()
+                            },
+                            valueRange = 0.30f..0.90f,
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !faceRunning
+                        )
+                        Text("Higher values reject weaker detections. Changes apply to new scans; use Re-scan to reprocess indexed photos.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
                     // Progress
@@ -7670,6 +7696,29 @@ private fun IndexingStatusScreen(
                         )
                     }
 
+                    // Minimum group size only hides small groups from People & pets; it does not delete indexed faces.
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Minimum Faces per Person", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
+                            Text("$minimumGroupFaces faces", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Slider(
+                            value = minimumGroupFaces.toFloat(),
+                            onValueChange = {
+                                minimumGroupFaces = it.roundToInt().coerceIn(1, 30)
+                                FaceRecognitionSettings.preferences(context).edit().putInt(FaceRecognitionSettings.KEY_MIN_GROUP_FACES, minimumGroupFaces).apply()
+                            },
+                            valueRange = 1f..30f,
+                            steps = 28,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text("Groups below this size stay indexed but are hidden from People & pets.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
                     // Similarity Threshold Line Drag Slider
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(
@@ -7697,7 +7746,10 @@ private fun IndexingStatusScreen(
                         }
                         Slider(
                             value = clusterThreshold,
-                            onValueChange = { clusterThreshold = (it * 100).roundToInt() / 100f },
+                            onValueChange = {
+                                clusterThreshold = (it * 100).roundToInt() / 100f
+                                FaceRecognitionSettings.preferences(context).edit().putFloat(FaceRecognitionSettings.KEY_SIMILARITY_THRESHOLD, clusterThreshold).apply()
+                            },
                             valueRange = 0.35f..0.75f,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -7990,10 +8042,11 @@ private fun PeopleScreen(
 
     // Only show groups that still have media in the current visible library.
     // The face database can retain rows for media that was deleted, hidden, or binned.
-    val visiblePeople = remember(clusters, photoByUri) {
+    val minimumGroupFaces = FaceRecognitionSettings.minGroupFaces(context)
+    val visiblePeople = remember(clusters, photoByUri, minimumGroupFaces) {
         clusters.mapNotNull { cluster ->
             val visibleFaces = store.facesForCluster(cluster.id).filter { it.mediaUri in photoByUri }
-            if (visibleFaces.isEmpty()) {
+            if (visibleFaces.size < minimumGroupFaces) {
                 null
             } else {
                 cluster.copy(
