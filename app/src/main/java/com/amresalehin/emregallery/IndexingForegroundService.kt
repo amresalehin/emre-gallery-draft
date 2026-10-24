@@ -17,6 +17,7 @@ import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceIndexingRepository
+import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -159,6 +160,8 @@ class IndexingForegroundService : Service() {
             media = photos,
             store = store,
             allowNativeFallback = allowNative,
+            detectionThreshold = FaceRecognitionSettings.detectionConfidence(applicationContext),
+            similarityThreshold = FaceRecognitionSettings.similarityThreshold(applicationContext),
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
             onProgress = { p ->
                 val done = (alreadyDone + p.processed).coerceAtMost(photos.size)
