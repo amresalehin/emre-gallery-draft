@@ -25,7 +25,7 @@ data class StoredFace(
 
 /**
  * Persistent, incremental face grouping. Embeddings and identity groups stay in app-private storage.
- * A conservative cosine threshold favours avoiding false merges over perfectly complete grouping.
+ * Recognition uses cosine distance (1 - cosine similarity); smaller distances mean closer matches.
  */
 class FaceClusterStore(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "face_index.db", null, DATABASE_VERSION) {
@@ -85,7 +85,7 @@ class FaceClusterStore(context: Context) :
 
     /** Inserts one face and assigns it to the closest existing centroid, or creates a new person. */
     @Synchronized
-    fun addFace(mediaUri: String, faceIndex: Int, rawEmbedding: FloatArray, threshold: Float = 0.55f): String {
+    fun addFace(mediaUri: String, faceIndex: Int, rawEmbedding: FloatArray, maxDistance: Float = 0.40f): String {
         require(rawEmbedding.isNotEmpty()) { "Face embedding is empty." }
         val embedding = normalize(rawEmbedding)
         val db = writableDatabase
@@ -96,19 +96,19 @@ class FaceClusterStore(context: Context) :
         if (existing != null) return existing
 
         var bestId: String? = null
-        var bestScore = -1f
+        var bestDistance = Float.POSITIVE_INFINITY
         db.rawQuery("SELECT id, centroid FROM clusters", null).use { cursor ->
             while (cursor.moveToNext()) {
                 val centroid = bytesToFloats(cursor.getBlob(1))
-                val score = cosine(embedding, centroid)
-                if (score > bestScore) {
-                    bestScore = score
+                val distance = cosineDistance(embedding, centroid)
+                if (distance < bestDistance) {
+                    bestDistance = distance
                     bestId = cursor.getString(0)
                 }
             }
         }
 
-        val clusterId = if (bestId != null && bestScore >= threshold) {
+        val clusterId = if (bestId != null && bestDistance <= maxDistance) {
             bestId!!
         } else {
             UUID.randomUUID().toString().also { id ->
@@ -238,7 +238,7 @@ class FaceClusterStore(context: Context) :
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
     @Synchronized
-    fun reclusterAll(threshold: Float = 0.55f): Int {
+    fun reclusterAll(maxDistance: Float = 0.40f): Int {
         val db = writableDatabase
         db.beginTransaction()
         try {
@@ -268,16 +268,16 @@ class FaceClusterStore(context: Context) :
             for (face in faceRows) {
                 val normVec = normalize(face.embedding)
                 var bestCluster: WorkingCluster? = null
-                var bestScore = -1f
+                var bestDistance = Float.POSITIVE_INFINITY
                 for (c in clusterList) {
-                    val score = cosine(normVec, c.centroid)
-                    if (score > bestScore) {
-                        bestScore = score
+                    val distance = cosineDistance(normVec, c.centroid)
+                    if (distance < bestDistance) {
+                        bestDistance = distance
                         bestCluster = c
                     }
                 }
 
-                if (bestCluster != null && bestScore >= threshold) {
+                if (bestCluster != null && bestDistance <= maxDistance) {
                     bestCluster.faces.add(face)
                     val dim = normVec.size
                     val mean = FloatArray(dim)
@@ -384,11 +384,11 @@ class FaceClusterStore(context: Context) :
         return FloatArray(values.size) { values[it] / norm }
     }
 
-    private fun cosine(a: FloatArray, b: FloatArray): Float {
-        if (a.size != b.size) return -1f
-        var score = 0f
-        for (i in a.indices) score += a[i] * b[i]
-        return score
+    private fun cosineDistance(a: FloatArray, b: FloatArray): Float {
+        if (a.size != b.size) return Float.POSITIVE_INFINITY
+        var similarity = 0f
+        for (i in a.indices) similarity += a[i] * b[i]
+        return (1f - similarity).coerceAtLeast(0f)
     }
 
     private fun floatsToBytes(values: FloatArray): ByteArray {
