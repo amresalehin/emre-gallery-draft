@@ -535,16 +535,12 @@ fun GalleryApp() {
                                                 change.consume()
                                                 navigated = true
                                                 navigateTo(nextDestination)
-                                            } else if (!resistedAtBoundary) {
-                                                // At Home's start or Settings' end, give a short
-                                                // native-style rubber-band instead of navigating further.
+                                            } else if (destination == Destination.SETTINGS && !resistedAtBoundary) {
+                                                // Rubber-band resistance is intentional only at the end of Settings.
                                                 resistedAtBoundary = true
                                                 change.consume()
-                                            }
-                                            if (nextDestination == null) {
                                                 val resistance = (totalX * 0.16f).coerceIn(-44f, 44f)
                                                 scope.launch { mainSwipeResistanceX.snapTo(resistance) }
-                                                change.consume()
                                             }
                                         }
                                     }
