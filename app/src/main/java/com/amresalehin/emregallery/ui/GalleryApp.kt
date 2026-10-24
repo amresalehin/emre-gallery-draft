@@ -899,9 +899,7 @@ fun GalleryApp() {
                             listOf(
                                 Triple(Destination.HOME, "Home", Icons.Default.Home),
                                 Triple(Destination.ALBUMS, "Albums", Icons.Default.PhotoLibrary),
-                                Triple(Destination.FAVOURITES, "Favourites", Icons.Default.Favorite),
-                                Triple(Destination.VIDEOS, "Videos", Icons.Default.PlayCircle),
-                                Triple(Destination.RECENTLY_ADDED, "Recently added", Icons.Default.Schedule)
+                                Triple(Destination.FAVOURITES, "Favourites", Icons.Default.Favorite)
                             ),
                             listOf(
                                 Triple(Destination.PEOPLE, "People & pets", Icons.Default.Face),
@@ -3311,10 +3309,6 @@ private fun AlbumsScreen(
 
     val favouritesCount = favourites.size
     val binCount = inBin.size
-    val videosCount = normalMedia.count { it.isVideo }
-    val recentlyAddedCount = normalMedia.count {
-        it.dateAddedSeconds * 1000L > System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
-    }
     val hiddenCount = hidden.size
     val archiveCount = archive.size
 
@@ -3771,34 +3765,7 @@ private fun AlbumsScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // 2-column tiles: Row 1 (Videos & Recently added)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CollectionTile(
-                    title = "Videos",
-                    count = "$videosCount items",
-                    icon = Icons.Default.PlayCircle,
-                    iconTint = MaterialTheme.colorScheme.onSurface,
-                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Videos") },
-                    modifier = Modifier.weight(1f)
-                )
-                CollectionTile(
-                    title = "Recently added",
-                    count = "$recentlyAddedCount items",
-                    icon = Icons.Default.Schedule,
-                    iconTint = MaterialTheme.colorScheme.onSurface,
-                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Recently added") },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // 2-column tiles: Row 2 (Locked folder & Archive)
+            // 2-column tiles: Locked folder & Archive
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
