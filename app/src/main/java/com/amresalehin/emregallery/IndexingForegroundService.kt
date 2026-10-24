@@ -161,7 +161,7 @@ class IndexingForegroundService : Service() {
             store = store,
             allowNativeFallback = allowNative,
             detectionThreshold = FaceRecognitionSettings.detectionConfidence(applicationContext),
-            similarityThreshold = FaceRecognitionSettings.similarityThreshold(applicationContext),
+            recognitionDistance = FaceRecognitionSettings.recognitionDistance(applicationContext),
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
             onProgress = { p ->
                 val done = (alreadyDone + p.processed).coerceAtMost(photos.size)
