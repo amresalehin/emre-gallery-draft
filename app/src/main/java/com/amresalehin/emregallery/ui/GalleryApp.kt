@@ -6839,8 +6839,27 @@ private fun IndexingStatusScreen(
                     onProgress = { received, total ->
                         downloadBytesReceived = received
                         downloadTotalBytes = total
+                        IndexingForegroundService.startOrUpdate(
+                            context, "Downloading face model",
+                            if (isModelDownloadPaused) "Download paused" else "${received / (1024 * 1024)} MB of ${(total / (1024 * 1024)).coerceAtLeast(1)} MB",
+                            if (total > 0L) ((received * 100L / total).toInt()).coerceIn(0, 100) else -1,
+                            100
+                        )
                     },
-                    onStage = { stage -> downloadStage = stage },
+                    onStage = { stage ->
+                        downloadStage = stage
+                        if (stage != "downloading") {
+                            IndexingForegroundService.startOrUpdate(
+                                context, "Preparing face model",
+                                when (stage) {
+                                    "extracting" -> "Extracting model archive…"
+                                    "installing" -> "Installing model files…"
+                                    "ready" -> "Face model ready"
+                                    else -> "Preparing model…"
+                                }
+                            )
+                        }
+                    },
                     awaitIfResumed = { modelDownloadPauseSignal.first { paused -> !paused } }
                 )
                 withContext(Dispatchers.Main.immediate) {
