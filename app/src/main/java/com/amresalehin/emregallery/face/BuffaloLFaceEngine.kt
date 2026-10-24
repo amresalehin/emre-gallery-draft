@@ -466,38 +466,52 @@ class BuffaloLFaceEngine private constructor(
         fun downloadModel(
             context: Context,
             force: Boolean = false,
-            onProgress: (Long, Long) -> Unit = { _, _ -> }
+            onProgress: (Long, Long) -> Unit = { _, _ -> },
+            onStage: (String) -> Unit = {}
         ) {
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             if (!modelDir.exists() && !modelDir.mkdirs()) error("Cannot create face model directory.")
             if (!force && isModelInstalled(context)) return
-            val connection = openConnectionWithRedirects(MODEL_URL)
             val availableBytes = StatFs(modelDir.absolutePath).availableBytes
             check(availableBytes >= MIN_FREE_SPACE_BYTES) {
                 "At least 60 MB of free storage is required to install the complete buffalo_l pack."
             }
+
+            val archive = File(modelDir, "buffalo_l.zip.part")
             val staging = File(modelDir, "installing").apply { deleteRecursively(); mkdirs() }
+            val connection = openConnectionWithRedirects(MODEL_URL)
             var responseTotal = -1L
             try {
                 if (connection.responseCode !in 200..299) {
                     error("Could not download buffalo_l model pack (HTTP ${connection.responseCode}).")
                 }
-                // Content-Length describes the compressed HTTP response. Count bytes at
-                // that stream boundary; counting extracted ZIP entries can exceed 100%.
                 val total = connection.contentLengthLong.coerceAtLeast(-1L)
                 responseTotal = total
-                val compressedInput = CountingInputStream(connection.inputStream) { bytesRead ->
-                    // Keep determinate progress below 100% until extraction, validation,
-                    // and installation have all completed.
-                    val reported = if (total > 0L) bytesRead.coerceAtMost(total - 1L) else bytesRead
-                    onProgress(reported, total)
+                onStage("downloading")
+                var received = 0L
+                BufferedInputStream(connection.inputStream).use { input ->
+                    archive.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            received += count
+                            onProgress(received, total)
+                        }
+                    }
                 }
-                ZipInputStream(BufferedInputStream(compressedInput)).use { zip ->
+            } finally {
+                connection.disconnect()
+            }
+
+            try {
+                onStage("extracting")
+                ZipInputStream(BufferedInputStream(archive.inputStream())).use { zip ->
                     var entry = zip.nextEntry
                     while (entry != null) {
-                        if (Thread.currentThread().isInterrupted) {
-                            throw CancellationException("Download cancelled.")
-                        }
+                        if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
                         if (!entry.isDirectory) {
                             val name = entry.name.substringAfterLast('/')
                             if (name.endsWith(".onnx") || name.contains("LICENSE", true)) {
@@ -505,9 +519,7 @@ class BuffaloLFaceEngine private constructor(
                                 destination.outputStream().buffered().use { output ->
                                     val buffer = ByteArray(64 * 1024)
                                     while (true) {
-                                        if (Thread.currentThread().isInterrupted) {
-                                            throw CancellationException("Download cancelled.")
-                                        }
+                                        if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
                                         val count = zip.read(buffer)
                                         if (count < 0) break
                                         output.write(buffer, 0, count)
@@ -516,11 +528,8 @@ class BuffaloLFaceEngine private constructor(
                             } else {
                                 val buffer = ByteArray(64 * 1024)
                                 while (true) {
-                                    if (Thread.currentThread().isInterrupted) {
-                                        throw CancellationException("Download cancelled.")
-                                    }
-                                    val count = zip.read(buffer)
-                                    if (count < 0) break
+                                    if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
+                                    if (zip.read(buffer) < 0) break
                                 }
                             }
                         }
@@ -532,7 +541,10 @@ class BuffaloLFaceEngine private constructor(
                     staging.resolve(name).let { !it.isFile || it.length() < 1024 * 1024 }
                 }
                 if (missing.isNotEmpty()) error("Incomplete buffalo_l archive; missing or invalid: " + missing.joinToString())
+
+                onStage("installing")
                 REQUIRED_MODELS.forEach { name ->
+                    if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
                     val source = staging.resolve(name)
                     val target = modelDir.resolve(name)
                     if (target.exists()) target.delete()
@@ -541,13 +553,13 @@ class BuffaloLFaceEngine private constructor(
                 staging.listFiles()?.filter { it.isFile && it.name.contains("LICENSE", true) }?.forEach {
                     it.copyTo(modelDir.resolve(it.name), overwrite = true)
                 }
+                check(isModelInstalled(context)) { "buffalo_l model pack installation failed validation." }
+                if (responseTotal > 0L) onProgress(responseTotal, responseTotal)
+                onStage("ready")
             } finally {
-                connection.disconnect()
+                archive.delete()
                 staging.deleteRecursively()
             }
-            check(isModelInstalled(context)) { "buffalo_l model pack installation failed validation." }
-            // Only report 100% once the model files are installed and validated.
-            if (responseTotal > 0L) onProgress(responseTotal, responseTotal)
         }
 
         fun open(context: Context): BuffaloLFaceEngine {
