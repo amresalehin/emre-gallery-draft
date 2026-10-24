@@ -509,21 +509,24 @@ fun GalleryApp() {
                         val mainDestinations = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
                         if (!showSidePanel && destination in mainDestinations) {
                             val slop = viewConfiguration.touchSlop * 2f
+                            val edgeWidth = 24.dp.toPx()
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
+                                // Let the left-edge drawer gesture own rightward swipes that begin at the edge.
+                                val drawerOwnsGesture = down.position.x <= edgeWidth
                                 var totalX = 0f
                                 var totalY = 0f
-                                var navigated = false
+                                var horizontalDragStarted = false
                                 var resistedAtBoundary = false
                                 do {
                                     val event = awaitPointerEvent()
                                     val change = event.changes.firstOrNull { it.id == down.id }
-                                    if (change != null && !navigated) {
+                                    if (change != null) {
                                         totalX += change.position.x - change.previousPosition.x
                                         totalY += change.position.y - change.previousPosition.y
-                                        if (kotlin.math.abs(totalX) > slop &&
-                                            kotlin.math.abs(totalX) > kotlin.math.abs(totalY) * 1.35f
-                                        ) {
+                                        val isHorizontal = kotlin.math.abs(totalX) > kotlin.math.abs(totalY) * 1.35f
+                                        if (!drawerOwnsGesture && isHorizontal && kotlin.math.abs(totalX) > slop) {
+                                            horizontalDragStarted = true
                                             val nextDestination = when {
                                                 totalX < 0f && destination == Destination.HOME -> Destination.ALBUMS
                                                 totalX < 0f && destination == Destination.ALBUMS -> Destination.SETTINGS
@@ -532,20 +535,34 @@ fun GalleryApp() {
                                                 else -> null
                                             }
                                             if (nextDestination != null) {
+                                                // Direct manipulation: keep the current screen attached to the finger.
+                                                scope.launch { mainSwipeResistanceX.snapTo(totalX * 0.72f) }
                                                 change.consume()
-                                                navigated = true
-                                                navigateTo(nextDestination)
-                                            } else if (destination == Destination.SETTINGS && !resistedAtBoundary) {
-                                                // Rubber-band resistance is intentional only at the end of Settings.
+                                            } else if (destination == Destination.SETTINGS) {
+                                                // Rubber-band resistance belongs only to the Settings end boundary.
                                                 resistedAtBoundary = true
-                                                change.consume()
                                                 val resistance = (totalX * 0.16f).coerceIn(-44f, 44f)
                                                 scope.launch { mainSwipeResistanceX.snapTo(resistance) }
+                                                change.consume()
                                             }
                                         }
                                     }
                                 } while (event.changes.any { it.pressed })
-                                if (!navigated && mainSwipeResistanceX.value != 0f) {
+
+                                if (horizontalDragStarted && !drawerOwnsGesture) {
+                                    val commitThreshold = size.width * 0.22f
+                                    val nextDestination = when {
+                                        totalX < -commitThreshold && destination == Destination.HOME -> Destination.ALBUMS
+                                        totalX < -commitThreshold && destination == Destination.ALBUMS -> Destination.SETTINGS
+                                        totalX > commitThreshold && destination == Destination.SETTINGS -> Destination.ALBUMS
+                                        totalX > commitThreshold && destination == Destination.ALBUMS -> Destination.HOME
+                                        else -> null
+                                    }
+                                    if (nextDestination != null) {
+                                        navigateTo(nextDestination)
+                                    }
+                                }
+                                if (mainSwipeResistanceX.value != 0f) {
                                     scope.launch {
                                         mainSwipeResistanceX.animateTo(
                                             targetValue = 0f,
