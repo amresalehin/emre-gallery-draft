@@ -64,13 +64,15 @@ class FaceIndexingRepository(private val context: Context) {
                         lastPrimaryFailure = null
                         bEngine
                     } else {
+                        if (!allowNativeFallback) error("Buffalo_L model is not installed; choose native fallback explicitly or download the model.")
                         activeEngineDescription = "Android Native FaceDetector (128-d fallback)"
                         lastPrimaryFailure = "Buffalo_L model pack not downloaded"
                         AndroidNativeFaceEngine(context)
                     }
                 } catch (e: Exception) {
+                    if (!allowNativeFallback) throw e
                     activeEngineDescription = "Android Native FaceDetector (128-d fallback)"
-                    lastPrimaryFailure = "Buffalo_L initialization failed: ${e.localizedMessage ?: e.message ?: "Unknown error"}"
+                    lastPrimaryFailure = "Buffalo_L initialization failed: " + (e.localizedMessage ?: e.message ?: "Unknown error")
                     AndroidNativeFaceEngine(context)
                 }
             }
