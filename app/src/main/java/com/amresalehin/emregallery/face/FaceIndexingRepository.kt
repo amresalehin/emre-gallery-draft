@@ -104,9 +104,10 @@ class FaceIndexingRepository(private val context: Context) {
 
     suspend fun downloadModel(
         force: Boolean = false,
-        onProgress: (receivedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
+        onProgress: (receivedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
+        onStage: (String) -> Unit = {}
     ) = withContext(Dispatchers.IO) {
-        BuffaloLFaceEngine.downloadModel(context, force, onProgress)
+        BuffaloLFaceEngine.downloadModel(context, force, onProgress, onStage)
         lastPrimaryFailure = null
         activeEngineDescription = "Buffalo_L (InsightFace ONNX 512-d)"
     }
