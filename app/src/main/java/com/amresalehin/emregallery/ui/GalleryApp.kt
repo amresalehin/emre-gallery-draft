@@ -855,15 +855,31 @@ fun GalleryApp() {
         }
                 if (showSidePanel) {
             val drawerWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 304.dp.toPx() }
-            val drawerOffsetX = remember { Animatable(0f) }
+            val drawerOffsetX = remember { Animatable(-drawerWidthPx) }
             val drawerScope = rememberCoroutineScope()
             val velocityTracker = remember { VelocityTracker() }
+            val drawerMotion = tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing)
             val scrimAlpha = (1f - (kotlin.math.abs(drawerOffsetX.value) / drawerWidthPx).coerceIn(0f, 1f)) * 0.42f
+            LaunchedEffect(Unit) {
+                drawerOffsetX.animateTo(
+                    targetValue = 0f,
+                    animationSpec = drawerMotion
+                )
+            }
+            val closeSidePanel: () -> Unit = {
+                drawerScope.launch {
+                    drawerOffsetX.animateTo(
+                        targetValue = -drawerWidthPx,
+                        animationSpec = tween(220, easing = FastOutSlowInEasing)
+                    )
+                    showSidePanel = false
+                }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = scrimAlpha))
-                    .clickable { showSidePanel = false }
+                    .clickable { closeSidePanel() }
                     .pointerInput(showSidePanel) {
                         detectHorizontalDragGestures(
                             onDragStart = {
@@ -891,8 +907,7 @@ fun GalleryApp() {
                                                 stiffness = Spring.StiffnessMediumLow
                                             )
                                         )
-                                        showSidePanel = false
-                                        drawerOffsetX.snapTo(0f)
+                                        closeSidePanel()
                                     }
                                 } else {
                                     drawerScope.launch {
@@ -966,7 +981,7 @@ fun GalleryApp() {
                                 Text("Emre Gallery", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                                 Text("Your media library", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            IconButton(onClick = { showSidePanel = false }) {
+                            IconButton(onClick = { closeSidePanel() }) {
                                 Icon(Icons.Default.Close, contentDescription = "Close navigation menu")
                             }
                         }
