@@ -500,6 +500,42 @@ fun GalleryApp() {
                             }
                         }
                     }
+                    .pointerInput(destination, showSidePanel, selectedMedia, showDetails) {
+                        val mainDestinations = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
+                        if (!showSidePanel && selectedMedia == null && !showDetails && destination in mainDestinations) {
+                            val slop = viewConfiguration.touchSlop * 2f
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var totalX = 0f
+                                var totalY = 0f
+                                var navigated = false
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change != null && !navigated) {
+                                        totalX += change.position.x - change.previousPosition.x
+                                        totalY += change.position.y - change.previousPosition.y
+                                        if (kotlin.math.abs(totalX) > slop &&
+                                            kotlin.math.abs(totalX) > kotlin.math.abs(totalY) * 1.35f
+                                        ) {
+                                            val nextDestination = when {
+                                                totalX < 0f && destination == Destination.HOME -> Destination.ALBUMS
+                                                totalX < 0f && destination == Destination.ALBUMS -> Destination.SETTINGS
+                                                totalX > 0f && destination == Destination.SETTINGS -> Destination.ALBUMS
+                                                totalX > 0f && destination == Destination.ALBUMS -> Destination.HOME
+                                                else -> null
+                                            }
+                                            if (nextDestination != null) {
+                                                change.consume()
+                                                navigated = true
+                                                navigateTo(nextDestination)
+                                            }
+                                        }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                            }
+                        }
+                    }
             ) { currentDestination ->
                 when (currentDestination) {
                     Destination.HOME -> HomeScreen(
