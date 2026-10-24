@@ -7932,9 +7932,7 @@ private fun IndexingStatusScreen(
             }
         }
     }
-}
 
-@Composable
     if (showFaceScanOptions) {
         AlertDialog(
             onDismissRequest = { showFaceScanOptions = false },
@@ -7988,6 +7986,8 @@ private fun IndexingStatusScreen(
             }
         )
     }
+}
+
 }
 
 private fun IndexingMetric(label: String, value: String, modifier: Modifier = Modifier) {
