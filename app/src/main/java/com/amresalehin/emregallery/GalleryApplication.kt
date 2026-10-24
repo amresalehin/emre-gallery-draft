@@ -8,9 +8,33 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import java.io.File
 
+import android.content.Context
+import android.provider.Settings
+
 class GalleryApplication : Application() {
+    companion object {
+        fun disableTouchPointTaps(context: Context) {
+            runCatching {
+                Settings.System.putInt(context.contentResolver, "show_touches", 0)
+            }
+            runCatching {
+                Settings.System.putInt(context.contentResolver, "pointer_location", 0)
+            }
+            runCatching {
+                Runtime.getRuntime().exec("settings put system show_touches 0")
+            }
+            runCatching {
+                Runtime.getRuntime().exec("settings put system pointer_location 0")
+            }
+            runCatching {
+                Runtime.getRuntime().exec(arrayOf("sh", "-c", "settings put system show_touches 0; settings put system pointer_location 0"))
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        disableTouchPointTaps(this)
         val imageLoader = ImageLoader.Builder(this)
             .memoryCache {
                 MemoryCache.Builder(this)
