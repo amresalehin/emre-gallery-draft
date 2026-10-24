@@ -98,6 +98,7 @@ import coil.size.Size
 import coil.size.Precision
 import androidx.compose.ui.res.painterResource
 import com.amresalehin.emregallery.R
+import com.amresalehin.emregallery.IndexingForegroundService
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
@@ -6824,6 +6825,7 @@ private fun IndexingStatusScreen(
     fun startModelDownload(force: Boolean = false) {
         if (isDownloadingModel) return
         isDownloadingModel = true
+        IndexingForegroundService.startOrUpdate(context, "Preparing face model", "Starting model download…")
         downloadError = null
         isModelDownloadPaused = false
         modelDownloadPauseSignal.value = false
@@ -6845,12 +6847,14 @@ private fun IndexingStatusScreen(
                     isDownloadingModel = false
                     downloadError = null
                     updateEngineState()
+                    if (!ocrRunning && !faceRunning) IndexingForegroundService.stop(context)
                 }
             } catch (cancelled: CancellationException) {
                 withContext(Dispatchers.Main.immediate) {
                     isDownloadingModel = false
                     downloadError = "Download cancelled."
                     updateEngineState()
+                    if (!ocrRunning && !faceRunning) IndexingForegroundService.stop(context)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main.immediate) {
@@ -6858,6 +6862,7 @@ private fun IndexingStatusScreen(
                     downloadError = e.localizedMessage ?: "Failed to download model."
                     FaceIndexingRepository.lastPrimaryFailure = downloadError
                     updateEngineState()
+                    if (!ocrRunning && !faceRunning) IndexingForegroundService.stop(context)
                 }
             }
         }
@@ -6873,6 +6878,7 @@ private fun IndexingStatusScreen(
         downloadJob?.cancel()
         downloadJob = null
         isDownloadingModel = false
+        if (!ocrRunning && !faceRunning) IndexingForegroundService.stop(context)
     }
 
     fun refreshCounts() {
@@ -6928,6 +6934,7 @@ private fun IndexingStatusScreen(
         ocrPauseSignal.value = false
         ocrPaused = false
         ocrRunning = true
+        IndexingForegroundService.startOrUpdate(context, "OCR indexing", "Preparing images…", 0, photos.size)
         ocrJob = scope.launch {
             var attempted = 0
             try {
@@ -6960,6 +6967,11 @@ private fun IndexingStatusScreen(
                                 ocrProcessed = (baseProcessed + attempted).coerceAtMost(photos.size)
                                 ocrItemsPerMinute = itemsPerMinute(attempted, startedAt)
                                 ocrCachedCount = (ocrCachedCount + 1)
+                                IndexingForegroundService.startOrUpdate(
+                                    context, "OCR indexing",
+                                    "Processed $ocrProcessed of ${photos.size} images",
+                                    ocrProcessed, photos.size
+                                )
                             }
                         }
                     }
@@ -6973,6 +6985,7 @@ private fun IndexingStatusScreen(
                     ocrPauseSignal.value = false
                     ocrJob = null
                     refreshCounts()
+                    if (!faceRunning && !isDownloadingModel) IndexingForegroundService.stop(context)
                 }
             }
         }
@@ -7019,6 +7032,7 @@ private fun IndexingStatusScreen(
         facePauseSignal.value = false
         facePaused = false
         faceRunning = true
+        IndexingForegroundService.startOrUpdate(context, "Face indexing", "Preparing face detector…", 0, photos.size)
         faceJob = scope.launch {
             try {
                 FaceIndexingRepository(context.applicationContext).indexNewMedia(
@@ -7031,6 +7045,11 @@ private fun IndexingStatusScreen(
                                 faceItemsPerMinute = itemsPerMinute(progress.processed, startedAt)
                                 faceTotalDetected = baseDetected + progress.facesFound
                                 faceFailedCount = progress.failed
+                                IndexingForegroundService.startOrUpdate(
+                                    context, "Face indexing",
+                                    "Processed ${faceProcessed} of ${photos.size} images · ${faceTotalDetected} faces found",
+                                    faceProcessed, photos.size
+                                )
                             }
                         }
                     },
@@ -7050,6 +7069,7 @@ private fun IndexingStatusScreen(
                     facePauseSignal.value = false
                     faceJob = null
                     refreshCounts()
+                    if (!ocrRunning && !isDownloadingModel) IndexingForegroundService.stop(context)
                 }
             }
         }
