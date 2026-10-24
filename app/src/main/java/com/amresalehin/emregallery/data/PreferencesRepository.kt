@@ -51,6 +51,13 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
+    suspend fun clearHomeScrollPosition() {
+        context.galleryDataStore.edit { prefs ->
+            prefs.remove(homeScrollIndexKey)
+            prefs.remove(homeScrollOffsetKey)
+        }
+    }
+
     val favourites: Flow<Set<String>> = context.galleryDataStore.data.map {
         it[favouritesKey] ?: emptySet()
     }.distinctUntilChanged()

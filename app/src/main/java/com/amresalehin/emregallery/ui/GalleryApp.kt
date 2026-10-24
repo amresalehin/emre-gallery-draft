@@ -116,6 +116,7 @@ import com.amresalehin.emregallery.face.FaceIndexingProgress
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -180,9 +181,7 @@ fun GalleryApp() {
     val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
-    val homeScrollPos by prefs.homeScrollPosition.collectAsStateWithLifecycle(initialValue = Pair(0, 0))
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
-    var hasRestoredHomeScroll by remember { mutableStateOf(false) }
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
@@ -367,22 +366,8 @@ fun GalleryApp() {
     val topContentPadding = statusBarTop + 68.dp
     val bottomContentPadding = navBarBottom + 88.dp
 
-    LaunchedEffect(visibleMedia.isNotEmpty(), homeScrollPos) {
-        if (!hasRestoredHomeScroll && visibleMedia.isNotEmpty() && homeScrollPos.first > 0) {
-            val target = homeScrollPos.first.coerceAtMost((visibleMedia.size - 1).coerceAtLeast(0))
-            homeListState.scrollToItem(target, homeScrollPos.second)
-            hasRestoredHomeScroll = true
-        }
-    }
-
-    LaunchedEffect(homeListState) {
-        snapshotFlow { homeListState.isScrollInProgress }
-            .distinctUntilChanged()
-            .collect { inProgress ->
-                if (!inProgress && visibleMedia.isNotEmpty() && (homeListState.firstVisibleItemIndex > 0 || homeListState.firstVisibleItemScrollOffset > 0)) {
-                    prefs.saveHomeScrollPosition(homeListState.firstVisibleItemIndex, homeListState.firstVisibleItemScrollOffset)
-                }
-            }
+    LaunchedEffect(Unit) {
+        prefs.clearHomeScrollPosition()
     }
 
     Surface(
@@ -816,7 +801,6 @@ fun GalleryApp() {
                             if (dest == Destination.HOME) {
                                 scope.launch {
                                     homeListState.animateScrollToItem(0)
-                                    prefs.saveHomeScrollPosition(0, 0)
                                 }
                             }
                         } else {
@@ -3979,24 +3963,76 @@ private fun ViewerScreen(
 ) {
     val context = LocalContext.current
     val videoPlayer = remember(item.uri, item.isVideo) {
-        if (item.isVideo) androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
-            setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.parse(item.uri)))
-            prepare()
-            playWhenReady = true
+        if (item.isVideo) {
+            val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                    /* minBufferMs = */ 1000,
+                    /* maxBufferMs = */ 3000,
+                    /* bufferForPlaybackMs = */ 100,
+                    /* bufferForPlaybackAfterRebufferMs = */ 250
+                )
+                .setPrioritizeTimeOverSizeThresholds(true)
+                .build()
+
+            androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                .setLoadControl(loadControl)
+                .build().apply {
+                    setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.parse(item.uri)))
+                    repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+                    videoScalingMode = androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+                    prepare()
+                    playWhenReady = true
+                }
         } else null
     }
-    DisposableEffect(videoPlayer) {
-        onDispose { videoPlayer?.release() }
-    }
+    var isVideoFirstFrameRendered by remember(item.uri) { mutableStateOf(false) }
+    var isPlaying by remember(item.uri) { mutableStateOf(true) }
     var videoPosition by remember(item.uri) { mutableLongStateOf(0L) }
     var videoDuration by remember(item.uri) { mutableLongStateOf(0L) }
     var videoMuted by remember(item.uri) { mutableStateOf(false) }
+    DisposableEffect(videoPlayer) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onRenderedFirstFrame() {
+                isVideoFirstFrameRendered = true
+            }
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                    videoDuration = videoPlayer?.duration?.takeIf { it > 0L } ?: 0L
+                }
+            }
+        }
+        videoPlayer?.addListener(listener)
+        onDispose {
+            videoPlayer?.removeListener(listener)
+            videoPlayer?.stop()
+            videoPlayer?.release()
+        }
+    }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, videoPlayer) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                videoPlayer?.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
     var metadata by remember(item.uri) { mutableStateOf<Map<String, String>>(emptyMap()) }
-    LaunchedEffect(videoPlayer, item.uri) {
-        while (videoPlayer != null) {
+    LaunchedEffect(videoPlayer, item.uri, showControls) {
+        if (!showControls) return@LaunchedEffect
+        while (videoPlayer != null && isActive) {
             videoPosition = videoPlayer.currentPosition.coerceAtLeast(0L)
-            videoDuration = videoPlayer.duration.takeIf { it > 0L } ?: 0L
-            kotlinx.coroutines.delay(250)
+            val d = videoPlayer.duration
+            if (d > 0L && d != videoDuration) {
+                videoDuration = d
+            }
+            delay(250)
         }
     }
     var ocrText by remember(item.uri) { mutableStateOf("") }
@@ -4184,36 +4220,47 @@ private fun ViewerScreen(
                     },
                 contentAlignment = Alignment.Center
             ) {
+                // Always render the cached thumbnail as baseline so there is never a black screen or blank flash
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(Uri.parse(currentItem.uri))
+                        .size(Size.ORIGINAL)
+                        .precision(Precision.EXACT)
+                        .placeholderMemoryCacheKey("${currentItem.uri}_thumb")
+                        .diskCacheKey("${currentItem.uri}:viewer-original")
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .memoryCacheKey("${currentItem.uri}:viewer-original")
+                        .crossfade(100)
+                        .build(),
+                    contentDescription = currentItem.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+
                 if (currentItem.isVideo && currentItem.uri == item.uri) {
                     androidx.compose.ui.viewinterop.AndroidView(
                         factory = { vc ->
                             androidx.media3.ui.PlayerView(vc).apply {
                                 player = videoPlayer
                                 useController = false
-                                setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                                setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_NEVER)
+                                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                isClickable = false
+                                isFocusable = false
                             }
                         },
-                        modifier = Modifier.fillMaxSize(),
-                        update = {
-                            it.player = videoPlayer
-                            it.useController = false
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(if (isVideoFirstFrameRendered) 1f else 0f),
+                        update = { pv ->
+                            if (pv.player != videoPlayer) {
+                                pv.player = videoPlayer
+                            }
+                            pv.useController = false
+                            pv.setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_NEVER)
+                            pv.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
                         }
-                    )
-                } else {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(Uri.parse(currentItem.uri))
-                            .size(Size.ORIGINAL)
-                            .precision(Precision.EXACT)
-                            .placeholderMemoryCacheKey("${currentItem.uri}_thumb")
-                            .diskCacheKey("${currentItem.uri}:viewer-original")
-                            .diskCachePolicy(CachePolicy.ENABLED)
-                            .memoryCacheKey("${currentItem.uri}:viewer-original")
-                            .crossfade(200)
-                            .build(),
-                        contentDescription = currentItem.name,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
                     )
                 }
             }
@@ -4282,13 +4329,13 @@ private fun ViewerScreen(
             ) {
                 IconButton(
                     onClick = {
-                        if (videoPlayer.isPlaying) videoPlayer.pause() else videoPlayer.play()
+                        if (isPlaying) videoPlayer.pause() else videoPlayer.play()
                     },
                     modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
-                        if (videoPlayer.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (videoPlayer.isPlaying) "Pause video" else "Play video"
+                        if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause video" else "Play video"
                     )
                 }
                 Text(
