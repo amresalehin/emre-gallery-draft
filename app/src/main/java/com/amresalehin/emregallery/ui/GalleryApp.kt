@@ -6809,6 +6809,7 @@ private fun IndexingStatusScreen(
     val modelDownloadPauseSignal = remember { MutableStateFlow(false) }
     var showFaceScanOptions by remember { mutableStateOf(false) }
     var allowNativeFallback by remember { mutableStateOf(false) }
+    var rescanAllRequested by remember { mutableStateOf(false) }
     var showFallbackChoice by remember { mutableStateOf(false) }
     var downloadStage by remember { mutableStateOf("downloading") }
     var downloadBytesReceived by remember { mutableLongStateOf(0L) }
@@ -6948,6 +6949,7 @@ private fun IndexingStatusScreen(
         if (ocrRunning || isDownloadingModel) return
         if (faceProcessed >= photos.size) return
         if (!isBuffaloLInstalled && !allowNativeFallback) {
+            rescanAllRequested = false
             showFallbackChoice = true
             return
         }
@@ -6966,6 +6968,7 @@ private fun IndexingStatusScreen(
     fun clearAndRescanFaces() {
         if (ocrRunning || faceRunning || isDownloadingModel) return
         if (!isBuffaloLInstalled && !allowNativeFallback) {
+            rescanAllRequested = true
             showFallbackChoice = true
             return
         }
@@ -7919,7 +7922,14 @@ private fun IndexingStatusScreen(
                     TextButton(onClick = {
                         showFallbackChoice = false
                         allowNativeFallback = true
-                        toggleFaceFinding()
+                        if (rescanAllRequested) {
+                            rescanAllRequested = false
+                            faceRunning = true
+                            facePaused = false
+                            IndexingForegroundService.startFace(context, rescanAll = true, allowNative = true)
+                        } else {
+                            toggleFaceFinding()
+                        }
                     }) { Text("Use native fallback") }
                 }
             }
