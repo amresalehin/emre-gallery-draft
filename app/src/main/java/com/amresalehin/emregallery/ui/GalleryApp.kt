@@ -21,6 +21,16 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import android.view.ViewConfiguration
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
@@ -92,6 +102,7 @@ import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
+import com.amresalehin.emregallery.face.FaceClusterSummary
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceIndexingProgress
 import kotlinx.coroutines.CancellationException
@@ -158,6 +169,9 @@ fun GalleryApp() {
     val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val homeScrollPos by prefs.homeScrollPosition.collectAsStateWithLifecycle(initialValue = Pair(0, 0))
+    val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var hasRestoredHomeScroll by remember { mutableStateOf(false) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -238,7 +252,7 @@ fun GalleryApp() {
                     destination = Destination.ALBUMS
                 }
                 destination in listOf(Destination.LIBRARY_OVERVIEW, Destination.INDEXING_STATUS, Destination.OCR_SETTINGS, Destination.ABOUT) -> {
-                    destination = Destination.SETTINGS
+                    destination = if (destination == Destination.INDEXING_STATUS) previousDestination else Destination.SETTINGS
                 }
                 else -> destination = Destination.HOME
             }
@@ -295,6 +309,20 @@ fun GalleryApp() {
     val topContentPadding = statusBarTop + 68.dp
     val bottomContentPadding = navBarBottom + 88.dp
 
+    LaunchedEffect(visibleMedia.isNotEmpty(), homeScrollPos) {
+        if (!hasRestoredHomeScroll && visibleMedia.isNotEmpty() && homeScrollPos.first > 0) {
+            val target = homeScrollPos.first.coerceAtMost((visibleMedia.size - 1).coerceAtLeast(0))
+            homeListState.scrollToItem(target, homeScrollPos.second)
+            hasRestoredHomeScroll = true
+        }
+    }
+
+    LaunchedEffect(homeListState.firstVisibleItemIndex, homeListState.firstVisibleItemScrollOffset) {
+        if (visibleMedia.isNotEmpty() && (homeListState.firstVisibleItemIndex > 0 || homeListState.firstVisibleItemScrollOffset > 0)) {
+            prefs.saveHomeScrollPosition(homeListState.firstVisibleItemIndex, homeListState.firstVisibleItemScrollOffset)
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background,
@@ -343,47 +371,33 @@ fun GalleryApp() {
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(destination, showSidePanel) {
-                        val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
-                        var horizontalDistance = 0f
-                        var startedAtLeftEdge = false
-                        val swipeThreshold = 72.dp.toPx()
-                        val edgeWidth = 32.dp.toPx()
-                        if (!showSidePanel && destination in mainPages) {
-                            detectHorizontalDragGestures(
-                                onDragStart = { offset ->
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = offset.x <= edgeWidth
-                                },
-                                onHorizontalDrag = { _, dragAmount ->
-                                    horizontalDistance += dragAmount
-                                },
-                                onDragEnd = {
-                                    if (destination == Destination.HOME &&
-                                        startedAtLeftEdge &&
-                                        horizontalDistance >= swipeThreshold
-                                    ) {
-                                        showSidePanel = true
-                                    } else if (kotlin.math.abs(horizontalDistance) >= swipeThreshold) {
-                                        val currentIndex = mainPages.indexOf(destination)
-                                        val nextIndex = if (horizontalDistance < 0f) currentIndex + 1 else currentIndex - 1
-                                        if (nextIndex in mainPages.indices) {
-                                            destination = mainPages[nextIndex]
-                                            albumFilter = null
+                        if (!showSidePanel && destination == Destination.HOME) {
+                            val edgeWidth = 24.dp.toPx()
+                            val slop = viewConfiguration.touchSlop * 2
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                if (down.position.x <= edgeWidth) {
+                                    var totalDragX = 0f
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                        if (change != null) {
+                                            totalDragX += change.position.x - change.previousPosition.x
+                                            if (totalDragX > slop) {
+                                                showSidePanel = true
+                                                change.consume()
+                                                break
+                                            }
                                         }
-                                    }
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = false
-                                },
-                                onDragCancel = {
-                                    horizontalDistance = 0f
-                                    startedAtLeftEdge = false
+                                    } while (event.changes.any { it.pressed })
                                 }
-                            )
+                            }
                         }
                     }
             ) { currentDestination ->
                 when (currentDestination) {
                     Destination.HOME -> HomeScreen(
+                        listState = homeListState,
                         media = visibleMedia,
                         loading = loading,
                         onPermissionGranted = { refreshMedia() },
@@ -479,7 +493,7 @@ fun GalleryApp() {
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         onBack = { destination = Destination.ALBUMS },
                         onOpenMedia = { item -> selectedMedia = item; showViewerControls = false; showDetails = false; previousDestination = Destination.PEOPLE; destination = Destination.VIEWER },
-                        onOpenIndexStatus = { destination = Destination.INDEXING_STATUS }
+                        onOpenIndexStatus = { previousDestination = Destination.PEOPLE; destination = Destination.INDEXING_STATUS }
                     )
                     Destination.MAP -> PhotoMapScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
@@ -517,7 +531,10 @@ fun GalleryApp() {
                         onSettings = { label ->
                             when (label) {
                                 "Library overview" -> destination = Destination.LIBRARY_OVERVIEW
-                                "Indexing Status" -> destination = Destination.INDEXING_STATUS
+                                "Indexing Status" -> {
+                                    previousDestination = Destination.SETTINGS
+                                    destination = Destination.INDEXING_STATUS
+                                }
                                 "About" -> destination = Destination.ABOUT
                                 "OCR" -> destination = Destination.OCR_SETTINGS
                             }
@@ -532,7 +549,8 @@ fun GalleryApp() {
                     )
                     Destination.INDEXING_STATUS -> IndexingStatusScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
-                        ocrLanguages = ocrLanguagesPref
+                        ocrLanguages = ocrLanguagesPref,
+                        onBack = { destination = previousDestination }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
                         onBack = { destination = Destination.SETTINGS }
@@ -712,7 +730,9 @@ fun GalleryApp() {
                             onDragEnd = {
                                 val velocityX = velocityTracker.calculateVelocity().x
                                 val current = drawerOffsetX.value
-                                if (current < -72.dp.toPx() || velocityX < -700f) {
+                                val minFlingVelocity = ViewConfiguration.get(context).scaledMinimumFlingVelocity.toFloat()
+                                val closeThreshold = drawerWidthPx * 0.35f
+                                if (current < -closeThreshold || velocityX < -minFlingVelocity) {
                                     drawerScope.launch {
                                         drawerOffsetX.animateTo(
                                             targetValue = -drawerWidthPx,
@@ -1659,6 +1679,7 @@ private fun ArchiveScreen(
 
 @Composable
 private fun HomeScreen(
+    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
     media: List<MediaItem>,
     loading: Boolean,
     albumTitle: String? = null,
@@ -1724,24 +1745,38 @@ private fun HomeScreen(
         groups.map { group -> group to group.items.chunked(pinchGridColumns.coerceIn(1, 6)) }
     }
 
-    val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     Box(
         modifier = Modifier.fillMaxSize().onGloballyPositioned { homeRootBounds.value = it.boundsInRoot() }
     ) {
     LazyColumn(
-        state = homeListState,
-        modifier = Modifier.fillMaxSize().pointerInput(pinchGridColumns) {
-            detectTransformGestures { _, _, zoom, _ ->
-                pinchZoomRemainder *= zoom
-                if (pinchZoomRemainder < 0.88f) {
-                    pinchGridColumns = (pinchGridColumns + 1).coerceAtMost(6)
-                    pinchZoomRemainder = 1f
-                } else if (pinchZoomRemainder > 1.12f) {
-                    pinchGridColumns = (pinchGridColumns - 1).coerceAtLeast(1)
-                    pinchZoomRemainder = 1f
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    do {
+                        val event = awaitPointerEvent()
+                        // Pinch-to-zoom requires 2 or more touches. Single-finger vertical scrolls
+                        // are NEVER consumed or intercepted, preserving native Android system scroll physics,
+                        // fling decay, touch slop, and overscroll on LazyColumn.
+                        if (event.changes.size >= 2) {
+                            val zoomChange = event.calculateZoom()
+                            if (zoomChange != 1f) {
+                                pinchZoomRemainder *= zoomChange
+                                if (pinchZoomRemainder < 0.82f) {
+                                    pinchGridColumns = (pinchGridColumns + 1).coerceAtMost(6)
+                                    pinchZoomRemainder = 1f
+                                } else if (pinchZoomRemainder > 1.22f) {
+                                    pinchGridColumns = (pinchGridColumns - 1).coerceAtLeast(1)
+                                    pinchZoomRemainder = 1f
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    } while (event.changes.any { it.pressed })
                 }
-            }
-        },
+            },
         contentPadding = PaddingValues(
             start = 12.dp,
             end = 12.dp,
@@ -1927,8 +1962,8 @@ private fun HomeScreen(
                                 val root = homeRootBounds.value
                                 if (root != null) {
                                     val edge = 56.dp.value * context.resources.displayMetrics.density
-                                    if (rootPosition.y < root.top + edge) homeScope.launch { homeListState.scrollBy(-22f) }
-                                    else if (rootPosition.y > root.bottom - edge) homeScope.launch { homeListState.scrollBy(22f) }
+                                    if (rootPosition.y < root.top + edge) homeScope.launch { listState.scrollBy(-22f) }
+                                    else if (rootPosition.y > root.bottom - edge) homeScope.launch { listState.scrollBy(22f) }
                                 }
                             }
                         },
@@ -1942,7 +1977,7 @@ private fun HomeScreen(
     }
 
     HomeFastScrollbar(
-        listState = homeListState,
+        listState = listState,
         topContentPadding = topContentPadding,
         bottomContentPadding = bottomContentPadding,
         thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -3843,10 +3878,8 @@ private fun ViewerScreen(
     LaunchedEffect(showDetails) {
         if (!showDetails) detailsExpanded = false
     }
-    val dragOffsetX = remember { Animatable(0f) }
     val dragOffsetY = remember { Animatable(0f) }
     LaunchedEffect(item.uri) {
-        dragOffsetX.snapTo(0f)
         dragOffsetY.snapTo(0f)
     }
     val share: () -> Unit = {
@@ -3864,261 +3897,154 @@ private fun ViewerScreen(
         }
     }
 
-    val currentOffsetX = dragOffsetX.value
     val currentOffsetY = dragOffsetY.value
     val dismissFraction = (kotlin.math.abs(currentOffsetY) / 540f).coerceIn(0f, 1f)
     val backdropAlpha = (1f - dismissFraction * 0.70f).coerceIn(0.30f, 1f)
+
+    val initialIndex = remember(items, item.uri) {
+        val idx = items.indexOfFirst { it.uri == item.uri }
+        if (idx >= 0) idx else 0
+    }
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex,
+        pageCount = { items.size }
+    )
+
+    // Synchronize pager page settlement with parent selected media
+    LaunchedEffect(pagerState.currentPage) {
+        val current = items.getOrNull(pagerState.currentPage)
+        if (current != null && current.uri != item.uri) {
+            onOpenNeighbor(current)
+        }
+    }
+
+    // Scroll to new target page if parent changes selected media
+    LaunchedEffect(item.uri) {
+        val targetIndex = items.indexOfFirst { it.uri == item.uri }
+        if (targetIndex >= 0 && targetIndex != pagerState.currentPage) {
+            pagerState.scrollToPage(targetIndex)
+        }
+    }
+
+    val viewConfig = ViewConfiguration.get(context)
+    val minFlingVelocity = viewConfig.scaledMinimumFlingVelocity.toFloat()
+    val density = androidx.compose.ui.platform.LocalDensity.current
 
     Box(
         Modifier
             .fillMaxSize()
             // Keep the viewer canvas consistent with the user's selected app theme and animate backdrop alpha on drag
             .background(MaterialTheme.colorScheme.background.copy(alpha = backdropAlpha))
-            .pointerInput(item.uri) {
-                detectTapGestures(
-                    onTap = { onToggleControls() },
-                    onLongPress = { showMore = true }
-                )
-            }
-            .pointerInput(items, item.uri, showDetails) {
-                val horizontalSwipeThreshold = 104.dp.toPx()
-                val verticalDismissThreshold = 120.dp.toPx()
-                val verticalDetailsThreshold = 72.dp.toPx()
-                val touchSlop = viewConfiguration.touchSlop
-                val containerWidthPx = size.width.toFloat()
-                val containerHeightPx = size.height.toFloat()
-                var totalX = 0f
-                var totalY = 0f
-                var horizontalSwipeLocked = false
-                var verticalSwipeLocked = false
-                val velocityTracker = VelocityTracker()
-                detectDragGestures(
-                    onDragStart = {
-                        totalX = 0f
-                        totalY = 0f
-                        horizontalSwipeLocked = false
-                        verticalSwipeLocked = false
-                        velocityTracker.resetTracking()
+            .draggable(
+                orientation = Orientation.Vertical,
+                enabled = !showDetails,
+                state = rememberDraggableState { delta ->
+                    ocrScope.launch {
+                        dragOffsetY.snapTo(dragOffsetY.value + delta)
+                    }
+                },
+                onDragStopped = { velocity ->
+                    val dismissDistanceThreshold = with(density) { 140.dp.toPx() }
+                    val detailsDistanceThreshold = with(density) { 64.dp.toPx() }
+                    if (dragOffsetY.value > dismissDistanceThreshold || velocity > minFlingVelocity * 1.4f) {
                         ocrScope.launch {
-                            dragOffsetX.snapTo(0f)
-                            dragOffsetY.snapTo(0f)
-                        }
-                    },
-                    onDrag = { change, dragAmount ->
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
-                        totalX += dragAmount.x
-                        totalY += dragAmount.y
-                        val absX = kotlin.math.abs(totalX)
-                        val absY = kotlin.math.abs(totalY)
-                        if (!horizontalSwipeLocked && !verticalSwipeLocked) {
-                            if (absX > touchSlop && absX > absY * 1.35f && !showDetails) {
-                                horizontalSwipeLocked = true
-                            } else if (absY > touchSlop && absY > absX * 1.2f) {
-                                verticalSwipeLocked = true
-                            }
-                        }
-                        if (horizontalSwipeLocked && !showDetails) {
-                            change.consume()
-                            ocrScope.launch { dragOffsetX.snapTo(totalX) }
-                        } else if (verticalSwipeLocked) {
-                            change.consume()
-                            ocrScope.launch { dragOffsetY.snapTo(totalY) }
-                        }
-                    },
-                    onDragEnd = {
-                        val velocity = velocityTracker.calculateVelocity()
-                        val velocityX = velocity.x
-                        val velocityY = velocity.y
-                        val absX = kotlin.math.abs(totalX)
-                        val absY = kotlin.math.abs(totalY)
-                        if (horizontalSwipeLocked && !showDetails && (absX > horizontalSwipeThreshold || kotlin.math.abs(velocityX) > 900f)) {
-                            val isNext = if (kotlin.math.abs(velocityX) > 900f) velocityX < 0 else totalX < 0
-                            val index = items.indexOfFirst { it.uri == item.uri }
-                            val targetIndex = if (isNext) index + 1 else index - 1
-                            val targetItem = items.getOrNull(targetIndex)
-                            if (index >= 0 && targetItem != null) {
-                                val exitOffset = if (isNext) -containerWidthPx else containerWidthPx
-                                ocrScope.launch {
-                                    dragOffsetX.animateTo(
-                                        targetValue = exitOffset,
-                                        initialVelocity = velocityX,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioNoBouncy,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        )
-                                    )
-                                    onOpenNeighbor(targetItem)
-                                    dragOffsetX.snapTo(0f)
-                                }
-                            } else {
-                                ocrScope.launch {
-                                    dragOffsetX.animateTo(
-                                        targetValue = 0f,
-                                        initialVelocity = velocityX,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
-                                    )
-                                }
-                            }
-                        } else if (verticalSwipeLocked && !showDetails && (totalY > verticalDismissThreshold || velocityY > 1000f)) {
-                            // Fluid momentum-based dismissal down with spring exit!
-                            ocrScope.launch {
-                                dragOffsetY.animateTo(
-                                    targetValue = containerHeightPx,
-                                    initialVelocity = velocityY,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
+                            dragOffsetY.animateTo(
+                                targetValue = 1200f,
+                                initialVelocity = velocity,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
                                 )
-                                onBack()
-                            }
-                        } else if (verticalSwipeLocked && absY > verticalDetailsThreshold) {
-                            if (totalY < 0 && !showDetails) onToggleDetails()
-                            else if (totalY > 0 && showDetails) onToggleDetails()
-                            ocrScope.launch {
-                                dragOffsetY.animateTo(
-                                    targetValue = 0f,
-                                    initialVelocity = velocityY,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioLowBouncy,
-                                        stiffness = Spring.StiffnessMedium
-                                    )
-                                )
-                            }
-                        } else {
-                            // Spring back with momentum
-                            ocrScope.launch {
-                                launch {
-                                    dragOffsetX.animateTo(
-                                        targetValue = 0f,
-                                        initialVelocity = velocityX,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
-                                    )
-                                }
-                                launch {
-                                    dragOffsetY.animateTo(
-                                        targetValue = 0f,
-                                        initialVelocity = velocityY,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
-                                    )
-                                }
-                            }
+                            )
+                            onBack()
                         }
-                    },
-                    onDragCancel = {
+                    } else if (dragOffsetY.value < -detailsDistanceThreshold || velocity < -minFlingVelocity * 1.4f) {
                         ocrScope.launch {
-                            launch {
-                                dragOffsetX.animateTo(
-                                    targetValue = 0f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMedium
-                                    )
+                            dragOffsetY.animateTo(
+                                targetValue = 0f,
+                                initialVelocity = velocity,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessMedium
                                 )
-                            }
-                            launch {
-                                dragOffsetY.animateTo(
-                                    targetValue = 0f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMedium
-                                    )
+                            )
+                            onToggleDetails()
+                        }
+                    } else {
+                        ocrScope.launch {
+                            dragOffsetY.animateTo(
+                                targetValue = 0f,
+                                initialVelocity = velocity,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessMedium
                                 )
-                            }
+                            )
                         }
                     }
-                )
-            }
+                }
+            )
     ) {
-        val currentIndex = items.indexOfFirst { it.uri == item.uri }
-        val swipeNeighbor = when {
-            currentOffsetX < 0f -> items.getOrNull(currentIndex + 1)
-            currentOffsetX > 0f -> items.getOrNull(currentIndex - 1)
-            else -> null
-        }
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val widthPx = constraints.maxWidth.toFloat()
-            // Show the adjacent image sliding in from the edge underneath the image
-            // being dragged, so the gesture tracks the user's finger.
-            swipeNeighbor?.takeIf { !showDetails && !item.isVideo && !it.isVideo && kotlin.math.abs(currentOffsetX) > 0f }?.let { neighbor ->
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(Uri.parse(neighbor.uri))
-                        .size(Size.ORIGINAL)
-                        .precision(Precision.EXACT)
-                        .diskCacheKey("${neighbor.uri}:viewer-original")
-                        .diskCachePolicy(CachePolicy.ENABLED)
-                        .memoryCacheKey("${neighbor.uri}:viewer-original")
-                        .crossfade(false)
-                        .build(),
-                    contentDescription = neighbor.name,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        translationX = (if (currentOffsetX < 0f) widthPx else -widthPx) + currentOffsetX
-                    }
-                )
-            }
-        AnimatedContent(
-            targetState = item,
-            // Horizontal movement is handled by the finger-tracked current/neighbor layers.
-            // Do not launch a second slide after the swipe completes; that causes a visible snap.
-            transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
-            label = "viewer_media_transition",
-            modifier = Modifier.fillMaxSize().graphicsLayer {
-                translationX = currentOffsetX
-                translationY = currentOffsetY
-                val scale = (1f - dismissFraction * 0.28f).coerceIn(0.72f, 1f)
-                scaleX = scale
-                scaleY = scale
-                clip = dismissFraction > 0.02f
-                shape = RoundedCornerShape((dismissFraction * 28f).dp)
-            }
-        ) { currentItem ->
-            if (currentItem.isVideo) {
-                androidx.compose.ui.viewinterop.AndroidView(
-                    factory = { vc ->
-                        androidx.media3.ui.PlayerView(vc).apply {
-                            player = videoPlayer
-                            useController = false
-                            setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
-                        }
+        HorizontalPager(
+            state = pagerState,
+            flingBehavior = PagerDefaults.flingBehavior(state = pagerState),
+            pageSpacing = 16.dp,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = currentOffsetY
+                    val scale = (1f - dismissFraction * 0.28f).coerceIn(0.72f, 1f)
+                    scaleX = scale
+                    scaleY = scale
+                    clip = dismissFraction > 0.02f
+                    shape = RoundedCornerShape((dismissFraction * 28f).dp)
+                },
+            key = { pageIndex -> items.getOrNull(pageIndex)?.uri ?: pageIndex.toString() }
+        ) { pageIndex ->
+            val currentItem = items.getOrNull(pageIndex) ?: item
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(currentItem.uri) {
+                        detectTapGestures(
+                            onTap = { onToggleControls() },
+                            onLongPress = { showMore = true }
+                        )
                     },
-                    modifier = Modifier.fillMaxSize(),
-                    update = {
-                        it.player = videoPlayer
-                        it.useController = false
-                    }
-                )
-            } else {
-                // The grid requests small decodes for the same MediaStore URI. Give the
-                // viewer its own cache key and request the original dimensions so Coil
-                // cannot reuse a low-resolution thumbnail in the full-screen viewer.
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(Uri.parse(currentItem.uri))
-                        .size(Size.ORIGINAL)
-                        .precision(Precision.EXACT)
-                        .diskCacheKey("${currentItem.uri}:viewer-original")
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .memoryCacheKey("${currentItem.uri}:viewer-original")
-                        .diskCacheKey("${currentItem.uri}:viewer-original")
-                        .crossfade(false)
-                        .build(),
-                    contentDescription = currentItem.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit
-                )
+                contentAlignment = Alignment.Center
+            ) {
+                if (currentItem.isVideo && currentItem.uri == item.uri) {
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { vc ->
+                            androidx.media3.ui.PlayerView(vc).apply {
+                                player = videoPlayer
+                                useController = false
+                                setShowBuffering(androidx.media3.ui.PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        update = {
+                            it.player = videoPlayer
+                            it.useController = false
+                        }
+                    )
+                } else {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(Uri.parse(currentItem.uri))
+                            .size(Size.ORIGINAL)
+                            .precision(Precision.EXACT)
+                            .diskCacheKey("${currentItem.uri}:viewer-original")
+                            .diskCachePolicy(CachePolicy.ENABLED)
+                            .memoryCacheKey("${currentItem.uri}:viewer-original")
+                            .crossfade(false)
+                            .build(),
+                        contentDescription = currentItem.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+                }
             }
-        }
         }
 
         // Wider, stronger edge shading extends down to the floating actions
@@ -4282,12 +4208,13 @@ private fun ViewerScreen(
                     // exposed viewer area expand or dismiss it without touching the panel.
                     .pointerInput(showDetails, detailsExpanded) {
                         var totalDragY = 0f
+                        val dismissThreshold = viewConfiguration.touchSlop * 3.5f
                         detectDragGestures(
                             onDragStart = { totalDragY = 0f },
                             onDragEnd = {
                                 when {
-                                    totalDragY < -72.dp.toPx() && !detailsExpanded -> detailsExpanded = true
-                                    totalDragY > 72.dp.toPx() -> onToggleDetails()
+                                    totalDragY < -dismissThreshold && !detailsExpanded -> detailsExpanded = true
+                                    totalDragY > dismissThreshold -> onToggleDetails()
                                 }
                             },
                             onDragCancel = { totalDragY = 0f }
@@ -4338,6 +4265,9 @@ private fun ViewerScreen(
                             .padding(top = 10.dp, bottom = 4.dp)
                             .pointerInput(showDetails, detailsExpanded) {
                                 val velocityTracker = VelocityTracker()
+                                val minFling = ViewConfiguration.get(context).scaledMinimumFlingVelocity.toFloat()
+                                val dismissDist = 80.dp.toPx()
+                                val expandDist = 44.dp.toPx()
                                 detectDragGestures(
                                     onDragStart = {
                                         velocityTracker.resetTracking()
@@ -4347,7 +4277,7 @@ private fun ViewerScreen(
                                         val velocityY = velocityTracker.calculateVelocity().y
                                         ocrScope.launch {
                                             when {
-                                                (sheetDragOffsetY.value > 60.dp.toPx() || velocityY > 750f) -> {
+                                                (sheetDragOffsetY.value > dismissDist || velocityY > minFling) -> {
                                                     sheetDragOffsetY.animateTo(
                                                         targetValue = 600f,
                                                         initialVelocity = velocityY,
@@ -4359,7 +4289,7 @@ private fun ViewerScreen(
                                                     onToggleDetails()
                                                     sheetDragOffsetY.snapTo(0f)
                                                 }
-                                                (sheetDragOffsetY.value < -48f || velocityY < -750f) && !detailsExpanded -> {
+                                                (sheetDragOffsetY.value < -expandDist || velocityY < -minFling) && !detailsExpanded -> {
                                                     detailsExpanded = true
                                                     sheetDragOffsetY.animateTo(
                                                         targetValue = 0f,
@@ -5590,115 +5520,64 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
 
     DisposableEffect(Unit) { onDispose { mapRef?.onPause(); mapRef?.onDetach(); mapRef = null } }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        AndroidView(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.56f)
-                .align(Alignment.TopCenter)
-                // Start the map card high enough that the floating controls sit inside its boundary.
-                .padding(top = 24.dp, start = 12.dp, end = 12.dp)
-                .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(18.dp))
-                .clip(RoundedCornerShape(18.dp)),
-            factory = { ctx ->
-                Configuration.getInstance().userAgentValue = ctx.packageName
-                MapView(ctx).apply {
-                    setTileSource(when { mapLayer == "Satellite" -> satelliteTileSource(); mapAppearance == "Night" -> nightTileSource(); else -> TileSourceFactory.MAPNIK })
-                    setMultiTouchControls(true)
-                    controller.setZoom(3.0)
-                    controller.setCenter(GeoPoint(20.5937, 78.9629))
-                    mapRef = this
-                    addMapListener(object : org.osmdroid.events.MapListener {
-                        override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
-                            updateVisibleMapBounds(this@apply, sheetExpandedState.value)
-                            return true
-                        }
-                        override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
-                            updateVisibleMapBounds(this@apply, sheetExpandedState.value)
-                            return true
-                        }
-                    })
-                }
-            },
-            update = { map ->
-                mapRef = map
-                if (locatedMedia.isNotEmpty() && !mapFramed && map.width > 0 && map.height > 0) {
-                    val points = locatedMedia.map { it.second }
-                    val north = points.maxOf { it.latitude }
-                    val south = points.minOf { it.latitude }
-                    val east = points.maxOf { it.longitude }
-                    val west = points.minOf { it.longitude }
-                    val bounds = org.osmdroid.util.BoundingBox(north, east, south, west)
-                    runCatching {
-                        // A single point or near-identical coordinates create a zero-size
-                        // bounding box, which osmdroid can interpret as a request for max zoom.
-                        if (points.size == 1 || (north - south) < 0.01 && (east - west) < 0.01) {
-                            map.controller.setCenter(points.first())
-                            map.controller.setZoom(5.0)
-                        } else {
-                            map.zoomToBoundingBox(bounds, true, 48)
-                            // Avoid an extreme close-up when all photos are concentrated
-                            // in a small area; users can zoom in manually afterward.
-                            if (map.zoomLevelDouble > 14.0) map.controller.setZoom(14.0)
-                        }
-                    }
-                    mapFramed = true
-                }
-                map.overlays.removeAll { it is PhotoHeatmapOverlay }
-                if (locatedMedia.isNotEmpty()) map.overlays.add(PhotoHeatmapOverlay(locatedMedia.map { it.second }))
-                map.post { updateVisibleMapBounds(map, sheetExpanded) }
-                map.invalidate()
-            }
-        )
-
-        LaunchedEffect(sheetExpanded) {
-            mapRef?.let { map -> updateVisibleMapBounds(map, sheetExpanded) }
-        }
-
-        // Soft translucent blur behind the floating map controls, including the status bar.
-        Box(
-            Modifier.fillMaxWidth()
-                .height(142.dp)
-                .align(Alignment.TopCenter)
-                .blur(24.dp)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                            MaterialTheme.colorScheme.surface.copy(alpha = 0.48f),
-                            Color.Transparent
-                        )
-                    )
-                )
-        )
-
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding()
+            .navigationBarsPadding()
+    ) {
+        // --- 1. Top Bar / Controls ---
         Row(
             Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-                .zIndex(1f),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(onClick = onBack, shape = CircleShape, color = MaterialTheme.colorScheme.surface.copy(alpha = .96f), shadowElevation = 4.dp) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", modifier = Modifier.padding(14.dp), tint = MaterialTheme.colorScheme.onSurface)
+            Surface(
+                onClick = onBack,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(42.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "Photo Map",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    if (locatedMedia.isEmpty()) "No geotagged photos" else "${locatedMedia.size} photos located",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Map layer dropdown button
             Box {
                 Surface(
                     onClick = { showMapLayerMenu = true },
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
-                    shadowElevation = 4.dp
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    modifier = Modifier.height(38.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(Icons.Default.Layers, contentDescription = "Map layers", tint = MaterialTheme.colorScheme.onSurface)
-                        Text(mapLayer, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
-                        Icon(Icons.Default.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(Icons.Default.Layers, contentDescription = "Map layers", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
+                        Text(mapLayer, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+                        Icon(Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 DropdownMenu(
@@ -5729,6 +5608,10 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                     )
                 }
             }
+
+            Spacer(Modifier.width(6.dp))
+
+            // Day / Night appearance toggle
             Surface(
                 onClick = {
                     mapAppearance = if (mapAppearance == "Day") "Night" else "Day"
@@ -5739,51 +5622,50 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                     }
                 },
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
-                shadowElevation = 4.dp
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(38.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                Box(contentAlignment = Alignment.Center) {
                     Icon(
                         if (mapAppearance == "Day") Icons.Default.DarkMode else Icons.Default.LightMode,
-                        contentDescription = null,
+                        contentDescription = "Toggle day/night map theme",
+                        modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        if (mapAppearance == "Day") "Night" else "Day",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             }
+
+            Spacer(Modifier.width(6.dp))
+
+            // Focus photos / My location button
             Surface(
                 onClick = {
                     if (!loading) {
                         mapRef?.let { map ->
-                            locatedMedia.firstOrNull()?.second?.let { point -> map.controller.animateTo(point); map.controller.setZoom(12.0) }
+                            locatedMedia.firstOrNull()?.second?.let { point ->
+                                map.controller.animateTo(point)
+                                map.controller.setZoom(12.0)
+                            }
                         }
                     }
                 },
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = .96f),
-                shadowElevation = 4.dp
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(38.dp)
             ) {
-                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                Box(contentAlignment = Alignment.Center) {
                     if (loading) {
                         CircularProgressIndicator(
                             progress = { if (scanTotal > 0) (scanProgress.toFloat() / scanTotal).coerceIn(0f, 1f) else 0f },
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
                             trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
                         )
                     } else {
                         Icon(
                             Icons.Default.MyLocation,
                             contentDescription = "Focus photos",
-                            modifier = Modifier.padding(14.dp),
+                            modifier = Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -5791,88 +5673,272 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
             }
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
-            Surface(
-                modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 8.dp
+        // --- 2. Top Half: The Defined Map Card ---
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .testTag("photo_map_card"),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(20.dp))
             ) {
-                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(32.dp))
-                    Spacer(Modifier.height(8.dp))
-                    Text("Allow photo location access", style = MaterialTheme.typography.titleMedium)
+                AndroidView(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(20.dp)),
+                    factory = { ctx ->
+                        Configuration.getInstance().userAgentValue = ctx.packageName
+                        MapView(ctx).apply {
+                            clipToOutline = true
+                            outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+                            setTileSource(when { mapLayer == "Satellite" -> satelliteTileSource(); mapAppearance == "Night" -> nightTileSource(); else -> TileSourceFactory.MAPNIK })
+                            setMultiTouchControls(true)
+                            setBuiltInZoomControls(false)
+                            controller.setZoom(3.0)
+                            controller.setCenter(GeoPoint(20.5937, 78.9629))
+                            mapRef = this
+                            addMapListener(object : org.osmdroid.events.MapListener {
+                                override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean {
+                                    updateVisibleMapBounds(this@apply, sheetExpandedState.value)
+                                    return true
+                                }
+                                override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean {
+                                    updateVisibleMapBounds(this@apply, sheetExpandedState.value)
+                                    return true
+                                }
+                            })
+                        }
+                    },
+                    update = { map ->
+                        mapRef = map
+                        if (locatedMedia.isNotEmpty() && !mapFramed && map.width > 0 && map.height > 0) {
+                            val points = locatedMedia.map { it.second }
+                            val north = points.maxOf { it.latitude }
+                            val south = points.minOf { it.latitude }
+                            val east = points.maxOf { it.longitude }
+                            val west = points.minOf { it.longitude }
+                            val bounds = org.osmdroid.util.BoundingBox(north, east, south, west)
+                            runCatching {
+                                if (points.size == 1 || (north - south) < 0.01 && (east - west) < 0.01) {
+                                    map.controller.setCenter(points.first())
+                                    map.controller.setZoom(5.0)
+                                } else {
+                                    map.zoomToBoundingBox(bounds, true, 48)
+                                    if (map.zoomLevelDouble > 14.0) map.controller.setZoom(14.0)
+                                }
+                            }
+                            mapFramed = true
+                        }
+                        map.overlays.removeAll { it is PhotoHeatmapOverlay }
+                        if (locatedMedia.isNotEmpty()) map.overlays.add(PhotoHeatmapOverlay(locatedMedia.map { it.second }))
+                        map.post { updateVisibleMapBounds(map, sheetExpanded) }
+                        map.invalidate()
+                    }
+                )
+
+                // Zoom in / out controls on the map card
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(
+                        onClick = { mapRef?.controller?.zoomIn() },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                        shadowElevation = 3.dp,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Add, contentDescription = "Zoom In", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                    Surface(
+                        onClick = { mapRef?.controller?.zoomOut() },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                        shadowElevation = 3.dp,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                    }
+                }
+
+                // Attribution badge inside the card
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color.Black.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 10.dp, bottom = 10.dp)
+                ) {
                     Text(
-                        "Android hides embedded GPS coordinates unless Emre Gallery has permission to read original photo metadata.",
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        "© OpenStreetMap",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = { locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION) }) {
-                        Text("Grant permission")
+                }
+
+                // Scanning indicator inside card
+                if (loading && scanTotal > 0) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(10.dp),
+                        shadowElevation = 2.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
+                            Text("Indexing coordinates ($scanProgress/$scanTotal)", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
         }
 
-        Surface(
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.43f),
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 12.dp
+        // Location permission banner if needed
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && !canReadOriginalLocation) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shadowElevation = 2.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Column(Modifier.weight(1f)) {
+                        Text("Location access needed", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text("Grant permission to read embedded GPS metadata.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f))
+                    }
+                    Button(
+                        onClick = { locationPermissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("Grant", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+
+        // --- 3. Bottom Half: Defined Photos Card ---
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp)
+                .testTag("photo_map_details_card"),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(Modifier.fillMaxSize()) {
-                Spacer(Modifier.height(12.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         "%,d photos in this area".format(Locale.getDefault(), viewportMedia.size),
                         modifier = Modifier.weight(1f),
-                        textAlign = TextAlign.Center,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Normal
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
                     )
-
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .6f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 if (!loading && locatedMedia.isEmpty()) {
-                    Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.LocationOff, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.LocationOff, null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(8.dp))
                         Text("No photos with GPS data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("Only images containing embedded location coordinates appear on this map.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Only images containing embedded location coordinates appear on this map.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                 } else if (!loading && viewportMedia.isEmpty()) {
-                    Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Map, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(Icons.Default.Map, null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(8.dp))
                         Text("No photos in this area", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text("Zoom out or move the map to see photos from another area.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Zoom out or move the map above to see photos from other locations.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                 } else {
-                    androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+                    LazyColumn(
+                        Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                         dayGroups.forEach { (day, entries) ->
                             item(key = "heading_$day") {
-                                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(day, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                                    Text("${entries.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Icon(Icons.Default.CheckCircleOutline, null, modifier = Modifier.padding(start = 8.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        day,
+                                        modifier = Modifier.weight(1f),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        "${entries.size}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                             item(key = "photos_$day") {
-                                LazyRow(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     items(entries, key = { it.first.uri }) { (photo, point) ->
                                         AsyncImage(
                                             model = ImageRequest.Builder(context).data(Uri.parse(photo.uri)).crossfade(false).build(),
                                             contentDescription = photo.name,
                                             contentScale = ContentScale.Crop,
-                                            modifier = Modifier.size(width = 118.dp, height = 118.dp).clickable {
-                                                mapRef?.controller?.animateTo(point)
-                                                mapRef?.controller?.setZoom(14.0)
-                                                onOpen(photo)
-                                            }
+                                            modifier = Modifier
+                                                .size(width = 110.dp, height = 110.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .clickable {
+                                                    mapRef?.controller?.animateTo(point)
+                                                    mapRef?.controller?.setZoom(14.0)
+                                                    onOpen(photo)
+                                                }
                                         )
                                     }
                                 }
@@ -5882,13 +5948,6 @@ private fun PhotoMapScreen(media: List<MediaItem>, focusItem: MediaItem? = null,
                 }
             }
         }
-        // Keep required map-data attribution unobtrusive without a floating credit badge.
-        Text(
-            "© OpenStreetMap contributors",
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 8.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White.copy(alpha = 0.82f)
-        )
     }
 }
 
@@ -6538,19 +6597,32 @@ private fun SettingsScreen(
 @Composable
 private fun IndexingStatusScreen(
     media: List<MediaItem>,
-    ocrLanguages: Set<String>
+    ocrLanguages: Set<String>,
+    onBack: () -> Unit
 ) {
+    androidx.activity.compose.BackHandler(onBack = onBack)
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val photos = remember(media) { media.filterNot { it.isVideo } }
     val photoUris = remember(photos) { photos.map { it.uri } }
     val faceStore = remember { FaceClusterStore(context.applicationContext) }
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
-    val pageBackground = if (lightAppearance) Color(0xFFF4F4F4) else MaterialTheme.colorScheme.background
+    val pageBackground = if (lightAppearance) Color(0xFFF7F7F7) else MaterialTheme.colorScheme.background
+    val cardBackground = if (lightAppearance) Color.White else MaterialTheme.colorScheme.surfaceContainer
+    val cardBorder = BorderStroke(1.dp, if (lightAppearance) Color(0xFFE5E7EB) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
 
     var countsReady by remember { mutableStateOf(false) }
     var ocrProcessed by remember { mutableIntStateOf(0) }
+    var ocrCachedCount by remember { mutableIntStateOf(0) }
     var faceProcessed by remember { mutableIntStateOf(0) }
+    var faceTotalDetected by remember { mutableIntStateOf(0) }
+    var faceFailedCount by remember { mutableIntStateOf(0) }
+    var clusterSummaries by remember { mutableStateOf<List<FaceClusterSummary>>(emptyList()) }
+    var clusterThreshold by remember { mutableFloatStateOf(0.55f) }
+    var isClusteringRunning by remember { mutableStateOf(false) }
+    var clusterStatusMessage by remember { mutableStateOf<String?>(null) }
+
     var ocrItemsPerMinute by remember { mutableIntStateOf(0) }
     var faceItemsPerMinute by remember { mutableIntStateOf(0) }
 
@@ -6566,18 +6638,33 @@ private fun IndexingStatusScreen(
     var faceRunToken by remember { mutableIntStateOf(0) }
     val facePauseSignal = remember { MutableStateFlow(false) }
 
-    LaunchedEffect(photoUris) {
-        countsReady = false
-        val initialCounts = withContext(Dispatchers.IO) {
-            val ocrCount = photos.count { item ->
-                TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
+    fun refreshCounts() {
+        scope.launch {
+            countsReady = false
+            withContext(Dispatchers.IO) {
+                val oCount = photos.count { item ->
+                    TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
+                }
+                val oFiles = TesseractOcr.cachedResultCount(context)
+                val fCount = faceStore.indexedMediaCount(photoUris)
+                val fFaces = faceStore.indexedFaceCount()
+                val fFailures = faceStore.failedMediaCount()
+                val cSummaries = faceStore.summaries()
+                withContext(Dispatchers.Main.immediate) {
+                    ocrProcessed = oCount.coerceIn(0, photos.size)
+                    ocrCachedCount = oFiles
+                    faceProcessed = fCount.coerceIn(0, photos.size)
+                    faceTotalDetected = fFaces
+                    faceFailedCount = fFailures
+                    clusterSummaries = cSummaries
+                    countsReady = true
+                }
             }
-            val faceCount = faceStore.indexedMediaCount(photoUris)
-            ocrCount to faceCount
         }
-        ocrProcessed = initialCounts.first.coerceIn(0, photos.size)
-        faceProcessed = initialCounts.second.coerceIn(0, photos.size)
-        countsReady = true
+    }
+
+    LaunchedEffect(photoUris) {
+        refreshCounts()
     }
 
     fun itemsPerMinute(processedThisRun: Int, startedAtMillis: Long): Int {
@@ -6625,8 +6712,6 @@ private fun IndexingStatusScreen(
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {
-                        // Continue past an unreadable image so a single bad file cannot
-                        // block the rest of the library from being scanned.
                         finishedAttempt = true
                     } finally {
                         if (finishedAttempt) {
@@ -6634,6 +6719,7 @@ private fun IndexingStatusScreen(
                             if (ocrRunToken == runToken) {
                                 ocrProcessed = (baseProcessed + attempted).coerceAtMost(photos.size)
                                 ocrItemsPerMinute = itemsPerMinute(attempted, startedAt)
+                                ocrCachedCount = (ocrCachedCount + 1)
                             }
                         }
                     }
@@ -6646,14 +6732,7 @@ private fun IndexingStatusScreen(
                     ocrPaused = false
                     ocrPauseSignal.value = false
                     ocrJob = null
-                    // Use the cache as the source of truth after a normal finish.
-                    if (attempted == photos.size - baseProcessed) {
-                        ocrProcessed = withContext(NonCancellable + Dispatchers.IO) {
-                            photos.count { item ->
-                                TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
-                            }
-                        }.coerceIn(0, photos.size)
-                    }
+                    refreshCounts()
                 }
             }
         }
@@ -6666,6 +6745,18 @@ private fun IndexingStatusScreen(
         ocrJob = null
         ocrRunning = false
         ocrPaused = false
+        refreshCounts()
+    }
+
+    fun clearAndReindexOcr() {
+        stopOcr()
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                TesseractOcr.clearCachedResults(context)
+            }
+            refreshCounts()
+            toggleOcr()
+        }
     }
 
     fun toggleFaceFinding() {
@@ -6679,6 +6770,7 @@ private fun IndexingStatusScreen(
         val runToken = faceRunToken + 1
         faceRunToken = runToken
         val baseProcessed = faceProcessed
+        val baseDetected = faceTotalDetected
         val startedAt = System.currentTimeMillis()
         facePauseSignal.value = false
         facePaused = false
@@ -6689,10 +6781,12 @@ private fun IndexingStatusScreen(
                     media = photos,
                     store = faceStore,
                     onProgress = { progress ->
-                        withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                        withContext(Dispatchers.Main.immediate) {
                             if (faceRunToken == runToken) {
                                 faceProcessed = (baseProcessed + progress.processed).coerceAtMost(photos.size)
                                 faceItemsPerMinute = itemsPerMinute(progress.processed, startedAt)
+                                faceTotalDetected = baseDetected + progress.facesFound
+                                faceFailedCount = progress.failed
                             }
                         }
                     },
@@ -6701,21 +6795,16 @@ private fun IndexingStatusScreen(
                         currentCoroutineContext().ensureActive()
                     }
                 )
-                if (faceRunToken == runToken) {
-                    faceProcessed = withContext(NonCancellable + Dispatchers.IO) {
-                        faceStore.indexedMediaCount(photoUris)
-                    }.coerceIn(0, photos.size)
-                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // Keep current progress visible; Play retries failed and unindexed images.
             } finally {
                 if (faceRunToken == runToken) {
                     faceRunning = false
                     facePaused = false
                     facePauseSignal.value = false
                     faceJob = null
+                    refreshCounts()
                 }
             }
         }
@@ -6728,167 +6817,740 @@ private fun IndexingStatusScreen(
         faceJob = null
         faceRunning = false
         facePaused = false
+        refreshCounts()
     }
 
-    Column(
+    fun clearAndRescanFaces() {
+        stopFaceFinding()
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                faceStore.clearAllFaceData()
+            }
+            refreshCounts()
+            toggleFaceFinding()
+        }
+    }
+
+    fun runFaceClustering(threshold: Float) {
+        if (isClusteringRunning) return
+        isClusteringRunning = true
+        clusterStatusMessage = "Clustering facial embeddings..."
+        scope.launch {
+            val resultCount = withContext(Dispatchers.IO) {
+                faceStore.reclusterAll(threshold)
+            }
+            withContext(Dispatchers.Main.immediate) {
+                clusterSummaries = withContext(Dispatchers.IO) { faceStore.summaries() }
+                faceTotalDetected = withContext(Dispatchers.IO) { faceStore.indexedFaceCount() }
+                isClusteringRunning = false
+                clusterStatusMessage = "Successfully grouped into $resultCount people profiles."
+            }
+        }
+    }
+
+    fun resetFaceClusters() {
+        if (isClusteringRunning) return
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                faceStore.resetClustersOnly()
+            }
+            withContext(Dispatchers.Main.immediate) {
+                clusterSummaries = emptyList()
+                clusterStatusMessage = "Clusters reset. Stored facial embeddings preserved."
+            }
+        }
+    }
+
+    val numberFormat = remember { NumberFormat.getIntegerInstance(Locale.getDefault()) }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(pageBackground)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        IndexingProgressCard(
-            title = "OCR",
-            icon = Icons.Default.DocumentScanner,
-            processed = ocrProcessed,
-            total = photos.size,
-            itemsPerMinute = ocrItemsPerMinute,
-            running = ocrRunning,
-            paused = ocrPaused,
-            enabled = countsReady && photos.isNotEmpty() && (ocrRunning || ocrProcessed < photos.size),
-            onPlayPause = ::toggleOcr,
-            onStop = ::stopOcr
-        )
-        IndexingProgressCard(
-            title = "Face Finding",
-            icon = Icons.Default.Face,
-            processed = faceProcessed,
-            total = photos.size,
-            itemsPerMinute = faceItemsPerMinute,
-            running = faceRunning,
-            paused = facePaused,
-            enabled = countsReady && photos.isNotEmpty() && (faceRunning || faceProcessed < photos.size),
-            onPlayPause = ::toggleFaceFinding,
-            onStop = ::stopFaceFinding
-        )
-    }
-}
-
-@Composable
-private fun IndexingProgressCard(
-    title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    processed: Int,
-    total: Int,
-    itemsPerMinute: Int,
-    running: Boolean,
-    paused: Boolean,
-    enabled: Boolean,
-    onPlayPause: () -> Unit,
-    onStop: () -> Unit
-) {
-    val colors = MaterialTheme.colorScheme
-    val progress = if (total > 0) (processed.toFloat() / total).coerceIn(0f, 1f) else 0f
-    val percent = (progress * 100f).roundToInt()
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(if (colors.background.luminance() > 0.5f) Color.White else colors.surface)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = colors.onSurface)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.titleSmall, color = colors.onSurface, maxLines = 1)
-                Text(
-                    "${NumberFormat.getIntegerInstance(Locale.getDefault()).format(processed)} / ${NumberFormat.getIntegerInstance(Locale.getDefault()).format(total)} images",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                    maxLines = 1
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "$percent%",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.onSurface
-            )
-        }
-
-        LinearProgressIndicator(
-            progress = { progress },
+        // Scrollable content area
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .clip(CircleShape),
-            color = colors.onSurface,
-            trackColor = if (colors.background.luminance() > 0.5f) Color(0xFFE2E2E2) else colors.onSurface.copy(alpha = 0.16f)
-        )
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Space reserved for the floating back button and status bar
+            Spacer(Modifier.statusBarsPadding())
+            Spacer(Modifier.height(56.dp))
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "$itemsPerMinute items/min",
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
-                modifier = Modifier.weight(1f)
-            )
-            IndexingControlButton(
-                icon = if (running && !paused) Icons.Default.Pause else Icons.Default.PlayArrow,
-                description = when {
-                    running && !paused -> "Pause $title"
-                    running && paused -> "Resume $title"
-                    else -> "Start $title"
-                },
-                enabled = enabled,
-                onClick = onPlayPause
-            )
-            Spacer(Modifier.width(8.dp))
-            IndexingControlButton(
-                icon = Icons.Default.Stop,
-                description = "Stop $title",
-                enabled = running,
-                onClick = onStop
-            )
+            // 1. OCR Indexing Card
+            val ocrProgress = if (photos.isNotEmpty()) (ocrProcessed.toFloat() / photos.size).coerceIn(0f, 1f) else 0f
+            val ocrPercent = (ocrProgress * 100f).roundToInt()
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
+                border = cardBorder,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.DocumentScanner,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "OCR Text Indexing",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        // Status Badge
+                        AssistChip(
+                            onClick = {},
+                            enabled = false,
+                            label = {
+                                Text(
+                                    when {
+                                        ocrRunning && !ocrPaused -> "Scanning"
+                                        ocrRunning && ocrPaused -> "Paused"
+                                        ocrProcessed >= photos.size && photos.isNotEmpty() -> "Complete"
+                                        else -> "Idle"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                disabledContainerColor = when {
+                                    ocrRunning && !ocrPaused -> MaterialTheme.colorScheme.primaryContainer
+                                    ocrRunning && ocrPaused -> MaterialTheme.colorScheme.secondaryContainer
+                                    ocrProcessed >= photos.size && photos.isNotEmpty() -> MaterialTheme.colorScheme.tertiaryContainer
+                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                },
+                                disabledLabelColor = when {
+                                    ocrRunning && !ocrPaused -> MaterialTheme.colorScheme.onPrimaryContainer
+                                    ocrRunning && ocrPaused -> MaterialTheme.colorScheme.onSecondaryContainer
+                                    ocrProcessed >= photos.size && photos.isNotEmpty() -> MaterialTheme.colorScheme.onTertiaryContainer
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            ),
+                            border = null,
+                            modifier = Modifier.height(28.dp)
+                        )
+                    }
+
+                    // Progress
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${numberFormat.format(ocrProcessed)} of ${numberFormat.format(photos.size)} photos",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "$ocrPercent%",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { ocrProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    }
+
+                    // Metrics
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IndexingMetric(
+                            label = "Processing Rate",
+                            value = "$ocrItemsPerMinute/min",
+                            modifier = Modifier.weight(1f)
+                        )
+                        IndexingMetric(
+                            label = "Cached Results",
+                            value = numberFormat.format(ocrCachedCount),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IndexingMetric(
+                            label = "Pending",
+                            value = numberFormat.format((photos.size - ocrProcessed).coerceAtLeast(0)),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    // Action buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = ::toggleOcr,
+                            enabled = countsReady && photos.isNotEmpty() && (ocrRunning || ocrProcessed < photos.size),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(
+                                if (ocrRunning && !ocrPaused) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                when {
+                                    ocrRunning && !ocrPaused -> "Pause"
+                                    ocrRunning && ocrPaused -> "Resume"
+                                    ocrProcessed >= photos.size && photos.isNotEmpty() -> "Finished"
+                                    else -> "Start OCR"
+                                }
+                            )
+                        }
+                        if (ocrRunning) {
+                            OutlinedButton(
+                                onClick = ::stopOcr,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Stop")
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = ::clearAndReindexOcr,
+                            enabled = countsReady && photos.isNotEmpty() && !ocrRunning,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Re-index")
+                        }
+                    }
+                }
+            }
+
+            // 2. Face Finding (Detection) Card
+            val faceProgress = if (photos.isNotEmpty()) (faceProcessed.toFloat() / photos.size).coerceIn(0f, 1f) else 0f
+            val facePercent = (faceProgress * 100f).roundToInt()
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
+                border = cardBorder,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Face,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Face Finding",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        // Status Badge
+                        AssistChip(
+                            onClick = {},
+                            enabled = false,
+                            label = {
+                                Text(
+                                    when {
+                                        faceRunning && !facePaused -> "Detecting"
+                                        faceRunning && facePaused -> "Paused"
+                                        faceProcessed >= photos.size && photos.isNotEmpty() -> "Complete"
+                                        else -> "Idle"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                disabledContainerColor = when {
+                                    faceRunning && !facePaused -> MaterialTheme.colorScheme.primaryContainer
+                                    faceRunning && facePaused -> MaterialTheme.colorScheme.secondaryContainer
+                                    faceProcessed >= photos.size && photos.isNotEmpty() -> MaterialTheme.colorScheme.tertiaryContainer
+                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                },
+                                disabledLabelColor = when {
+                                    faceRunning && !facePaused -> MaterialTheme.colorScheme.onPrimaryContainer
+                                    faceRunning && facePaused -> MaterialTheme.colorScheme.onSecondaryContainer
+                                    faceProcessed >= photos.size && photos.isNotEmpty() -> MaterialTheme.colorScheme.onTertiaryContainer
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            ),
+                            border = null,
+                            modifier = Modifier.height(28.dp)
+                        )
+                    }
+
+                    // Progress
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "${numberFormat.format(faceProcessed)} of ${numberFormat.format(photos.size)} photos scanned",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "$facePercent%",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { faceProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp)),
+                            color = MaterialTheme.colorScheme.secondary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    }
+
+                    // Metrics
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IndexingMetric(
+                            label = "Detected Faces",
+                            value = numberFormat.format(faceTotalDetected),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IndexingMetric(
+                            label = "Detection Speed",
+                            value = "$faceItemsPerMinute/min",
+                            modifier = Modifier.weight(1f)
+                        )
+                        IndexingMetric(
+                            label = "Unreadable",
+                            value = numberFormat.format(faceFailedCount),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    // Action buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = ::toggleFaceFinding,
+                            enabled = countsReady && photos.isNotEmpty() && (faceRunning || faceProcessed < photos.size),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(
+                                if (faceRunning && !facePaused) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                when {
+                                    faceRunning && !facePaused -> "Pause"
+                                    faceRunning && facePaused -> "Resume"
+                                    faceProcessed >= photos.size && photos.isNotEmpty() -> "Finished"
+                                    else -> "Find Faces"
+                                }
+                            )
+                        }
+                        if (faceRunning) {
+                            OutlinedButton(
+                                onClick = ::stopFaceFinding,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Stop")
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = ::clearAndRescanFaces,
+                            enabled = countsReady && photos.isNotEmpty() && !faceRunning,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Re-scan")
+                        }
+                    }
+                }
+            }
+
+            // 3. Face Clustering Card
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = cardBackground),
+                border = cardBorder,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Face Clustering",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        // Status Badge
+                        AssistChip(
+                            onClick = {},
+                            enabled = false,
+                            label = {
+                                Text(
+                                    when {
+                                        isClusteringRunning -> "Clustering"
+                                        faceTotalDetected == 0 -> "No Faces"
+                                        else -> "${clusterSummaries.size} Groups"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                disabledContainerColor = when {
+                                    isClusteringRunning -> MaterialTheme.colorScheme.primaryContainer
+                                    clusterSummaries.isNotEmpty() -> MaterialTheme.colorScheme.tertiaryContainer
+                                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                                },
+                                disabledLabelColor = when {
+                                    isClusteringRunning -> MaterialTheme.colorScheme.onPrimaryContainer
+                                    clusterSummaries.isNotEmpty() -> MaterialTheme.colorScheme.onTertiaryContainer
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            ),
+                            border = null,
+                            modifier = Modifier.height(28.dp)
+                        )
+                    }
+
+                    // Similarity Threshold Line Drag Slider
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Similarity Threshold",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            val thresholdLabel = when {
+                                clusterThreshold >= 0.62f -> "Strict"
+                                clusterThreshold >= 0.52f -> "Balanced"
+                                else -> "Loose"
+                            }
+                            Text(
+                                String.format(Locale.US, "%.2f (%s)", clusterThreshold, thresholdLabel),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Slider(
+                            value = clusterThreshold,
+                            onValueChange = { clusterThreshold = (it * 100).roundToInt() / 100f },
+                            valueRange = 0.35f..0.75f,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Loose (0.35)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "Strict (0.75)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Metrics Grid
+                    val largestGroup = remember(clusterSummaries) {
+                        clusterSummaries.maxOfOrNull { it.faceCount } ?: 0
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        IndexingMetric(
+                            label = "People Groups",
+                            value = numberFormat.format(clusterSummaries.size),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IndexingMetric(
+                            label = "Clustered Faces",
+                            value = numberFormat.format(faceTotalDetected),
+                            modifier = Modifier.weight(1f)
+                        )
+                        IndexingMetric(
+                            label = "Largest Group",
+                            value = "$largestGroup faces",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    // Feedback status text
+                    if (clusterStatusMessage != null) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    clusterStatusMessage!!,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    } else if (faceTotalDetected == 0) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "Tip: Run Face Finding on your photos first so face embeddings are available for clustering.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    // Action buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = { runFaceClustering(clusterThreshold) },
+                            enabled = !isClusteringRunning && faceTotalDetected > 0,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            if (isClusteringRunning) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Clustering…")
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (clusterSummaries.isEmpty()) "Cluster Faces" else "Re-cluster Faces")
+                            }
+                        }
+                        if (clusterSummaries.isNotEmpty()) {
+                            OutlinedButton(
+                                onClick = ::resetFaceClusters,
+                                enabled = !isClusteringRunning,
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Reset")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Bottom navigation bar padding
+            Spacer(Modifier.navigationBarsPadding())
+            Spacer(Modifier.height(16.dp))
+        }
+
+        // Floating Top Bar: Floating Back Button & Refresh Button
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Tactile Floating Back Button
+            Surface(
+                onClick = onBack,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
+            // Floating Refresh Button
+            Surface(
+                onClick = ::refreshCounts,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Refresh status",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }
-
-@Composable
-private fun IndexingControlButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    description: String,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    val colors = MaterialTheme.colorScheme
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(
-                (if (colors.background.luminance() > 0.5f) Color(0xFFF0F0F0) else colors.onSurface.copy(alpha = 0.10f))
-                    .copy(alpha = if (enabled) 1f else 0.65f)
-            )
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            icon,
-            contentDescription = description,
-            modifier = Modifier.size(18.dp),
-            tint = colors.onSurface.copy(alpha = if (enabled) 1f else 0.45f)
-        )
-    }
-}
-
 
 @Composable
 private fun IndexingMetric(label: String, value: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                value,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

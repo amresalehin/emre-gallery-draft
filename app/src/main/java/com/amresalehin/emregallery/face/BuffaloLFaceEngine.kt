@@ -31,6 +31,11 @@ data class DetectedFaceEmbedding(
     val embedding: FloatArray
 )
 
+interface FaceEngine : AutoCloseable {
+    fun embed(uri: Uri): List<DetectedFaceEmbedding>
+    override fun close() {}
+}
+
 /**
  * Local InsightFace buffalo_l inference.
  *
@@ -44,11 +49,11 @@ class BuffaloLFaceEngine private constructor(
     private val context: Context,
     private val detectorSession: OrtSession,
     private val recognitionSession: OrtSession
-) : AutoCloseable {
+) : FaceEngine {
 
     private data class FaceDetection(val bounds: RectF, val landmarks: FloatArray, val score: Float)
 
-    fun embed(uri: Uri): List<DetectedFaceEmbedding> {
+    override fun embed(uri: Uri): List<DetectedFaceEmbedding> {
         val bitmap = decodeOrientedBitmap(uri)
             ?: error("Could not decode this image.")
         try {
@@ -334,12 +339,12 @@ class BuffaloLFaceEngine private constructor(
         private const val DETECTION_THRESHOLD = 0.5f
         private const val NMS_THRESHOLD = 0.4f
         private const val MAX_FACES = 100
-        private const val MIN_FREE_SPACE_BYTES = 500L * 1024 * 1024
+        private const val MIN_FREE_SPACE_BYTES = 60L * 1024 * 1024
         private val STRIDES = intArrayOf(8, 16, 32)
         private const val MODEL_URL =
             "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
         private val REQUIRED_MODELS = listOf(
-            "det_10g.onnx", "w600k_r50.onnx", "2d106det.onnx", "1k3d68.onnx", "genderage.onnx"
+            "det_10g.onnx", "w600k_r50.onnx"
         )
 
         fun isModelInstalled(context: Context): Boolean {
@@ -347,6 +352,31 @@ class BuffaloLFaceEngine private constructor(
             return REQUIRED_MODELS.all { name ->
                 dir.resolve(name).let { it.isFile && it.length() > 1024 * 1024 }
             }
+        }
+
+        private fun openConnectionWithRedirects(initialUrl: String): HttpURLConnection {
+            var url = initialUrl
+            var redirects = 0
+            while (redirects < 6) {
+                val conn = URL(url).openConnection() as HttpURLConnection
+                conn.connectTimeout = 30_000
+                conn.readTimeout = 120_000
+                conn.instanceFollowRedirects = false
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) EmreGallery/1.0")
+                conn.connect()
+                val code = conn.responseCode
+                if (code in listOf(HttpURLConnection.HTTP_MOVED_PERM, HttpURLConnection.HTTP_MOVED_TEMP, 307, 308)) {
+                    val location = conn.getHeaderField("Location")
+                    conn.disconnect()
+                    if (!location.isNullOrBlank()) {
+                        url = location
+                        redirects++
+                        continue
+                    }
+                }
+                return conn
+            }
+            error("Too many redirects connecting to $initialUrl")
         }
 
         /**
@@ -363,7 +393,7 @@ class BuffaloLFaceEngine private constructor(
             }
             val availableBytes = StatFs(modelDir.absolutePath).availableBytes
             check(availableBytes >= MIN_FREE_SPACE_BYTES) {
-                "At least 500 MB of free storage is recommended to install the bundled buffalo_l model."
+                "At least 60 MB of free storage is required to install the bundled buffalo_l model."
             }
 
             REQUIRED_MODELS.forEach { name ->
@@ -404,19 +434,13 @@ class BuffaloLFaceEngine private constructor(
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             if (!modelDir.exists() && !modelDir.mkdirs()) error("Cannot create face model directory.")
             if (isModelInstalled(context)) return
-            val connection = URL(MODEL_URL).openConnection() as HttpURLConnection
-            connection.connectTimeout = 20_000
-            connection.readTimeout = 120_000
-            connection.instanceFollowRedirects = true
-            // The five uncompressed ONNX files occupy roughly 340 MB. Keep a safety margin
-            // so extraction does not fail halfway through on devices with tight storage.
+            val connection = openConnectionWithRedirects(MODEL_URL)
             val availableBytes = StatFs(modelDir.absolutePath).availableBytes
             check(availableBytes >= MIN_FREE_SPACE_BYTES) {
-                "At least 500 MB of free storage is recommended to install the complete buffalo_l pack."
+                "At least 60 MB of free storage is required to install the complete buffalo_l pack."
             }
             val staging = File(modelDir, "installing").apply { deleteRecursively(); mkdirs() }
             try {
-                connection.connect()
                 if (connection.responseCode !in 200..299) {
                     error("Could not download buffalo_l model pack (HTTP ${connection.responseCode}).")
                 }

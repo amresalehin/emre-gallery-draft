@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -33,6 +34,21 @@ class PreferencesRepository(private val context: Context) {
     private val ocrLanguagesKey = stringSetPreferencesKey("ocr_languages")
     private val mediaTagsKey = stringPreferencesKey("media_custom_tags")
     private val mediaPeopleKey = stringPreferencesKey("media_custom_people")
+    private val homeScrollIndexKey = intPreferencesKey("home_scroll_index")
+    private val homeScrollOffsetKey = intPreferencesKey("home_scroll_offset")
+
+    val homeScrollPosition: Flow<Pair<Int, Int>> = context.galleryDataStore.data.map { prefs ->
+        val index = prefs[homeScrollIndexKey] ?: 0
+        val offset = prefs[homeScrollOffsetKey] ?: 0
+        Pair(index, offset)
+    }
+
+    suspend fun saveHomeScrollPosition(index: Int, offset: Int) {
+        context.galleryDataStore.edit { prefs ->
+            prefs[homeScrollIndexKey] = index
+            prefs[homeScrollOffsetKey] = offset
+        }
+    }
 
     val favourites: Flow<Set<String>> = context.galleryDataStore.data.map {
         it[favouritesKey] ?: emptySet()

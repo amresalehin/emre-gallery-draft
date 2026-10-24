@@ -33,16 +33,27 @@ class FaceIndexingRepository(private val context: Context) {
         var processed = 0
         var facesFound = 0
         var failed = 0
-        var engine: BuffaloLFaceEngine? = null
+        var engine: FaceEngine? = null
         try {
-            if (pending.isNotEmpty()) engine = BuffaloLFaceEngine.open(context)
+            if (pending.isNotEmpty()) {
+                engine = try {
+                    if (BuffaloLFaceEngine.isModelInstalled(context)) {
+                        BuffaloLFaceEngine.open(context)
+                    } else {
+                        AndroidNativeFaceEngine(context)
+                    }
+                } catch (e: Exception) {
+                    AndroidNativeFaceEngine(context)
+                }
+            }
             for (item in pending) {
                 // Pause and cancellation take effect between images; an in-flight native
                 // inference is allowed to complete before the next checkpoint.
                 awaitIfResumed()
                 currentCoroutineContext().ensureActive()
                 try {
-                    val detections = engine!!.embed(Uri.parse(item.uri))
+                    val activeEngine = engine ?: AndroidNativeFaceEngine(context)
+                    val detections = activeEngine.embed(Uri.parse(item.uri))
                     detections.forEach { face ->
                         store.addFace(item.uri, face.faceIndex, face.embedding)
                     }

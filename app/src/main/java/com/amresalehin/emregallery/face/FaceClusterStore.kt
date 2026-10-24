@@ -232,6 +232,120 @@ class FaceClusterStore(context: Context) :
         readableDatabase.rawQuery("SELECT COUNT(*) FROM indexed_media WHERE status='failed'", null)
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
+    @Synchronized
+    fun clusterCount(): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM clusters", null)
+            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    @Synchronized
+    fun reclusterAll(threshold: Float = 0.55f): Int {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            data class StoredFaceRow(val mediaUri: String, val faceIndex: Int, val embedding: FloatArray)
+            val faceRows = mutableListOf<StoredFaceRow>()
+            db.rawQuery("SELECT media_uri, face_index, embedding FROM faces", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    faceRows += StoredFaceRow(
+                        mediaUri = cursor.getString(0),
+                        faceIndex = cursor.getInt(1),
+                        embedding = bytesToFloats(cursor.getBlob(2))
+                    )
+                }
+            }
+            if (faceRows.isEmpty()) {
+                db.setTransactionSuccessful()
+                return 0
+            }
+
+            db.delete("faces", null, null)
+            db.delete("clusters", null, null)
+
+            class WorkingCluster(val id: String, var centroid: FloatArray, val faces: MutableList<StoredFaceRow>)
+            val clusterList = mutableListOf<WorkingCluster>()
+            var personIdx = 1
+
+            for (face in faceRows) {
+                val normVec = normalize(face.embedding)
+                var bestCluster: WorkingCluster? = null
+                var bestScore = -1f
+                for (c in clusterList) {
+                    val score = cosine(normVec, c.centroid)
+                    if (score > bestScore) {
+                        bestScore = score
+                        bestCluster = c
+                    }
+                }
+
+                if (bestCluster != null && bestScore >= threshold) {
+                    bestCluster.faces.add(face)
+                    val dim = normVec.size
+                    val mean = FloatArray(dim)
+                    for (f in bestCluster.faces) {
+                        val v = normalize(f.embedding)
+                        for (i in 0 until dim) mean[i] += v[i]
+                    }
+                    bestCluster.centroid = normalize(mean)
+                } else {
+                    val newId = UUID.randomUUID().toString()
+                    clusterList.add(WorkingCluster(newId, normVec.copyOf(), mutableListOf(face)))
+                }
+            }
+
+            for (c in clusterList) {
+                val clusterVals = ContentValues().apply {
+                    put("id", c.id)
+                    put("display_name", "Person ${personIdx++}")
+                    put("centroid", floatsToBytes(c.centroid))
+                    put("face_count", c.faces.size)
+                    put("updated_at", System.currentTimeMillis())
+                }
+                db.insertOrThrow("clusters", null, clusterVals)
+                for (f in c.faces) {
+                    val faceVals = ContentValues().apply {
+                        put("media_uri", f.mediaUri)
+                        put("face_index", f.faceIndex)
+                        put("cluster_id", c.id)
+                        put("embedding", floatsToBytes(normalize(f.embedding)))
+                    }
+                    db.insertOrThrow("faces", null, faceVals)
+                }
+            }
+
+            db.setTransactionSuccessful()
+            return clusterList.size
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun resetClustersOnly() {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("clusters", null, null)
+            db.delete("faces", null, null)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun clearAllFaceData() {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("faces", null, null)
+            db.delete("clusters", null, null)
+            db.delete("indexed_media", null, null)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     private fun recomputeCentroid(db: SQLiteDatabase, clusterId: String) {
         val vectors = mutableListOf<FloatArray>()
         db.rawQuery("SELECT embedding FROM faces WHERE cluster_id=?", arrayOf(clusterId)).use { cursor ->
