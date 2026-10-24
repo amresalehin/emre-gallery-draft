@@ -46,7 +46,8 @@ class FaceIndexingRepository(private val context: Context) {
         media: List<MediaItem>,
         store: FaceClusterStore,
         onProgress: suspend (FaceIndexingProgress) -> Unit = {},
-        awaitIfResumed: suspend () -> Unit = {}
+        awaitIfResumed: suspend () -> Unit = {},
+        allowNativeFallback: Boolean = false
     ): FaceIndexingProgress = withContext(Dispatchers.IO) {
         val photos = media.filterNot { it.isVideo }
         val pending = photos.filterNot { store.isMediaIndexed(it.uri) }
