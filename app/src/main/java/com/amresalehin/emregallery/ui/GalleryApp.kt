@@ -712,7 +712,6 @@ fun GalleryApp() {
                         onRefresh = { refreshMedia() },
                         onSettings = { label ->
                             when (label) {
-                                "Library overview" -> navigateTo(Destination.LIBRARY_OVERVIEW)
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
                                 "About" -> navigateTo(Destination.ABOUT)
                                 "OCR" -> navigateTo(Destination.OCR_SETTINGS)
@@ -1025,41 +1024,67 @@ fun GalleryApp() {
                         }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                         Spacer(Modifier.height(12.dp))
-                        val drawerItems = listOf(
-                            Triple(Destination.HOME, "Home", Icons.Default.Home),
-                            Triple(Destination.ALBUMS, "Albums", Icons.Default.PhotoLibrary),
-                            Triple(Destination.FAVOURITES, "Favourites", Icons.Default.Favorite),
-                            Triple(Destination.VIDEOS, "Videos", Icons.Default.PlayCircle),
-                            Triple(Destination.RECENTLY_ADDED, "Recently added", Icons.Default.Schedule),
-                            Triple(Destination.LOCKED_FOLDER, "Locked folder", Icons.Default.Lock),
-                            Triple(Destination.ARCHIVE, "Archive", Icons.Default.Archive),
-                            Triple(Destination.BIN, "Bin", Icons.Default.Delete),
-                            Triple(Destination.PEOPLE, "People & pets", Icons.Default.Face),
-                            Triple(Destination.MAP, "Map & Places", Icons.Default.Map),
-                            Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings)
+                        val drawerSections = listOf(
+                            listOf(
+                                Triple(Destination.HOME, "Home", Icons.Default.Home),
+                                Triple(Destination.ALBUMS, "Albums", Icons.Default.PhotoLibrary),
+                                Triple(Destination.FAVOURITES, "Favourites", Icons.Default.Favorite),
+                                Triple(Destination.VIDEOS, "Videos", Icons.Default.PlayCircle),
+                                Triple(Destination.RECENTLY_ADDED, "Recently added", Icons.Default.Schedule)
+                            ),
+                            listOf(
+                                Triple(Destination.PEOPLE, "People & pets", Icons.Default.Face),
+                                Triple(Destination.MAP, "Map & Places", Icons.Default.Map)
+                            ),
+                            listOf(
+                                Triple(Destination.LOCKED_FOLDER, "Locked folder", Icons.Default.Lock),
+                                Triple(Destination.ARCHIVE, "Archive", Icons.Default.Archive),
+                                Triple(Destination.BIN, "Bin", Icons.Default.Delete)
+                            ),
+                            listOf(
+                                Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings)
+                            )
                         )
-                        drawerItems.forEach { (dest, label, icon) ->
-                            val selected = destination == dest
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                                    .clickable {
-                                        if (dest == Destination.MAP) {
-                                            mapReturnDestination = destination
-                                            mapFocusItem = null
+
+                        drawerSections.forEachIndexed { sectionIndex, group ->
+                            if (sectionIndex > 0) {
+                                Spacer(Modifier.height(6.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                Spacer(Modifier.height(6.dp))
+                            }
+                            group.forEach { (dest, label, icon) ->
+                                val selected = destination == dest
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                                        .clickable {
+                                            if (dest == Destination.MAP) {
+                                                mapReturnDestination = destination
+                                                mapFocusItem = null
+                                            }
+                                            navigateTo(dest, rememberPrevious = false)
+                                            albumFilter = null
+                                            showSidePanel = false
                                         }
-                                        navigateTo(dest, rememberPrevious = false)
-                                        albumFilter = null
-                                        showSidePanel = false
-                                    }
-                                    .padding(horizontal = 14.dp, vertical = 13.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(icon, contentDescription = null, tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(Modifier.width(14.dp))
-                                Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
+                                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        icon,
+                                        contentDescription = null,
+                                        tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(Modifier.width(14.dp))
+                                    Text(
+                                        label,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
                     }
@@ -6690,36 +6715,95 @@ private fun SettingsScreen(
 ) {
     var query by remember { mutableStateOf("") }
     val entries = listOf(
-        "Library overview" to Icons.Default.PhotoLibrary,
         "Theme" to Icons.Default.Palette,
-        "Gestures & Touch Feedback" to Icons.Default.TouchApp,
-        "Tools" to Icons.Default.Build,
-        "Intelligence" to Icons.Default.Psychology,
         "Indexing Status" to Icons.Default.Storage,
-        "Duplicates or Similar" to Icons.Default.Collections,
-        "Permissions" to Icons.Default.Lock,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(
-                top = topContentPadding + 60.dp,
+                top = topContentPadding + 64.dp,
                 bottom = bottomContentPadding
             )
         ) {
+            if (entries.isEmpty() && query.isNotBlank()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.size(56.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.SearchOff,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(28.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "No settings found",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "No settings match \"$query\"",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
             items(entries) { (label, icon) ->
                 if (label == "Theme") {
-                    ElevatedCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp)) {
+                    ElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        )
+                    ) {
+                        Column(Modifier.padding(18.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(icon, null, Modifier.size(30.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            icon,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(24.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
                                 Spacer(Modifier.width(14.dp))
-                                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                Column {
+                                    Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                    Text("Customize app appearance", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(Modifier.height(14.dp))
                             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                                 listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEachIndexed { index, (key, name) ->
                                     SegmentedButton(
@@ -6731,73 +6815,44 @@ private fun SettingsScreen(
                             }
                         }
                     }
-                } else if (label == "Gestures & Touch Feedback") {
-                    val context = LocalContext.current
-                    ElevatedCard(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(icon, null, Modifier.size(30.dp), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(14.dp))
-                                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Show taps on touch points", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                                    Text("Disabled · System pointer dots hidden", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                FilledTonalButton(
-                                    onClick = { com.amresalehin.emregallery.GalleryApplication.disableTouchPointTaps(context) }
-                                ) {
-                                    Text("Disable")
-                                }
-                            }
-                            Spacer(Modifier.height(10.dp))
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                            Spacer(Modifier.height(10.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Predictive back animation", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                                    Text("Active · Native Android M3 pop & scale gestures", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                                }
-                                Icon(Icons.Default.CheckCircle, contentDescription = "Active", tint = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                    }
                 } else {
                     ElevatedCard(
                         onClick = {
-                            if (label == "Library overview" || label == "Indexing Status") onRefresh()
-                            if (label == "Permissions") onPermissionSettings()
+                            if (label == "Indexing Status") onRefresh()
                             onSettings(label)
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        )
                     ) {
                         Row(
-                            Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
+                            Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(icon, null, Modifier.size(30.dp))
-                            Spacer(Modifier.width(18.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        icon,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(16.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                                Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     when (label) {
-                                        "Library overview" -> "$total media items indexed"
-                                        "Intelligence" -> "AI providers not configured"
-                                        "Indexing Status" -> "Local MediaStore scan"
-                                        "Duplicates or Similar" -> "Detection engine not configured"
+                                        "Indexing Status" -> "Local MediaStore scan & OCR status"
                                         "About" -> "Emre Gallery · 0.1.0"
-                                        "Tools" -> "Local library tools"
-                                        else -> "Manage access"
+                                        else -> ""
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -6827,23 +6882,23 @@ private fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) {
                 Row(
-                    modifier = Modifier.fillMaxSize().padding(start = 4.dp, end = 12.dp),
+                    modifier = Modifier.fillMaxSize().padding(start = 4.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onMenuClick, modifier = Modifier.size(44.dp)) {
                         Icon(Icons.Default.Menu, contentDescription = "Open navigation menu", tint = MaterialTheme.colorScheme.onSurface)
                     }
                     Row(
-                        modifier = Modifier.weight(1f).fillMaxHeight().padding(start = 8.dp),
+                        modifier = Modifier.weight(1f).fillMaxHeight().padding(start = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             Icons.Default.Search,
                             contentDescription = "Search settings",
-                            modifier = Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.onSurface
+                            modifier = Modifier.size(22.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(10.dp))
                         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                             if (query.isEmpty()) {
                                 Text("Search settings…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
@@ -6856,6 +6911,11 @@ private fun SettingsScreen(
                                 cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
                                 modifier = Modifier.fillMaxWidth()
                             )
+                        }
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = "" }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear search", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
