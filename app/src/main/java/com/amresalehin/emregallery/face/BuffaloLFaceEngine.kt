@@ -17,6 +17,8 @@ import ai.onnxruntime.OrtSession
 import ai.onnxruntime.TensorInfo
 import java.io.BufferedInputStream
 import java.io.File
+import java.io.FilterInputStream
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.FloatBuffer
@@ -25,6 +27,36 @@ import kotlinx.coroutines.CancellationException
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
+
+/**
+ * Counts bytes read from the HTTP response stream (the compressed ZIP), not bytes
+ * emitted by ZipInputStream after decompression.
+ */
+private class CountingInputStream(
+    input: InputStream,
+    private val onBytesRead: (Long) -> Unit
+) : FilterInputStream(input) {
+    var bytesRead: Long = 0L
+        private set
+
+    override fun read(): Int {
+        val value = super.read()
+        if (value >= 0) {
+            bytesRead++
+            onBytesRead(bytesRead)
+        }
+        return value
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        val count = super.read(buffer, offset, length)
+        if (count > 0) {
+            bytesRead += count
+            onBytesRead(bytesRead)
+        }
+        return count
+    }
+}
 
 data class DetectedFaceEmbedding(
     val faceIndex: Int,
@@ -449,9 +481,16 @@ class BuffaloLFaceEngine private constructor(
                 if (connection.responseCode !in 200..299) {
                     error("Could not download buffalo_l model pack (HTTP ${connection.responseCode}).")
                 }
+                // Content-Length describes the compressed HTTP response. Count bytes at
+                // that stream boundary; counting extracted ZIP entries can exceed 100%.
                 val total = connection.contentLengthLong.coerceAtLeast(-1L)
-                var received = 0L
-                ZipInputStream(BufferedInputStream(connection.inputStream)).use { zip ->
+                val compressedInput = CountingInputStream(connection.inputStream) { bytesRead ->
+                    // Keep determinate progress below 100% until extraction, validation,
+                    // and installation have all completed.
+                    val reported = if (total > 0L) bytesRead.coerceAtMost(total - 1L) else bytesRead
+                    onProgress(reported, total)
+                }
+                ZipInputStream(BufferedInputStream(compressedInput)).use { zip ->
                     var entry = zip.nextEntry
                     while (entry != null) {
                         if (Thread.currentThread().isInterrupted) {
@@ -470,8 +509,6 @@ class BuffaloLFaceEngine private constructor(
                                         val count = zip.read(buffer)
                                         if (count < 0) break
                                         output.write(buffer, 0, count)
-                                        received += count
-                                        onProgress(received, total)
                                     }
                                 }
                             } else {
@@ -482,8 +519,6 @@ class BuffaloLFaceEngine private constructor(
                                     }
                                     val count = zip.read(buffer)
                                     if (count < 0) break
-                                    received += count
-                                    if (received % (4L * 1024 * 1024) < buffer.size) onProgress(received, total)
                                 }
                             }
                         }
@@ -509,6 +544,8 @@ class BuffaloLFaceEngine private constructor(
                 staging.deleteRecursively()
             }
             check(isModelInstalled(context)) { "buffalo_l model pack installation failed validation." }
+            // Only report 100% once the model files are installed and validated.
+            if (connection.contentLengthLong > 0L) onProgress(connection.contentLengthLong, connection.contentLengthLong)
         }
 
         fun open(context: Context): BuffaloLFaceEngine {
