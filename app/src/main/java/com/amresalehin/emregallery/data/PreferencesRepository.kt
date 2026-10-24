@@ -11,6 +11,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -41,7 +42,7 @@ class PreferencesRepository(private val context: Context) {
         val index = prefs[homeScrollIndexKey] ?: 0
         val offset = prefs[homeScrollOffsetKey] ?: 0
         Pair(index, offset)
-    }
+    }.distinctUntilChanged()
 
     suspend fun saveHomeScrollPosition(index: Int, offset: Int) {
         context.galleryDataStore.edit { prefs ->
@@ -52,19 +53,19 @@ class PreferencesRepository(private val context: Context) {
 
     val favourites: Flow<Set<String>> = context.galleryDataStore.data.map {
         it[favouritesKey] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     val hidden: Flow<Set<String>> = context.galleryDataStore.data.map {
         it[hiddenKey] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     val bin: Flow<Set<String>> = context.galleryDataStore.data.map {
         it[binKey] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     val archive: Flow<Set<String>> = context.galleryDataStore.data.map {
         it[archiveKey] ?: emptySet()
-    }
+    }.distinctUntilChanged()
 
     val recentSearches: Flow<List<String>> = context.galleryDataStore.data.map { prefs ->
         val rawV2 = prefs[searchesKey]
@@ -82,31 +83,31 @@ class PreferencesRepository(private val context: Context) {
         } else {
             prefs[legacySearchesKey]?.toList()?.sorted() ?: emptyList()
         }
-    }
+    }.distinctUntilChanged()
 
     val theme: Flow<String> = context.galleryDataStore.data.map {
         it[themeKey] ?: "system"
-    }
+    }.distinctUntilChanged()
 
     val sortOrder: Flow<String> = context.galleryDataStore.data.map {
         it[sortOrderKey] ?: "date_desc"
-    }
+    }.distinctUntilChanged()
 
     val groupBy: Flow<String> = context.galleryDataStore.data.map {
         it[groupByKey] ?: "date"
-    }
+    }.distinctUntilChanged()
 
     val gridColumns: Flow<Int> = context.galleryDataStore.data.map {
         it[gridColumnsKey]?.toIntOrNull() ?: 3
-    }
+    }.distinctUntilChanged()
 
     val gridStyle: Flow<String> = context.galleryDataStore.data.map {
         it[gridStyleKey] ?: "square"
-    }
+    }.distinctUntilChanged()
 
     val ocrLanguages: Flow<Set<String>> = context.galleryDataStore.data.map {
         it[ocrLanguagesKey] ?: setOf("eng")
-    }
+    }.distinctUntilChanged()
 
     val customAlbums: Flow<List<CustomAlbum>> = context.galleryDataStore.data.map { prefs ->
         val raw = prefs[customAlbumsKey] ?: "[]"
@@ -133,7 +134,7 @@ class PreferencesRepository(private val context: Context) {
         } catch (e: Exception) {
             emptyList()
         }
-    }
+    }.distinctUntilChanged()
 
     val customTagsMap: Flow<Map<String, Set<String>>> = context.galleryDataStore.data.map { prefs ->
         val raw = prefs[mediaTagsKey] ?: "{}"
@@ -152,7 +153,7 @@ class PreferencesRepository(private val context: Context) {
         } catch (e: Exception) {
             emptyMap()
         }
-    }
+    }.distinctUntilChanged()
 
     val customPeopleMap: Flow<Map<String, Set<String>>> = context.galleryDataStore.data.map { prefs ->
         val raw = prefs[mediaPeopleKey] ?: "{}"
@@ -171,7 +172,7 @@ class PreferencesRepository(private val context: Context) {
         } catch (e: Exception) {
             emptyMap()
         }
-    }
+    }.distinctUntilChanged()
 
     suspend fun saveCustomAlbums(albums: List<CustomAlbum>) {
         val array = JSONArray()

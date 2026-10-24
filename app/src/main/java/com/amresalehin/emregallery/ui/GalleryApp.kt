@@ -24,6 +24,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import android.view.ViewConfiguration
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -118,6 +120,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -182,8 +186,6 @@ fun GalleryApp() {
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
-    // Small rubber-band response when a horizontal swipe reaches the first or last main tab.
-    val mainSwipeResistanceX = remember { Animatable(0f) }
     var pendingPermanentDeleteUris by remember { mutableStateOf<List<String>>(emptyList()) }
     fun refreshMedia() {
         if (!hasMediaPermission(context)) return
@@ -373,10 +375,14 @@ fun GalleryApp() {
         }
     }
 
-    LaunchedEffect(homeListState.firstVisibleItemIndex, homeListState.firstVisibleItemScrollOffset) {
-        if (visibleMedia.isNotEmpty() && (homeListState.firstVisibleItemIndex > 0 || homeListState.firstVisibleItemScrollOffset > 0)) {
-            prefs.saveHomeScrollPosition(homeListState.firstVisibleItemIndex, homeListState.firstVisibleItemScrollOffset)
-        }
+    LaunchedEffect(homeListState) {
+        snapshotFlow { homeListState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { inProgress ->
+                if (!inProgress && visibleMedia.isNotEmpty() && (homeListState.firstVisibleItemIndex > 0 || homeListState.firstVisibleItemScrollOffset > 0)) {
+                    prefs.saveHomeScrollPosition(homeListState.firstVisibleItemIndex, homeListState.firstVisibleItemScrollOffset)
+                }
+            }
     }
 
     Surface(
@@ -399,62 +405,71 @@ fun GalleryApp() {
                     val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
                     val initialIndex = mainPages.indexOf(initialState)
                     val targetIndex = mainPages.indexOf(targetState)
+                    val isOpeningAlbumDetail = targetState == Destination.HOME && albumFilter != null
+                    val isExitingAlbumDetail = initialState == Destination.HOME && albumFilter != null && isNavigatingBack
 
                     if (targetState == Destination.VIEWER) {
-                        (fadeIn(animationSpec = tween(260)) + scaleIn(initialScale = 0.94f, animationSpec = tween(260, easing = FastOutSlowInEasing)))
-                            .togetherWith(fadeOut(animationSpec = tween(180)) + scaleOut(targetScale = 0.96f, animationSpec = tween(180)))
+                        (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
+                            scaleIn(initialScale = 0.80f, animationSpec = spring(dampingRatio = 0.84f, stiffness = 420f)))
+                            .togetherWith(
+                                fadeOut(animationSpec = tween(140)) +
+                                scaleOut(targetScale = 1.05f, animationSpec = tween(140))
+                            )
                     } else if (initialState == Destination.VIEWER) {
-                        (fadeIn(animationSpec = tween(220)) + scaleIn(initialScale = 0.96f, animationSpec = tween(240, easing = FastOutSlowInEasing)))
-                            .togetherWith(fadeOut(animationSpec = tween(240)) + scaleOut(targetScale = 0.90f, animationSpec = tween(240, easing = FastOutLinearInEasing)))
-                    } else if (isNavigatingBack) {
-                        // Android native predictive back pop animation:
-                        // Current subscreen slides out to the right; previous screen slides in from left with scale
+                        (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
+                            scaleIn(initialScale = 1.04f, animationSpec = tween(180, easing = FastOutSlowInEasing)))
+                            .togetherWith(
+                                fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing)) +
+                                scaleOut(targetScale = 0.80f, animationSpec = tween(180, easing = FastOutSlowInEasing))
+                            )
+                    } else if (isOpeningAlbumDetail) {
+                        // Forward push when drilling down into an album
                         (slideInHorizontally(
-                            animationSpec = tween(320, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> -width / 4 }
-                        ) + fadeIn(animationSpec = tween(220)) + scaleIn(initialScale = 0.94f, animationSpec = tween(320, easing = FastOutSlowInEasing)))
+                            animationSpec = tween(240, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> width }
+                        ) + fadeIn(animationSpec = tween(200)))
                             .togetherWith(
                                 slideOutHorizontally(
-                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> width }
-                                ) + fadeOut(animationSpec = tween(220))
+                                    animationSpec = tween(240, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> -(width * 0.20f).toInt() }
+                                ) + fadeOut(animationSpec = tween(160))
                             )
-                    } else if (initialIndex >= 0 && targetIndex >= 0) {
-                        if (targetIndex > initialIndex) {
-                            (slideInHorizontally(
-                                animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                initialOffsetX = { width -> width }
-                            ) + fadeIn(animationSpec = tween(220)))
-                                .togetherWith(
-                                    slideOutHorizontally(
-                                        animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                        targetOffsetX = { width -> -width / 4 }
-                                    ) + fadeOut(animationSpec = tween(220))
-                                )
-                        } else {
-                            (slideInHorizontally(
-                                animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                initialOffsetX = { width -> -width }
-                            ) + fadeIn(animationSpec = tween(220)))
-                                .togetherWith(
-                                    slideOutHorizontally(
-                                        animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                        targetOffsetX = { width -> width / 4 }
-                                    ) + fadeOut(animationSpec = tween(220))
-                                )
-                        }
+                    } else if (isExitingAlbumDetail || isNavigatingBack) {
+                        // Pop backwards when returning
+                        (slideInHorizontally(
+                            animationSpec = tween(220, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> -(width * 0.20f).toInt() }
+                        ) + fadeIn(animationSpec = tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(220, easing = FastOutSlowInEasing)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> width }
+                                ) + fadeOut(animationSpec = tween(160))
+                            )
+                    } else if (initialIndex >= 0 && targetIndex >= 0 && albumFilter == null) {
+                        // Crisp Material 3 lateral glide between bottom-nav primary tabs (Home, Albums, Settings)
+                        val direction = if (targetIndex > initialIndex) 1 else -1
+                        (slideInHorizontally(
+                            animationSpec = tween(200, easing = FastOutSlowInEasing),
+                            initialOffsetX = { width -> (width * 0.14f * direction).toInt() }
+                        ) + fadeIn(animationSpec = tween(180)) + scaleIn(initialScale = 0.98f, animationSpec = tween(200, easing = FastOutSlowInEasing)))
+                            .togetherWith(
+                                slideOutHorizontally(
+                                    animationSpec = tween(180, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> -(width * 0.10f * direction).toInt() }
+                                ) + fadeOut(animationSpec = tween(140))
+                            )
                     } else {
                         // Forward navigation to a subscreen:
-                        // Target slides in from the right; current slides out to the left with subtle scale
                         (slideInHorizontally(
-                            animationSpec = tween(320, easing = FastOutSlowInEasing),
+                            animationSpec = tween(240, easing = FastOutSlowInEasing),
                             initialOffsetX = { width -> width }
-                        ) + fadeIn(animationSpec = tween(220)))
+                        ) + fadeIn(animationSpec = tween(200)))
                             .togetherWith(
                                 slideOutHorizontally(
-                                    animationSpec = tween(320, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> -width / 4 }
-                                ) + fadeOut(animationSpec = tween(220)) + scaleOut(targetScale = 0.94f, animationSpec = tween(320, easing = FastOutSlowInEasing))
+                                    animationSpec = tween(240, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { width -> -(width * 0.20f).toInt() }
+                                ) + fadeOut(animationSpec = tween(160)) + scaleOut(targetScale = 0.96f, animationSpec = tween(240, easing = FastOutSlowInEasing))
                             )
                     }
                 },
@@ -462,7 +477,6 @@ fun GalleryApp() {
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        translationX = mainSwipeResistanceX.value
                         if (isPredictiveBackActive && predictiveBackProgress > 0f) {
                             val p = predictiveBackProgress
                             val scale = 1f - (p * 0.12f)
@@ -479,99 +493,29 @@ fun GalleryApp() {
                             shadowElevation = (p * 20).dp.toPx()
                         }
                     }
-                    .pointerInput(destination, showSidePanel) {
-                        // Open the navigation drawer with an inward swipe from the
-                        // left edge on any primary screen, not only Home.
-                        if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
-                            val edgeWidth = 24.dp.toPx()
-                            val slop = viewConfiguration.touchSlop * 2
+                    .pointerInput(destination, showSidePanel, albumFilter) {
+                        // Inward swipe from left edge to open side panel on main screens without conflicting with list scrolling
+                        if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) {
+                            val edgeWidth = 32.dp.toPx()
+                            val slop = viewConfiguration.touchSlop * 1.5f
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 if (down.position.x <= edgeWidth) {
                                     var totalDragX = 0f
+                                    var totalDragY = 0f
                                     do {
                                         val event = awaitPointerEvent()
                                         val change = event.changes.firstOrNull { it.id == down.id }
                                         if (change != null) {
                                             totalDragX += change.position.x - change.previousPosition.x
-                                            if (totalDragX > slop) {
+                                            totalDragY += change.position.y - change.previousPosition.y
+                                            if (totalDragX > slop && kotlin.math.abs(totalDragX) > kotlin.math.abs(totalDragY) * 1.5f) {
                                                 showSidePanel = true
                                                 change.consume()
                                                 break
                                             }
                                         }
                                     } while (event.changes.any { it.pressed })
-                                }
-                            }
-                        }
-                    }
-                    .pointerInput(destination, showSidePanel) {
-                        val mainDestinations = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
-                        if (!showSidePanel && destination in mainDestinations) {
-                            val slop = viewConfiguration.touchSlop * 2f
-                            val edgeWidth = 24.dp.toPx()
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                // Let the left-edge drawer gesture own rightward swipes that begin at the edge.
-                                val drawerOwnsGesture = down.position.x <= edgeWidth
-                                var totalX = 0f
-                                var totalY = 0f
-                                var horizontalDragStarted = false
-                                var resistedAtBoundary = false
-                                do {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == down.id }
-                                    if (change != null) {
-                                        totalX += change.position.x - change.previousPosition.x
-                                        totalY += change.position.y - change.previousPosition.y
-                                        val isHorizontal = kotlin.math.abs(totalX) > kotlin.math.abs(totalY) * 1.35f
-                                        if (!drawerOwnsGesture && isHorizontal && kotlin.math.abs(totalX) > slop) {
-                                            horizontalDragStarted = true
-                                            val nextDestination = when {
-                                                totalX < 0f && destination == Destination.HOME -> Destination.ALBUMS
-                                                totalX < 0f && destination == Destination.ALBUMS -> Destination.SETTINGS
-                                                totalX > 0f && destination == Destination.SETTINGS -> Destination.ALBUMS
-                                                totalX > 0f && destination == Destination.ALBUMS -> Destination.HOME
-                                                else -> null
-                                            }
-                                            if (nextDestination != null) {
-                                                // Direct manipulation: keep the current screen attached to the finger.
-                                                scope.launch { mainSwipeResistanceX.snapTo(totalX * 0.72f) }
-                                                change.consume()
-                                            } else if (destination == Destination.SETTINGS) {
-                                                // Rubber-band resistance belongs only to the Settings end boundary.
-                                                resistedAtBoundary = true
-                                                val resistance = (totalX * 0.16f).coerceIn(-44f, 44f)
-                                                scope.launch { mainSwipeResistanceX.snapTo(resistance) }
-                                                change.consume()
-                                            }
-                                        }
-                                    }
-                                } while (event.changes.any { it.pressed })
-
-                                if (horizontalDragStarted && !drawerOwnsGesture) {
-                                    val commitThreshold = size.width * 0.22f
-                                    val nextDestination = when {
-                                        totalX < -commitThreshold && destination == Destination.HOME -> Destination.ALBUMS
-                                        totalX < -commitThreshold && destination == Destination.ALBUMS -> Destination.SETTINGS
-                                        totalX > commitThreshold && destination == Destination.SETTINGS -> Destination.ALBUMS
-                                        totalX > commitThreshold && destination == Destination.ALBUMS -> Destination.HOME
-                                        else -> null
-                                    }
-                                    if (nextDestination != null) {
-                                        navigateTo(nextDestination)
-                                    }
-                                }
-                                if (mainSwipeResistanceX.value != 0f) {
-                                    scope.launch {
-                                        mainSwipeResistanceX.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMedium
-                                            )
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -856,8 +800,8 @@ fun GalleryApp() {
             }
         }
 
-        // Floating Bottom Navigation Bar across Home, Albums, Settings
-        if (destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
+        // Floating Bottom Navigation Bar across Home, Albums, Settings (hidden during active album drill-down)
+        if (destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -868,20 +812,14 @@ fun GalleryApp() {
                 FloatingNavigationBar(
                     current = destination,
                     onSelect = { dest ->
-                        if (dest == Destination.HOME) {
-                            val now = android.os.SystemClock.uptimeMillis()
-                            val isDoubleTap = now - lastHomeButtonTapAt in 1..ViewConfiguration.getDoubleTapTimeout().toLong()
-                            lastHomeButtonTapAt = if (isDoubleTap) 0L else now
-                            navigateTo(dest, rememberPrevious = false)
-                            albumFilter = null
-                            if (isDoubleTap) {
+                        if (dest == destination) {
+                            if (dest == Destination.HOME) {
                                 scope.launch {
                                     homeListState.animateScrollToItem(0)
                                     prefs.saveHomeScrollPosition(0, 0)
                                 }
                             }
                         } else {
-                            lastHomeButtonTapAt = 0L
                             navigateTo(dest, rememberPrevious = false)
                             albumFilter = null
                         }
@@ -890,88 +828,22 @@ fun GalleryApp() {
             }
         }
         }
-                if (showSidePanel) {
-            val drawerWidthPx = with(androidx.compose.ui.platform.LocalDensity.current) { 304.dp.toPx() }
-            val drawerOffsetX = remember { Animatable(-drawerWidthPx) }
-            val drawerScope = rememberCoroutineScope()
-            val velocityTracker = remember { VelocityTracker() }
-            val drawerMotion = tween<Float>(durationMillis = 280, easing = FastOutSlowInEasing)
-            val scrimAlpha = (1f - (kotlin.math.abs(drawerOffsetX.value) / drawerWidthPx).coerceIn(0f, 1f)) * 0.42f
-            LaunchedEffect(Unit) {
-                drawerOffsetX.animateTo(
-                    targetValue = 0f,
-                    animationSpec = drawerMotion
-                )
-            }
-            val closeSidePanel: () -> Unit = {
-                drawerScope.launch {
-                    drawerOffsetX.animateTo(
-                        targetValue = -drawerWidthPx,
-                        animationSpec = tween(220, easing = FastOutSlowInEasing)
-                    )
-                    showSidePanel = false
-                }
-            }
+
+        AnimatedVisibility(
+            visible = showSidePanel,
+            enter = fadeIn(animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(180)),
+            modifier = Modifier.fillMaxSize().zIndex(100f)
+        ) {
+            val closeSidePanel = { showSidePanel = false }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = scrimAlpha))
-                    .clickable { closeSidePanel() }
-                    .pointerInput(showSidePanel) {
-                        detectHorizontalDragGestures(
-                            onDragStart = {
-                                velocityTracker.resetTracking()
-                            },
-                            onHorizontalDrag = { change, dragAmount ->
-                                velocityTracker.addPosition(change.uptimeMillis, change.position)
-                                drawerScope.launch {
-                                    val next = (drawerOffsetX.value + dragAmount).coerceIn(-drawerWidthPx, 0f)
-                                    drawerOffsetX.snapTo(next)
-                                }
-                            },
-                            onDragEnd = {
-                                val velocityX = velocityTracker.calculateVelocity().x
-                                val current = drawerOffsetX.value
-                                val minFlingVelocity = ViewConfiguration.get(context).scaledMinimumFlingVelocity.toFloat()
-                                val closeThreshold = drawerWidthPx * 0.35f
-                                if (current < -closeThreshold || velocityX < -minFlingVelocity) {
-                                    drawerScope.launch {
-                                        drawerOffsetX.animateTo(
-                                            targetValue = -drawerWidthPx,
-                                            initialVelocity = velocityX,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMediumLow
-                                            )
-                                        )
-                                        showSidePanel = false
-                                    }
-                                } else {
-                                    drawerScope.launch {
-                                        drawerOffsetX.animateTo(
-                                            targetValue = 0f,
-                                            initialVelocity = velocityX,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessMedium
-                                            )
-                                        )
-                                    }
-                                }
-                            },
-                            onDragCancel = {
-                                drawerScope.launch {
-                                    drawerOffsetX.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
-                                    )
-                                }
-                            }
-                        )
-                    }
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null
+                    ) { closeSidePanel() }
                     .testTag("side_panel_scrim")
             ) {
                 Surface(
@@ -979,13 +851,28 @@ fun GalleryApp() {
                         .align(Alignment.CenterStart)
                         .fillMaxHeight()
                         .width(304.dp)
-                        .graphicsLayer { translationX = drawerOffsetX.value }
-                        .clickable { /* Keep taps inside the drawer from dismissing it. */ }
+                        .animateEnterExit(
+                            enter = slideInHorizontally(
+                                initialOffsetX = { -it },
+                                animationSpec = spring(
+                                    dampingRatio = 0.88f,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            ),
+                            exit = slideOutHorizontally(
+                                targetOffsetX = { -it },
+                                animationSpec = tween(180, easing = FastOutSlowInEasing)
+                            )
+                        )
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null
+                        ) { /* Keep taps inside the drawer from dismissing it */ }
                         .testTag("side_panel"),
                     shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerLow,
                     tonalElevation = 8.dp,
-                    shadowElevation = 12.dp
+                    shadowElevation = 16.dp
                 ) {
                     Column(
                         modifier = Modifier
@@ -1053,7 +940,7 @@ fun GalleryApp() {
                                 Spacer(Modifier.height(6.dp))
                             }
                             group.forEach { (dest, label, icon) ->
-                                val selected = destination == dest
+                                val selected = destination == dest && albumFilter == null
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1066,7 +953,7 @@ fun GalleryApp() {
                                             }
                                             navigateTo(dest, rememberPrevious = false)
                                             albumFilter = null
-                                            showSidePanel = false
+                                            closeSidePanel()
                                         }
                                         .padding(horizontal = 14.dp, vertical = 11.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -1341,12 +1228,42 @@ private fun FloatingNavigationBar(
             items.forEach { (dest, pair) ->
                 val (label, icon) = pair
                 val selected = current == dest
+                val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                val isPressed by interactionSource.collectIsPressedAsState()
+                val pillWidth by animateDpAsState(
+                    targetValue = if (selected) 58.dp else 40.dp,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                    label = "nav_pill_width"
+                )
+                val pillColor by animateColorAsState(
+                    targetValue = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                    animationSpec = tween(180),
+                    label = "nav_pill_color"
+                )
+                val iconTint by animateColorAsState(
+                    targetValue = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                    animationSpec = tween(180),
+                    label = "nav_icon_tint"
+                )
+                val scale by animateFloatAsState(
+                    targetValue = if (isPressed) 0.92f else 1.0f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                    label = "nav_item_press"
+                )
 
                 Box(
                     modifier = Modifier
                         .weight(1f)
+                        .graphicsLayer {
+                            scaleX = scale
+                            scaleY = scale
+                        }
                         .clip(RoundedCornerShape(20.dp))
-                        .clickable { onSelect(dest) }
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = ripple(bounded = true, radius = 32.dp),
+                            onClick = { onSelect(dest) }
+                        )
                         .padding(vertical = 4.dp)
                         .testTag("nav_item_${label.lowercase()}"),
                     contentAlignment = Alignment.Center
@@ -1357,14 +1274,14 @@ private fun FloatingNavigationBar(
                     ) {
                         Surface(
                             shape = CircleShape,
-                            color = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                            modifier = Modifier.height(30.dp).width(56.dp)
+                            color = pillColor,
+                            modifier = Modifier.height(30.dp).width(pillWidth)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = icon,
                                     contentDescription = label,
-                                    tint = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    tint = iconTint,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -1927,10 +1844,6 @@ private fun HomeScreen(
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
-    val itemBounds = remember { mutableStateMapOf<String, Rect>() }
-    var dragSelectionActive by remember { mutableStateOf(false) }
-    var lastDragUri by remember { mutableStateOf<String?>(null) }
-    val homeRootBounds = remember { mutableStateOf<Rect?>(null) }
     var granted by remember { mutableStateOf(hasMediaPermission(context)) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val hasPermission = hasMediaPermission(context)
@@ -1972,243 +1885,228 @@ private fun HomeScreen(
         groups.map { group -> group to group.items.chunked(pinchGridColumns.coerceIn(1, 6)) }
     }
 
-    Box(
-        modifier = Modifier.fillMaxSize().onGloballyPositioned { homeRootBounds.value = it.boundsInRoot() }
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxSize()
     ) {
-    LazyColumn(
-        state = listState,
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    do {
-                        val event = awaitPointerEvent()
-                        // Pinch-to-zoom requires 2 or more touches. Single-finger vertical scrolls
-                        // are NEVER consumed or intercepted, preserving native Android system scroll physics,
-                        // fling decay, touch slop, and overscroll on LazyColumn.
-                        if (event.changes.size >= 2) {
-                            val zoomChange = event.calculateZoom()
-                            if (zoomChange != 1f) {
-                                pinchZoomRemainder *= zoomChange
-                                if (pinchZoomRemainder < 0.82f) {
-                                    pinchGridColumns = (pinchGridColumns + 1).coerceAtMost(6)
-                                    pinchZoomRemainder = 1f
-                                } else if (pinchZoomRemainder > 1.22f) {
-                                    pinchGridColumns = (pinchGridColumns - 1).coerceAtLeast(1)
-                                    pinchZoomRemainder = 1f
-                                }
-                                event.changes.forEach { it.consume() }
-                            }
-                        }
-                    } while (event.changes.any { it.pressed })
-                }
-            },
-        contentPadding = PaddingValues(
-            start = 12.dp,
-            end = 12.dp,
-            top = topContentPadding,
-            bottom = bottomContentPadding
-        ),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        if (selectionMode) {
-            item(key = "home_selection_toolbar") {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(onClick = { selectedUris = emptySet() }) {
-                            Icon(Icons.Default.Close, contentDescription = "Exit selection")
-                        }
-                        Text(
-                            text = "${selectedUris.size} selected",
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        TextButton(onClick = {
-                            selectedUris = if (selectedUris.size == sortedMedia.size) emptySet() else sortedMedia.map { it.uri }.toSet()
-                        }) {
-                            Text(if (selectedUris.size == sortedMedia.size) "Deselect all" else "Select all")
-                        }
-                    }
-                }
-            }
-        }
-
-        if (albumTitle != null) {
-            val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
-            val collectionIcon = when (albumTitle) {
-                "Favourites" -> Icons.Default.Favorite
-                "Videos" -> Icons.Default.PlayCircle
-                "Recently added" -> Icons.Default.Schedule
-                "Locked folder" -> Icons.Default.Lock
-                "Bin" -> Icons.Default.Delete
-                "Archive" -> Icons.Default.Archive
-                else -> Icons.Default.Folder
-            }
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.secondaryContainer
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(collectionIcon, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(if (isCollection) "Collection" else "Album", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f))
-                            Text(albumTitle, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        if (onAddPhotosToAlbum != null) {
-                            FilledTonalButton(
-                                onClick = onAddPhotosToAlbum,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Add photos", style = MaterialTheme.typography.labelMedium)
-                            }
-                            Spacer(Modifier.width(6.dp))
-                        }
-                        IconButton(onClick = onClearAlbumFilter, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Close, "Clear filter", tint = MaterialTheme.colorScheme.onSecondaryContainer)
-                        }
-                    }
-                }
-            }
-        }
-
-        if (loading && sortedMedia.isEmpty()) {
-            item {
-                HomeScreenSkeleton(
-                    gridColumns = pinchGridColumns,
-                    gridStyle = gridStyle,
-                    showMemories = albumTitle == null
-                )
-            }
-        } else if (sortedMedia.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 48.dp, horizontal = 24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (albumTitle != null) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(54.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.height(12.dp))
-                            Text("No photos in this album", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                            Spacer(Modifier.height(6.dp))
-                            Text("Add photos from your gallery to populate this album.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                            if (onAddPhotosToAlbum != null) {
-                                Spacer(Modifier.height(16.dp))
-                                Button(onClick = onAddPhotosToAlbum) {
-                                    Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Add photos")
+        val containerWidth = maxWidth - 24.dp
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        do {
+                            val event = awaitPointerEvent()
+                            // Pinch-to-zoom requires 2 or more touches. Single-finger vertical scrolls
+                            // are NEVER consumed or intercepted, preserving native Android system scroll physics,
+                            // fling decay, touch slop, and overscroll on LazyColumn.
+                            if (event.changes.size >= 2) {
+                                val zoomChange = event.calculateZoom()
+                                if (zoomChange != 1f) {
+                                    pinchZoomRemainder *= zoomChange
+                                    if (pinchZoomRemainder < 0.82f) {
+                                        pinchGridColumns = (pinchGridColumns + 1).coerceAtMost(6)
+                                        pinchZoomRemainder = 1f
+                                    } else if (pinchZoomRemainder > 1.22f) {
+                                        pinchGridColumns = (pinchGridColumns - 1).coerceAtLeast(1)
+                                        pinchZoomRemainder = 1f
+                                    }
+                                    event.changes.forEach { it.consume() }
                                 }
                             }
-                        }
-                    } else {
-                        Text("No photos or videos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } while (event.changes.any { it.pressed })
                     }
-                }
-            }
-        } else {
-            if (loading) {
-                item { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
-            }
-            if (albumTitle == null) {
-                item { MemoriesStrip(sortedMedia, onOpen) }
-                item {
-                    HorizontalDivider(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
-                        thickness = 1.dp
-                    )
-                }
-            }
-
-            groupedRows.forEach { (group, rowChunks) ->
-                if (group.dayLabel.isNotBlank()) {
-                    item(key = "header_${group.dayKey}", contentType = "header") {
+                },
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = topContentPadding,
+                bottom = bottomContentPadding
+            ),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            if (selectionMode) {
+                item(key = "home_selection_toolbar") {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp, vertical = 6.dp)
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            IconButton(onClick = { selectedUris = emptySet() }) {
+                                Icon(Icons.Default.Close, contentDescription = "Exit selection")
+                            }
                             Text(
-                                text = group.dayLabel,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = "${selectedUris.size} selected",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                text = "${group.items.size} ${if (group.items.size == 1) "item" else "items"}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            TextButton(onClick = {
+                                selectedUris = if (selectedUris.size == sortedMedia.size) emptySet() else sortedMedia.map { it.uri }.toSet()
+                            }) {
+                                Text(if (selectedUris.size == sortedMedia.size) "Deselect all" else "Select all")
+                            }
                         }
                     }
                 }
+            }
 
-                items(
-                    count = rowChunks.size,
-                    key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
-                    contentType = { "photo_row" }
-                ) { rowIndex ->
-                    JustifiedMosaicRow(
-                        items = rowChunks[rowIndex],
-                        rowIndex = rowIndex,
-                        isSquare = (gridStyle == "square"),
-                        selectedUris = selectedUris,
-                        onLongPress = { item -> selectedUris = selectedUris + item.uri; dragSelectionActive = true; lastDragUri = item.uri },
-                        onToggleSelection = { item -> selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri },
-                        onDragSelect = { item, rootPosition ->
-                            if (dragSelectionActive) {
-                                val hit = itemBounds.entries.firstOrNull { (_, bounds) -> bounds.contains(rootPosition) }?.key
-                                if (hit != null && hit != lastDragUri) {
-                                    selectedUris = selectedUris + hit
-                                    lastDragUri = hit
+            if (albumTitle != null) {
+                val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
+                val collectionIcon = when (albumTitle) {
+                    "Favourites" -> Icons.Default.Favorite
+                    "Videos" -> Icons.Default.PlayCircle
+                    "Recently added" -> Icons.Default.Schedule
+                    "Locked folder" -> Icons.Default.Lock
+                    "Bin" -> Icons.Default.Delete
+                    "Archive" -> Icons.Default.Archive
+                    else -> Icons.Default.Folder
+                }
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(collectionIcon, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(if (isCollection) "Collection" else "Album", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f))
+                                Text(albumTitle, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            if (onAddPhotosToAlbum != null) {
+                                FilledTonalButton(
+                                    onClick = onAddPhotosToAlbum,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Add photos", style = MaterialTheme.typography.labelMedium)
                                 }
-                                val root = homeRootBounds.value
-                                if (root != null) {
-                                    val edge = 56.dp.value * context.resources.displayMetrics.density
-                                    if (rootPosition.y < root.top + edge) homeScope.launch { listState.scrollBy(-22f) }
-                                    else if (rootPosition.y > root.bottom - edge) homeScope.launch { listState.scrollBy(22f) }
+                                Spacer(Modifier.width(6.dp))
+                            }
+                            IconButton(onClick = onClearAlbumFilter, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.Close, "Clear filter", tint = MaterialTheme.colorScheme.onSecondaryContainer)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (loading && sortedMedia.isEmpty()) {
+                item {
+                    HomeScreenSkeleton(
+                        gridColumns = pinchGridColumns,
+                        gridStyle = gridStyle,
+                        showMemories = albumTitle == null
+                    )
+                }
+            } else if (sortedMedia.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp, horizontal = 24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (albumTitle != null) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(54.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.height(12.dp))
+                                Text("No photos in this album", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                                Spacer(Modifier.height(6.dp))
+                                Text("Add photos from your gallery to populate this album.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                if (onAddPhotosToAlbum != null) {
+                                    Spacer(Modifier.height(16.dp))
+                                    Button(onClick = onAddPhotosToAlbum) {
+                                        Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("Add photos")
+                                    }
                                 }
                             }
-                        },
-                        onDragEnd = { dragSelectionActive = false; lastDragUri = null },
-                        onBoundsChanged = { item, bounds -> itemBounds[item.uri] = bounds },
-                        onOpen = { item -> if (selectionMode) { selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri } else onOpen(item) }
-                    )
+                        } else {
+                            Text("No photos or videos found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            } else {
+                if (loading) {
+                    item { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
+                }
+                if (albumTitle == null) {
+                    item { MemoriesStrip(sortedMedia, onOpen) }
+                    item {
+                        HorizontalDivider(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                            thickness = 1.dp
+                        )
+                    }
+                }
+
+                groupedRows.forEach { (group, rowChunks) ->
+                    if (group.dayLabel.isNotBlank()) {
+                        item(key = "header_${group.dayKey}", contentType = "header") {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = group.dayLabel,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = "${group.items.size} ${if (group.items.size == 1) "item" else "items"}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    items(
+                        count = rowChunks.size,
+                        key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
+                        contentType = { "photo_row" }
+                    ) { rowIndex ->
+                        JustifiedMosaicRow(
+                            items = rowChunks[rowIndex],
+                            containerWidth = containerWidth,
+                            rowIndex = rowIndex,
+                            isSquare = (gridStyle == "square"),
+                            selectedUris = selectedUris,
+                            onLongPress = { item -> selectedUris = selectedUris + item.uri },
+                            onToggleSelection = { item -> selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri },
+                            onOpen = { item -> if (selectionMode) { selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri } else onOpen(item) }
+                        )
+                    }
                 }
             }
         }
-    }
 
-    HomeFastScrollbar(
-        listState = listState,
-        topContentPadding = topContentPadding,
-        bottomContentPadding = bottomContentPadding,
-        thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+        HomeFastScrollbar(
+            listState = listState,
+            topContentPadding = topContentPadding,
+            bottomContentPadding = bottomContentPadding,
+            thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -2223,30 +2121,20 @@ private fun HomeFastScrollbar(
     val scope = rememberCoroutineScope()
     var dragging by remember { mutableStateOf(false) }
     var dragRemainder by remember { mutableFloatStateOf(0f) }
-    val layout = listState.layoutInfo
-    val totalItems = layout.totalItemsCount
-    val visibleItems = layout.visibleItemsInfo
-    val viewportPx = layout.viewportSize.height.toFloat()
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val minThumbPx = with(density) { 36.dp.toPx() }
+    val minThumbPx = remember(density) { with(density) { 36.dp.toPx() } }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-    if (totalItems > 0 && visibleItems.isNotEmpty() && viewportPx > 0f &&
-        (visibleItems.first().index > 0 || visibleItems.last().index < totalItems - 1)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = topContentPadding, bottom = bottomContentPadding)
     ) {
-        val thumbHeightPx = (viewportPx * visibleItems.size / totalItems.toFloat())
-            .coerceIn(minThumbPx, viewportPx)
-        val maxThumbTravel = (viewportPx - thumbHeightPx).coerceAtLeast(1f)
-        val scrollFraction = (listState.firstVisibleItemIndex.toFloat() /
-            (totalItems - visibleItems.size).coerceAtLeast(1)).coerceIn(0f, 1f)
-        val thumbTopPx = maxThumbTravel * scrollFraction
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .padding(top = topContentPadding, bottom = bottomContentPadding)
-                .width(24.dp)
-                .pointerInput(totalItems, viewportPx, topContentPadding, bottomContentPadding) {
+                .width(28.dp)
+                .pointerInput(listState) {
                     detectDragGestures(
                         onDragStart = { dragging = true; dragRemainder = 0f },
                         onDragEnd = { dragging = false; dragRemainder = 0f },
@@ -2257,7 +2145,7 @@ private fun HomeFastScrollbar(
                             val count = currentLayout.totalItemsCount
                             val height = size.height.toFloat()
                             if (count > 0 && height > 0f) {
-                                dragRemainder += dragAmount.y / height * count
+                                dragRemainder += (dragAmount.y / height) * count
                                 val itemDelta = dragRemainder.toInt()
                                 if (itemDelta != 0) {
                                     dragRemainder -= itemDelta
@@ -2272,13 +2160,27 @@ private fun HomeFastScrollbar(
             contentAlignment = Alignment.TopEnd
         ) {
             Canvas(Modifier.fillMaxSize()) {
+                val layout = listState.layoutInfo
+                val totalItems = layout.totalItemsCount
+                val visibleItems = layout.visibleItemsInfo
+                val viewportPx = size.height
+
+                if (totalItems <= 0 || visibleItems.isEmpty() || viewportPx <= 0f) return@Canvas
+                if (visibleItems.first().index == 0 && visibleItems.last().index == totalItems - 1) return@Canvas
+
+                val thumbHeightPx = (viewportPx * visibleItems.size / totalItems.toFloat())
+                    .coerceIn(minThumbPx, viewportPx)
+                val maxThumbTravel = (viewportPx - thumbHeightPx).coerceAtLeast(1f)
+                val scrollFraction = (listState.firstVisibleItemIndex.toFloat() /
+                    (totalItems - visibleItems.size).coerceAtLeast(1)).coerceIn(0f, 1f)
+                val thumbTopPx = maxThumbTravel * scrollFraction
+
                 val inMotion = dragging || listState.isScrollInProgress
-                val thumbWidth = if (inMotion) 6.dp.toPx() else 2.dp.toPx()
+                val thumbWidth = if (inMotion) 6.dp.toPx() else 2.5.dp.toPx()
                 val height = thumbHeightPx.coerceAtMost(size.height)
-                val fraction = if (size.height <= height) 0f else thumbTopPx / (size.height - height)
-                val top = (size.height - height) * fraction
+                val top = thumbTopPx.coerceIn(0f, size.height - height)
                 drawRoundRect(
-                    color = thumbColor.copy(alpha = if (inMotion) 0.95f else 0.65f),
+                    color = thumbColor.copy(alpha = if (inMotion) 0.95f else 0.55f),
                     topLeft = Offset(size.width - thumbWidth, top),
                     size = androidx.compose.ui.geometry.Size(thumbWidth, height),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(thumbWidth / 2f)
@@ -2286,8 +2188,8 @@ private fun HomeFastScrollbar(
             }
         }
     }
-    }
 }
+
 @Composable
 private fun HomeScreenSkeleton(
     gridColumns: Int = 3,
@@ -2453,10 +2355,25 @@ private fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
             items(stories.size, key = { index -> stories[index].first }) { index ->
                 val (title, storyMedia) = stories[index]
                 val cover = storyMedia.first()
+                val memInteractionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                val isMemPressed by memInteractionSource.collectIsPressedAsState()
+                val memScale by animateFloatAsState(
+                    targetValue = if (isMemPressed) 0.94f else 1f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                    label = "mem_card_scale"
+                )
                 Box(
                     Modifier.width(132.dp).height(184.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { onOpen(cover) }
+                        .graphicsLayer {
+                            scaleX = memScale
+                            scaleY = memScale
+                        }
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(
+                            interactionSource = memInteractionSource,
+                            indication = ripple(bounded = true),
+                            onClick = { onOpen(cover) }
+                        )
                 ) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
@@ -2723,59 +2640,55 @@ private fun SquareGrid(
 @Composable
 private fun JustifiedMosaicRow(
     items: List<MediaItem>,
+    containerWidth: Dp,
     rowIndex: Int,
     isSquare: Boolean,
     selectedUris: Set<String> = emptySet(),
     onLongPress: (MediaItem) -> Unit = {},
     onToggleSelection: (MediaItem) -> Unit = {},
-    onDragSelect: (MediaItem, Offset) -> Unit = { _, _ -> },
-    onDragEnd: () -> Unit = {},
-    onBoundsChanged: (MediaItem, Rect) -> Unit = { _, _ -> },
     onOpen: (MediaItem) -> Unit
 ) {
     if (items.isEmpty()) return
 
-    val aspects = items.mapIndexed { index, item ->
-        if (isSquare) 1f else if (item.width > 0 && item.height > 0) {
-            (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
-        } else {
-            when ((item.id.hashCode() + rowIndex + index).mod(4)) {
-                0 -> 0.72f
-                1 -> 0.9f
-                2 -> 1.0f
-                else -> 1.35f
+    val aspects = remember(items, isSquare) {
+        items.mapIndexed { index, item ->
+            if (isSquare) 1f else if (item.width > 0 && item.height > 0) {
+                (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
+            } else {
+                when ((item.id.hashCode() + rowIndex + index).mod(4)) {
+                    0 -> 0.72f
+                    1 -> 0.9f
+                    2 -> 1.0f
+                    else -> 1.35f
+                }
             }
         }
     }
 
-    BoxWithConstraints(
+    val gap = 4.dp
+    val totalGap = gap * (items.size - 1)
+    val aspectsSum = remember(aspects) { aspects.sum().coerceAtLeast(0.1f) }
+    val rowHeight = remember(containerWidth, totalGap, aspectsSum) {
+        ((containerWidth - totalGap) / aspectsSum).coerceIn(72.dp, 220.dp)
+    }
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp)
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap)
     ) {
-        val gap = 4.dp
-        val totalGap = gap * (items.size - 1)
-        val rowHeight = ((maxWidth - totalGap) / aspects.sum()).coerceIn(72.dp, 220.dp)
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(gap)
-        ) {
-            items.forEachIndexed { index, item ->
-                MosaicMediaItem(
-                    item = item,
-                    modifier = Modifier
-                        .weight(aspects[index])
-                        .height(rowHeight),
-                    selected = item.uri in selectedUris,
-                    onLongPress = { onLongPress(item) },
-                    onToggleSelection = { onToggleSelection(item) },
-                    onDragSelect = { position -> onDragSelect(item, position) },
-                    onDragEnd = onDragEnd,
-                    onBoundsChanged = { bounds -> onBoundsChanged(item, bounds) },
-                    onOpen = onOpen
-                )
-            }
+        items.forEachIndexed { index, item ->
+            MosaicMediaItem(
+                item = item,
+                modifier = Modifier
+                    .weight(aspects[index])
+                    .height(rowHeight),
+                selected = item.uri in selectedUris,
+                onLongPress = { onLongPress(item) },
+                onToggleSelection = { onToggleSelection(item) },
+                onOpen = onOpen
+            )
         }
     }
 }
@@ -2788,16 +2701,14 @@ private fun MosaicMediaItem(
     selected: Boolean = false,
     onLongPress: () -> Unit = {},
     onToggleSelection: () -> Unit = {},
-    onDragSelect: (Offset) -> Unit = {},
-    onDragEnd: () -> Unit = {},
-    onBoundsChanged: (Rect) -> Unit = {},
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
     val imageRequest = remember(item.uri) {
         ImageRequest.Builder(context)
             .data(Uri.parse(item.uri))
-            .size(720, 720)
+            .size(480, 480)
+            .precision(Precision.INEXACT)
             .crossfade(false)
             .diskCacheKey("${item.uri}_thumb")
             .diskCachePolicy(CachePolicy.ENABLED)
@@ -2805,44 +2716,33 @@ private fun MosaicMediaItem(
             .build()
     }
 
-    var tileBounds by remember(item.uri) { mutableStateOf<Rect?>(null) }
+    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val itemScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "mosaic_press_scale"
+    )
+
     Box(
-        modifier = modifier.onGloballyPositioned { coordinates ->
-            val bounds = coordinates.boundsInRoot()
-            tileBounds = bounds
-            onBoundsChanged(bounds)
-        }
-            .clip(RoundedCornerShape(8.dp))
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = itemScale
+                scaleY = itemScale
+            }
+            .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .then(
-                Modifier.border(
-                    width = 2.dp,
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f),
-                    shape = RoundedCornerShape(8.dp)
-                )
+            .border(
+                width = 1.5.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                shape = RoundedCornerShape(10.dp)
             )
             .combinedClickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
                 onClick = { if (selected) onToggleSelection() else onOpen(item) },
                 onLongClick = { onLongPress() }
             )
-            .pointerInput(item.uri, tileBounds) {
-                var dragging = false
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { position ->
-                        dragging = true
-                        onLongPress()
-                        val bounds = tileBounds
-                        if (bounds != null) onDragSelect(Offset(bounds.left + position.x, bounds.top + position.y))
-                    },
-                    onDragEnd = { if (dragging) onDragEnd(); dragging = false },
-                    onDragCancel = { if (dragging) onDragEnd(); dragging = false },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        val bounds = tileBounds
-                        if (bounds != null) onDragSelect(Offset(bounds.left + change.position.x, bounds.top + change.position.y))
-                    }
-                )
-            }
     ) {
         AsyncImage(
             model = imageRequest,
@@ -2907,7 +2807,8 @@ private fun MediaGridItem(
     val imageRequest = remember(item.uri) {
         ImageRequest.Builder(context)
             .data(Uri.parse(item.uri))
-            .size(720, 720)
+            .size(480, 480)
+            .precision(Precision.INEXACT)
             .crossfade(false)
             .diskCacheKey("${item.uri}_thumb")
             .diskCachePolicy(CachePolicy.ENABLED)
@@ -2915,14 +2816,30 @@ private fun MediaGridItem(
             .build()
     }
 
+    val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val itemScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "thumb_press_scale"
+    )
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(aspect)
-            .clip(RoundedCornerShape(8.dp))
+            .graphicsLayer {
+                scaleX = itemScale
+                scaleY = itemScale
+            }
+            .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .border(2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f), RoundedCornerShape(8.dp))
-            .clickable { onOpen(item) }
+            .border(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = ripple(bounded = true, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                onClick = { onOpen(item) }
+            )
     ) {
         AsyncImage(
             model = imageRequest,
@@ -4288,10 +4205,11 @@ private fun ViewerScreen(
                             .data(Uri.parse(currentItem.uri))
                             .size(Size.ORIGINAL)
                             .precision(Precision.EXACT)
+                            .placeholderMemoryCacheKey("${currentItem.uri}_thumb")
                             .diskCacheKey("${currentItem.uri}:viewer-original")
                             .diskCachePolicy(CachePolicy.ENABLED)
                             .memoryCacheKey("${currentItem.uri}:viewer-original")
-                            .crossfade(false)
+                            .crossfade(200)
                             .build(),
                         contentDescription = currentItem.name,
                         modifier = Modifier.fillMaxSize(),

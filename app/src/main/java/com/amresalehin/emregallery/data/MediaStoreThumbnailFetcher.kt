@@ -32,13 +32,13 @@ class MediaStoreThumbnailFetcher(
         }
         val widthPx = widthDim.px
         val heightPx = heightDim.px
-        if (widthPx > 480 || heightPx > 480) {
+        if (widthPx > 600 || heightPx > 600) {
             return@withContext null
         }
         val bitmap: Bitmap? = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val clampedWidth = widthPx.coerceIn(120, 480)
-                val clampedHeight = heightPx.coerceIn(120, 480)
+                val clampedWidth = widthPx.coerceIn(120, 512)
+                val clampedHeight = heightPx.coerceIn(120, 512)
                 context.contentResolver.loadThumbnail(uri, Size(clampedWidth, clampedHeight), null)
             } else {
                 val id = try {
@@ -71,11 +71,11 @@ class MediaStoreThumbnailFetcher(
 
     class Factory(private val context: Context) : Fetcher.Factory<Uri> {
         override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
-            if (data.scheme == "content" && data.authority == "media") {
+            if (data.scheme == "content" && (data.authority == "media" || data.authority == MediaStore.AUTHORITY)) {
                 val widthDim = options.size.width
                 val heightDim = options.size.height
                 if (widthDim is Dimension.Pixels && heightDim is Dimension.Pixels) {
-                    if (widthDim.px <= 480 && heightDim.px <= 480) {
+                    if (widthDim.px <= 600 && heightDim.px <= 600) {
                         return MediaStoreThumbnailFetcher(context, data, options)
                     }
                 }

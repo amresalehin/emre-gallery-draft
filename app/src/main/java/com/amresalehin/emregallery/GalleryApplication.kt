@@ -11,6 +11,8 @@ import java.io.File
 import android.content.Context
 import android.provider.Settings
 
+import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
+
 class GalleryApplication : Application() {
     companion object {
         fun disableTouchPointTaps(context: Context) {
@@ -49,9 +51,10 @@ class GalleryApplication : Application() {
                     .build()
             }
             .components {
+                add(MediaStoreThumbnailFetcher.Factory(this@GalleryApplication))
                 add(VideoFrameDecoder.Factory())
             }
-            .crossfade(true)
+            .crossfade(false)
             .respectCacheHeaders(false)
             .allowHardware(true)
             .build()
