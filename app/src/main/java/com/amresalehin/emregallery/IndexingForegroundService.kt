@@ -77,7 +77,11 @@ class IndexingForegroundService : Service() {
             return START_NOT_STICKY
         }
         if (action == ACTION_STATUS) {
-            // A status ping must not restart a completed job.
+            // Reconcile stale persisted state after process death without restarting work.
+            if (taskJob?.isActive != true) {
+                updateState(running = false, paused = false)
+                stopSelf()
+            }
             return START_NOT_STICKY
         }
 
@@ -171,7 +175,6 @@ class IndexingForegroundService : Service() {
             onProgress = { received, total ->
                 updateState(bytes = received, bytesTotal = total, processed = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0, total = 100)
                 postProgress("Downloading face model", "${received / (1024 * 1024)} MB of ${(total / (1024 * 1024)).coerceAtLeast(1)} MB", if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0, 100)
-                runCatching { awaitResumeBlockingUnsupported() }
             },
             onStage = { stage ->
                 updateState(stage = stage)
@@ -184,10 +187,6 @@ class IndexingForegroundService : Service() {
             },
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() }
         )
-    }
-
-    private fun awaitResumeBlockingUnsupported() {
-        // Download callbacks are synchronous; pausing is enforced by awaitIfResumed at stream checkpoints.
     }
 
     private suspend fun awaitResume() {
@@ -300,7 +299,7 @@ class IndexingForegroundService : Service() {
 
         private fun command(context: Context, action: String, configure: Intent.() -> Unit = {}) {
             val intent = Intent(context, IndexingForegroundService::class.java).setAction(action).apply(configure)
-            if (action == ACTION_PAUSE || action == ACTION_RESUME || action == ACTION_CANCEL) {
+            if (action == ACTION_PAUSE || action == ACTION_RESUME || action == ACTION_CANCEL || action == ACTION_STATUS) {
                 context.startService(intent)
             } else {
                 ContextCompat.startForegroundService(context, intent)
