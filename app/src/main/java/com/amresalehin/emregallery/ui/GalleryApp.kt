@@ -6790,6 +6790,7 @@ private fun IndexingStatusScreen(
     var primaryModelFailure by remember { mutableStateOf<String?>(null) }
 
     var isDownloadingModel by remember { mutableStateOf(false) }
+    var downloadStage by remember { mutableStateOf("downloading") }
     var downloadBytesReceived by remember { mutableLongStateOf(0L) }
     var downloadTotalBytes by remember { mutableLongStateOf(0L) }
     var downloadError by remember { mutableStateOf<String?>(null) }
@@ -6806,6 +6807,7 @@ private fun IndexingStatusScreen(
         if (isDownloadingModel) return
         isDownloadingModel = true
         downloadError = null
+        downloadStage = "downloading"
         downloadBytesReceived = 0L
         downloadTotalBytes = 0L
         downloadJob = scope.launch {
@@ -6815,7 +6817,8 @@ private fun IndexingStatusScreen(
                     onProgress = { received, total ->
                         downloadBytesReceived = received
                         downloadTotalBytes = total
-                    }
+                    },
+                    onStage = { stage -> downloadStage = stage }
                 )
                 withContext(Dispatchers.Main.immediate) {
                     isDownloadingModel = false
@@ -7322,7 +7325,11 @@ private fun IndexingStatusScreen(
                         // Status Badge
 
                         val faceChipLabel = when {
-                            isDownloadingModel -> "Downloading $downloadPercent%"
+                            isDownloadingModel -> when (downloadStage) {
+                                "extracting" -> "Extracting"
+                                "installing" -> "Installing"
+                                else -> "Downloading $downloadPercent%"
+                            }
                             faceRunning && !facePaused -> "Detecting"
                             faceRunning && facePaused -> "Paused"
                             faceProcessed >= photos.size && photos.isNotEmpty() -> "Complete"
@@ -7385,7 +7392,11 @@ private fun IndexingStatusScreen(
                                     )
                                     Spacer(Modifier.width(10.dp))
                                     Text(
-                                        "Downloading Buffalo_L Model ($downloadPercent%)",
+                                        when (downloadStage) {
+                                            "extracting" -> "Extracting Buffalo_L Model…"
+                                            "installing" -> "Installing Buffalo_L Model…"
+                                            else -> "Downloading Buffalo_L Model ($downloadPercent%)"
+                                        },
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -7398,10 +7409,11 @@ private fun IndexingStatusScreen(
                                         Text("Cancel", style = MaterialTheme.typography.labelMedium)
                                     }
                                 }
+                                val isTransferStage = downloadStage == "downloading"
                                 val progressFloat = if (downloadTotalBytes > 0) {
-                                    (downloadBytesReceived.toFloat() / downloadTotalBytes).coerceIn(0f, 1f)
+                                    (downloadBytesReceived.toFloat() / downloadTotalBytes).coerceIn(0f, 0.99f)
                                 } else 0f
-                                if (downloadTotalBytes > 0) {
+                                if (isTransferStage && downloadTotalBytes > 0) {
                                     LinearProgressIndicator(
                                         progress = { progressFloat },
                                         modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
@@ -7413,8 +7425,8 @@ private fun IndexingStatusScreen(
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
-                                Text(
-                                    text = "${formatBytes(downloadBytesReceived)} of ${if (downloadTotalBytes > 0) formatBytes(downloadTotalBytes) else "approx. 288 MB"} downloaded",
+                                if (isTransferStage) Text(
+                                    text = "${formatBytes(downloadBytesReceived)} of ${if (downloadTotalBytes > 0) formatBytes(downloadTotalBytes) else "unknown size"} downloaded",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
