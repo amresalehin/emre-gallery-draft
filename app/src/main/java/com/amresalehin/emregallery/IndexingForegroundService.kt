@@ -283,6 +283,9 @@ class IndexingForegroundService : Service() {
         const val KEY_BYTES_TOTAL = "bytes_total"
         const val KEY_ERROR = "error"
 
+        private const val TASK_OCR = "ocr"
+        private const val TASK_FACE = "face"
+        private const val TASK_MODEL = "model"
         private const val CHANNEL_ID = "media_indexing"
         private const val NOTIFICATION_ID = 4107
         private const val ACTION_START_OCR = "com.amresalehin.emregallery.indexing.START_OCR"
