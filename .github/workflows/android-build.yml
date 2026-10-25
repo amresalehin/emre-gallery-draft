@@ -2,9 +2,9 @@ name: Android build
 
 on:
   push:
-    branches: [Develop]
+    branches: [Develop, 'integration/**']
   pull_request:
-    branches: [Develop]
+    branches: [Develop, 'integration/**']
   workflow_dispatch:
 
 permissions:

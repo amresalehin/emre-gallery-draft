@@ -43,22 +43,22 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
                 withContext(Dispatchers.IO) { locationCache.clearAll() }
             }
 
-            val photos = media.filterNot { it.isVideo }
+            val items = media
             val cached = withContext(Dispatchers.IO) { locationCache.loadAll() }
-            val cachedLocated = photos.mapNotNull { item ->
+            val cachedLocated = items.mapNotNull { item ->
                 cached[item.uri]?.point?.let { item to it }
             }
 
-            val uncachedPhotos = if (forceRescan) photos else photos.filterNot { cached.containsKey(it.uri) }
+            val uncachedItems = if (forceRescan) items else items.filterNot { cached.containsKey(it.uri) }
             _uiState.update {
                 it.copy(
                     locatedMedia = cachedLocated,
-                    scanTotal = uncachedPhotos.size,
-                    loading = uncachedPhotos.isNotEmpty()
+                    scanTotal = uncachedItems.size,
+                    loading = uncachedItems.isNotEmpty()
                 )
             }
 
-            if (uncachedPhotos.isEmpty()) {
+            if (uncachedItems.isEmpty()) {
                 _uiState.update { it.copy(loading = false) }
                 return@launch
             }
@@ -67,7 +67,7 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
             val result = cachedLocated.toMutableList()
             var scanned = 0
 
-            for (item in uncachedPhotos) {
+            for (item in uncachedItems) {
                 if (!isActive) break
 
                 val point = withContext(Dispatchers.IO) {
@@ -83,7 +83,7 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
                 }
                 scanned++
 
-                if (scanned % 12 == 0 || scanned == uncachedPhotos.size) {
+                if (scanned % 12 == 0 || scanned == uncachedItems.size) {
                     val currentList = result.toList()
                     val currentScanned = scanned
                     _uiState.update {
@@ -99,7 +99,7 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
             _uiState.update {
                 it.copy(
                     locatedMedia = result.toList(),
-                    scanProgress = uncachedPhotos.size,
+                    scanProgress = uncachedItems.size,
                     loading = false
                 )
             }
