@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -142,6 +143,8 @@ fun PhotoMapViewContainer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val heatmapPoints = remember(locatedMedia) { locatedMedia.map { it.second } }
+    val heatmapOverlay = remember { PhotoHeatmapOverlay() }
 
     Card(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).testTag("photo_map_card"),
@@ -181,9 +184,9 @@ fun PhotoMapViewContainer(
                 },
                 update = { map ->
                     onMapReady(map)
-                    map.overlays.removeAll { it is PhotoHeatmapOverlay }
-                    if (locatedMedia.isNotEmpty()) {
-                        map.overlays.add(PhotoHeatmapOverlay(locatedMedia.map { it.second }))
+                    heatmapOverlay.updatePoints(heatmapPoints)
+                    if (!map.overlays.contains(heatmapOverlay)) {
+                        map.overlays.add(heatmapOverlay)
                     }
                     map.post { onBoundsChanged(calculateMapBounds(map, context)) }
                     map.invalidate()
