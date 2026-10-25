@@ -263,9 +263,9 @@ fun PhotoMapDetailsCard(
             ) {
                 Text(
                     when {
-                        loading && locatedTotal == 0 -> "Scanning photos for locations…"
-                        !loading && locatedTotal == 0 -> "No geotagged photos"
-                        else -> "%,d photos in this area".format(Locale.getDefault(), viewportCount)
+                        loading && locatedTotal == 0 -> "Scanning media for locations…"
+                        !loading && locatedTotal == 0 -> "No geotagged media"
+                        else -> "%,d items in this area".format(Locale.getDefault(), viewportCount)
                     },
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium,
@@ -281,7 +281,7 @@ fun PhotoMapDetailsCard(
                 Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     CircularProgressIndicator(modifier = Modifier.size(36.dp), strokeWidth = 3.dp, color = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.height(16.dp))
-                    Text("Scanning photo locations…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Scanning media locations…", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
                     Text(
                         if (scanTotal > 0) "Reading GPS metadata ($scanProgress of $scanTotal scanned)" else "Scanning your gallery for GPS metadata…",
@@ -294,17 +294,17 @@ fun PhotoMapDetailsCard(
                 Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Icon(Icons.Default.LocationOff, contentDescription = null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
-                    Text("No photos with GPS data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("No media with GPS data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
-                    Text("None of the photos in this gallery contain embedded GPS coordinates.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text("None of the images or videos in this gallery contain accessible GPS coordinates.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
             } else if (viewportCount == 0) {
                 Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                     Icon(Icons.Default.Explore, contentDescription = null, modifier = Modifier.size(36.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
-                    Text("No photos in this area", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("No media in this area", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Pan or zoom out to see photos, or tap below to frame all $locatedTotal photos.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text("Pan or zoom out to see media, or tap below to frame all $locatedTotal items.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(12.dp))
                     Button(onClick = onFitAllPhotos, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
                         Icon(Icons.Default.FilterCenterFocus, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -324,12 +324,34 @@ fun PhotoMapDetailsCard(
                         item(key = "photos_$day") {
                             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 items(entries, key = { it.first.uri }) { (photo, point) ->
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(context).data(Uri.parse(photo.uri)).crossfade(false).build(),
-                                        contentDescription = photo.name,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(width = 110.dp, height = 110.dp).clip(RoundedCornerShape(12.dp)).clickable { onPhotoClick(photo, point) }
-                                    )
+                                    Box(
+                                        modifier = Modifier.size(width = 110.dp, height = 110.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { onPhotoClick(photo, point) }
+                                    ) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context).data(Uri.parse(photo.uri)).crossfade(false).build(),
+                                            contentDescription = photo.name,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                        if (photo.isVideo) {
+                                            Surface(
+                                                modifier = Modifier.align(Alignment.Center).size(32.dp),
+                                                shape = CircleShape,
+                                                color = Color.Black.copy(alpha = 0.58f)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        Icons.Default.PlayArrow,
+                                                        contentDescription = "Video",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(22.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

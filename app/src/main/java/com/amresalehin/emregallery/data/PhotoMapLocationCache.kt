@@ -14,7 +14,7 @@ import org.osmdroid.util.GeoPoint
 import java.io.File
 
 /**
- * Persistent SQLite cache for photo GPS metadata, including photos with no GPS coordinates.
+ * Persistent SQLite cache for image and video GPS metadata, including media with no GPS coordinates.
  */
 class PhotoMapLocationCache(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "photo_map_locations.db", null, 3) {
@@ -91,12 +91,12 @@ class PhotoMapLocationCache(context: Context) :
         forceRescan: Boolean = false,
         onProgress: ((scanned: Int, total: Int, located: Int) -> Unit)? = null
     ): Int {
-        val photos = media.filterNot { it.isVideo }
+        val items = media
         if (forceRescan) {
             clearAll()
         }
         val cached = loadAll()
-        val pending = if (forceRescan) photos else photos.filterNot { cached.containsKey(it.uri) }
+        val pending = if (forceRescan) items else items.filterNot { cached.containsKey(it.uri) }
         var newlyLocated = 0
         var totalLocated = cached.values.count { it.point != null }
 
