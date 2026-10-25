@@ -554,7 +554,6 @@ fun GalleryApp() {
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
                                 "About" -> navigateTo(Destination.ABOUT)
-                                "OCR Settings", "OCR" -> navigateTo(Destination.OCR_SETTINGS)
                             }
                         },
                         onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
@@ -570,7 +569,15 @@ fun GalleryApp() {
                         ocrLanguages = ocrLanguagesPref,
                         ocrModel = ocrModelPref,
                         onModelChange = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
-                        onOpenOcrSettings = { navigateTo(Destination.OCR_SETTINGS) },
+                        onToggleLanguage = { code ->
+                            val updated = ocrLanguagesPref.toMutableSet()
+                            if (code in updated) {
+                                if (updated.size > 1) updated.remove(code)
+                            } else {
+                                updated.add(code)
+                            }
+                            scope.launch { prefs.setOcrLanguages(updated) }
+                        },
                         onBack = { performBackNavigation() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(

@@ -28,6 +28,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.ocr.TesseractOcr
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -37,11 +41,12 @@ fun IndexingStatusScreen(
     ocrLanguages: Set<String>,
     ocrModel: String = "fast",
     onModelChange: ((String) -> Unit)? = null,
-    onOpenOcrSettings: (() -> Unit)? = null,
+    onToggleLanguage: ((String) -> Unit)? = null,
     onBack: () -> Unit,
     viewModel: IndexingStatusViewModel = viewModel()
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var showFaceScanOptions by remember { mutableStateOf(false) }
@@ -81,7 +86,7 @@ fun IndexingStatusScreen(
             .fillMaxSize()
             .background(pageBackground)
     ) {
-        // Main scrollable content
+        // Main scrollable content with two simple cards
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -92,10 +97,11 @@ fun IndexingStatusScreen(
             Spacer(Modifier.statusBarsPadding())
             Spacer(Modifier.height(56.dp))
 
-            // 1. OCR Indexing Card
+            // 1. OCR Indexing & Configuration Card
             OcrIndexingCard(
                 totalPhotos = uiState.totalPhotos,
                 ocrState = uiState.ocr,
+                ocrLanguages = ocrLanguages,
                 countsReady = uiState.countsReady,
                 cardBackground = cardBackground,
                 cardBorder = cardBorder,
@@ -107,47 +113,52 @@ fun IndexingStatusScreen(
                     viewModel.setOcrModel(newModel)
                     onModelChange?.invoke(newModel)
                 },
-                onOpenOcrSettings = onOpenOcrSettings
+                onToggleLanguage = { code ->
+                    onToggleLanguage?.invoke(code)
+                },
+                onClearCache = {
+                    scope.launch(Dispatchers.IO) {
+                        TesseractOcr.clearCachedResults(context)
+                        withContext(Dispatchers.Main) {
+                            viewModel.refreshCounts()
+                        }
+                    }
+                }
             )
 
-            // 2. Face Finding (Detection) Card
-            FaceFindingCard(
+            // 2. Face Recognition (Finding & Clustering) Card
+            FaceRecognitionCard(
                 totalPhotos = uiState.totalPhotos,
                 faceFindingState = uiState.faceFinding,
                 engineState = uiState.engine,
                 modelDownloadState = uiState.modelDownload,
+                clusteringState = uiState.clustering,
                 countsReady = uiState.countsReady,
                 cardBackground = cardBackground,
                 cardBorder = cardBorder,
                 numberFormat = numberFormat,
                 onConfidenceChange = viewModel::updateDetectionConfidence,
+                onMinGroupFacesChange = viewModel::updateMinGroupFaces,
+                onClusterDistanceChange = viewModel::updateClusterDistance,
                 onToggleFaceFinding = {
                     viewModel.toggleFaceFinding { showFallbackChoice = true }
                 },
                 onStopFaceFinding = viewModel::stopFaceFinding,
                 onRescanRequested = { showFaceScanOptions = true },
                 onDownloadModel = viewModel::startModelDownload,
-                onCancelDownload = viewModel::cancelModelDownload
-            )
-
-            // 3. Face Clustering Card
-            FaceClusteringCard(
-                faceDetected = uiState.faceFinding.totalDetected,
-                clusteringState = uiState.clustering,
-                cardBackground = cardBackground,
-                cardBorder = cardBorder,
-                numberFormat = numberFormat,
-                onMinGroupFacesChange = viewModel::updateMinGroupFaces,
-                onClusterDistanceChange = viewModel::updateClusterDistance,
+                onCancelDownload = viewModel::cancelModelDownload,
                 onClusterFaces = viewModel::runFaceClustering,
-                onResetClusters = viewModel::resetFaceClusters
+                onResetClusters = viewModel::resetFaceClusters,
+                onSelectNativeFallback = {
+                    viewModel.setAllowNativeFallback(true)
+                }
             )
 
             Spacer(Modifier.navigationBarsPadding())
             Spacer(Modifier.height(16.dp))
         }
 
-        // Floating Top Bar: Tactile Back & Refresh Buttons
+        // Floating Top Bar: Back & Refresh Buttons
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)

@@ -34,7 +34,6 @@ fun SettingsScreen(
     var query by remember { mutableStateOf("") }
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
-        "OCR Settings" to Icons.Default.DocumentScanner,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
@@ -100,8 +99,17 @@ fun SettingsScreen(
                             containerColor = MaterialTheme.colorScheme.surfaceContainer
                         )
                     ) {
-                        Column(Modifier.padding(18.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
@@ -109,7 +117,7 @@ fun SettingsScreen(
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
-                                            icon,
+                                            if (theme == "dark") Icons.Default.DarkMode else Icons.Default.LightMode,
                                             contentDescription = null,
                                             modifier = Modifier.size(24.dp),
                                             tint = MaterialTheme.colorScheme.primary
@@ -119,17 +127,65 @@ fun SettingsScreen(
                                 Spacer(Modifier.width(14.dp))
                                 Column {
                                     Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                    Text("Customize app appearance", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        when (theme) {
+                                            "dark" -> "Dark"
+                                            "light" -> "Light"
+                                            else -> "System"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
-                            Spacer(Modifier.height(14.dp))
-                            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                                listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEachIndexed { index, (key, name) ->
-                                    SegmentedButton(
-                                        selected = theme == key,
-                                        onClick = { onTheme(key) },
-                                        shape = SegmentedButtonDefaults.itemShape(index, 3)
-                                    ) { Text(name) }
+
+                            // Compact, icon-only Light/Dark toggle using sun and moon icons
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                                modifier = Modifier.height(40.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val isLight = theme == "light"
+                                    val isDark = theme == "dark"
+
+                                    Surface(
+                                        onClick = { onTheme("light") },
+                                        shape = CircleShape,
+                                        color = if (isLight) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.LightMode,
+                                                contentDescription = "Light mode",
+                                                tint = if (isLight) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.width(2.dp))
+
+                                    Surface(
+                                        onClick = { onTheme("dark") },
+                                        shape = CircleShape,
+                                        color = if (isDark) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                                        modifier = Modifier.size(34.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.DarkMode,
+                                                contentDescription = "Dark mode",
+                                                tint = if (isDark) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
