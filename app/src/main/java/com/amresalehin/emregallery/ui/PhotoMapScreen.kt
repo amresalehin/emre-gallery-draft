@@ -21,6 +21,9 @@ import org.osmdroid.views.MapView
 
 private const val WORLD_VIEW_ZOOM = 1.0
 private val WORLD_VIEW_CENTER = GeoPoint(0.0, 0.0)
+private val EASTERN_HEMISPHERE_BOUNDS = BoundingBox(75.0, 180.0, -50.0, 0.0)
+private const val PHOTO_MAP_PREFERENCES = "photo_map_preferences"
+private const val KEY_HAS_SEEN_INITIAL_REGION = "has_seen_initial_region"
 
 fun showWorldView(map: MapView, animated: Boolean = false) {
     if (map.width <= 0 || map.height <= 0) {
@@ -37,6 +40,15 @@ fun showWorldView(map: MapView, animated: Boolean = false) {
     map.invalidate()
 }
 
+fun showEasternHemisphereView(map: MapView, animated: Boolean = false) {
+    if (map.width <= 0 || map.height <= 0) {
+        map.post { showEasternHemisphereView(map, animated) }
+        return
+    }
+    map.zoomToBoundingBox(EASTERN_HEMISPHERE_BOUNDS, animated, 0)
+    map.invalidate()
+}
+
 fun focusSinglePhoto(map: MapView, point: GeoPoint, animated: Boolean = true) {
     if (animated) map.controller.animateTo(point) else map.controller.setCenter(point)
     map.controller.setZoom(15.0)
@@ -47,10 +59,10 @@ fun fitPointsToMap(
     map: MapView,
     points: List<GeoPoint>,
     animated: Boolean = true,
-    paddingPx: Int = 64
+    paddingDp: Int = 76
 ) {
     if (points.isEmpty()) {
-        showWorldView(map, animated)
+        showEasternHemisphereView(map, animated)
         return
     }
     if (points.size == 1) {
@@ -80,14 +92,13 @@ fun fitPointsToMap(
         return
     }
 
-    val marginLat = (latSpan * 0.10).coerceAtLeast(0.01)
-    val marginLon = (lonSpan * 0.10).coerceAtLeast(0.01)
     val bounds = BoundingBox(
-        (north + marginLat).coerceAtMost(85.0),
-        (east + marginLon).coerceAtMost(180.0),
-        (south - marginLat).coerceAtLeast(-85.0),
-        (west - marginLon).coerceAtLeast(-180.0)
+        north.coerceAtMost(85.0),
+        east.coerceIn(-180.0, 180.0),
+        south.coerceAtLeast(-85.0),
+        west.coerceIn(-180.0, 180.0)
     )
+    val paddingPx = (paddingDp * map.context.resources.displayMetrics.density).toInt()
     runCatching {
         if (map.width > 0 && map.height > 0) {
             map.zoomToBoundingBox(bounds, animated, paddingPx)
@@ -113,6 +124,10 @@ fun PhotoMapScreen(
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val firstMapVisit = remember(context) {
+        !context.getSharedPreferences(PHOTO_MAP_PREFERENCES, android.content.Context.MODE_PRIVATE)
+            .getBoolean(KEY_HAS_SEEN_INITIAL_REGION, false)
+    }
 
     val locationPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
@@ -121,6 +136,12 @@ fun PhotoMapScreen(
     }
 
     LaunchedEffect(Unit) {
+        if (firstMapVisit) {
+            context.getSharedPreferences(PHOTO_MAP_PREFERENCES, android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_HAS_SEEN_INITIAL_REGION, true)
+                .apply()
+        }
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
             !hasMediaLocationPermission(context)
         ) {
@@ -130,6 +151,7 @@ fun PhotoMapScreen(
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var mapFramed by remember { mutableStateOf(false) }
+    var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
     var reportedMissingGpsForUri by remember { mutableStateOf<String?>(null) }
     var userHasMovedMap by remember { mutableStateOf(false) }
 
@@ -137,42 +159,51 @@ fun PhotoMapScreen(
         viewModel.loadAndScanMedia(media)
     }
 
-    LaunchedEffect(uiState.locatedMedia, focusItem, uiState.loading) {
+    LaunchedEffect(uiState.locatedMedia, focusItem, uiState.loading, mapRef) {
         val requestedItem = focusItem ?: return@LaunchedEffect
         val match = uiState.locatedMedia.firstOrNull { it.first.uri == requestedItem.uri }
-        if (match != null) {
-            mapRef?.let { focusSinglePhoto(it, match.second, animated = true) }
-        } else if (!uiState.loading && reportedMissingGpsForUri != requestedItem.uri) {
+        if (match == null && !uiState.loading && reportedMissingGpsForUri != requestedItem.uri) {
             reportedMissingGpsForUri = requestedItem.uri
             snackbarHostState.showSnackbar(
-                message = "Cannot focus on \""+requestedItem.name+"\": no accessible GPS coordinates found.",
+                message = "Cannot focus on \"" + requestedItem.name + "\": no accessible GPS coordinates found.",
                 duration = SnackbarDuration.Short
             )
-            mapRef?.let { map ->
-                if (uiState.locatedMedia.isNotEmpty()) {
-                    fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
-                } else {
-                    showWorldView(map, animated = true)
-                }
-            }
         }
     }
 
-    // Show the world while indexing, then frame valid locations once. Empty scans
-    // stay world-wide; repeated index emissions must not recenter the user's map.
-    LaunchedEffect(uiState.locatedMedia, uiState.loading) {
-        val map = mapRef
-        if (!mapFramed && map != null && map.width > 0 && map.height > 0) {
+    // The very first map visit starts with the requested eastern-hemisphere view.
+    // On later visits, do not frame partial cache contents: wait until indexing ends,
+    // then fit every located item unless the user has already moved the map.
+    LaunchedEffect(mapRef, uiState.locatedMedia, uiState.loading, focusItem, firstMapVisit) {
+        val map = mapRef ?: return@LaunchedEffect
+        if (mapFramed) return@LaunchedEffect
+
+        if (focusItem != null) {
+            val match = uiState.locatedMedia.firstOrNull { it.first.uri == focusItem.uri }
             when {
-                uiState.locatedMedia.isNotEmpty() && focusItem == null -> {
-                    fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
+                match != null -> {
+                    focusSinglePhoto(map, match.second, animated = false)
                     mapFramed = true
                 }
-                !uiState.loading && uiState.locatedMedia.isEmpty() -> {
-                    if (!userHasMovedMap) showWorldView(map, animated = false)
+                !uiState.loading -> {
+                    if (!userHasMovedMap && uiState.locatedMedia.isNotEmpty()) {
+                        fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
+                    } else if (!userHasMovedMap) {
+                        showEasternHemisphereView(map, animated = false)
+                    }
                     mapFramed = true
                 }
             }
+        } else if (firstMapVisit) {
+            showEasternHemisphereView(map, animated = false)
+            mapFramed = true
+        } else if (!uiState.loading) {
+            if (!userHasMovedMap && uiState.locatedMedia.isNotEmpty()) {
+                fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
+            } else if (!userHasMovedMap) {
+                showEasternHemisphereView(map, animated = false)
+            }
+            mapFramed = true
         }
     }
 
@@ -208,15 +239,15 @@ fun PhotoMapScreen(
                     }
                 },
                 onFitAllPhotos = {
+                    selectedMapMedia = null
                     mapRef?.let { map ->
                         if (uiState.locatedMedia.isNotEmpty()) {
                             fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
                         } else {
-                            showWorldView(map, animated = true)
+                            showEasternHemisphereView(map, animated = true)
                         }
                     }
-                },
-                onRescan = { viewModel.rescanMedia(media) }
+                }
             )
 
             PhotoMapViewContainer(
@@ -225,21 +256,9 @@ fun PhotoMapScreen(
                 loading = uiState.loading,
                 scanProgress = uiState.scanProgress,
                 scanTotal = uiState.scanTotal,
-                onMapReady = { map ->
-                    mapRef = map
-                    if (!mapFramed && map.width > 0 && map.height > 0) {
-                        when {
-                            uiState.locatedMedia.isNotEmpty() && focusItem == null -> {
-                                fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
-                                mapFramed = true
-                            }
-                            !uiState.loading && uiState.locatedMedia.isEmpty() -> {
-                                showWorldView(map, animated = false)
-                                mapFramed = true
-                            }
-                        }
-                    }
-                },
+                selectedMedia = selectedMapMedia,
+                onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
+                onMapReady = { map -> mapRef = map },
                 onUserMapGesture = { userHasMovedMap = true },
                 onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
                 modifier = Modifier.weight(1f)
@@ -253,15 +272,16 @@ fun PhotoMapScreen(
                 scanTotal = uiState.scanTotal,
                 dayGroups = uiState.dayGroups,
                 onPhotoClick = { photo, point ->
+                    selectedMapMedia = photo to point
                     mapRef?.let { focusSinglePhoto(it, point, animated = true) }
-                    onOpen(photo)
                 },
                 onFitAllPhotos = {
+                    selectedMapMedia = null
                     mapRef?.let { map ->
                         if (uiState.locatedMedia.isNotEmpty()) {
                             fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
                         } else {
-                            showWorldView(map, animated = true)
+                            showEasternHemisphereView(map, animated = true)
                         }
                     }
                 },

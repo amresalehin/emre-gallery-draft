@@ -5,9 +5,10 @@ import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,8 +29,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.amresalehin.emregallery.R
 import com.amresalehin.emregallery.data.MediaItem
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
@@ -38,6 +42,7 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import java.util.Locale
 
 @Composable
@@ -49,7 +54,6 @@ fun PhotoMapTopBar(
     onDismissLayerMenu: () -> Unit,
     onSelectLayer: (String) -> Unit,
     onFitAllPhotos: () -> Unit,
-    onRescan: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -71,18 +75,17 @@ fun PhotoMapTopBar(
         Box {
             Surface(
                 onClick = onOpenLayerMenu,
-                shape = RoundedCornerShape(12.dp),
+                shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                modifier = Modifier.height(38.dp)
+                modifier = Modifier.size(38.dp)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(Icons.Default.Layers, contentDescription = "Map layers", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
-                    Text(mapLayer, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
-                    Icon(Icons.Default.ExpandMore, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (mapLayer == "Satellite") Icons.Default.SatelliteAlt else Icons.Default.Layers,
+                        contentDescription = "Map layer: $mapLayer",
+                        modifier = Modifier.size(19.dp),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
                 }
             }
             DropdownMenu(expanded = showMapLayerMenu, onDismissRequest = onDismissLayerMenu) {
@@ -113,19 +116,6 @@ fun PhotoMapTopBar(
             }
         }
 
-        if (onRescan != null) {
-            Spacer(Modifier.width(8.dp))
-            Surface(
-                onClick = onRescan,
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                modifier = Modifier.size(38.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Rescan locations", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
-                }
-            }
-        }
     }
 }
 
@@ -137,6 +127,8 @@ fun PhotoMapViewContainer(
     loading: Boolean,
     scanProgress: Int,
     scanTotal: Int,
+    selectedMedia: Pair<MediaItem, GeoPoint>? = null,
+    onOpenSelected: () -> Unit = {},
     onMapReady: (MapView) -> Unit,
     onUserMapGesture: () -> Unit = {},
     onBoundsChanged: (BoundingBox?) -> Unit,
@@ -145,6 +137,7 @@ fun PhotoMapViewContainer(
     val context = LocalContext.current
     val heatmapPoints = remember(locatedMedia) { locatedMedia.map { it.second } }
     val heatmapOverlay = remember { PhotoHeatmapOverlay() }
+    val selectedMarker = remember { mutableStateOf<Marker?>(null) }
 
     Card(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).testTag("photo_map_card"),
@@ -166,7 +159,7 @@ fun PhotoMapViewContainer(
                         setBuiltInZoomControls(false)
                         minZoomLevel = 0.0
                         controller.setZoom(1.0)
-                        controller.setCenter(GeoPoint(0.0, 0.0))
+                        controller.setCenter(GeoPoint(12.5, 90.0))
                         onMapReady(this)
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
@@ -188,6 +181,21 @@ fun PhotoMapViewContainer(
                     if (!map.overlays.contains(heatmapOverlay)) {
                         map.overlays.add(heatmapOverlay)
                     }
+
+                    val selected = selectedMedia
+                    if (selected == null) {
+                        selectedMarker.value?.let { map.overlays.remove(it) }
+                        selectedMarker.value = null
+                    } else {
+                        val marker = selectedMarker.value ?: Marker(map).apply {
+                            icon = ContextCompat.getDrawable(map.context, R.drawable.ic_map_selection_pin)
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        }.also { selectedMarker.value = it }
+                        marker.position = selected.second
+                        marker.title = selected.first.name
+                        if (!map.overlays.contains(marker)) map.overlays.add(marker)
+                    }
+
                     map.post { onBoundsChanged(calculateMapBounds(map, context)) }
                     map.invalidate()
                 }
@@ -199,6 +207,26 @@ fun PhotoMapViewContainer(
                 modifier = Modifier.align(Alignment.BottomStart).padding(start = 10.dp, bottom = 10.dp)
             ) {
                 Text("© OpenStreetMap", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.85f), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+            }
+
+            if (selectedMedia != null) {
+                Surface(
+                    onClick = onOpenSelected,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp).size(44.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = "Open selected media",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
 
             if (loading && scanTotal > 0) {
@@ -309,47 +337,52 @@ fun PhotoMapDetailsCard(
                     Button(onClick = onFitAllPhotos, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
                         Icon(Icons.Default.FilterCenterFocus, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Fit all photos", style = MaterialTheme.typography.labelMedium)
+                        Text("Fit all media", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             } else {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 104.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     dayGroups.forEach { (day, entries) ->
-                        item(key = "heading_$day") {
-                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        item(key = "heading_$day", span = { GridItemSpan(maxLineSpan) }) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(day, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
                                 Text("${entries.size}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        item(key = "photos_$day") {
-                            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                items(entries, key = { it.first.uri }) { (photo, point) ->
-                                    Box(
-                                        modifier = Modifier.size(width = 110.dp, height = 110.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .clickable { onPhotoClick(photo, point) }
+                        items(entries, key = { it.first.uri }) { (photo, point) ->
+                            Box(
+                                modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { onPhotoClick(photo, point) }
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context).data(Uri.parse(photo.uri)).crossfade(false).build(),
+                                    contentDescription = photo.name,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                if (photo.isVideo) {
+                                    Surface(
+                                        modifier = Modifier.align(Alignment.Center).size(32.dp),
+                                        shape = CircleShape,
+                                        color = Color.Black.copy(alpha = 0.58f)
                                     ) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context).data(Uri.parse(photo.uri)).crossfade(false).build(),
-                                            contentDescription = photo.name,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                        if (photo.isVideo) {
-                                            Surface(
-                                                modifier = Modifier.align(Alignment.Center).size(32.dp),
-                                                shape = CircleShape,
-                                                color = Color.Black.copy(alpha = 0.58f)
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        Icons.Default.PlayArrow,
-                                                        contentDescription = "Video",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(22.dp)
-                                                    )
-                                                }
-                                            }
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Default.PlayArrow,
+                                                contentDescription = "Video",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(22.dp)
+                                            )
                                         }
                                     }
                                 }
