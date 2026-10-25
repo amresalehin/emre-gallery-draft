@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.Point
 import android.graphics.RectF
 import android.os.Handler
@@ -15,7 +14,6 @@ import org.osmdroid.views.overlay.Overlay
 import java.lang.ref.WeakReference
 import java.util.concurrent.Executors
 import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.ln
@@ -49,6 +47,7 @@ class PhotoHeatmapOverlay(
     private var cachedRender: RenderedHeatmap? = null
     @Volatile
     private var activeKey: RenderKey? = null
+    private val renderLock = Any()
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingKey: RenderKey? = null
@@ -57,10 +56,6 @@ class PhotoHeatmapOverlay(
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
         isFilterBitmap = true
         isDither = true
-    }
-    private val contourPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1.05f
     }
 
     private data class ScreenPoint(val x: Float, val y: Float)
@@ -72,17 +67,8 @@ class PhotoHeatmapOverlay(
         val cameraYBucket: Long,
         val pointsVersion: Int
     )
-    private data class ContourPath(val path: Path, val color: Int)
-    private data class RenderedHeatmap(
-        val key: RenderKey,
-        val bitmap: Bitmap,
-        val contours: List<ContourPath>
-    )
-    private data class BucketAccumulator(
-        var count: Float = 0f,
-        var sumX: Float = 0f,
-        var sumY: Float = 0f
-    )
+    private data class RenderedHeatmap(val key: RenderKey, val bitmap: Bitmap)
+    private data class BucketKey(val x: Int, val y: Int)
 
     /**
      * Change photo coordinates without replacing this overlay instance. The caller
@@ -97,7 +83,10 @@ class PhotoHeatmapOverlay(
         pendingRender = null
         pendingKey = null
         activeKey = null
-        cachedRender = null
+        synchronized(renderLock) {
+            cachedRender?.bitmap?.recycle()
+            cachedRender = null
+        }
     }
 
     override fun draw(canvas: Canvas, mapView: MapView, shadow: Boolean) {
@@ -105,26 +94,20 @@ class PhotoHeatmapOverlay(
         if (shadow || points.isEmpty() || mapView.width <= 0 || mapView.height <= 0) return
 
         val key = createRenderKey(mapView) ?: return
-        val render = cachedRender
-        if (render != null && render.key == key) {
-            drawRender(canvas, render, mapView.width, mapView.height)
+        val renderedBitmap = synchronized(renderLock) {
+            cachedRender?.takeIf { it.key == key && !it.bitmap.isRecycled }?.bitmap
+        }
+        if (renderedBitmap != null) {
+            canvas.drawBitmap(
+                renderedBitmap,
+                null,
+                RectF(0f, 0f, mapView.width.toFloat(), mapView.height.toFloat()),
+                bitmapPaint
+            )
             return
         }
 
         requestRender(mapView, key)
-    }
-
-    private fun drawRender(canvas: Canvas, render: RenderedHeatmap, width: Int, height: Int) {
-        canvas.drawBitmap(
-            render.bitmap,
-            null,
-            RectF(0f, 0f, width.toFloat(), height.toFloat()),
-            bitmapPaint
-        )
-        for (contour in render.contours) {
-            contourPaint.color = contour.color
-            canvas.drawPath(contour.path, contourPaint)
-        }
     }
 
     /**
@@ -136,7 +119,7 @@ class PhotoHeatmapOverlay(
         val height = mapView.height
         if (width <= 0 || height <= 0) return null
 
-        val zoom = mapView.zoomLevelDouble.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val zoom = mapView.zoomLevelDouble.coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
         val zoomBucket = (zoom * ZOOM_KEY_STEPS).roundToInt()
         val keyZoom = zoomBucket.toDouble() / ZOOM_KEY_STEPS
         val center = mapView.projection.fromPixels(width / 2, height / 2)
@@ -178,7 +161,8 @@ class PhotoHeatmapOverlay(
 
             pendingKey = null
             activeKey = key
-            val zoom = map.zoomLevelDouble.coerceIn(MIN_ZOOM, MAX_ZOOM)
+            val zoom = (key.zoomBucket.toDouble() / ZOOM_KEY_STEPS)
+                .coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM)
             val kernel = kernelForZoom(zoom)
             val projectedPoints = projectPoints(map, kernel.radius * KERNEL_SUPPORT_MULTIPLIER)
             val snapshotVersion = pointsVersion
@@ -199,12 +183,23 @@ class PhotoHeatmapOverlay(
                     renderGeneration == generation &&
                     pointsVersion == snapshotVersion
                 ) {
-                    cachedRender = result
+                    synchronized(renderLock) {
+                        if (renderGeneration == generation && pointsVersion == snapshotVersion) {
+                            val previous = cachedRender
+                            cachedRender = result
+                            if (previous?.bitmap !== result.bitmap) previous?.bitmap?.recycle()
+                        } else {
+                            result.bitmap.recycle()
+                        }
+                    }
                     activeKey = null
                     mapReference.get()?.postInvalidate()
-                } else if (activeKey == key) {
-                    activeKey = null
-                    mapReference.get()?.postInvalidate()
+                } else {
+                    result?.bitmap?.recycle()
+                    if (activeKey == key) {
+                        activeKey = null
+                        mapReference.get()?.postInvalidate()
+                    }
                 }
             }
         }
@@ -255,51 +250,42 @@ class PhotoHeatmapOverlay(
 
         val density = FloatArray(gridWidth * gridHeight)
         if (projectedPoints.isNotEmpty()) {
-            // Aggregate nearby samples into grid buckets first. At world zoom, thousands
-            // of photos can occupy the same few pixels; weighting buckets avoids doing
-            // the same kernel accumulation for each one individually.
-            val buckets = HashMap<Long, BucketAccumulator>()
+            // Bucket points only for bookkeeping while retaining each point's original
+            // projected offset. Do not average nearby points into one artificial center.
+            val buckets = HashMap<BucketKey, MutableList<ScreenPoint>>()
             for (point in projectedPoints) {
-                val bucketX = floor(point.x / gridCell).toInt()
-                val bucketY = floor(point.y / gridCell).toInt()
-                val bucketKey = (bucketX.toLong() shl 32) xor (bucketY.toLong() and 0xffffffffL)
-                val bucket = buckets.getOrPut(bucketKey) { BucketAccumulator() }
-                bucket.count += 1f
-                bucket.sumX += point.x
-                bucket.sumY += point.y
+                val cellX = floor(point.x / gridCell).toInt()
+                val cellY = floor(point.y / gridCell).toInt()
+                buckets.getOrPut(BucketKey(cellX, cellY)) { ArrayList() }.add(point)
             }
 
             val supportRadius = kernelRadius * KERNEL_SUPPORT_MULTIPLIER
             val supportSquared = supportRadius * supportRadius
-            val radiusInCells = kotlin.math.ceil(supportRadius / gridCell).toInt()
             var visited = 0
-            for (bucket in buckets.values) {
+            for (bucketPoints in buckets.values) {
                 if (isCancelled()) return null
-                val sourceX = bucket.sumX / bucket.count
-                val sourceY = bucket.sumY / bucket.count
-                val centerCellX = floor(sourceX / gridCell).toInt()
-                val centerCellY = floor(sourceY / gridCell).toInt()
-                val minX = max(0, centerCellX - radiusInCells)
-                val maxX = min(gridWidth - 1, centerCellX + radiusInCells)
-                val minY = max(0, centerCellY - radiusInCells)
-                val maxY = min(gridHeight - 1, centerCellY + radiusInCells)
-
-                for (y in minY..maxY) {
-                    val sampleY = y * gridCell + gridCell / 2f
-                    val dy = sampleY - sourceY
-                    for (x in minX..maxX) {
-                        val sampleX = x * gridCell + gridCell / 2f
-                        val dx = sampleX - sourceX
-                        val distanceSquared = dx * dx + dy * dy
-                        if (distanceSquared <= supportSquared) {
-                            density[y * gridWidth + x] += bucket.count * exp(
-                                -distanceSquared / (2f * kernelSigma * kernelSigma)
-                            )
+                for (point in bucketPoints) {
+                    val minX = max(0, floor((point.x - supportRadius) / gridCell).toInt())
+                    val maxX = min(gridWidth - 1, floor((point.x + supportRadius) / gridCell).toInt())
+                    val minY = max(0, floor((point.y - supportRadius) / gridCell).toInt())
+                    val maxY = min(gridHeight - 1, floor((point.y + supportRadius) / gridCell).toInt())
+                    for (y in minY..maxY) {
+                        val sampleY = y * gridCell + gridCell / 2f
+                        val dy = sampleY - point.y
+                        for (x in minX..maxX) {
+                            val sampleX = x * gridCell + gridCell / 2f
+                            val dx = sampleX - point.x
+                            val distanceSquared = dx * dx + dy * dy
+                            if (distanceSquared <= supportSquared) {
+                                density[y * gridWidth + x] += exp(
+                                    -distanceSquared / (2f * kernelSigma * kernelSigma)
+                                )
+                            }
                         }
                     }
+                    visited++
+                    if (visited % CANCEL_CHECK_BUCKETS == 0 && isCancelled()) return null
                 }
-                visited++
-                if (visited % CANCEL_CHECK_BUCKETS == 0 && isCancelled()) return null
             }
         }
 
@@ -323,10 +309,11 @@ class PhotoHeatmapOverlay(
         val bitmap = Bitmap.createBitmap(gridWidth, gridHeight, Bitmap.Config.ARGB_8888)
         bitmap.setPixels(pixels, 0, gridWidth, 0, 0, gridWidth, gridHeight)
 
-        val contours = buildContours(smoothed, gridWidth, gridHeight, gridCell, ::isCancelled)
-            ?: return null
-        if (isCancelled()) return null
-        return RenderedHeatmap(key, bitmap, contours)
+        if (isCancelled()) {
+            bitmap.recycle()
+            return null
+        }
+        return RenderedHeatmap(key, bitmap)
     }
 
     /**
@@ -336,116 +323,35 @@ class PhotoHeatmapOverlay(
     private fun densityColor(density: Float): Int {
         if (density <= MIN_VISIBLE_DENSITY) return Color.TRANSPARENT
         val intensity = (ln(1f + density) / LN_REFERENCE_DENSITY).coerceIn(0f, 1f)
-        val position = intensity.coerceIn(0f, 1f)
-        val upperIndex = COLOR_STOPS.indexOfFirst { it.first >= position }
-        val lowerIndex: Int
-        val fraction: Float
-        if (upperIndex <= 0) {
-            lowerIndex = 0
-            fraction = 0f
-        } else if (upperIndex < 0) {
-            lowerIndex = COLOR_STOPS.lastIndex
-            fraction = 0f
-        } else {
-            lowerIndex = upperIndex - 1
-            val lowerStop = COLOR_STOPS[lowerIndex]
-            val upperStop = COLOR_STOPS[upperIndex]
-            fraction = ((position - lowerStop.first) / (upperStop.first - lowerStop.first))
-                .coerceIn(0f, 1f)
+        val upperIndex = COLOR_STOPS.indexOfFirst { it.first >= intensity }
+        val lowerIndex = when {
+            upperIndex < 0 -> COLOR_STOPS.lastIndex - 1
+            upperIndex <= 0 -> 0
+            else -> upperIndex - 1
+        }
+        val fraction = when {
+            upperIndex < 0 -> 1f
+            upperIndex <= 0 -> 0f
+            else -> {
+                val lowerStop = COLOR_STOPS[lowerIndex]
+                val upperStop = COLOR_STOPS[upperIndex]
+                ((intensity - lowerStop.first) / (upperStop.first - lowerStop.first))
+                    .coerceIn(0f, 1f)
+            }
         }
 
         val colorA = COLOR_STOPS[lowerIndex].second
         val colorB = COLOR_STOPS[min(lowerIndex + 1, COLOR_STOPS.lastIndex)].second
-        fun channelA(color: Int, shift: Int) = (color shr shift) and 0xff
+        fun channel(color: Int, shift: Int) = (color shr shift) and 0xff
         fun lerpChannel(shift: Int): Int =
-            (channelA(colorA, shift) +
-                (channelA(colorB, shift) - channelA(colorA, shift)) * fraction).roundToInt().coerceIn(0, 255)
+            (channel(colorA, shift) +
+                (channel(colorB, shift) - channel(colorA, shift)) * fraction)
+                .roundToInt().coerceIn(0, 255)
 
         val alphaFraction = ((intensity - ALPHA_START) / (ALPHA_FULL - ALPHA_START)).coerceIn(0f, 1f)
         val alpha = (alphaFraction * MAX_HEAT_ALPHA).roundToInt()
         if (alpha <= 0) return Color.TRANSPARENT
         return Color.argb(alpha, lerpChannel(16), lerpChannel(8), lerpChannel(0))
-    }
-
-    /** Build interpolated marching-squares isopleths at fixed density thresholds. */
-    private fun buildContours(
-        values: FloatArray,
-        width: Int,
-        height: Int,
-        cellSize: Int,
-        isCancelled: () -> Boolean
-    ): List<ContourPath>? {
-        if (width < 2 || height < 2) return emptyList()
-        val result = ArrayList<ContourPath>(CONTOUR_LEVELS.size)
-        val xIntersections = FloatArray(4)
-        val yIntersections = FloatArray(4)
-        for ((levelIndex, threshold) in CONTOUR_LEVELS.withIndex()) {
-            val path = Path()
-            for (y in 0 until height - 1) {
-                if (y % CONTOUR_CANCEL_CHECK_ROWS == 0 && isCancelled()) return null
-                val row = y * width
-                val nextRow = row + width
-                val centerY = y * cellSize + cellSize / 2f
-                val nextCenterY = (y + 1) * cellSize + cellSize / 2f
-                for (x in 0 until width - 1) {
-                    val topLeft = values[row + x]
-                    val topRight = values[row + x + 1]
-                    val bottomRight = values[nextRow + x + 1]
-                    val bottomLeft = values[nextRow + x]
-                    var count = 0
-
-                    if ((topLeft >= threshold) != (topRight >= threshold)) {
-                        val t = interpolate(topLeft, topRight, threshold)
-                        xIntersections[count] = (x + t) * cellSize + cellSize / 2f
-                        yIntersections[count] = centerY
-                        count++
-                    }
-                    if ((topRight >= threshold) != (bottomRight >= threshold)) {
-                        val t = interpolate(topRight, bottomRight, threshold)
-                        xIntersections[count] = (x + 1) * cellSize + cellSize / 2f
-                        yIntersections[count] = centerY + t * cellSize
-                        count++
-                    }
-                    if ((bottomRight >= threshold) != (bottomLeft >= threshold)) {
-                        val t = interpolate(bottomRight, bottomLeft, threshold)
-                        xIntersections[count] = (x + 1 - t) * cellSize + cellSize / 2f
-                        yIntersections[count] = nextCenterY
-                        count++
-                    }
-                    if ((bottomLeft >= threshold) != (topLeft >= threshold)) {
-                        val t = interpolate(bottomLeft, topLeft, threshold)
-                        xIntersections[count] = x * cellSize + cellSize / 2f
-                        yIntersections[count] = nextCenterY - t * cellSize
-                        count++
-                    }
-
-                    when (count) {
-                        2 -> {
-                            path.moveTo(xIntersections[0], yIntersections[0])
-                            path.lineTo(xIntersections[1], yIntersections[1])
-                        }
-                        4 -> {
-                            path.moveTo(xIntersections[0], yIntersections[0])
-                            path.lineTo(xIntersections[1], yIntersections[1])
-                            path.moveTo(xIntersections[2], yIntersections[2])
-                            path.lineTo(xIntersections[3], yIntersections[3])
-                        }
-                    }
-                }
-            }
-            result.add(
-                ContourPath(
-                    path,
-                    Color.argb(18 + levelIndex * 3, 55, 55, 100)
-                )
-            )
-        }
-        return result
-    }
-
-    private fun interpolate(a: Float, b: Float, threshold: Float): Float {
-        if (abs(b - a) < FLOAT_EPSILON) return 0.5f
-        return ((threshold - a) / (b - a)).coerceIn(0f, 1f)
     }
 
     private fun gaussianBlur(
@@ -496,7 +402,8 @@ class PhotoHeatmapOverlay(
     private data class Kernel(val radius: Float, val sigma: Float)
 
     private fun kernelForZoom(zoom: Double): Kernel {
-        val fraction = ((zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)).toFloat().coerceIn(0f, 1f)
+        val fraction = ((zoom - MIN_MAP_ZOOM) / (MAX_MAP_ZOOM - MIN_MAP_ZOOM))
+            .toFloat().coerceIn(0f, 1f)
         val eased = fraction * fraction * (3f - 2f * fraction)
         return Kernel(
             lerp(MAX_KERNEL_RADIUS, MIN_KERNEL_RADIUS, eased),
@@ -508,8 +415,8 @@ class PhotoHeatmapOverlay(
         from + (to - from) * fraction
 
     private companion object {
-        const val MIN_ZOOM = 3.0
-        const val MAX_ZOOM = 19.0
+        const val MIN_MAP_ZOOM = 1.0
+        const val MAX_MAP_ZOOM = 19.0
         const val FINE_GRID_ZOOM = 14.0
         const val TILE_SIZE = 256.0
         const val MAX_MERCATOR_LATITUDE = 85.05112878
@@ -517,11 +424,11 @@ class PhotoHeatmapOverlay(
         const val CAMERA_BUCKET_PIXELS = 4.0
         const val GRID_CELL = 8
         const val FINE_GRID_CELL = 4
-        const val MAX_KERNEL_RADIUS = 74f
+        const val MAX_KERNEL_RADIUS = 34f
         const val MIN_KERNEL_RADIUS = 12f
-        const val MAX_KERNEL_SIGMA = 33f
+        const val MAX_KERNEL_SIGMA = 12f
         const val MIN_KERNEL_SIGMA = 5.5f
-        const val KERNEL_SUPPORT_MULTIPLIER = 1.35f
+        const val KERNEL_SUPPORT_MULTIPLIER = 2.2f
         const val BLUR_RADIUS = 2
         const val BLUR_SIGMA = 0.8f
         const val FINE_BLUR_SIGMA = 0.65f
@@ -529,24 +436,22 @@ class PhotoHeatmapOverlay(
         const val MAX_PROJECTED_POINTS_HINT = 4096
         const val CANCEL_CHECK_BUCKETS = 32
         const val PIXEL_CANCEL_CHECK_INTERVAL = 1024
-        const val CONTOUR_CANCEL_CHECK_ROWS = 8
-        val CONTOUR_LEVELS = floatArrayOf(0.55f, 1.0f, 1.8f, 3.0f, 5.0f)
         const val BLUR_CANCEL_CHECK_ROWS = 8
         const val FLOAT_EPSILON = 0.00001f
         const val REFERENCE_DENSITY = 5f
         val LN_REFERENCE_DENSITY = ln(1f + REFERENCE_DENSITY)
         const val MIN_VISIBLE_DENSITY = 0.012f
-        const val ALPHA_START = 0.035f
-        const val ALPHA_FULL = 0.85f
-        const val MAX_HEAT_ALPHA = 142f
+        const val ALPHA_START = 0.025f
+        const val ALPHA_FULL = 0.9f
+        const val MAX_HEAT_ALPHA = 154f
         val COLOR_STOPS = listOf(
-            0.0f to Color.rgb(91, 75, 208),   // blue-violet
-            0.16f to Color.rgb(41, 111, 230), // blue
-            0.33f to Color.rgb(0, 198, 235),  // cyan
-            0.50f to Color.rgb(43, 207, 142), // green
-            0.67f to Color.rgb(250, 222, 65), // yellow
-            0.83f to Color.rgb(255, 140, 44), // orange
-            1.0f to Color.rgb(236, 52, 63)    // red
+            0.0f to Color.rgb(116, 87, 217), // violet
+            0.18f to Color.rgb(149, 96, 233), // purple
+            0.40f to Color.rgb(214, 107, 234), // magenta-pink
+            0.62f to Color.rgb(245, 141, 203), // pink
+            0.80f to Color.rgb(250, 155, 169), // warm pink
+            0.92f to Color.rgb(249, 199, 106), // warm yellow
+            1.0f to Color.rgb(255, 231, 123) // pale yellow core
         )
         val RENDER_EXECUTOR = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable, "Emre-PhotoHeatmap").apply { isDaemon = true }
