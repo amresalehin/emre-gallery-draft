@@ -249,7 +249,7 @@ fun AlbumsScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 gridItems(customAlbums.take(4), key = { it.id }) { album ->
-                                    val cover = media.firstOrNull { it.uri in album.mediaUris }
+                                    val cover = normalMedia.firstOrNull { it.uri in album.mediaUris }
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()

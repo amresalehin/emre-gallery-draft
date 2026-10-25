@@ -51,8 +51,14 @@ fun ViewerButton(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun ViewerAction(icon: ImageVector, label: String, onClick: () -> Unit) {
+fun ViewerAction(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    tint: Color? = null
+) {
     val scheme = MaterialTheme.colorScheme
+    val actionColor = tint ?: scheme.onSurface
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -66,11 +72,11 @@ fun ViewerAction(icon: ImageVector, label: String, onClick: () -> Unit) {
             modifier = Modifier.size(46.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(icon, label, tint = scheme.onSurface)
+                Icon(icon, label, tint = actionColor)
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(label, color = scheme.onSurface, style = MaterialTheme.typography.labelSmall)
+        Text(label, color = actionColor, style = MaterialTheme.typography.labelSmall)
     }
 }
 

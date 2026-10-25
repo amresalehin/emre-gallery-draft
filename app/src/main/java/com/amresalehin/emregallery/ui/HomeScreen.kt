@@ -2,8 +2,12 @@ package com.amresalehin.emregallery.ui
 
 import android.Manifest
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -46,14 +50,23 @@ fun HomeScreen(
     onClearAlbumFilter: () -> Unit = {},
     onAddPhotosToAlbum: (() -> Unit)? = null,
     onPermissionGranted: () -> Unit = {},
+    onMoveToBin: (Set<String>) -> Unit = {},
+    onMoveToLocked: (Set<String>) -> Unit = {},
+    onShareItems: (Set<String>) -> Unit = {},
+    onAddToAlbum: ((Set<String>) -> Unit)? = null,
+    selectedUris: Set<String> = emptySet(),
+    onSelectionChange: (Set<String>) -> Unit = {},
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
     val homeScope = rememberCoroutineScope()
-    var selectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
     val selectionMode = selectedUris.isNotEmpty()
+
+    BackHandler(enabled = selectionMode) {
+        onSelectionChange(emptySet())
+    }
     var granted by remember { mutableStateOf(hasMediaPermission(context)) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         val hasPermission = hasMediaPermission(context)
@@ -150,37 +163,6 @@ fun HomeScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (selectionMode) {
-                item(key = "home_selection_toolbar") {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = { selectedUris = emptySet() }) {
-                                Icon(Icons.Default.Close, contentDescription = "Exit selection")
-                            }
-                            Text(
-                                text = "${selectedUris.size} selected",
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                            TextButton(onClick = {
-                                selectedUris = if (selectedUris.size == sortedMedia.size) emptySet() else sortedMedia.map { it.uri }.toSet()
-                            }) {
-                                Text(if (selectedUris.size == sortedMedia.size) "Deselect all" else "Select all")
-                            }
-                        }
-                    }
-                }
-            }
-
             if (albumTitle != null) {
                 val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
                 val collectionIcon = when (albumTitle) {
@@ -316,9 +298,9 @@ fun HomeScreen(
                             rowIndex = rowIndex,
                             isSquare = (gridStyle == "square"),
                             selectedUris = selectedUris,
-                            onLongPress = { item -> selectedUris = selectedUris + item.uri },
-                            onToggleSelection = { item -> selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri },
-                            onOpen = { item -> if (selectionMode) { selectedUris = if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri } else onOpen(item) }
+                            onLongPress = { item -> onSelectionChange(selectedUris + item.uri) },
+                            onToggleSelection = { item -> onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) },
+                            onOpen = { item -> if (selectionMode) { onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) } else onOpen(item) }
                         )
                     }
                 }

@@ -19,7 +19,9 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +69,7 @@ fun ViewerScreen(
     onToggleHide: () -> Unit,
     onToggleBin: () -> Unit,
     onToggleArchive: () -> Unit,
+    onDeletePermanently: (() -> Unit)? = null,
     onAddTo: () -> Unit,
     onOpenNeighbor: (MediaItem) -> Unit,
     onOpenMap: () -> Unit
@@ -86,6 +89,8 @@ fun ViewerScreen(
 
     // "More" bottom sheet state
     var showMore by remember { mutableStateOf(false) }
+    var confirmPermanentDelete by remember { mutableStateOf(false) }
+    var confirmMoveToBin by remember { mutableStateOf(false) }
 
     // Interactive vertical drag-to-dismiss & drag-to-reveal gestures
     val dragOffsetY = remember { Animatable(0f) }
@@ -297,7 +302,14 @@ fun ViewerScreen(
             ViewerBottomActionBar(
                 isBin = isBin,
                 onEdit = launchEdit,
-                onToggleBin = onToggleBin
+                onToggleBin = {
+                    if (isBin) {
+                        onToggleBin()
+                    } else {
+                        confirmMoveToBin = true
+                    }
+                },
+                onDeletePermanently = if (isBin && onDeletePermanently != null) { { confirmPermanentDelete = true } } else null
             )
         }
 
@@ -316,7 +328,13 @@ fun ViewerScreen(
             onToggleDetails = onToggleDetails,
             onShare = shareMedia,
             onAddTo = onAddTo,
-            onToggleBin = onToggleBin,
+            onToggleBin = {
+                if (isBin) {
+                    onToggleBin()
+                } else {
+                    confirmMoveToBin = true
+                }
+            },
             onShowMore = { showMore = true },
             onOpenMap = onOpenMap,
             onAddTag = onAddTag,
@@ -332,11 +350,76 @@ fun ViewerScreen(
             isBin = isBin,
             isHidden = isHidden,
             isArchived = isArchived,
-            onToggleBin = onToggleBin,
+            onToggleBin = {
+                if (isBin) {
+                    onToggleBin()
+                } else {
+                    confirmMoveToBin = true
+                }
+            },
             onToggleHide = onToggleHide,
             onToggleArchive = onToggleArchive,
+            onDeletePermanently = if (isBin && onDeletePermanently != null) { { confirmPermanentDelete = true } } else null,
             onShowDetails = { if (!showDetails) onToggleDetails() },
             onDismiss = { showMore = false }
+        )
+    }
+
+    // Confirmation dialog for moving to Bin (monochrome)
+    if (confirmMoveToBin) {
+        AlertDialog(
+            onDismissRequest = { confirmMoveToBin = false },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) },
+            title = { Text("Move to Bin?") },
+            text = { Text("Move \"${item.name}\" to the device Bin? You can restore it later from the Bin.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmMoveToBin = false
+                        onToggleBin()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.onSurface,
+                        contentColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Text("Move to Bin")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmMoveToBin = false }) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
+    // Confirmation dialog for permanent delete (monochrome)
+    if (confirmPermanentDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmPermanentDelete = false },
+            icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) },
+            title = { Text("Delete permanently?") },
+            text = { Text("Permanently delete \"${item.name}\" from this device? This action cannot be undone.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        confirmPermanentDelete = false
+                        onDeletePermanently?.invoke()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.onSurface,
+                        contentColor = MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmPermanentDelete = false }) {
+                    Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         )
     }
 }

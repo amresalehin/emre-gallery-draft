@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -38,6 +39,33 @@ class PreferencesRepository(private val context: Context) {
     private val mediaPeopleKey = stringPreferencesKey("media_custom_people")
     private val homeScrollIndexKey = intPreferencesKey("home_scroll_index")
     private val homeScrollOffsetKey = intPreferencesKey("home_scroll_offset")
+    private val lockedFolderPinKey = stringPreferencesKey("locked_folder_pin_hash")
+    private val lockedFolderBiometricKey = booleanPreferencesKey("locked_folder_biometric_enabled")
+    private val welcomeCompletedKey = booleanPreferencesKey("welcome_completed")
+    private val sharedPrefs = context.getSharedPreferences("emre_gallery_prefs", Context.MODE_PRIVATE)
+
+    fun isWelcomeCompletedSync(): Boolean {
+        return sharedPrefs.getBoolean("welcome_completed", false)
+    }
+
+    val hasCompletedWelcome: Flow<Boolean> = context.galleryDataStore.data.map {
+        it[welcomeCompletedKey] ?: isWelcomeCompletedSync()
+    }.distinctUntilChanged()
+
+    suspend fun setCompletedWelcome(completed: Boolean) {
+        sharedPrefs.edit().putBoolean("welcome_completed", completed).commit()
+        context.galleryDataStore.edit { prefs ->
+            prefs[welcomeCompletedKey] = completed
+        }
+    }
+
+    val lockedFolderPinHash: Flow<String?> = context.galleryDataStore.data.map {
+        it[lockedFolderPinKey]
+    }.distinctUntilChanged()
+
+    val lockedFolderBiometricEnabled: Flow<Boolean> = context.galleryDataStore.data.map {
+        it[lockedFolderBiometricKey] ?: true
+    }.distinctUntilChanged()
 
     val homeScrollPosition: Flow<Pair<Int, Int>> = context.galleryDataStore.data.map { prefs ->
         val index = prefs[homeScrollIndexKey] ?: 0
@@ -261,6 +289,15 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
+    suspend fun setHiddenBatch(uris: Collection<String>, hiddenVal: Boolean) {
+        if (uris.isEmpty()) return
+        context.galleryDataStore.edit { prefs ->
+            val set = (prefs[hiddenKey] ?: emptySet()).toMutableSet()
+            if (hiddenVal) set.addAll(uris) else set.removeAll(uris.toSet())
+            prefs[hiddenKey] = set
+        }
+    }
+
     suspend fun setInBin(uri: String, inBin: Boolean) {
         context.galleryDataStore.edit { prefs ->
             val set = (prefs[binKey] ?: emptySet()).toMutableSet()
@@ -269,10 +306,89 @@ class PreferencesRepository(private val context: Context) {
         }
     }
 
+    suspend fun setInBinBatch(uris: Collection<String>, inBin: Boolean) {
+        if (uris.isEmpty()) return
+        context.galleryDataStore.edit { prefs ->
+            val set = (prefs[binKey] ?: emptySet()).toMutableSet()
+            if (inBin) set.addAll(uris) else set.removeAll(uris.toSet())
+            prefs[binKey] = set
+        }
+    }
+
+    suspend fun removePermanently(uris: Collection<String>) {
+        if (uris.isEmpty()) return
+        val uriSet = uris.toSet()
+        context.galleryDataStore.edit { prefs ->
+            val binSet = (prefs[binKey] ?: emptySet()).toMutableSet()
+            binSet.removeAll(uriSet)
+            prefs[binKey] = binSet
+
+            val hiddenSet = (prefs[hiddenKey] ?: emptySet()).toMutableSet()
+            hiddenSet.removeAll(uriSet)
+            prefs[hiddenKey] = hiddenSet
+
+            val favSet = (prefs[favouritesKey] ?: emptySet()).toMutableSet()
+            favSet.removeAll(uriSet)
+            prefs[favouritesKey] = favSet
+
+            val archSet = (prefs[archiveKey] ?: emptySet()).toMutableSet()
+            archSet.removeAll(uriSet)
+            prefs[archiveKey] = archSet
+        }
+        // Also remove from custom albums
+        val currentAlbums = customAlbums.first()
+        val hasChanges = currentAlbums.any { it.mediaUris.any { uri -> uri in uriSet } }
+        if (hasChanges) {
+            saveCustomAlbums(currentAlbums.map { album ->
+                album.copy(mediaUris = album.mediaUris - uriSet)
+            })
+        }
+    }
+
+    suspend fun setLockedFolderPin(pin: String) {
+        val hash = hashPin(pin.trim())
+        context.galleryDataStore.edit { prefs ->
+            prefs[lockedFolderPinKey] = hash
+        }
+    }
+
+    suspend fun verifyLockedFolderPin(pin: String): Boolean {
+        val stored = lockedFolderPinHash.first() ?: return false
+        return stored == hashPin(pin.trim())
+    }
+
+    suspend fun clearLockedFolderPin() {
+        context.galleryDataStore.edit { prefs ->
+            prefs.remove(lockedFolderPinKey)
+        }
+    }
+
+    suspend fun setLockedFolderBiometricEnabled(enabled: Boolean) {
+        context.galleryDataStore.edit { prefs ->
+            prefs[lockedFolderBiometricKey] = enabled
+        }
+    }
+
+    private fun hashPin(pin: String): String {
+        val salt = "EmreGallerySecureSalt2026"
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val digest = md.digest((salt + pin).toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
     suspend fun setArchived(uri: String, archivedVal: Boolean) {
         context.galleryDataStore.edit { prefs ->
             val set = (prefs[archiveKey] ?: emptySet()).toMutableSet()
             if (archivedVal) set.add(uri) else set.remove(uri)
+            prefs[archiveKey] = set
+        }
+    }
+
+    suspend fun setArchivedBatch(uris: Collection<String>, archivedVal: Boolean) {
+        if (uris.isEmpty()) return
+        context.galleryDataStore.edit { prefs ->
+            val set = (prefs[archiveKey] ?: emptySet()).toMutableSet()
+            if (archivedVal) set.addAll(uris) else set.removeAll(uris.toSet())
             prefs[archiveKey] = set
         }
     }

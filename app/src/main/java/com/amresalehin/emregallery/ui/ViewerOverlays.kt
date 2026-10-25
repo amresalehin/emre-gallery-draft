@@ -107,6 +107,7 @@ fun BoxScope.ViewerBottomActionBar(
     isBin: Boolean,
     onEdit: () -> Unit,
     onToggleBin: () -> Unit,
+    onDeletePermanently: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -117,12 +118,28 @@ fun BoxScope.ViewerBottomActionBar(
             .padding(horizontal = 8.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
-        ViewerAction(Icons.Default.Tune, "Edit", onEdit)
-        ViewerAction(
-            icon = if (isBin) Icons.Default.Restore else Icons.Default.Delete,
-            label = if (isBin) "Restore" else "Delete",
-            onClick = onToggleBin
-        )
+        if (isBin) {
+            ViewerAction(
+                icon = Icons.Default.Restore,
+                label = "Restore",
+                onClick = onToggleBin
+            )
+            if (onDeletePermanently != null) {
+                ViewerAction(
+                    icon = Icons.Default.DeleteForever,
+                    label = "Delete permanently",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    onClick = onDeletePermanently
+                )
+            }
+        } else {
+            ViewerAction(Icons.Default.Tune, "Edit", onEdit)
+            ViewerAction(
+                icon = Icons.Default.Delete,
+                label = "Delete",
+                onClick = onToggleBin
+            )
+        }
     }
 }
 
@@ -138,6 +155,7 @@ fun ViewerMoreBottomSheet(
     onToggleBin: () -> Unit,
     onToggleHide: () -> Unit,
     onToggleArchive: () -> Unit,
+    onDeletePermanently: (() -> Unit)? = null,
     onShowDetails: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -148,6 +166,13 @@ fun ViewerMoreBottomSheet(
                 leadingContent = { Icon(Icons.Default.Restore, null) },
                 modifier = Modifier.clickable { onDismiss(); onToggleBin() }
             )
+            if (onDeletePermanently != null) {
+                ListItem(
+                    headlineContent = { Text("Delete permanently from device") },
+                    leadingContent = { Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.onSurface) },
+                    modifier = Modifier.clickable { onDismiss(); onDeletePermanently() }
+                )
+            }
         } else {
             ListItem(
                 headlineContent = { Text(if (isHidden) "Unhide (return to gallery)" else "Move to Locked folder") },

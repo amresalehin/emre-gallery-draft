@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceIndexingRepository
@@ -204,8 +205,14 @@ class IndexingForegroundService : Service() {
         currentCoroutineContext().ensureActive()
     }
 
-    private fun loadPhotos(): List<MediaItem> =
-        MediaRepository(contentResolver).loadMedia().filterNot { it.isVideo }
+    private suspend fun loadPhotos(): List<MediaItem> {
+        val prefsRepo = PreferencesRepository(applicationContext)
+        val hiddenUris = runCatching { prefsRepo.hidden.first() }.getOrDefault(emptySet())
+        val binUris = runCatching { prefsRepo.bin.first() }.getOrDefault(emptySet())
+        return MediaRepository(contentResolver).loadMedia().filterNot {
+            it.isVideo || it.isTrashed || it.uri in hiddenUris || it.uri in binUris
+        }
+    }
 
     private fun updateState(
         task: String? = null,
