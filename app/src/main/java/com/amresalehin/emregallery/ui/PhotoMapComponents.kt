@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import android.content.Context
 import android.net.Uri
+import android.view.MotionEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -160,15 +161,25 @@ fun PhotoMapViewContainer(
                         minZoomLevel = 0.0
                         controller.setZoom(1.0)
                         controller.setCenter(GeoPoint(12.5, 90.0))
+                        setOnTouchListener { _, event ->
+                            if (event.actionMasked == MotionEvent.ACTION_MOVE ||
+                                event.actionMasked == MotionEvent.ACTION_POINTER_DOWN
+                            ) {
+                                onUserMapGesture()
+                            }
+                            // Observe gestures only; let MapView retain normal touch handling.
+                            false
+                        }
                         onMapReady(this)
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
-                                onUserMapGesture()
+                                // MapListener events also fire for programmatic framing.
+                                // They update the visible media list but must not count as
+                                // evidence that the user manually moved the map.
                                 onBoundsChanged(calculateMapBounds(this@apply, ctx))
                                 return true
                             }
                             override fun onZoom(event: ZoomEvent?): Boolean {
-                                onUserMapGesture()
                                 onBoundsChanged(calculateMapBounds(this@apply, ctx))
                                 return true
                             }
