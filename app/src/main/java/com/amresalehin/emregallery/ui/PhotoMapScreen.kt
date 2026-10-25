@@ -263,6 +263,7 @@ fun PhotoMapScreen(
                 dayGroups = uiState.dayGroups,
                 onPhotoClick = { photo, point ->
                     selectedMapMedia = photo to point
+                    mapFramed = true
                     mapRef?.let { focusSinglePhoto(it, point, animated = true) }
                 },
                 onFitAllPhotos = {

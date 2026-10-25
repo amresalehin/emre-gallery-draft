@@ -112,7 +112,7 @@ fun PhotoMapTopBar(
             modifier = Modifier.size(38.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.FilterCenterFocus, contentDescription = "Fit all photos", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
+                Icon(Icons.Default.FilterCenterFocus, contentDescription = "Fit all media", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
             }
         }
 
