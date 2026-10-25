@@ -66,6 +66,7 @@ fun fitPointsToMap(
         return
     }
     if (points.size == 1) {
+        // A single coordinate stays centered, with the surrounding map visible.
         focusSinglePhoto(map, points.first(), animated)
         return
     }
@@ -77,26 +78,15 @@ fun fitPointsToMap(
     val latSpan = north - south
     val lonSpan = kotlin.math.abs(east - west)
 
-    if (latSpan < 0.005 && lonSpan < 0.005) {
-        val center = GeoPoint((north + south) / 2.0, (east + west) / 2.0)
-        if (animated) map.controller.animateTo(center) else map.controller.setCenter(center)
-        map.controller.setZoom(15.0)
-        map.invalidate()
-        return
-    }
-    if (latSpan < 0.05 && lonSpan < 0.05) {
-        val center = GeoPoint((north + south) / 2.0, (east + west) / 2.0)
-        if (animated) map.controller.animateTo(center) else map.controller.setCenter(center)
-        map.controller.setZoom(13.5)
-        map.invalidate()
-        return
-    }
-
+    // A tiny geographic expansion keeps zero-span or tightly clustered coordinates
+    // well-defined. The visible margin itself is applied in screen-space below.
+    val latMargin = (latSpan * 0.02).coerceAtLeast(0.0001)
+    val lonMargin = (lonSpan * 0.02).coerceAtLeast(0.0001)
     val bounds = BoundingBox(
-        north.coerceAtMost(85.0),
-        east.coerceIn(-180.0, 180.0),
-        south.coerceAtLeast(-85.0),
-        west.coerceIn(-180.0, 180.0)
+        (north + latMargin).coerceAtMost(85.0),
+        (east + lonMargin).coerceAtMost(180.0),
+        (south - latMargin).coerceAtLeast(-85.0),
+        (west - lonMargin).coerceAtLeast(-180.0)
     )
     val paddingPx = (paddingDp * map.context.resources.displayMetrics.density).toInt()
     runCatching {
