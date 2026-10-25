@@ -19,32 +19,40 @@ import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 
-/**
- * Focuses camera on a single photo location at standard detail zoom (15.0).
- */
-fun focusSinglePhoto(map: MapView, point: GeoPoint, animated: Boolean = true) {
-    if (animated) {
-        map.controller.animateTo(point)
-    } else {
-        map.controller.setCenter(point)
+private const val WORLD_VIEW_ZOOM = 1.0
+private val WORLD_VIEW_CENTER = GeoPoint(0.0, 0.0)
+
+fun showWorldView(map: MapView, animated: Boolean = false) {
+    if (map.width <= 0 || map.height <= 0) {
+        map.post { showWorldView(map, animated) }
+        return
     }
+    if (animated) {
+        map.controller.animateTo(WORLD_VIEW_CENTER)
+        map.controller.setZoom(WORLD_VIEW_ZOOM)
+    } else {
+        map.controller.setCenter(WORLD_VIEW_CENTER)
+        map.controller.setZoom(WORLD_VIEW_ZOOM)
+    }
+    map.invalidate()
+}
+
+fun focusSinglePhoto(map: MapView, point: GeoPoint, animated: Boolean = true) {
+    if (animated) map.controller.animateTo(point) else map.controller.setCenter(point)
     map.controller.setZoom(15.0)
     map.invalidate()
 }
 
-/**
- * Centralized camera-fitting implementation for framing any group of locations.
- * Defines consistent, predictable behavior for one photo, tightly clustered photos,
- * and widely distributed locations.
- */
 fun fitPointsToMap(
     map: MapView,
     points: List<GeoPoint>,
     animated: Boolean = true,
     paddingPx: Int = 64
 ) {
-    if (points.isEmpty()) return
-
+    if (points.isEmpty()) {
+        showWorldView(map, animated)
+        return
+    }
     if (points.size == 1) {
         focusSinglePhoto(map, points.first(), animated)
         return
@@ -54,37 +62,24 @@ fun fitPointsToMap(
     val south = points.minOf { it.latitude }
     val east = points.maxOf { it.longitude }
     val west = points.minOf { it.longitude }
-
     val latSpan = north - south
     val lonSpan = kotlin.math.abs(east - west)
 
-    // Tightly clustered photos (span < ~500m)
     if (latSpan < 0.005 && lonSpan < 0.005) {
         val center = GeoPoint((north + south) / 2.0, (east + west) / 2.0)
-        if (animated) {
-            map.controller.animateTo(center)
-        } else {
-            map.controller.setCenter(center)
-        }
+        if (animated) map.controller.animateTo(center) else map.controller.setCenter(center)
         map.controller.setZoom(15.0)
         map.invalidate()
         return
     }
-
-    // Moderately clustered photos (span < ~5km)
     if (latSpan < 0.05 && lonSpan < 0.05) {
         val center = GeoPoint((north + south) / 2.0, (east + west) / 2.0)
-        if (animated) {
-            map.controller.animateTo(center)
-        } else {
-            map.controller.setCenter(center)
-        }
+        if (animated) map.controller.animateTo(center) else map.controller.setCenter(center)
         map.controller.setZoom(13.5)
         map.invalidate()
         return
     }
 
-    // Widely distributed locations: calculate bounding box with 10% margin
     val marginLat = (latSpan * 0.10).coerceAtLeast(0.01)
     val marginLon = (lonSpan * 0.10).coerceAtLeast(0.01)
     val bounds = BoundingBox(
@@ -93,28 +88,20 @@ fun fitPointsToMap(
         (south - marginLat).coerceAtLeast(-85.0),
         (west - marginLon).coerceAtLeast(-180.0)
     )
-
     runCatching {
         if (map.width > 0 && map.height > 0) {
             map.zoomToBoundingBox(bounds, animated, paddingPx)
-            if (map.zoomLevelDouble > 15.0) {
-                map.controller.setZoom(15.0)
-            }
+            if (map.zoomLevelDouble > 15.0) map.controller.setZoom(15.0)
         } else {
             map.post {
                 map.zoomToBoundingBox(bounds, animated, paddingPx)
-                if (map.zoomLevelDouble > 15.0) {
-                    map.controller.setZoom(15.0)
-                }
+                if (map.zoomLevelDouble > 15.0) map.controller.setZoom(15.0)
             }
         }
         map.invalidate()
     }
 }
 
-/**
- * Screen displaying gallery photos on an interactive OpenStreetMap.
- */
 @Composable
 fun PhotoMapScreen(
     media: List<MediaItem>,
@@ -130,13 +117,13 @@ fun PhotoMapScreen(
     val locationPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (isGranted) {
-            viewModel.rescanMedia(media)
-        }
+        if (isGranted) viewModel.rescanMedia(media)
     }
 
     LaunchedEffect(Unit) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !hasMediaLocationPermission(context)) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
+            !hasMediaLocationPermission(context)
+        ) {
             locationPermLauncher.launch(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
         }
     }
@@ -144,42 +131,48 @@ fun PhotoMapScreen(
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var mapFramed by remember { mutableStateOf(false) }
     var reportedMissingGpsForUri by remember { mutableStateOf<String?>(null) }
+    var userHasMovedMap by remember { mutableStateOf(false) }
 
     LaunchedEffect(media) {
         viewModel.loadAndScanMedia(media)
     }
 
-    // Camera handling for focusItem (viewer-originated or user selection)
     LaunchedEffect(uiState.locatedMedia, focusItem, uiState.loading) {
-        val target = focusItem ?: return@LaunchedEffect
-        val match = uiState.locatedMedia.firstOrNull { it.first.uri == target.uri }
+        val requestedItem = focusItem ?: return@LaunchedEffect
+        val match = uiState.locatedMedia.firstOrNull { it.first.uri == requestedItem.uri }
         if (match != null) {
-            mapRef?.let { map ->
-                focusSinglePhoto(map, match.second, animated = true)
-            }
-        } else if (!uiState.loading && reportedMissingGpsForUri != target.uri) {
-            reportedMissingGpsForUri = target.uri
+            mapRef?.let { focusSinglePhoto(it, match.second, animated = true) }
+        } else if (!uiState.loading && reportedMissingGpsForUri != requestedItem.uri) {
+            reportedMissingGpsForUri = requestedItem.uri
             snackbarHostState.showSnackbar(
-                message = "Cannot focus on \"${target.name}\": no accessible GPS coordinates found.",
+                message = "Cannot focus on \""+requestedItem.name+"\": no accessible GPS coordinates found.",
                 duration = SnackbarDuration.Short
             )
-            // Fit all available photos instead of doing nothing
             mapRef?.let { map ->
                 if (uiState.locatedMedia.isNotEmpty()) {
                     fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
+                } else {
+                    showWorldView(map, animated = true)
                 }
             }
         }
     }
 
-    // Auto-frame all located photos on initial load if no specific focusItem is provided
-    LaunchedEffect(uiState.locatedMedia) {
+    // Show the world while indexing, then frame valid locations once. Empty scans
+    // stay world-wide; repeated index emissions must not recenter the user's map.
+    LaunchedEffect(uiState.locatedMedia, uiState.loading) {
         val map = mapRef
-        if (uiState.locatedMedia.isNotEmpty() && !mapFramed && map != null && map.width > 0 && map.height > 0) {
-            if (focusItem == null) {
-                fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
+        if (!mapFramed && map != null && map.width > 0 && map.height > 0) {
+            when {
+                uiState.locatedMedia.isNotEmpty() && focusItem == null -> {
+                    fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
+                    mapFramed = true
+                }
+                !uiState.loading && uiState.locatedMedia.isEmpty() -> {
+                    if (!userHasMovedMap) showWorldView(map, animated = false)
+                    mapFramed = true
+                }
             }
-            mapFramed = true
         }
     }
 
@@ -192,8 +185,7 @@ fun PhotoMapScreen(
     }
 
     Box(
-        Modifier
-            .fillMaxSize()
+        Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .navigationBarsPadding()
@@ -209,11 +201,8 @@ fun PhotoMapScreen(
                     viewModel.setMapLayer(layer)
                     mapRef?.let { map ->
                         map.setTileSource(
-                            if (layer == "Satellite") {
-                                PhotoMapTiles.satelliteTileSource()
-                            } else {
-                                TileSourceFactory.MAPNIK
-                            }
+                            if (layer == "Satellite") PhotoMapTiles.satelliteTileSource()
+                            else TileSourceFactory.MAPNIK
                         )
                         map.invalidate()
                     }
@@ -222,12 +211,12 @@ fun PhotoMapScreen(
                     mapRef?.let { map ->
                         if (uiState.locatedMedia.isNotEmpty()) {
                             fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
+                        } else {
+                            showWorldView(map, animated = true)
                         }
                     }
                 },
-                onRescan = {
-                    viewModel.rescanMedia(media)
-                }
+                onRescan = { viewModel.rescanMedia(media) }
             )
 
             PhotoMapViewContainer(
@@ -238,16 +227,21 @@ fun PhotoMapScreen(
                 scanTotal = uiState.scanTotal,
                 onMapReady = { map ->
                     mapRef = map
-                    if (uiState.locatedMedia.isNotEmpty() && !mapFramed) {
-                        if (focusItem == null) {
-                            fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
+                    if (!mapFramed && map.width > 0 && map.height > 0) {
+                        when {
+                            uiState.locatedMedia.isNotEmpty() && focusItem == null -> {
+                                fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
+                                mapFramed = true
+                            }
+                            !uiState.loading && uiState.locatedMedia.isEmpty() -> {
+                                showWorldView(map, animated = false)
+                                mapFramed = true
+                            }
                         }
-                        mapFramed = true
                     }
                 },
-                onBoundsChanged = { bounds ->
-                    viewModel.updateVisibleMapBounds(bounds)
-                },
+                onUserMapGesture = { userHasMovedMap = true },
+                onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
                 modifier = Modifier.weight(1f)
             )
 
@@ -259,15 +253,15 @@ fun PhotoMapScreen(
                 scanTotal = uiState.scanTotal,
                 dayGroups = uiState.dayGroups,
                 onPhotoClick = { photo, point ->
-                    mapRef?.let { map ->
-                        focusSinglePhoto(map, point, animated = true)
-                    }
+                    mapRef?.let { focusSinglePhoto(it, point, animated = true) }
                     onOpen(photo)
                 },
                 onFitAllPhotos = {
                     mapRef?.let { map ->
                         if (uiState.locatedMedia.isNotEmpty()) {
                             fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
+                        } else {
+                            showWorldView(map, animated = true)
                         }
                     }
                 },
@@ -277,9 +271,7 @@ fun PhotoMapScreen(
 
         SnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 16.dp)
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp)
         )
     }
 }
