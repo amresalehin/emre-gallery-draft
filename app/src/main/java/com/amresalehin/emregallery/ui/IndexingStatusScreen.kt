@@ -35,6 +35,9 @@ import java.util.Locale
 fun IndexingStatusScreen(
     media: List<MediaItem>,
     ocrLanguages: Set<String>,
+    ocrModel: String = "fast",
+    onModelChange: ((String) -> Unit)? = null,
+    onOpenOcrSettings: (() -> Unit)? = null,
     onBack: () -> Unit,
     viewModel: IndexingStatusViewModel = viewModel()
 ) {
@@ -60,8 +63,8 @@ fun IndexingStatusScreen(
         }
     }
 
-    LaunchedEffect(media, ocrLanguages) {
-        viewModel.setMedia(media, ocrLanguages)
+    LaunchedEffect(media, ocrLanguages, ocrModel) {
+        viewModel.setMedia(media, ocrLanguages, ocrModel)
     }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
@@ -99,7 +102,12 @@ fun IndexingStatusScreen(
                 numberFormat = numberFormat,
                 onToggleOcr = viewModel::toggleOcr,
                 onStopOcr = viewModel::stopOcr,
-                onReindexOcr = viewModel::clearAndReindexOcr
+                onReindexOcr = viewModel::clearAndReindexOcr,
+                onModelChange = { newModel ->
+                    viewModel.setOcrModel(newModel)
+                    onModelChange?.invoke(newModel)
+                },
+                onOpenOcrSettings = onOpenOcrSettings
             )
 
             // 2. Face Finding (Detection) Card

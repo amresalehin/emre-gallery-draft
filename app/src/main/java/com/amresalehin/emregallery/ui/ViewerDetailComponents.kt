@@ -382,11 +382,15 @@ fun DetailOcrCard(
     ocrError: String?,
     ocrBusy: Boolean,
     ocrLanguages: List<String>,
+    ocrModel: String = "fast",
+    onSelectModel: ((String) -> Unit)? = null,
     onToggleLanguage: (String) -> Unit,
     onRunOcr: () -> Unit,
     onCopyText: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isBest = ocrModel.equals("best", ignoreCase = true)
+
     DetailCard(modifier = modifier) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -402,7 +406,53 @@ fun DetailOcrCard(
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurface
                 )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "OCR Text",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
                 Spacer(Modifier.weight(1f))
+
+                // Model Selection Pill Toggle
+                if (onSelectModel != null && !item.isVideo) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                    ) {
+                        Row(modifier = Modifier.padding(2.dp)) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (!isBest) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                modifier = Modifier.clickable(!ocrBusy) { onSelectModel("fast") }
+                            ) {
+                                Text(
+                                    "Fast",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (!isBest) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (!isBest) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isBest) MaterialTheme.colorScheme.tertiaryContainer else Color.Transparent,
+                                modifier = Modifier.clickable(!ocrBusy) { onSelectModel("best") }
+                            ) {
+                                Text(
+                                    "Best",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (isBest) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isBest) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.width(6.dp))
+                }
+
                 IconButton(
                     onClick = onRunOcr,
                     enabled = !item.isVideo && !ocrBusy && ocrLanguages.isNotEmpty()

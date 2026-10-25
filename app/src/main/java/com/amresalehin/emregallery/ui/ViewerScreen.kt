@@ -49,6 +49,7 @@ fun ViewerScreen(
     items: List<MediaItem>,
     customAlbums: List<CustomAlbum>,
     defaultOcrLanguages: Set<String> = setOf("eng"),
+    defaultOcrModel: String = "fast",
     customTags: Set<String>,
     customPeople: Set<String>,
     onAddTag: (String) -> Unit,
@@ -320,7 +321,8 @@ fun ViewerScreen(
             onOpenMap = onOpenMap,
             onAddTag = onAddTag,
             isBin = isBin,
-            defaultOcrLanguages = defaultOcrLanguages
+            defaultOcrLanguages = defaultOcrLanguages,
+            defaultOcrModel = defaultOcrModel
         )
     }
 

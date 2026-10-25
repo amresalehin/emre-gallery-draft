@@ -101,7 +101,8 @@ class IndexingForegroundService : Service() {
                 when (action) {
                     ACTION_START_OCR -> runOcr(
                         intent?.getStringArrayListExtra(EXTRA_LANGUAGES)?.ifEmpty { arrayListOf("eng") } ?: arrayListOf("eng"),
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
+                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
+                        intent?.getStringExtra(EXTRA_MODEL) ?: "fast"
                     )
                     ACTION_START_FACE -> runFace(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
@@ -125,18 +126,19 @@ class IndexingForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    private suspend fun runOcr(languages: List<String>, rescanAll: Boolean) {
+    private suspend fun runOcr(languages: List<String>, rescanAll: Boolean, modelId: String = "fast") {
+        val model = com.amresalehin.emregallery.ocr.TesseractModel.fromId(modelId)
         val photos = loadPhotos()
         if (rescanAll) withContext(Dispatchers.IO) { TesseractOcr.clearCachedResults(this@IndexingForegroundService) }
         val pending = photos.filterNot { TesseractOcr.hasCachedResult(this, Uri.parse(it.uri)) }
         updateState(task = TASK_OCR, running = true, paused = false, processed = photos.size - pending.size, total = photos.size, error = null)
-        postProgress("OCR indexing", "Preparing ${pending.size} remaining images", photos.size - pending.size, photos.size)
+        postProgress("OCR indexing", "Preparing ${pending.size} images (${model.shortName})", photos.size - pending.size, photos.size)
         var completed = photos.size - pending.size
         for (item in pending) {
             awaitResume()
             currentCoroutineContext().ensureActive()
             try {
-                val text = TesseractOcr.recognize(this, Uri.parse(item.uri), languages)
+                val text = TesseractOcr.recognize(this, Uri.parse(item.uri), languages, model)
                 TesseractOcr.saveCachedResult(this, Uri.parse(item.uri), text)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -145,7 +147,7 @@ class IndexingForegroundService : Service() {
             }
             completed++
             updateState(processed = completed, total = photos.size)
-            postProgress("OCR indexing", "Processed $completed of ${photos.size} images", completed, photos.size)
+            postProgress("OCR indexing", "Processed $completed of ${photos.size} images (${model.title})", completed, photos.size)
         }
     }
 
@@ -301,6 +303,7 @@ class IndexingForegroundService : Service() {
         private const val ACTION_STATUS = "com.amresalehin.emregallery.indexing.STATUS"
         private const val EXTRA_LANGUAGES = "languages"
         private const val EXTRA_RESCAN_ALL = "rescan_all"
+        private const val EXTRA_MODEL = "ocr_model"
         private const val EXTRA_ALLOW_NATIVE = "allow_native"
         private const val EXTRA_FORCE = "force"
 
@@ -313,10 +316,16 @@ class IndexingForegroundService : Service() {
             }
         }
 
-        fun startOcr(context: Context, languages: List<String>, rescanAll: Boolean = false) =
+        fun startOcr(
+            context: Context,
+            languages: List<String>,
+            rescanAll: Boolean = false,
+            modelId: String = "fast"
+        ) =
             command(context, ACTION_START_OCR) {
                 putStringArrayListExtra(EXTRA_LANGUAGES, ArrayList(languages))
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
+                putExtra(EXTRA_MODEL, modelId)
             }
 
         fun startFace(context: Context, rescanAll: Boolean = false, allowNative: Boolean = false) =

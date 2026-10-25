@@ -328,7 +328,9 @@ fun SideNavigationDrawer(
                             Triple(Destination.BIN, "Bin", Icons.Default.Delete)
                         ),
                         listOf(
-                            Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings)
+                            Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings),
+                            Triple(Destination.OCR_SETTINGS, "OCR Settings", Icons.Default.DocumentScanner),
+                            Triple(Destination.INDEXING_STATUS, "Indexing Status", Icons.Default.Storage)
                         )
                     )
 

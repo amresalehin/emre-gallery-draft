@@ -10,9 +10,57 @@ import com.googlecode.tesseract.android.TessBaseAPI
 import java.io.File
 import java.io.InputStream
 
+enum class TesseractModel(
+    val id: String,
+    val title: String,
+    val shortName: String,
+    val tag: String,
+    val description: String,
+    val speedSummary: String,
+    val accuracySummary: String,
+    val memoryFootprint: String,
+    val assetFolder: String,
+    val storageDirName: String,
+    val repoUrl: String
+) {
+    FAST(
+        id = "fast",
+        title = "tessdata_fast",
+        shortName = "Fast (Quantized)",
+        tag = "Recommended for Mobile",
+        description = "Integer-quantized 8-bit LSTM neural network models. Optimized for high speed, low RAM footprint, and battery-friendly photo indexing.",
+        speedSummary = "Up to 4x faster",
+        accuracySummary = "High accuracy",
+        memoryFootprint = "~4 MB per language",
+        assetFolder = "tessdata_fast",
+        storageDirName = "tesseract_fast",
+        repoUrl = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main"
+    ),
+    BEST(
+        id = "best",
+        title = "tessdata_best",
+        shortName = "Best (Full Precision)",
+        tag = "Maximum Quality",
+        description = "Full-precision floating-point LSTM neural network models directly from Tesseract training. Delivers maximum character recognition accuracy on complex documents, low-contrast text, and signs.",
+        speedSummary = "Standard speed",
+        accuracySummary = "Maximum accuracy",
+        memoryFootprint = "~15 MB per language",
+        assetFolder = "tessdata_best",
+        storageDirName = "tesseract_best",
+        repoUrl = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main"
+    );
+
+    companion object {
+        fun fromId(id: String?): TesseractModel =
+            entries.find { it.id.equals(id, ignoreCase = true) || it.title.equals(id, ignoreCase = true) } ?: FAST
+    }
+}
+
 /**
- * Fully on-device OCR using Tesseract (tess-two).
- * Traineddata files are bundled into APK assets and extracted to internal storage on demand.
+ * Fully on-device OCR using Tesseract (tesseract4android).
+ * Traineddata models (tessdata_fast and tessdata_best) are bundled into APK assets
+ * and extracted to model-specific internal storage directories, with on-demand download
+ * fallback from official Tesseract GitHub repositories.
  */
 object TesseractOcr {
     private fun cacheFile(context: Context, uri: Uri): File {
@@ -66,30 +114,66 @@ object TesseractOcr {
         "Japanese" to "jpn"
     )
 
-    /** Returns selected traineddata files that are already extracted and usable. */
-    fun installedLanguages(context: Context): Set<String> {
-        val directory = File(context.filesDir, "tesseract/tessdata")
+    fun getBaseDir(context: Context, model: TesseractModel): File =
+        File(context.filesDir, model.storageDirName)
+
+    fun getTessdataDir(context: Context, model: TesseractModel): File =
+        File(getBaseDir(context, model), "tessdata")
+
+    /** Checks whether a traineddata binary is bundled directly in APK assets for the given model. */
+    fun isLanguageBundledInAssets(context: Context, code: String, model: TesseractModel): Boolean {
+        return runCatching {
+            context.assets.open("${model.assetFolder}/$code.traineddata").use { true }
+        }.getOrDefault(false)
+    }
+
+    /** Checks whether the language data is already extracted to disk and ready to use. */
+    fun isLanguageInstalled(context: Context, code: String, model: TesseractModel): Boolean {
+        val file = File(getTessdataDir(context, model), "$code.traineddata")
+        return file.isFile && file.length() >= 1024
+    }
+
+    /** Returns the size in bytes of the installed language model on disk, or 0 if not installed. */
+    fun getInstalledLanguageSizeBytes(context: Context, code: String, model: TesseractModel): Long {
+        val file = File(getTessdataDir(context, model), "$code.traineddata")
+        return if (file.isFile) file.length() else 0L
+    }
+
+    /** Returns total disk storage in bytes used by all extracted traineddata files for this model. */
+    fun getModelStorageBytes(context: Context, model: TesseractModel): Long {
+        val dir = getTessdataDir(context, model)
+        return dir.listFiles()?.filter { it.isFile && it.name.endsWith(".traineddata") }
+            ?.sumOf { it.length() } ?: 0L
+    }
+
+    /** Returns selected traineddata files that are already extracted and usable for the given model. */
+    fun installedLanguages(context: Context, model: TesseractModel = TesseractModel.FAST): Set<String> {
+        val directory = getTessdataDir(context, model)
         return supportedLanguages.values.filterTo(mutableSetOf()) { code ->
             File(directory, "$code.traineddata").let { it.isFile && it.length() >= 1024 }
         }
     }
 
-    /** Extracts bundled language models to private storage before OCR is requested. */
-    fun prepareLanguages(context: Context, languageCodes: List<String>) {
-        val directory = File(context.filesDir, "tesseract/tessdata")
+    /** Extracts bundled language models or downloads missing ones to private storage before OCR. */
+    fun prepareLanguages(
+        context: Context,
+        languageCodes: List<String>,
+        model: TesseractModel = TesseractModel.FAST
+    ) {
+        val directory = getTessdataDir(context, model)
         if (!directory.exists() && !directory.mkdirs()) {
-            error("Could not create OCR language-data directory.")
+            error("Could not create OCR language-data directory for ${model.title}.")
         }
         languageCodes.distinct().filter { it in supportedLanguages.values }.forEach { code ->
             val destination = File(directory, "$code.traineddata")
             if (!destination.isFile || destination.length() < 1024) {
-                copyBundledTrainedData(context, code, destination)
+                copyBundledTrainedData(context, code, model, destination)
             }
         }
         // English is used as a fallback by the recognition engine.
         val english = File(directory, "eng.traineddata")
         if (!english.isFile || english.length() < 1024) {
-            copyBundledTrainedData(context, "eng", english)
+            copyBundledTrainedData(context, "eng", model, english)
         }
     }
 
@@ -105,12 +189,22 @@ object TesseractOcr {
         return deleted
     }
 
-    fun recognize(context: Context, uri: Uri, languageCodes: List<String>): String {
+    fun deleteModelStorage(context: Context, model: TesseractModel): Boolean {
+        val dir = getTessdataDir(context, model)
+        return dir.deleteRecursively()
+    }
+
+    fun recognize(
+        context: Context,
+        uri: Uri,
+        languageCodes: List<String>,
+        model: TesseractModel = TesseractModel.FAST
+    ): String {
         require(languageCodes.isNotEmpty()) { "Choose at least one OCR language." }
-        val baseDir = File(context.filesDir, "tesseract")
-        val tessdataDir = File(baseDir, "tessdata")
+        val baseDir = getBaseDir(context, model)
+        val tessdataDir = getTessdataDir(context, model)
         if (!tessdataDir.exists() && !tessdataDir.mkdirs()) {
-            error("Could not create OCR language-data directory.")
+            error("Could not create OCR language-data directory for ${model.title}.")
         }
 
         val validCodes = languageCodes.distinct().filter { it in supportedLanguages.values }
@@ -119,13 +213,13 @@ object TesseractOcr {
         validCodes.forEach { code ->
             val destination = File(tessdataDir, "$code.traineddata")
             if (!destination.exists() || destination.length() < 1024) {
-                copyBundledTrainedData(context, code, destination)
+                copyBundledTrainedData(context, code, model, destination)
             }
         }
 
         val englishData = File(tessdataDir, "eng.traineddata")
         if (!englishData.exists() || englishData.length() < 1024) {
-            copyBundledTrainedData(context, "eng", englishData)
+            copyBundledTrainedData(context, "eng", model, englishData)
         }
 
         val bitmap = decodeBitmap(context, uri)
@@ -145,8 +239,8 @@ object TesseractOcr {
                 }
                 val candidateEngine = TessBaseAPI()
                 val initialized = runCatching {
-                    // The bundled tessdata_fast models are LSTM-only. Explicitly
-                    // select the LSTM engine rather than the legacy/default mode.
+                    // Both tessdata_fast and tessdata_best models are LSTM neural network models.
+                    // OEM_LSTM_ONLY instructs Tesseract to use the neural network engine.
                     candidateEngine.init(
                         baseDir.absolutePath,
                         candidate,
@@ -163,10 +257,10 @@ object TesseractOcr {
             }
 
             val engine = activeEngine ?: error(
-                "Tesseract could not load OCR language data ($combinedLangs). " +
-                    "The bundled traineddata may be missing, incomplete, or incompatible. " +
-                    (lastInitError?.let { "Last initialization error: $it. " } ?: "") +
-                    "Verify the language data and try again."
+                "Tesseract could not load ${model.title} OCR data ($combinedLangs). " +
+                    "The model files may be missing or corrupted. " +
+                    (lastInitError?.let { "Details: $it. " } ?: "") +
+                    "Please verify language files in OCR Settings and try again."
             )
             engine.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
             engine.setImage(bitmap)
@@ -177,7 +271,12 @@ object TesseractOcr {
         }
     }
 
-    private fun copyBundledTrainedData(context: Context, code: String, destination: File) {
+    private fun copyBundledTrainedData(
+        context: Context,
+        code: String,
+        model: TesseractModel,
+        destination: File
+    ) {
         val parent = destination.parentFile ?: error("Invalid destination parent directory")
         if (!parent.exists() && !parent.mkdirs()) {
             error("Could not create directory for language: $code")
@@ -185,8 +284,9 @@ object TesseractOcr {
         val temporary = File(parent, "$code.traineddata.tmp_${System.currentTimeMillis()}")
         try {
             var loaded = false
+            // 1. Try model-specific asset folder (e.g. assets/tessdata_fast/$code.traineddata or assets/tessdata_best/$code.traineddata)
             try {
-                context.assets.open("tessdata/$code.traineddata").use { input ->
+                context.assets.open("${model.assetFolder}/$code.traineddata").use { input ->
                     temporary.outputStream().use { output -> input.copyTo(output) }
                 }
                 loaded = temporary.length() >= 1024
@@ -194,13 +294,24 @@ object TesseractOcr {
                 loaded = false
             }
 
+            // 2. Fallback to generic assets/tessdata/$code.traineddata if available
             if (!loaded) {
-                // Download on-demand from official tessdata_fast repository
-                val connection = java.net.URL(
-                    "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$code.traineddata"
-                ).openConnection() as java.net.HttpURLConnection
+                try {
+                    context.assets.open("tessdata/$code.traineddata").use { input ->
+                        temporary.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    loaded = temporary.length() >= 1024
+                } catch (_: Exception) {
+                    loaded = false
+                }
+            }
+
+            // 3. Download on-demand from the official GitHub repository for this specific model
+            if (!loaded) {
+                val urlString = "${model.repoUrl}/$code.traineddata"
+                val connection = java.net.URL(urlString).openConnection() as java.net.HttpURLConnection
                 connection.connectTimeout = 15000
-                connection.readTimeout = 45000
+                connection.readTimeout = 60000
                 connection.instanceFollowRedirects = true
                 try {
                     connection.connect()
@@ -209,14 +320,14 @@ object TesseractOcr {
                             temporary.outputStream().use { output -> input.copyTo(output) }
                         }
                     } else {
-                        error("HTTP ${connection.responseCode}")
+                        error("HTTP ${connection.responseCode} while fetching $urlString")
                     }
                 } finally {
                     connection.disconnect()
                 }
             }
 
-            if (temporary.length() < 1024) error("Language data for '$code' is missing or incomplete.")
+            if (temporary.length() < 1024) error("Language data for '$code' (${model.title}) is incomplete.")
             if (destination.exists()) {
                 destination.delete()
             }
@@ -227,7 +338,7 @@ object TesseractOcr {
         } catch (e: Exception) {
             temporary.delete()
             throw IllegalStateException(
-                "OCR data for '$code' is unavailable: ${e.message}",
+                "OCR data for '$code' (${model.title}) could not be installed: ${e.message}",
                 e
             )
         }

@@ -85,6 +85,7 @@ fun GalleryApp() {
     val gridColumnsPref by prefs.gridColumns.collectAsStateWithLifecycle(initialValue = 3)
     val gridStylePref by prefs.gridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
     val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
+    val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -553,7 +554,7 @@ fun GalleryApp() {
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
                                 "About" -> navigateTo(Destination.ABOUT)
-                                "OCR" -> navigateTo(Destination.OCR_SETTINGS)
+                                "OCR Settings", "OCR" -> navigateTo(Destination.OCR_SETTINGS)
                             }
                         },
                         onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
@@ -567,9 +568,24 @@ fun GalleryApp() {
                     Destination.INDEXING_STATUS -> IndexingStatusScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         ocrLanguages = ocrLanguagesPref,
+                        ocrModel = ocrModelPref,
+                        onModelChange = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
+                        onOpenOcrSettings = { navigateTo(Destination.OCR_SETTINGS) },
                         onBack = { performBackNavigation() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
+                        currentModel = ocrModelPref,
+                        ocrLanguages = ocrLanguagesPref,
+                        onSelectModel = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
+                        onToggleLanguage = { code ->
+                            val updated = ocrLanguagesPref.toMutableSet()
+                            if (code in updated) {
+                                if (updated.size > 1) updated.remove(code)
+                            } else {
+                                updated.add(code)
+                            }
+                            scope.launch { prefs.setOcrLanguages(updated) }
+                        },
                         onBack = { performBackNavigation() }
                     )
                     Destination.ABOUT -> AboutScreen(
@@ -594,6 +610,7 @@ fun GalleryApp() {
                             item = item,
                             items = visibleMedia.ifEmpty { listOf(item) },
                             defaultOcrLanguages = ocrLanguagesPref,
+                            defaultOcrModel = ocrModelPref,
                             favourite = item.uri in favourites,
                             isHidden = item.uri in hidden,
                             isBin = item.uri in inBin,

@@ -44,6 +44,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     private var currentPhotos: List<MediaItem> = emptyList()
     private var currentPhotoUris: List<String> = emptyList()
     private var currentOcrLanguages: Set<String> = emptySet()
+    private var currentOcrModel: String = "fast"
 
     var allowNativeFallback: Boolean = false
         private set
@@ -60,15 +61,21 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         startServiceMonitoring()
     }
 
-    fun setMedia(media: List<MediaItem>, ocrLanguages: Set<String>) {
+    fun setMedia(media: List<MediaItem>, ocrLanguages: Set<String>, ocrModel: String = "fast") {
         val photos = media.filterNot { it.isVideo }
         val uris = photos.map { it.uri }
         currentPhotos = photos
         currentPhotoUris = uris
         currentOcrLanguages = ocrLanguages
+        currentOcrModel = ocrModel
 
-        _uiState.update { it.copy(totalPhotos = photos.size) }
+        _uiState.update { it.copy(totalPhotos = photos.size, ocr = it.ocr.copy(model = ocrModel)) }
         refreshCounts()
+    }
+
+    fun setOcrModel(modelId: String) {
+        currentOcrModel = modelId
+        _uiState.update { it.copy(ocr = it.ocr.copy(model = modelId)) }
     }
 
     fun updateEngineState() {
@@ -244,7 +251,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         _uiState.update { it.copy(ocr = it.ocr.copy(isRunning = true, isPaused = false)) }
         IndexingForegroundService.startOcr(
             context,
-            currentOcrLanguages.toList().ifEmpty { listOf("eng") }
+            currentOcrLanguages.toList().ifEmpty { listOf("eng") },
+            modelId = currentOcrModel
         )
     }
 
@@ -263,7 +271,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         IndexingForegroundService.startOcr(
             context,
             currentOcrLanguages.toList().ifEmpty { listOf("eng") },
-            rescanAll = true
+            rescanAll = true,
+            modelId = currentOcrModel
         )
     }
 

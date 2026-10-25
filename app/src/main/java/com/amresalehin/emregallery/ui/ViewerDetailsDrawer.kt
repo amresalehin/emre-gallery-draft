@@ -41,12 +41,14 @@ import kotlinx.coroutines.withContext
 class ViewerDetailsState(
     val context: Context,
     val item: MediaItem,
-    defaultOcrLanguages: Set<String>
+    defaultOcrLanguages: Set<String>,
+    initialOcrModel: String = "fast"
 ) {
     var metadata by mutableStateOf<Map<String, String>>(emptyMap())
     var ocrText by mutableStateOf("")
     var ocrError by mutableStateOf<String?>(null)
     var ocrBusy by mutableStateOf(false)
+    var ocrModel by mutableStateOf(initialOcrModel)
     val ocrLanguages = mutableStateListOf<String>().apply {
         val initial = if (defaultOcrLanguages.isNotEmpty()) defaultOcrLanguages else setOf("eng")
         addAll(initial)
@@ -78,7 +80,8 @@ class ViewerDetailsState(
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 val mediaUri = Uri.parse(item.uri)
-                val recognized = TesseractOcr.recognize(context, mediaUri, ocrLanguages.toList())
+                val model = com.amresalehin.emregallery.ocr.TesseractModel.fromId(ocrModel)
+                val recognized = TesseractOcr.recognize(context, mediaUri, ocrLanguages.toList(), model)
                 runCatching { TesseractOcr.saveCachedResult(context, mediaUri, recognized) }
                 recognized
             }
@@ -102,14 +105,15 @@ class ViewerDetailsState(
 @Composable
 fun rememberViewerDetailsState(
     item: MediaItem,
-    defaultOcrLanguages: Set<String>
+    defaultOcrLanguages: Set<String>,
+    defaultOcrModel: String = "fast"
 ): ViewerDetailsState {
     val context = LocalContext.current
-    val state = remember(item.uri, defaultOcrLanguages) {
-        ViewerDetailsState(context, item, defaultOcrLanguages)
+    val state = remember(item.uri, defaultOcrLanguages, defaultOcrModel) {
+        ViewerDetailsState(context, item, defaultOcrLanguages, defaultOcrModel)
     }
 
-    LaunchedEffect(item.uri, defaultOcrLanguages) {
+    LaunchedEffect(item.uri, defaultOcrLanguages, defaultOcrModel) {
         state.loadData()
     }
 
@@ -140,12 +144,13 @@ fun BoxScope.ViewerDetailsDrawer(
     onAddTag: (String) -> Unit,
     isBin: Boolean,
     defaultOcrLanguages: Set<String> = setOf("eng"),
+    defaultOcrModel: String = "fast",
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val viewConfiguration = ViewConfiguration.get(context)
     val coroutineScope = rememberCoroutineScope()
-    val detailsState = rememberViewerDetailsState(item, defaultOcrLanguages)
+    val detailsState = rememberViewerDetailsState(item, defaultOcrLanguages, defaultOcrModel)
 
     // Smooth backdrop scrim
     AnimatedVisibility(
@@ -350,6 +355,8 @@ fun BoxScope.ViewerDetailsDrawer(
                             ocrError = detailsState.ocrError,
                             ocrBusy = detailsState.ocrBusy,
                             ocrLanguages = detailsState.ocrLanguages,
+                            ocrModel = detailsState.ocrModel,
+                            onSelectModel = { detailsState.ocrModel = it },
                             onToggleLanguage = { detailsState.toggleOcrLanguage(it) },
                             onRunOcr = {
                                 coroutineScope.launch { detailsState.runOcr() }

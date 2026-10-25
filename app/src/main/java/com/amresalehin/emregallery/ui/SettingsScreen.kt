@@ -34,6 +34,7 @@ fun SettingsScreen(
     var query by remember { mutableStateOf("") }
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
+        "OCR Settings" to Icons.Default.DocumentScanner,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
@@ -168,6 +169,7 @@ fun SettingsScreen(
                                 Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     when (label) {
+                                        "OCR Settings" -> "Tesseract model (fast / best) & language models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"
                                         "About" -> "Emre Gallery · 0.1.0"
                                         else -> ""

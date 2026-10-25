@@ -7,7 +7,8 @@ data class OcrState(
     val cachedCount: Int = 0,
     val isRunning: Boolean = false,
     val isPaused: Boolean = false,
-    val itemsPerMinute: Int = 0
+    val itemsPerMinute: Int = 0,
+    val model: String = "fast"
 )
 
 data class FaceFindingState(

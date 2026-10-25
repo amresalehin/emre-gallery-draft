@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import java.text.NumberFormat
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OcrIndexingCard(
     totalPhotos: Int,
@@ -32,10 +34,13 @@ fun OcrIndexingCard(
     onToggleOcr: () -> Unit,
     onStopOcr: () -> Unit,
     onReindexOcr: () -> Unit,
+    onModelChange: ((String) -> Unit)? = null,
+    onOpenOcrSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val ocrProgress = if (totalPhotos > 0) (ocrState.processed.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
     val ocrPercent = (ocrProgress * 100f).roundToInt()
+    val isBestModel = ocrState.model.equals("best", ignoreCase = true)
 
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -76,6 +81,24 @@ fun OcrIndexingCard(
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    Text(
+                        if (isBestModel) "tessdata_best (Maximum Accuracy)" else "tessdata_fast (Fast & Quantized)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (onOpenOcrSettings != null) {
+                    IconButton(
+                        onClick = onOpenOcrSettings,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Tune,
+                            contentDescription = "OCR Settings",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
                 // Status Badge
                 AssistChip(
@@ -110,6 +133,50 @@ fun OcrIndexingCard(
                     border = null,
                     modifier = Modifier.height(28.dp)
                 )
+            }
+
+            // Model Switcher Segmented Buttons
+            if (onModelChange != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Tesseract Model",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (onOpenOcrSettings != null) {
+                            TextButton(
+                                onClick = onOpenOcrSettings,
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                            ) {
+                                Text("Manage", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        SegmentedButton(
+                            selected = !isBestModel,
+                            onClick = { onModelChange("fast") },
+                            enabled = !ocrState.isRunning,
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                        ) {
+                            Text("tessdata_fast", style = MaterialTheme.typography.labelMedium)
+                        }
+                        SegmentedButton(
+                            selected = isBestModel,
+                            onClick = { onModelChange("best") },
+                            enabled = !ocrState.isRunning,
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                        ) {
+                            Text("tessdata_best", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
             }
 
             // Progress
