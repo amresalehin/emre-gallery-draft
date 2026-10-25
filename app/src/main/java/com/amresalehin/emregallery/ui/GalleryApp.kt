@@ -596,7 +596,8 @@ fun GalleryApp() {
 
     val hasMediaPerm = hasMediaPermission(context)
     val hasNotifPerm = hasNotificationPermission(context)
-    val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm)
+    val hasAllFilesPerm = hasAllFilesAccess()
+    val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm) && hasAllFilesPerm
     if (!hasCompletedWelcome || !allRequiredPermissions) {
         WelcomeScreen(
             initialStep = if (hasCompletedWelcome) 1 else 0,
