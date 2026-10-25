@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Geocoder
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
 import androidx.core.content.ContextCompat
@@ -63,6 +64,54 @@ fun readMediaMetadata(context: Context, item: MediaItem): Map<String, String> {
         values["longitude"] = locationPoint.longitude.toString()
         reverseGeocodeLocation(context, locationPoint.latitude, locationPoint.longitude)?.let {
             values["location"] = it
+        }
+    }
+
+    // Video container metadata is separate from image EXIF. Read it explicitly so
+    // technical fields are available to the details sheet as well as MediaStore fields.
+    if (item.isVideo) {
+        runCatching {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(context, uri)
+
+                fun extract(key: Int): String? =
+                    runCatching { retriever.extractMetadata(key) }
+                        .getOrNull()
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+
+                fun putIfMissing(name: String, key: Int) {
+                    if (values[name].isNullOrBlank()) {
+                        extract(key)?.let { values[name] = it }
+                    }
+                }
+
+                putIfMissing("video_duration_ms", MediaMetadataRetriever.METADATA_KEY_DURATION)
+                putIfMissing("video_width", MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                putIfMissing("video_height", MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                putIfMissing("video_bitrate_bps", MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                putIfMissing("video_capture_framerate", MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+                putIfMissing("video_rotation_degrees", MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+                putIfMissing("video_track_count", MediaMetadataRetriever.METADATA_KEY_NUM_TRACKS)
+                putIfMissing("mime_type", MediaMetadataRetriever.METADATA_KEY_MIMETYPE)
+                putIfMissing("title", MediaMetadataRetriever.METADATA_KEY_TITLE)
+                putIfMissing("album", MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                putIfMissing("genre", MediaMetadataRetriever.METADATA_KEY_GENRE)
+                putIfMissing("year", MediaMetadataRetriever.METADATA_KEY_YEAR)
+                putIfMissing("capture_date", MediaMetadataRetriever.METADATA_KEY_DATE)
+
+                if (values["creator"].isNullOrBlank()) {
+                    (extract(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                        ?: extract(MediaMetadataRetriever.METADATA_KEY_AUTHOR))
+                        ?.let { values["creator"] = it }
+                }
+                extract(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)?.let {
+                    values["video_has_audio"] = it
+                }
+            } finally {
+                retriever.release()
+            }
         }
     }
 
@@ -174,6 +223,13 @@ fun formatBytes(bytes: Long): String = when {
 }
 
 fun formatDuration(ms: Long): String {
-    val seconds = ms / 1000
-    return "%d:%02d".format(seconds / 60, seconds % 60)
+    val totalSeconds = ms.coerceAtLeast(0L) / 1000L
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
 }

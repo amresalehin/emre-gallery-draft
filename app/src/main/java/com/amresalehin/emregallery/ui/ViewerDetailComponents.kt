@@ -791,10 +791,62 @@ fun DetailMetadataCard(
     item: MediaItem,
     modifier: Modifier = Modifier
 ) {
-    val metadataRows = remember(metadata, item.uri, item.dateTakenMillis, item.dateAddedSeconds, item.width, item.height, item.sizeBytes) {
+    val metadataRows = remember(
+        metadata,
+        item.uri,
+        item.dateTakenMillis,
+        item.dateAddedSeconds,
+        item.width,
+        item.height,
+        item.sizeBytes,
+        item.durationMillis,
+        item.isVideo,
+        item.mimeType
+    ) {
+        val videoWidth = metadata["video_width"]?.toIntOrNull() ?: 0
+        val videoHeight = metadata["video_height"]?.toIntOrNull() ?: 0
+        val width = item.width.takeIf { it > 0 } ?: videoWidth
+        val height = item.height.takeIf { it > 0 } ?: videoHeight
+        val dimensions = if (width > 0 && height > 0) "$width × $height px" else null
+
+        val videoDurationMillis = item.durationMillis.takeIf { it > 0 }
+            ?: metadata["video_duration_ms"]?.toLongOrNull()?.takeIf { it > 0 }
+        val videoDuration = if (item.isVideo) {
+            videoDurationMillis?.let { formatDuration(it) }
+        } else {
+            null
+        }
+        val bitrate = metadata["video_bitrate_bps"]?.toLongOrNull()?.takeIf { it > 0L }?.let {
+            when {
+                it >= 1_000_000L -> "%.2f Mbps".format(it / 1_000_000.0)
+                it >= 1_000L -> "%.0f kbps".format(it / 1_000.0)
+                else -> "$it bps"
+            }
+        }
+        val captureFrameRate = metadata["video_capture_framerate"]?.toDoubleOrNull()
+            ?.takeIf { it > 0.0 }?.let { "%.2f fps".format(it) }
+        val rotation = metadata["video_rotation_degrees"]?.toIntOrNull()?.let { "$it°" }
+        val audioTrack = metadata["video_has_audio"]?.let {
+            when {
+                it.equals("yes", ignoreCase = true) -> "Present"
+                it.equals("no", ignoreCase = true) -> "Not present"
+                else -> it
+            }
+        }
+        val fileFormat = item.mimeType?.takeIf { it.isNotBlank() }
+            ?: metadata["mime_type"]?.takeIf { it.isNotBlank() }
+
         val rows = listOf(
-            "Dimensions" to (if (item.width > 0 && item.height > 0) "${item.width} × ${item.height} px" else null),
+            "Media type" to if (item.isVideo) "Video" else "Image",
+            "Duration" to videoDuration,
+            "File format" to fileFormat,
+            "Dimensions" to dimensions,
             "File size" to item.sizeBytes.takeIf { it > 0 }?.let { formatBytes(it) },
+            "Video bitrate" to if (item.isVideo) bitrate else null,
+            "Capture frame rate" to if (item.isVideo) captureFrameRate else null,
+            "Rotation" to if (item.isVideo) rotation else null,
+            "Audio track" to if (item.isVideo) audioTrack else null,
+            "Track count" to if (item.isVideo) metadata["video_track_count"] else null,
             "Device manufacturer" to metadata["make"],
             "Device model" to metadata["model"],
             "Aperture" to metadata["aperture"],
@@ -810,6 +862,9 @@ fun DetailMetadataCard(
                 ?: item.name.substringBeforeLast('.').takeIf { it.isNotBlank() }),
             "Description" to metadata["description"],
             "Creator" to metadata["creator"],
+            "Album" to metadata["album"],
+            "Genre" to metadata["genre"],
+            "Year" to metadata["year"],
             "Copyright" to metadata["copyright"],
             "Subject" to metadata["subject"],
             "Keywords" to metadata["keywords"],
@@ -832,7 +887,7 @@ fun DetailMetadataCard(
         ) {
             Icon(
                 Icons.Default.Article,
-                contentDescription = "Image metadata",
+                contentDescription = "Media metadata",
                 modifier = Modifier.size(22.dp).padding(top = 2.dp),
                 tint = MaterialTheme.colorScheme.onSurface
             )
