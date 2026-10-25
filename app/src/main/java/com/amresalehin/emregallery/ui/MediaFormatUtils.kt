@@ -241,6 +241,18 @@ fun formatMediaDateTime(takenMillis: Long, addedSeconds: Long): String {
     return "${dateFormat.format(date)}  •  ${timeFormat.format(date)}"
 }
 
+fun formatMediaSubtitle(item: MediaItem): String {
+    val millis = item.dateTakenMillis.takeIf { it > 0 } ?: (item.dateAddedSeconds * 1000L)
+    val datePart = if (millis > 0) {
+        val date = Date(millis)
+        val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.ENGLISH)
+        val timeFormat = SimpleDateFormat("h:mm a", Locale.ENGLISH)
+        "${dateFormat.format(date)} · ${timeFormat.format(date)}"
+    } else null
+    val sizePart = if (item.sizeBytes > 0) formatBytes(item.sizeBytes) else null
+    return listOfNotNull(datePart, sizePart).joinToString(" · ")
+}
+
 fun formatIsoDate(takenMillis: Long, addedSeconds: Long): String {
     val millis = takenMillis.takeIf { it > 0 } ?: (addedSeconds * 1000L)
     if (millis <= 0) return "2024-10-23T17:42:35+05:30"

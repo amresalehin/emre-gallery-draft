@@ -3,7 +3,7 @@ package com.amresalehin.emregallery.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
+import android.location.Geocoder
 import android.net.Uri
 import android.view.ViewConfiguration
 import androidx.compose.animation.*
@@ -12,9 +12,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,10 +30,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.data.PhotoMapLocationCache
+import com.amresalehin.emregallery.face.DetectedMediaFace
+import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.osmdroid.util.GeoPoint
+import java.util.Locale
 
 /**
  * State holder for the media details drawer (metadata and OCR).
@@ -121,7 +127,9 @@ fun rememberViewerDetailsState(
 }
 
 /**
- * Slide-up details drawer containing EXIF/XMP info, location, people, albums, OCR, and tags.
+ * Slide-up details drawer containing Overview and Actions tabs.
+ * Dimensions, positioning, top rounded corners, and gestures are preserved.
+ * Switching tabs changes only the content area without resizing or dismissing the drawer.
  */
 @Composable
 fun BoxScope.ViewerDetailsDrawer(
@@ -152,7 +160,20 @@ fun BoxScope.ViewerDetailsDrawer(
     val coroutineScope = rememberCoroutineScope()
     val detailsState = rememberViewerDetailsState(item, defaultOcrLanguages, defaultOcrModel)
 
-    // Smooth backdrop scrim
+    var selectedTab by remember { mutableStateOf(DetailDrawerTab.OVERVIEW) }
+    val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
+    var faceReloadKey by remember { mutableIntStateOf(0) }
+
+    val detectedFaces = remember(item.uri, faceReloadKey) {
+        faceStore.facesForMedia(item.uri)
+    }
+
+    // Dialog state for Actions tab
+    var showAddLocationDialog by remember { mutableStateOf(false) }
+    var showAddTagDialog by remember { mutableStateOf(false) }
+    var renamingFace by remember { mutableStateOf<DetectedMediaFace?>(null) }
+
+    // Backdrop scrim
     AnimatedVisibility(
         visible = showDetails,
         enter = fadeIn(animationSpec = tween(280)),
@@ -300,117 +321,212 @@ fun BoxScope.ViewerDetailsDrawer(
                     )
                 }
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                // Pinned Header & Tabs at top of drawer
+                DetailDrawerHeader(
+                    item = item,
+                    selectedTab = selectedTab,
+                    onSelectTab = { selectedTab = it }
+                )
+
+                // Scrollable content area (Overview and Actions share exact same container dimensions)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
                 ) {
-                    // Header: Filename, Date & Time, and Edit button pill
-                    item {
-                        DetailHeaderSection(
-                            item = item,
-                            onEdit = {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_EDIT)
-                                            .setDataAndType(Uri.parse(item.uri), item.mimeType ?: "image/*")
-                                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    )
-                                }
-                            }
-                        )
-                    }
-
-                    // Quick Actions row
-                    item {
-                        DetailQuickActionsRow(
-                            isBin = isBin,
-                            onShare = onShare,
-                            onAddTo = onAddTo,
-                            onToggleBin = onToggleBin,
-                            onMore = onShowMore
-                        )
-                    }
-
-                    // Card 1: Location & Mini Map Preview
-                    item {
-                        val locationText = detailsState.metadata["location"]?.takeIf { it.isNotBlank() }
-                            ?: "Location not available"
-                        val hasGps = detailsState.metadata.containsKey("latitude")
-                        DetailLocationCard(
-                            locationText = locationText,
-                            onOpenMap = {
-                                if (!hasGps) {
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Photo has no GPS coordinates to locate on map",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                                onOpenMap()
-                            }
-                        )
-                    }
-
-                    // Card 2: Visual description
-                    item {
-                        DetailAiSummaryCard()
-                    }
-
-                    // Card 3: OCR text recognition
-                    item {
-                        DetailOcrCard(
-                            item = item,
-                            ocrText = detailsState.ocrText,
-                            ocrError = detailsState.ocrError,
-                            ocrBusy = detailsState.ocrBusy,
-                            ocrLanguages = detailsState.ocrLanguages,
-                            ocrModel = detailsState.ocrModel,
-                            onSelectModel = { detailsState.ocrModel = it },
-                            onToggleLanguage = { detailsState.toggleOcrLanguage(it) },
-                            onRunOcr = {
-                                coroutineScope.launch { detailsState.runOcr() }
-                            },
-                            onCopyText = { detailsState.copyOcrText() }
-                        )
-                    }
-
-                    // Card 4: Tags
-                    item {
-                        DetailTagsCard(
-                            tags = customTags,
-                            onAddTag = { onAddTag("Tag") }
-                        )
-                    }
-
-                    // Card 5: People detected
-                    item {
-                        DetailPeopleCard(mediaUri = item.uri)
-                    }
-
-                    // Card 6: Albums containing this item
-                    item {
-                        DetailAlbumsCard(
-                            item = item,
-                            customAlbums = customAlbums,
-                            items = items,
-                            onAddTo = onAddTo
-                        )
-                    }
-
-                    // Card 7: EXIF & XMP Metadata
-                    item {
-                        DetailMetadataCard(
-                            metadata = detailsState.metadata,
-                            item = item
-                        )
-                    }
-
-                    item {
-                        Spacer(Modifier.height(16.dp))
+                    when (selectedTab) {
+                        DetailDrawerTab.OVERVIEW -> {
+                            OverviewTabContent(
+                                item = item,
+                                customTags = customTags,
+                                detectedFaces = detectedFaces,
+                                metadata = detailsState.metadata,
+                                onOpenMap = onOpenMap
+                            )
+                        }
+                        DetailDrawerTab.ACTIONS -> {
+                            ActionsTabContent(
+                                item = item,
+                                customTags = customTags,
+                                detectedFaces = detectedFaces,
+                                metadata = detailsState.metadata,
+                                detailsState = detailsState,
+                                onAddTo = onAddTo,
+                                onAddLocationClick = { showAddLocationDialog = true },
+                                onAddTagClick = { showAddTagDialog = true },
+                                onRenameFaceClick = { renamingFace = it }
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+
+    // Add Location Dialog
+    if (showAddLocationDialog) {
+        var locationInput by remember { mutableStateOf("") }
+        var isGeocoding by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { showAddLocationDialog = false },
+            title = { Text("Add location") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Enter a place name, city, or coordinates:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = locationInput,
+                        onValueChange = { locationInput = it },
+                        label = { Text("Location name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(
+                        onClick = {
+                            showAddLocationDialog = false
+                            onOpenMap()
+                        },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Select on map")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val input = locationInput.trim()
+                        if (input.isNotEmpty()) {
+                            isGeocoding = true
+                            coroutineScope.launch {
+                                val geocoder = runCatching {
+                                    @Suppress("DEPRECATION")
+                                    Geocoder(context, Locale.getDefault()).getFromLocationName(input, 1)
+                                }.getOrNull()?.firstOrNull()
+
+                                val point = if (geocoder != null) {
+                                    GeoPoint(geocoder.latitude, geocoder.longitude)
+                                } else {
+                                    val parts = input.split(",").mapNotNull { it.trim().toDoubleOrNull() }
+                                    if (parts.size >= 2) GeoPoint(parts[0], parts[1]) else null
+                                }
+
+                                withContext(Dispatchers.IO) {
+                                    PhotoMapLocationCache(context).save(item.uri, point)
+                                }
+
+                                val updated = detailsState.metadata.toMutableMap()
+                                updated["location"] = input
+                                if (point != null) {
+                                    updated["latitude"] = point.latitude.toString()
+                                    updated["longitude"] = point.longitude.toString()
+                                }
+                                detailsState.metadata = updated
+                                isGeocoding = false
+                                showAddLocationDialog = false
+                            }
+                        }
+                    },
+                    enabled = !isGeocoding && locationInput.isNotBlank()
+                ) {
+                    if (isGeocoding) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Save")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddLocationDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Add Tag Dialog
+    if (showAddTagDialog) {
+        var tagInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddTagDialog = false },
+            title = { Text("Add tag") },
+            text = {
+                OutlinedTextField(
+                    value = tagInput,
+                    onValueChange = { tagInput = it },
+                    label = { Text("Tag name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = tagInput.trim()
+                        if (trimmed.isNotEmpty()) {
+                            onAddTag(trimmed)
+                            showAddTagDialog = false
+                        }
+                    },
+                    enabled = tagInput.isNotBlank()
+                ) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddTagDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Rename Person Dialog
+    if (renamingFace != null) {
+        val face = renamingFace!!
+        var nameInput by remember(face) {
+            val initial = if (face.displayName.equals("Unknown", ignoreCase = true)) "" else face.displayName
+            mutableStateOf(initial)
+        }
+        AlertDialog(
+            onDismissRequest = { renamingFace = null },
+            title = {
+                Text(if (face.displayName.isBlank() || face.displayName.equals("Unknown", ignoreCase = true)) "Name this person" else "Rename person")
+            },
+            text = {
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Person name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleanName = nameInput.trim()
+                        if (cleanName.isNotEmpty()) {
+                            faceStore.renameCluster(face.clusterId, cleanName)
+                            faceReloadKey++
+                            renamingFace = null
+                        }
+                    },
+                    enabled = nameInput.isNotBlank()
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renamingFace = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

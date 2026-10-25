@@ -23,6 +23,13 @@ data class StoredFace(
     val embedding: FloatArray
 )
 
+data class DetectedMediaFace(
+    val mediaUri: String,
+    val faceIndex: Int,
+    val clusterId: String,
+    val displayName: String
+)
+
 /**
  * Persistent, incremental face grouping. Embeddings and identity groups stay in app-private storage.
  * Recognition uses cosine distance (1 - cosine similarity); smaller distances mean closer matches.
@@ -185,6 +192,29 @@ class FaceClusterStore(context: Context) :
                     faceIndex = cursor.getInt(1),
                     clusterId = cursor.getString(2),
                     embedding = bytesToFloats(cursor.getBlob(3))
+                )
+            }
+        }
+        return result
+    }
+
+    @Synchronized
+    fun facesForMedia(mediaUri: String): List<DetectedMediaFace> {
+        val result = mutableListOf<DetectedMediaFace>()
+        readableDatabase.rawQuery(
+            """SELECT f.media_uri, f.face_index, f.cluster_id, c.display_name
+               FROM faces f
+               JOIN clusters c ON f.cluster_id = c.id
+               WHERE f.media_uri = ?
+               ORDER BY f.face_index""".trimIndent(),
+            arrayOf(mediaUri)
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                result += DetectedMediaFace(
+                    mediaUri = cursor.getString(0),
+                    faceIndex = cursor.getInt(1),
+                    clusterId = cursor.getString(2),
+                    displayName = cursor.getString(3)
                 )
             }
         }
