@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -39,24 +40,19 @@ import org.osmdroid.views.MapView
 import java.util.Locale
 
 /**
- * Top bar for the Photo Map screen with back navigation, map layer selection, day/night theme toggle,
- * and photo location focus action.
+ * Top bar for the Photo Map screen with back navigation, map layer selection, and fit all photos action.
+ * Unnecessary heading and description have been removed for a clean, minimal look.
  */
 @Composable
 fun PhotoMapTopBar(
-    locatedCount: Int,
-    loading: Boolean,
-    scanProgress: Int,
-    scanTotal: Int,
     mapLayer: String,
-    mapAppearance: String,
     showMapLayerMenu: Boolean,
     onBack: () -> Unit,
     onOpenLayerMenu: () -> Unit,
     onDismissLayerMenu: () -> Unit,
     onSelectLayer: (String) -> Unit,
-    onToggleMapAppearance: () -> Unit,
-    onFocusPhotos: () -> Unit,
+    onFitAllPhotos: () -> Unit,
+    onRescan: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -73,26 +69,16 @@ fun PhotoMapTopBar(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    Icons.Default.ArrowBack,
+                    Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = "Back",
                     tint = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                "Photo Map",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                if (locatedCount == 0) "No geotagged photos" else "$locatedCount photos located",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
 
+        Spacer(Modifier.weight(1f))
+
+        // Layer selection dropdown
         Box {
             Surface(
                 onClick = onOpenLayerMenu,
@@ -143,46 +129,37 @@ fun PhotoMapTopBar(
             }
         }
 
-        Spacer(Modifier.width(6.dp))
+        Spacer(Modifier.width(8.dp))
 
+        // Fit all photos button
         Surface(
-            onClick = onToggleMapAppearance,
+            onClick = onFitAllPhotos,
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
             modifier = Modifier.size(38.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    if (mapAppearance == "Day") Icons.Default.DarkMode else Icons.Default.LightMode,
-                    contentDescription = "Toggle day/night map theme",
+                    Icons.Default.FilterCenterFocus,
+                    contentDescription = "Fit all photos",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
 
-        Spacer(Modifier.width(6.dp))
-
-        Surface(
-            onClick = onFocusPhotos,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.size(38.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (loading) {
-                    CircularProgressIndicator(
-                        progress = {
-                            if (scanTotal > 0) (scanProgress.toFloat() / scanTotal).coerceIn(0f, 1f) else 0f
-                        },
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-                    )
-                } else {
+        if (onRescan != null) {
+            Spacer(Modifier.width(8.dp))
+            Surface(
+                onClick = onRescan,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(38.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Default.MyLocation,
-                        contentDescription = "Focus photos",
+                        Icons.Default.Refresh,
+                        contentDescription = "Rescan locations",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurface
                     )
@@ -193,13 +170,13 @@ fun PhotoMapTopBar(
 }
 
 /**
- * Container holding the interactive osmdroid MapView, heatmap overlays, zoom controls, and status chips.
+ * Container holding the interactive osmdroid MapView, heatmap overlays, and attribution.
+ * Plus/minus zoom buttons removed; native pinch-to-zoom and map gestures preserved.
  */
 @Composable
 fun PhotoMapViewContainer(
     locatedMedia: List<Pair<MediaItem, GeoPoint>>,
     mapLayer: String,
-    mapAppearance: String,
     loading: Boolean,
     scanProgress: Int,
     scanTotal: Int,
@@ -224,8 +201,6 @@ fun PhotoMapViewContainer(
                 .fillMaxSize()
                 .clip(RoundedCornerShape(20.dp))
         ) {
-            var activeMapView: MapView? = null
-
             AndroidView(
                 modifier = Modifier
                     .fillMaxSize()
@@ -236,17 +211,16 @@ fun PhotoMapViewContainer(
                         clipToOutline = true
                         outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
                         setTileSource(
-                            when {
-                                mapLayer == "Satellite" -> PhotoMapTiles.satelliteTileSource()
-                                mapAppearance == "Night" -> PhotoMapTiles.nightTileSource()
-                                else -> TileSourceFactory.MAPNIK
+                            if (mapLayer == "Satellite") {
+                                PhotoMapTiles.satelliteTileSource()
+                            } else {
+                                TileSourceFactory.MAPNIK
                             }
                         )
                         setMultiTouchControls(true)
                         setBuiltInZoomControls(false)
                         controller.setZoom(3.0)
                         controller.setCenter(GeoPoint(20.5937, 78.9629))
-                        activeMapView = this
                         onMapReady(this)
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
@@ -261,7 +235,6 @@ fun PhotoMapViewContainer(
                     }
                 },
                 update = { map ->
-                    activeMapView = map
                     onMapReady(map)
                     map.overlays.removeAll { it is PhotoHeatmapOverlay }
                     if (locatedMedia.isNotEmpty()) {
@@ -273,37 +246,6 @@ fun PhotoMapViewContainer(
                     map.invalidate()
                 }
             )
-
-            // Zoom In & Zoom Out floating controls
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Surface(
-                    onClick = { activeMapView?.controller?.zoomIn() },
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                    shadowElevation = 3.dp,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Add, contentDescription = "Zoom In", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-                Surface(
-                    onClick = { activeMapView?.controller?.zoomOut() },
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                    shadowElevation = 3.dp,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
-                    }
-                }
-            }
 
             // OpenStreetMap Attribution badge
             Surface(
@@ -367,64 +309,20 @@ fun calculateMapBounds(map: MapView, context: Context): BoundingBox? {
 }
 
 /**
- * Permission prompt banner for ACCESS_MEDIA_LOCATION on Android 10 (API 29) and higher.
- */
-@Composable
-fun PhotoMapPermissionBanner(
-    onGrantPermission: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shadowElevation = 2.dp
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Icon(
-                Icons.Default.LocationOn,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer
-            )
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Location access needed",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                Text(
-                    "Grant permission to read embedded GPS metadata.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
-                )
-            }
-            Button(
-                onClick = onGrantPermission,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Text("Grant", style = MaterialTheme.typography.labelMedium)
-            }
-        }
-    }
-}
-
-/**
  * Bottom card displaying photos within the visible viewport, grouped by day.
+ * Distinguishes clearly between indexing in progress, completed indexing with no GPS coordinates,
+ * and photos available.
  */
 @Composable
 fun PhotoMapDetailsCard(
     viewportCount: Int,
     locatedTotal: Int,
     loading: Boolean,
+    scanProgress: Int = 0,
+    scanTotal: Int = 0,
     dayGroups: List<Pair<String, List<Pair<MediaItem, GeoPoint>>>>,
     onPhotoClick: (MediaItem, GeoPoint) -> Unit,
+    onFitAllPhotos: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -447,15 +345,56 @@ fun PhotoMapDetailsCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "%,d photos in this area".format(Locale.getDefault(), viewportCount),
+                    when {
+                        loading && locatedTotal == 0 -> "Scanning photos for locations…"
+                        !loading && locatedTotal == 0 -> "No geotagged photos"
+                        else -> "%,d photos in this area".format(Locale.getDefault(), viewportCount)
+                    },
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+                if (locatedTotal > 0 && viewportCount != locatedTotal) {
+                    Text(
+                        "of $locatedTotal located",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-            if (!loading && locatedTotal == 0) {
+            if (loading && locatedTotal == 0) {
+                // State 1: Indexing in progress with no coordinates found yet
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(36.dp),
+                        strokeWidth = 3.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Scanning photo locations…",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (scanTotal > 0) "Reading GPS metadata ($scanProgress of $scanTotal scanned)"
+                        else "Scanning your gallery for GPS metadata…",
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            } else if (!loading && locatedTotal == 0) {
+                // State 2: Completed indexing with no accessible GPS coordinates
                 Column(
                     Modifier
                         .fillMaxSize()
@@ -475,14 +414,16 @@ fun PhotoMapDetailsCard(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "Only images containing embedded location coordinates appear on this map.",
+                        "None of the photos in this gallery contain embedded GPS coordinates.",
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
-            } else if (!loading && viewportCount == 0) {
+            } else if (viewportCount == 0) {
+                // State 3: Photos exist, but none inside the active viewport
                 Column(
                     Modifier
                         .fillMaxSize()
@@ -491,7 +432,7 @@ fun PhotoMapDetailsCard(
                     verticalArrangement = Arrangement.Center
                 ) {
                     Icon(
-                        Icons.Default.Map,
+                        Icons.Default.Explore,
                         contentDescription = null,
                         modifier = Modifier.size(36.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
@@ -502,14 +443,25 @@ fun PhotoMapDetailsCard(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "Zoom out or move the map above to see photos from other locations.",
+                        "Pan or zoom out to see photos, or tap below to frame all $locatedTotal photos.",
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                        onClick = onFitAllPhotos,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.FilterCenterFocus, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Fit all photos", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             } else {
+                // State 4: Photos found in viewport, rendered with chronological day groups
                 LazyColumn(
                     Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),

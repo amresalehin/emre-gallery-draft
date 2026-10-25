@@ -25,6 +25,14 @@ fun hasMediaPermission(context: Context): Boolean {
         (Build.VERSION.SDK_INT >= 34 && ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == PackageManager.PERMISSION_GRANTED)
 }
 
+fun hasMediaLocationPermission(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED
+    } else {
+        true
+    }
+}
+
 fun reverseGeocodeLocation(context: Context, latitude: Double, longitude: Double): String? {
     if (!Geocoder.isPresent()) return null
     return runCatching {
@@ -47,16 +55,34 @@ fun reverseGeocodeLocation(context: Context, latitude: Double, longitude: Double
 fun readMediaMetadata(context: Context, item: MediaItem): Map<String, String> {
     val values = mutableMapOf<String, String>()
     val uri = Uri.parse(item.uri)
+
+    // First, reliably extract coordinates using unredacted location reader
+    val locationPoint = com.amresalehin.emregallery.data.PhotoMapLocationCache.extractLocation(context, item.uri)
+    if (locationPoint != null) {
+        values["latitude"] = locationPoint.latitude.toString()
+        values["longitude"] = locationPoint.longitude.toString()
+        reverseGeocodeLocation(context, locationPoint.latitude, locationPoint.longitude)?.let {
+            values["location"] = it
+        }
+    }
+
     if (!item.isVideo) {
         runCatching {
-            context.contentResolver.openInputStream(uri)?.use { stream ->
+            val targetUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && uri.scheme == android.content.ContentResolver.SCHEME_CONTENT) {
+                runCatching { android.provider.MediaStore.setRequireOriginal(uri) }.getOrDefault(uri)
+            } else {
+                uri
+            }
+            (context.contentResolver.openInputStream(targetUri) ?: context.contentResolver.openInputStream(uri))?.use { stream ->
                 val exif = ExifInterface(stream)
                 exif.getAttribute(ExifInterface.TAG_MAKE)?.takeIf { it.isNotBlank() }?.let { values["make"] = it }
                 exif.getAttribute(ExifInterface.TAG_MODEL)?.takeIf { it.isNotBlank() }?.let { values["model"] = it }
-                exif.latLong?.let { coordinates ->
-                    values["latitude"] = coordinates[0].toString()
-                    values["longitude"] = coordinates[1].toString()
-                    reverseGeocodeLocation(context, coordinates[0], coordinates[1])?.let { values["location"] = it }
+                if (!values.containsKey("latitude")) {
+                    exif.latLong?.let { coordinates ->
+                        values["latitude"] = coordinates[0].toString()
+                        values["longitude"] = coordinates[1].toString()
+                        reverseGeocodeLocation(context, coordinates[0], coordinates[1])?.let { values["location"] = it }
+                    }
                 }
                 fun put(key: String, vararg tags: String) {
                     tags.firstNotNullOfOrNull { tag -> exif.getAttribute(tag)?.takeIf { it.isNotBlank() } }?.let { values[key] = it }

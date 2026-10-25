@@ -42,6 +42,7 @@ fun IndexingStatusScreen(
     ocrModel: String = "fast",
     onModelChange: ((String) -> Unit)? = null,
     onToggleLanguage: ((String) -> Unit)? = null,
+    onOpenMap: (() -> Unit)? = null,
     onBack: () -> Unit,
     viewModel: IndexingStatusViewModel = viewModel()
 ) {
@@ -126,7 +127,21 @@ fun IndexingStatusScreen(
                 }
             )
 
-            // 2. Face Recognition (Finding & Clustering) Card
+            // 2. Map & Location Indexing Card
+            LocationIndexingCard(
+                totalPhotos = uiState.totalPhotos,
+                locationState = uiState.location,
+                countsReady = uiState.countsReady,
+                cardBackground = cardBackground,
+                cardBorder = cardBorder,
+                numberFormat = numberFormat,
+                onToggleLocation = viewModel::toggleLocationIndexing,
+                onStopLocation = viewModel::stopLocationIndexing,
+                onReindexLocation = viewModel::clearAndReindexLocation,
+                onOpenMap = { onOpenMap?.invoke() }
+            )
+
+            // 3. Face Recognition (Finding & Clustering) Card
             FaceRecognitionCard(
                 totalPhotos = uiState.totalPhotos,
                 faceFindingState = uiState.faceFinding,

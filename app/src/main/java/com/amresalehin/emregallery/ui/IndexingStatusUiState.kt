@@ -21,6 +21,14 @@ data class FaceFindingState(
     val detectionConfidence: Float = 0.60f
 )
 
+data class LocationIndexingState(
+    val processed: Int = 0,
+    val locatedCount: Int = 0,
+    val isRunning: Boolean = false,
+    val isPaused: Boolean = false,
+    val itemsPerMinute: Int = 0
+)
+
 data class ModelDownloadState(
     val isDownloading: Boolean = false,
     val isPaused: Boolean = false,
@@ -49,6 +57,7 @@ data class IndexingStatusUiState(
     val countsReady: Boolean = false,
     val ocr: OcrState = OcrState(),
     val faceFinding: FaceFindingState = FaceFindingState(),
+    val location: LocationIndexingState = LocationIndexingState(),
     val modelDownload: ModelDownloadState = ModelDownloadState(),
     val clustering: FaceClusteringState = FaceClusteringState(),
     val engine: EngineState = EngineState()

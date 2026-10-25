@@ -55,6 +55,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     private var ocrStartProcessed: Int = 0
     private var faceStartTimeMillis: Long = 0L
     private var faceStartProcessed: Int = 0
+    private var locationStartTimeMillis: Long = 0L
+    private var locationStartProcessed: Int = 0
 
     init {
         updateEngineState()
@@ -99,7 +101,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             val photos = currentPhotos
             val photoUris = currentPhotoUris
 
-            val (ocrProcessed, ocrCached, faceProcessed, faceDetected, faceFailures, summaries) = withContext(Dispatchers.IO) {
+            val (ocrProcessed, ocrCached, faceProcessed, faceDetected, faceFailures, summaries, locProcessed, locLocated) = withContext(Dispatchers.IO) {
                 val oCount = photos.count { item ->
                     TesseractOcr.hasCachedResult(context, Uri.parse(item.uri))
                 }
@@ -108,7 +110,11 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val fFaces = faceStore.indexedFaceCount()
                 val fFailures = faceStore.failedMediaCount()
                 val cSummaries = faceStore.summaries()
-                CountsResult(oCount, oFiles, fCount, fFaces, fFailures, cSummaries)
+                val locCache = com.amresalehin.emregallery.data.PhotoMapLocationCache(context.applicationContext)
+                val locMap = locCache.loadAll()
+                val lProcessed = photos.count { locMap.containsKey(it.uri) }
+                val lLocated = locMap.values.count { it.point != null }
+                CountsResult(oCount, oFiles, fCount, fFaces, fFailures, cSummaries, lProcessed, lLocated)
             }
 
             _uiState.update { state ->
@@ -125,6 +131,10 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         totalDetected = faceDetected,
                         failedCount = faceFailures
                     ),
+                    location = state.location.copy(
+                        processed = locProcessed.coerceIn(0, totalPhotos),
+                        locatedCount = locLocated
+                    ),
                     clustering = state.clustering.copy(
                         summaries = summaries
                     )
@@ -139,7 +149,9 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         val faceProcessed: Int,
         val faceDetected: Int,
         val faceFailures: Int,
-        val summaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>
+        val summaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>,
+        val locProcessed: Int,
+        val locLocated: Int
     )
 
     private fun startServiceMonitoring() {
@@ -166,6 +178,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 _uiState.update { state ->
                     var newOcr = state.ocr
                     var newFace = state.faceFinding
+                    var newLocation = state.location
                     var newDownload = state.modelDownload
 
                     when (task) {
@@ -193,6 +206,18 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 itemsPerMinute = ipm
                             )
                         }
+                        "location" -> {
+                            val ipm = if (running && !paused) {
+                                calculateRate(processed - locationStartProcessed, locationStartTimeMillis)
+                            } else 0
+                            newLocation = newLocation.copy(
+                                isRunning = running,
+                                isPaused = paused,
+                                processed = if (total > 0) processed else newLocation.processed,
+                                locatedCount = if (faces >= 0) faces else newLocation.locatedCount,
+                                itemsPerMinute = ipm
+                            )
+                        }
                         "model" -> {
                             newDownload = newDownload.copy(
                                 isDownloading = running,
@@ -212,12 +237,13 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     state.copy(
                         ocr = newOcr,
                         faceFinding = newFace,
+                        location = newLocation,
                         modelDownload = newDownload
                     )
                 }
 
                 if (wasRunning && !running) {
-                    if (task == "ocr" || task == "face") {
+                    if (task == "ocr" || task == "face" || task == "location") {
                         refreshCounts()
                     }
                     updateEngineState()
@@ -436,5 +462,35 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 )
             }
         }
+    }
+
+    fun toggleLocationIndexing() {
+        val state = _uiState.value
+        if (!state.countsReady || currentPhotos.isEmpty()) return
+        if (state.location.isRunning) {
+            val paused = !state.location.isPaused
+            _uiState.update { it.copy(location = it.location.copy(isPaused = paused)) }
+            if (paused) IndexingForegroundService.pause(context) else IndexingForegroundService.resume(context)
+            return
+        }
+        if (state.ocr.isRunning || state.faceFinding.isRunning || state.modelDownload.isDownloading) return
+        if (state.location.processed >= currentPhotos.size) return
+
+        locationStartTimeMillis = System.currentTimeMillis()
+        locationStartProcessed = state.location.processed
+        _uiState.update { it.copy(location = it.location.copy(isRunning = true, isPaused = false)) }
+        IndexingForegroundService.startLocation(context, rescanAll = false)
+    }
+
+    fun stopLocationIndexing() {
+        IndexingForegroundService.cancel(context)
+        _uiState.update { it.copy(location = it.location.copy(isRunning = false, isPaused = false)) }
+    }
+
+    fun clearAndReindexLocation() {
+        locationStartTimeMillis = System.currentTimeMillis()
+        locationStartProcessed = 0
+        _uiState.update { it.copy(location = it.location.copy(isRunning = true, isPaused = false, processed = 0, locatedCount = 0)) }
+        IndexingForegroundService.startLocation(context, rescanAll = true)
     }
 }

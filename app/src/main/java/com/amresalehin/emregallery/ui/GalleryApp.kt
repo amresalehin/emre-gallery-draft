@@ -51,6 +51,14 @@ import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 
+data class NavBackStackEntry(
+    val destination: Destination,
+    val selectedMedia: MediaItem? = null,
+    val mapFocusItem: MediaItem? = null,
+    val albumFilter: String? = null,
+    val albumFilterReturnDestination: Destination = Destination.ALBUMS
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryApp() {
@@ -65,7 +73,7 @@ fun GalleryApp() {
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
     var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
-    var mapReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
+    val backStack = remember { mutableStateListOf<NavBackStackEntry>() }
     var showViewerControls by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
     var searchStage by remember { mutableStateOf(SearchStage.DISCOVERY) }
@@ -102,6 +110,16 @@ fun GalleryApp() {
         }
     }
     LaunchedEffect(Unit) { if (hasMediaPermission(context)) refreshMedia() }
+    LaunchedEffect(media) {
+        if (media.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val locationCache = com.amresalehin.emregallery.data.PhotoMapLocationCache(context.applicationContext)
+                    locationCache.scanMediaBatch(context, media)
+                }
+            }
+        }
+    }
     val permanentDeleteLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -155,12 +173,28 @@ fun GalleryApp() {
     var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
     var predictiveBackEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
 
-    fun navigateTo(dest: Destination, rememberPrevious: Boolean = true) {
+    fun navigateTo(
+        dest: Destination,
+        rememberPrevious: Boolean = true,
+        newSelectedMedia: MediaItem? = selectedMedia,
+        newMapFocusItem: MediaItem? = mapFocusItem
+    ) {
         isNavigatingBack = false
         if (rememberPrevious && destination != dest) {
+            backStack.add(
+                NavBackStackEntry(
+                    destination = destination,
+                    selectedMedia = selectedMedia,
+                    mapFocusItem = mapFocusItem,
+                    albumFilter = albumFilter,
+                    albumFilterReturnDestination = albumFilterReturnDestination
+                )
+            )
             previousDestination = destination
         }
         destination = dest
+        selectedMedia = newSelectedMedia
+        mapFocusItem = newMapFocusItem
     }
 
     fun performBackNavigation() {
@@ -172,16 +206,18 @@ fun GalleryApp() {
             destination == Destination.VIEWER && showDetails -> {
                 showDetails = false
             }
-            destination == Destination.VIEWER || destination == Destination.SEARCH -> {
-                destination = previousDestination
+            backStack.isNotEmpty() -> {
+                val entry = backStack.removeAt(backStack.size - 1)
+                destination = entry.destination
+                selectedMedia = entry.selectedMedia
+                mapFocusItem = entry.mapFocusItem
+                albumFilter = entry.albumFilter
+                albumFilterReturnDestination = entry.albumFilterReturnDestination
+                previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
             }
             albumFilter != null -> {
                 albumFilter = null
                 destination = albumFilterReturnDestination
-            }
-            destination == Destination.MAP -> {
-                destination = mapReturnDestination
-                mapFocusItem = null
             }
             destination in listOf(
                 Destination.DEVICE_FOLDERS,
@@ -192,9 +228,11 @@ fun GalleryApp() {
                 Destination.RECENTLY_ADDED,
                 Destination.LOCKED_FOLDER,
                 Destination.ARCHIVE,
-                Destination.PEOPLE
+                Destination.PEOPLE,
+                Destination.MAP
             ) -> {
                 destination = Destination.ALBUMS
+                mapFocusItem = null
             }
             destination in listOf(
                 Destination.LIBRARY_OVERVIEW,
@@ -202,13 +240,17 @@ fun GalleryApp() {
                 Destination.OCR_SETTINGS,
                 Destination.ABOUT
             ) -> {
-                destination = if (destination == Destination.INDEXING_STATUS) previousDestination else Destination.SETTINGS
+                destination = Destination.SETTINGS
             }
-            else -> destination = Destination.HOME
+            else -> {
+                destination = Destination.HOME
+                mapFocusItem = null
+                selectedMedia = null
+            }
         }
     }
 
-    val canGoBack = destination != Destination.HOME || albumFilter != null || showSidePanel || (destination == Destination.VIEWER && showDetails)
+    val canGoBack = backStack.isNotEmpty() || destination != Destination.HOME || albumFilter != null || showSidePanel || (destination == Destination.VIEWER && showDetails)
 
     PredictiveBackHandler(enabled = canGoBack) { progress: Flow<BackEventCompat> ->
         try {
@@ -305,12 +347,21 @@ fun GalleryApp() {
                     val isExitingAlbumDetail = initialState == Destination.HOME && albumFilter != null && isNavigatingBack
 
                     if (targetState == Destination.VIEWER) {
-                        (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
-                            scaleIn(initialScale = 0.80f, animationSpec = spring(dampingRatio = 0.84f, stiffness = 420f)))
-                            .togetherWith(
-                                fadeOut(animationSpec = tween(140)) +
-                                scaleOut(targetScale = 1.05f, animationSpec = tween(140))
-                            )
+                        if (isNavigatingBack) {
+                            (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
+                                scaleIn(initialScale = 1.04f, animationSpec = tween(180, easing = FastOutSlowInEasing)))
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing)) +
+                                    scaleOut(targetScale = 0.80f, animationSpec = tween(180, easing = FastOutSlowInEasing))
+                                )
+                        } else {
+                            (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
+                                scaleIn(initialScale = 0.80f, animationSpec = spring(dampingRatio = 0.84f, stiffness = 420f)))
+                                .togetherWith(
+                                    fadeOut(animationSpec = tween(140)) +
+                                    scaleOut(targetScale = 1.05f, animationSpec = tween(140))
+                                )
+                        }
                     } else if (initialState == Destination.VIEWER) {
                         (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
                             scaleIn(initialScale = 1.04f, animationSpec = tween(180, easing = FastOutSlowInEasing)))
@@ -443,7 +494,7 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> { mapReturnDestination = Destination.ALBUMS; mapFocusItem = null; navigateTo(Destination.MAP) }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        onFilter = { when (it) { "Map" -> navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null); "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { selectedMedia = it; navigateTo(Destination.VIEWER) },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -521,7 +572,11 @@ fun GalleryApp() {
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
                         focusItem = mapFocusItem,
                         onBack = { performBackNavigation() },
-                        onOpen = { selectedMedia = it; showViewerControls = false; showDetails = false; navigateTo(Destination.VIEWER) }
+                        onOpen = { photo ->
+                            showViewerControls = false
+                            showDetails = false
+                            navigateTo(Destination.VIEWER, rememberPrevious = true, newSelectedMedia = photo, newMapFocusItem = photo)
+                        }
                     )
                     Destination.DEVICE_FOLDERS -> DeviceFoldersScreen(
                         media = media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive },
@@ -578,6 +633,7 @@ fun GalleryApp() {
                             }
                             scope.launch { prefs.setOcrLanguages(updated) }
                         },
+                        onOpenMap = { navigateTo(Destination.MAP) },
                         onBack = { performBackNavigation() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
@@ -615,7 +671,7 @@ fun GalleryApp() {
                     Destination.VIEWER -> selectedMedia?.let { item ->
                         ViewerScreen(
                             item = item,
-                            items = visibleMedia.ifEmpty { listOf(item) },
+                            items = if (visibleMedia.any { it.uri == item.uri }) visibleMedia else media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive }.ifEmpty { listOf(item) },
                             defaultOcrLanguages = ocrLanguagesPref,
                             defaultOcrModel = ocrModelPref,
                             favourite = item.uri in favourites,
@@ -650,7 +706,10 @@ fun GalleryApp() {
                             },
                             onAddTo = { mediaForAddToAlbum = item; showAddToAlbumSheet = true },
                             onOpenNeighbor = { selectedMedia = it; showDetails = false },
-                            onOpenMap = { mapFocusItem = item; mapReturnDestination = Destination.VIEWER; showDetails = false; navigateTo(Destination.MAP) }
+                            onOpenMap = {
+                                showDetails = false
+                                navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = item)
+                            }
                         )
                     }
                 }
@@ -738,8 +797,9 @@ fun GalleryApp() {
                                 }
                             }
                         } else {
-                            navigateTo(dest, rememberPrevious = false)
+                            backStack.clear()
                             albumFilter = null
+                            navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)
                         }
                     }
                 )
@@ -752,12 +812,14 @@ fun GalleryApp() {
             destination = destination,
             albumFilter = albumFilter,
             onNavigate = { dest ->
-                if (dest == Destination.MAP) {
-                    mapReturnDestination = destination
-                    mapFocusItem = null
+                if (dest in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
+                    backStack.clear()
+                    albumFilter = null
+                    navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)
+                } else {
+                    albumFilter = null
+                    navigateTo(dest, rememberPrevious = true, newMapFocusItem = if (dest == Destination.MAP) null else mapFocusItem)
                 }
-                navigateTo(dest, rememberPrevious = false)
-                albumFilter = null
                 showSidePanel = false
             },
             onClose = { showSidePanel = false }

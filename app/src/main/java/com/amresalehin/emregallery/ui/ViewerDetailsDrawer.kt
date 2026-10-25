@@ -336,9 +336,19 @@ fun BoxScope.ViewerDetailsDrawer(
                     item {
                         val locationText = detailsState.metadata["location"]?.takeIf { it.isNotBlank() }
                             ?: "Location not available"
+                        val hasGps = detailsState.metadata.containsKey("latitude")
                         DetailLocationCard(
                             locationText = locationText,
-                            onOpenMap = onOpenMap
+                            onOpenMap = {
+                                if (!hasGps) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Photo has no GPS coordinates to locate on map",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                onOpenMap()
+                            }
                         )
                     }
 

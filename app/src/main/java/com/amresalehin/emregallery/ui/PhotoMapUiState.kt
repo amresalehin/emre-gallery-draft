@@ -4,6 +4,7 @@ import com.amresalehin.emregallery.data.MediaItem
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -16,10 +17,8 @@ data class PhotoMapUiState(
     val scanProgress: Int = 0,
     val scanTotal: Int = 0,
     val mapLayer: String = "Standard",
-    val mapAppearance: String = "Day",
     val showMapLayerMenu: Boolean = false,
-    val visibleBounds: BoundingBox? = null,
-    val canReadOriginalLocation: Boolean = true
+    val visibleBounds: BoundingBox? = null
 ) {
     /**
      * Photos currently within the active visible map viewport bounds.
@@ -37,19 +36,64 @@ data class PhotoMapUiState(
     }
 
     /**
-     * Viewport photos grouped by day of the week, sorted in descending order of capture/creation.
+     * Viewport photos grouped by actual day and sorted chronologically descending.
      */
     val dayGroups: List<Pair<String, List<Pair<MediaItem, GeoPoint>>>> by lazy {
-        val dayFormat = SimpleDateFormat("EEEE", Locale.getDefault())
-        viewportMedia.groupBy { (item, _) ->
-            val millis = if (item.dateTakenMillis > 0) item.dateTakenMillis else item.dateAddedSeconds * 1000
-            dayFormat.format(Date(millis))
-        }.entries
-            .sortedByDescending { entry ->
-                entry.value.maxOfOrNull { (item, _) ->
-                    if (item.dateTakenMillis > 0) item.dateTakenMillis else item.dateAddedSeconds * 1000
-                } ?: 0L
+        if (viewportMedia.isEmpty()) return@lazy emptyList()
+
+        val cal = Calendar.getInstance()
+        val todayCal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val todayStart = todayCal.timeInMillis
+        val yesterdayStart = todayStart - (24 * 60 * 60 * 1000L)
+        val currentYear = todayCal.get(Calendar.YEAR)
+
+        val dayFormatSameYear = SimpleDateFormat("EEE, d MMM", Locale.getDefault())
+        val dayFormatOtherYear = SimpleDateFormat("EEE, d MMM yyyy", Locale.getDefault())
+
+        val groupedMap = LinkedHashMap<Long, MutableList<Pair<MediaItem, GeoPoint>>>()
+
+        // Sort viewport media chronologically descending
+        val sortedMedia = viewportMedia.sortedByDescending { (item, _) ->
+            if (item.dateTakenMillis > 0) item.dateTakenMillis else (item.dateAddedSeconds * 1000L)
+        }
+
+        for (pair in sortedMedia) {
+            val item = pair.first
+            val timestamp = if (item.dateTakenMillis > 0) item.dateTakenMillis else (item.dateAddedSeconds * 1000L)
+            val validTimestamp = if (timestamp > 0) timestamp else todayStart
+            cal.timeInMillis = validTimestamp
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            val dayStart = cal.timeInMillis
+
+            groupedMap.getOrPut(dayStart) { mutableListOf() }.add(pair)
+        }
+
+        groupedMap.entries
+            .sortedByDescending { it.key }
+            .map { (dayStart, dayItems) ->
+                val label = when (dayStart) {
+                    todayStart -> "Today"
+                    yesterdayStart -> "Yesterday"
+                    else -> {
+                        cal.timeInMillis = dayStart
+                        if (cal.get(Calendar.YEAR) == currentYear) {
+                            dayFormatSameYear.format(Date(dayStart))
+                        } else {
+                            dayFormatOtherYear.format(Date(dayStart))
+                        }
+                    }
+                }
+                label to dayItems.sortedByDescending { (item, _) ->
+                    if (item.dateTakenMillis > 0) item.dateTakenMillis else (item.dateAddedSeconds * 1000L)
+                }
             }
-            .map { it.key to it.value }
     }
 }

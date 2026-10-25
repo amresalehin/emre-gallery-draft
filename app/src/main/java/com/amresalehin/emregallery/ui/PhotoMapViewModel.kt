@@ -16,7 +16,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.osmdroid.util.BoundingBox
-import org.osmdroid.util.GeoPoint
 
 /**
  * ViewModel managing the photo GPS indexing, location cache, and UI state for the Photo Map screen.
@@ -29,11 +28,7 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
     private val _uiState = MutableStateFlow(PhotoMapUiState())
     val uiState: StateFlow<PhotoMapUiState> = _uiState.asStateFlow()
 
-    fun updatePermission(canRead: Boolean) {
-        _uiState.update { it.copy(canReadOriginalLocation = canRead) }
-    }
-
-    fun loadAndScanMedia(media: List<MediaItem>) {
+    fun loadAndScanMedia(media: List<MediaItem>, forceRescan: Boolean = false) {
         indexingJob?.cancel()
         indexingJob = viewModelScope.launch {
             _uiState.update {
@@ -44,13 +39,17 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
                 )
             }
 
+            if (forceRescan) {
+                withContext(Dispatchers.IO) { locationCache.clearAll() }
+            }
+
             val photos = media.filterNot { it.isVideo }
             val cached = withContext(Dispatchers.IO) { locationCache.loadAll() }
             val cachedLocated = photos.mapNotNull { item ->
                 cached[item.uri]?.point?.let { item to it }
             }
 
-            val uncachedPhotos = photos.filterNot { cached.containsKey(it.uri) }
+            val uncachedPhotos = if (forceRescan) photos else photos.filterNot { cached.containsKey(it.uri) }
             _uiState.update {
                 it.copy(
                     locatedMedia = cachedLocated,
@@ -107,23 +106,16 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun rescanMedia(media: List<MediaItem>) {
+        loadAndScanMedia(media, forceRescan = true)
+    }
+
     fun updateVisibleMapBounds(bounds: BoundingBox?) {
         _uiState.update { it.copy(visibleBounds = bounds) }
     }
 
     fun setMapLayer(layer: String) {
         _uiState.update { it.copy(mapLayer = layer, showMapLayerMenu = false) }
-    }
-
-    fun toggleMapAppearance(): String {
-        val nextAppearance = if (_uiState.value.mapAppearance == "Day") "Night" else "Day"
-        _uiState.update {
-            it.copy(
-                mapAppearance = nextAppearance,
-                mapLayer = if (it.mapLayer == "Satellite" && nextAppearance == "Night") "Standard" else it.mapLayer
-            )
-        }
-        return nextAppearance
     }
 
     fun setLayerMenuExpanded(expanded: Boolean) {

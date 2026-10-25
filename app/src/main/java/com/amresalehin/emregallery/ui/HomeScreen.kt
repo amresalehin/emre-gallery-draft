@@ -62,7 +62,21 @@ fun HomeScreen(
     }
     LaunchedEffect(Unit) { granted = hasMediaPermission(context) }
     if (!granted) {
-        PermissionState { launcher.launch(if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)) }
+        val permissionsToRequest = when {
+            Build.VERSION.SDK_INT >= 33 -> arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.ACCESS_MEDIA_LOCATION
+            )
+            Build.VERSION.SDK_INT >= 29 -> arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.ACCESS_MEDIA_LOCATION
+            )
+            else -> arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            )
+        }
+        PermissionState { launcher.launch(permissionsToRequest) }
         return
     }
 

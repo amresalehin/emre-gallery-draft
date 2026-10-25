@@ -1,11 +1,10 @@
 package com.amresalehin.emregallery.ui
 
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
-import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.MapTileIndex
 
 /**
- * Custom tile sources for ESRI World Imagery satellite tiles and CartoDB Dark Matter night tiles.
+ * Custom tile source for ESRI World Imagery satellite tiles.
  */
 object PhotoMapTiles {
 
@@ -23,18 +22,4 @@ object PhotoMapTiles {
                 MapTileIndex.getY(pMapTileIndex) + "/" +
                 MapTileIndex.getX(pMapTileIndex) + imageFilenameEnding()
     }
-
-    fun nightTileSource(): XYTileSource = XYTileSource(
-        "CartoDBDarkMatter",
-        0,
-        20,
-        256,
-        ".png",
-        arrayOf(
-            "https://a.basemaps.cartocdn.com/dark_all/",
-            "https://b.basemaps.cartocdn.com/dark_all/",
-            "https://c.basemaps.cartocdn.com/dark_all/",
-            "https://d.basemaps.cartocdn.com/dark_all/"
-        )
-    )
 }

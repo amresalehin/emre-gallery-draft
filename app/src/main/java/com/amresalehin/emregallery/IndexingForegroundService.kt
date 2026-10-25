@@ -90,6 +90,7 @@ class IndexingForegroundService : Service() {
         val title = when (action) {
             ACTION_START_OCR -> "OCR indexing"
             ACTION_START_FACE -> "Face indexing"
+            ACTION_START_LOCATION -> "Map location indexing"
             ACTION_DOWNLOAD_MODEL -> "Downloading face model"
             else -> "Media indexing"
         }
@@ -107,6 +108,9 @@ class IndexingForegroundService : Service() {
                     ACTION_START_FACE -> runFace(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
                         intent?.getBooleanExtra(EXTRA_ALLOW_NATIVE, false) == true
+                    )
+                    ACTION_START_LOCATION -> runLocation(
+                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
                     )
                     ACTION_DOWNLOAD_MODEL -> downloadModel(intent?.getBooleanExtra(EXTRA_FORCE, false) == true)
                 }
@@ -239,10 +243,40 @@ class IndexingForegroundService : Service() {
         manager.notify(NOTIFICATION_ID, notification)
     }
 
+    private suspend fun runLocation(rescanAll: Boolean) {
+        val photos = loadPhotos()
+        val cache = com.amresalehin.emregallery.data.PhotoMapLocationCache(applicationContext)
+        if (rescanAll) withContext(Dispatchers.IO) { cache.clearAll() }
+        val cached = withContext(Dispatchers.IO) { cache.loadAll() }
+        val pending = if (rescanAll) photos else photos.filterNot { cached.containsKey(it.uri) }
+        var locatedCount = cached.values.count { it.point != null }
+        val doneCount = photos.size - pending.size
+        updateState(task = TASK_LOCATION, running = true, paused = false, processed = doneCount, total = photos.size, faces = locatedCount, error = null)
+        postProgress("Map location indexing", "Scanning ${pending.size} photos for GPS geotags", doneCount, photos.size)
+        var completed = doneCount
+        for (item in pending) {
+            awaitResume()
+            currentCoroutineContext().ensureActive()
+            val point = withContext(Dispatchers.IO) {
+                com.amresalehin.emregallery.data.PhotoMapLocationCache.extractLocation(applicationContext, item.uri)
+            }
+            withContext(Dispatchers.IO) {
+                cache.save(item.uri, point)
+            }
+            if (point != null) locatedCount++
+            completed++
+            updateState(processed = completed, total = photos.size, faces = locatedCount)
+            if (completed % 8 == 0 || completed == photos.size) {
+                postProgress("Map location indexing", "Scanned $completed of ${photos.size} photos · $locatedCount geotagged", completed, photos.size)
+            }
+        }
+    }
+
     private fun refreshNotification(message: String) {
         val title = when (prefs.getString(KEY_TASK, "")) {
             TASK_OCR -> "OCR indexing"
             TASK_FACE -> "Face indexing"
+            TASK_LOCATION -> "Map location indexing"
             TASK_MODEL -> "Downloading face model"
             else -> "Media indexing"
         }
@@ -289,6 +323,7 @@ class IndexingForegroundService : Service() {
         const val KEY_BYTES_TOTAL = "bytes_total"
         const val KEY_ERROR = "error"
 
+        const val TASK_LOCATION = "location"
         private const val TASK_OCR = "ocr"
         private const val TASK_FACE = "face"
         private const val TASK_MODEL = "model"
@@ -296,6 +331,7 @@ class IndexingForegroundService : Service() {
         private const val NOTIFICATION_ID = 4107
         private const val ACTION_START_OCR = "com.amresalehin.emregallery.indexing.START_OCR"
         private const val ACTION_START_FACE = "com.amresalehin.emregallery.indexing.START_FACE"
+        private const val ACTION_START_LOCATION = "com.amresalehin.emregallery.indexing.START_LOCATION"
         private const val ACTION_DOWNLOAD_MODEL = "com.amresalehin.emregallery.indexing.DOWNLOAD_MODEL"
         private const val ACTION_PAUSE = "com.amresalehin.emregallery.indexing.PAUSE"
         private const val ACTION_RESUME = "com.amresalehin.emregallery.indexing.RESUME"
@@ -332,6 +368,11 @@ class IndexingForegroundService : Service() {
             command(context, ACTION_START_FACE) {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
                 putExtra(EXTRA_ALLOW_NATIVE, allowNative)
+            }
+
+        fun startLocation(context: Context, rescanAll: Boolean = false) =
+            command(context, ACTION_START_LOCATION) {
+                putExtra(EXTRA_RESCAN_ALL, rescanAll)
             }
 
         fun downloadModel(context: Context, force: Boolean = false) =
