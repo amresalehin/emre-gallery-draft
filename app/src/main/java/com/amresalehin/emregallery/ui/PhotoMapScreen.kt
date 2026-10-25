@@ -59,7 +59,7 @@ fun fitPointsToMap(
     map: MapView,
     points: List<GeoPoint>,
     animated: Boolean = true,
-    paddingDp: Int = 76
+    paddingDp: Int = 126
 ) {
     if (points.isEmpty()) {
         showEasternHemisphereView(map, animated)
@@ -162,8 +162,9 @@ fun PhotoMapScreen(
     }
 
     // The very first map visit starts with the requested eastern-hemisphere view.
-    // On later visits, do not frame partial cache contents: wait until indexing ends,
-    // then fit every located item unless the user has already moved the map.
+    // On later visits, wait until the location cache has been loaded and any missing
+    // coordinates have been indexed. Fit cached points automatically unless the user
+    // has actually dragged or pinched the map.
     LaunchedEffect(mapRef, uiState.locatedMedia, uiState.loading, focusItem, firstMapVisit) {
         val map = mapRef ?: return@LaunchedEffect
         if (mapFramed) return@LaunchedEffect
