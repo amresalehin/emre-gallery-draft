@@ -15,10 +15,9 @@ import kotlin.math.min
 /**
  * Draws a smooth, filled-contour (isopleth-style) density map for geotagged photos.
  *
- * A compact screen-space density grid is built from projected photo coordinates and
- * smoothed with a separable Gaussian kernel. Contour bands are then filled from low
- * to high density. Screen-space rendering makes the result naturally adapt to the
- * current map zoom, pan, and viewport without network calls or extra map libraries.
+ * The renderer builds a small screen-space density field from projected photo GPS
+ * coordinates, smooths it using a separable Gaussian kernel, and fills nested density
+ * bands. It works entirely on-device and adapts naturally to map pan and zoom.
  */
 class PhotoHeatmapOverlay(
     private val points: List<GeoPoint>
@@ -29,7 +28,7 @@ class PhotoHeatmapOverlay(
     }
     private val contourPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 1.15f
+        strokeWidth = 1f
     }
 
     private data class ScreenPoint(val x: Float, val y: Float)
@@ -42,108 +41,101 @@ class PhotoHeatmapOverlay(
         val height = mapView.height
         val projection = mapView.projection
         val projected = Point()
-        val padding = KERNEL_RADIUS.toFloat()
+        val cell = GRID_CELL
+        val gridWidth = (width + cell - 1) / cell
+        val gridHeight = (height + cell - 1) / cell
+        if (gridWidth <= 0 || gridHeight <= 0) return
 
-        // Keep off-screen points in the calculation when their kernel can still
-        // influence the viewport; this prevents visible density from popping at edges.
+        // Include nearby off-screen samples so contours remain continuous at edges.
+        val margin = KERNEL_RADIUS.toFloat()
         val screenPoints = points.mapNotNull { point ->
             projection.toPixels(point, projected)
             val x = projected.x.toFloat()
             val y = projected.y.toFloat()
-            if (x < -padding || x > width + padding ||
-                y < -padding || y > height + padding
+            if (x < -margin || x > width + margin ||
+                y < -margin || y > height + margin
             ) null else ScreenPoint(x, y)
         }
         if (screenPoints.isEmpty()) return
 
-        // An 8 px grid is detailed enough for phone screens while bounding work
-        // independently of the number of photos or the device's pixel resolution.
-        val cell = GRID_CELL
-        val gridWidth = (width + cell - 1) / cell
-        val gridHeight = (height + cell - 1) / cell
-        val grid = FloatArray(gridWidth * gridHeight)
-        screenPoints.forEach { point ->
-            val gx = floor(point.x / cell).toInt()
-            val gy = floor(point.y / cell).toInt()
-            val minX = max(0, gx - KERNEL_RADIUS / cell)
-            val maxX = min(gridWidth - 1, gx + KERNEL_RADIUS / cell)
-            val minY = max(0, gy - KERNEL_RADIUS / cell)
-            val maxY = min(gridHeight - 1, gy + KERNEL_RADIUS / cell)
+        val density = FloatArray(gridWidth * gridHeight)
+        for (point in screenPoints) {
+            val minX = max(0, floor((point.x - KERNEL_RADIUS) / cell).toInt())
+            val maxX = min(gridWidth - 1, floor((point.x + KERNEL_RADIUS) / cell).toInt())
+            val minY = max(0, floor((point.y - KERNEL_RADIUS) / cell).toInt())
+            val maxY = min(gridHeight - 1, floor((point.y + KERNEL_RADIUS) / cell).toInt())
             for (y in minY..maxY) {
+                val sampleY = y * cell + cell / 2f
+                val dy = sampleY - point.y
                 for (x in minX..maxX) {
-                    val dx = (x * cell + cell / 2f) - point.x
-                    val dy = (y * cell + cell / 2f) - point.y
+                    val sampleX = x * cell + cell / 2f
+                    val dx = sampleX - point.x
                     val distanceSquared = dx * dx + dy * dy
                     if (distanceSquared <= KERNEL_RADIUS * KERNEL_RADIUS) {
-                        val weight = kotlin.math.exp(
+                        density[y * gridWidth + x] += kotlin.math.exp(
                             -distanceSquared / (2f * KERNEL_SIGMA * KERNEL_SIGMA)
                         )
-                        grid[y * gridWidth + x] += weight
                     }
                 }
             }
         }
 
-        val smoothed = gaussianBlur(grid, gridWidth, gridHeight)
+        val smoothed = gaussianBlur(density, gridWidth, gridHeight)
         var peak = 0f
-        for (value in smoothed) peak = max(peak, value)
+        smoothed.forEach { peak = max(peak, it) }
         if (peak <= 0f) return
 
-        // Use relative contour levels so a single-photo region remains visible
-        // while crowded regions form nested isopleths instead of isolated blobs.
+        // Restrained, mineral-like tones maintain legibility over both light and
+        // satellite tiles. Increasing alpha makes the inner, denser bands stronger.
         val levels = floatArrayOf(0.075f, 0.14f, 0.23f, 0.35f, 0.5f, 0.68f, 0.84f)
         val colors = intArrayOf(
-            Color.argb(30, 92, 150, 174),
-            Color.argb(40, 83, 164, 181),
-            Color.argb(54, 76, 174, 167),
-            Color.argb(70, 126, 184, 145),
-            Color.argb(88, 193, 190, 120),
-            Color.argb(108, 211, 156, 101),
-            Color.argb(126, 194, 119, 105)
+            Color.argb(28, 92, 150, 174),
+            Color.argb(38, 83, 164, 181),
+            Color.argb(52, 76, 174, 167),
+            Color.argb(68, 126, 184, 145),
+            Color.argb(86, 193, 190, 120),
+            Color.argb(106, 211, 156, 101),
+            Color.argb(124, 194, 119, 105)
         )
 
-        // Each band is a union of softly joined grid cells. The subtle shared
-        // edge treatment gives a readable filled-isopleth look without point glows.
+        // Render from the outermost region inward. A path of adjacent grid cells
+        // creates filled density regions rather than individual radial point glows.
         val path = Path()
-        for (band in levels.indices.reversed()) {
+        val cellFloat = cell.toFloat()
+        for (band in levels.indices) {
             val threshold = peak * levels[band]
             path.reset()
             for (y in 0 until gridHeight) {
+                val top = y * cellFloat
                 for (x in 0 until gridWidth) {
-                    val value = smoothed[y * gridWidth + x]
-                    if (value >= threshold) {
-                        val left = x * cell.toFloat()
-                        val top = y * cell.toFloat()
-                        path.addRect(left, top, left + cell + 0.5f, top + cell + 0.5f, Path.Direction.CW)
+                    if (smoothed[y * gridWidth + x] >= threshold) {
+                        val left = x * cellFloat
+                        path.addRect(left, top, left + cellFloat + 0.5f, top + cellFloat + 0.5f, Path.Direction.CW)
                     }
                 }
             }
             fillPaint.color = colors[band]
             canvas.drawPath(path, fillPaint)
-
-            // Thin, translucent contour edges preserve the scientific map aesthetic.
             if (band > 0) {
-                contourPaint.color = Color.argb(24 + band * 3, 54, 91, 99)
+                contourPaint.color = Color.argb(18 + band * 3, 54, 91, 99)
                 canvas.drawPath(path, contourPaint)
             }
         }
     }
 
-    /**
-     * Fast separable Gaussian blur over a small grid; no allocations per cell.
-     */
+    /** Fast separable Gaussian blur over the compact density grid. */
     private fun gaussianBlur(source: FloatArray, width: Int, height: Int): FloatArray {
         val radius = BLUR_RADIUS
         val weights = FloatArray(radius * 2 + 1)
-        var weightSum = 0f
+        var total = 0f
         for (offset in -radius..radius) {
             val weight = kotlin.math.exp(
                 -(offset * offset).toFloat() / (2f * BLUR_SIGMA * BLUR_SIGMA)
             )
             weights[offset + radius] = weight
-            weightSum += weight
+            total += weight
         }
-        for (i in weights.indices) weights[i] /= weightSum
+        for (index in weights.indices) weights[index] /= total
 
         val horizontal = FloatArray(source.size)
         val output = FloatArray(source.size)
