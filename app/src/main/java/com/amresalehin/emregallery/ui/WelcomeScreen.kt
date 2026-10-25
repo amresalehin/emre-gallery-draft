@@ -200,7 +200,7 @@ fun WelcomeScreen(
                             )
                         }
 
-                        // Bottom-right navigation chevron: transparent button, only the arrow is visible
+                        // Top-right navigation chevron: transparent button, only the arrow is visible
                         IconButton(
                             onClick = { currentStep = 1 },
                             colors = IconButtonDefaults.iconButtonColors(
@@ -208,9 +208,9 @@ fun WelcomeScreen(
                                 contentColor = Color(0xFF161A20)
                             ),
                             modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .navigationBarsPadding()
-                                .padding(end = 28.dp, bottom = 28.dp)
+                                .align(Alignment.TopEnd)
+                                .statusBarsPadding()
+                                .padding(end = 20.dp, top = 16.dp)
                                 .size(56.dp)
                                 .testTag("welcome_intro_next_button")
                         ) {

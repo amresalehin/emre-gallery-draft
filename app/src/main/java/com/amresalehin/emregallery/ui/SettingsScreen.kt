@@ -35,7 +35,6 @@ fun SettingsScreen(
     var query by remember { mutableStateOf("") }
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
-        "All Files Access" to Icons.Default.FolderSpecial,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
@@ -189,58 +188,6 @@ fun SettingsScreen(
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-                } else if (label == "All Files Access") {
-                    val hasFullAccess = hasAllFilesAccess()
-                    ElevatedCard(
-                        onClick = { if (!hasFullAccess) requestAllFilesAccess(context) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.elevatedCardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (hasFullAccess) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                                modifier = Modifier.size(42.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        if (hasFullAccess) Icons.Default.CheckCircle else Icons.Default.Security,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(24.dp),
-                                        tint = if (hasFullAccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSecondaryContainer
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(16.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("All Files Access", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    if (hasFullAccess) "Granted · Delete and manage media without repeated prompts"
-                                    else "Grant permission once to delete and protect media without confirmation popups",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            if (!hasFullAccess) {
-                                FilledTonalButton(
-                                    onClick = { requestAllFilesAccess(context) },
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                ) {
-                                    Text("Grant once", style = MaterialTheme.typography.labelMedium)
-                                }
-                            } else {
-                                Icon(Icons.Default.Check, contentDescription = "Granted", tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }
