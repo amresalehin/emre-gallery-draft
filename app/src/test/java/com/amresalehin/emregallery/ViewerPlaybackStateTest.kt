@@ -18,36 +18,74 @@ class ViewerPlaybackStateTest {
     }
 
     @Test
-    fun transitionContentScaleInterpolatesCropToFitContinuously() {
-        val source = Size(width = 200f, height = 100f)
-        val destination = Size(width = 100f, height = 100f)
-        val crop = ContentScale.Crop.computeScaleFactor(source, destination)
-        val fit = ContentScale.Fit.computeScaleFactor(source, destination)
+    fun transitionContentScaleMatchesThumbnailCropWithoutDistortingImage() {
+        val screen = Size(width = 1080f, height = 2400f)
+        val thumbnailScaleX = 360f / screen.width
+        val thumbnailScaleY = 360f / screen.height
+        val sources = listOf(
+            Size(width = 400f, height = 200f), // Landscape
+            Size(width = 200f, height = 400f), // Portrait
+            Size(width = 300f, height = 300f)  // Square
+        )
 
-        val atStart = transitionContentScale(0f).computeScaleFactor(source, destination)
-        val atMiddle = transitionContentScale(0.5f).computeScaleFactor(source, destination)
-        val atEnd = transitionContentScale(1f).computeScaleFactor(source, destination)
+        sources.forEach { source ->
+            val thumbnail = Size(
+                width = screen.width * thumbnailScaleX,
+                height = screen.height * thumbnailScaleY
+            )
+            val cropAtThumbnail = ContentScale.Crop.computeScaleFactor(source, thumbnail)
+            val fitAtFullscreen = ContentScale.Fit.computeScaleFactor(source, screen)
 
-        assertEquals(crop.scaleX, atStart.scaleX, 0.001f)
-        assertEquals(crop.scaleY, atStart.scaleY, 0.001f)
-        assertEquals((crop.scaleX + fit.scaleX) / 2f, atMiddle.scaleX, 0.001f)
-        assertEquals((crop.scaleY + fit.scaleY) / 2f, atMiddle.scaleY, 0.001f)
-        assertEquals(fit.scaleX, atEnd.scaleX, 0.001f)
-        assertEquals(fit.scaleY, atEnd.scaleY, 0.001f)
+            fun assertEffectiveScale(progress: Float) {
+                val scale = transitionContentScale(
+                    progress = progress,
+                    thumbnailScaleX = thumbnailScaleX,
+                    thumbnailScaleY = thumbnailScaleY
+                ).computeScaleFactor(source, screen)
+                val fraction = progress.coerceIn(0f, 1f)
+                val parentScaleX = thumbnailScaleX + (1f - thumbnailScaleX) * fraction
+                val parentScaleY = thumbnailScaleY + (1f - thumbnailScaleY) * fraction
+                val effectiveX = scale.scaleX * parentScaleX
+                val effectiveY = scale.scaleY * parentScaleY
+                val expected = cropAtThumbnail.scaleX +
+                    (fitAtFullscreen.scaleX - cropAtThumbnail.scaleX) * fraction
+
+                assertEquals("Effective X scale at progress=$progress for source=$source", expected, effectiveX, 0.001f)
+                assertEquals("Effective Y scale at progress=$progress for source=$source", expected, effectiveY, 0.001f)
+                assertEquals("Image must not distort at progress=$progress for source=$source", effectiveX, effectiveY, 0.001f)
+            }
+
+            // Closed endpoint uses the actual square thumbnail crop, not a fullscreen crop.
+            assertEffectiveScale(0f)
+            // Keep the rendered image aspect-preserving while the parent rectangle changes shape.
+            assertEffectiveScale(0.5f)
+            // Open endpoint returns to ordinary fullscreen Fit.
+            assertEffectiveScale(1f)
+        }
     }
 
     @Test
     fun transitionContentScaleClampsProgressToValidRange() {
-        val source = Size(width = 200f, height = 100f)
-        val destination = Size(width = 100f, height = 100f)
-        val crop = ContentScale.Crop.computeScaleFactor(source, destination)
-        val fit = ContentScale.Fit.computeScaleFactor(source, destination)
+        val source = Size(width = 400f, height = 200f)
+        val screen = Size(width = 1080f, height = 2400f)
+        val thumbnailScaleX = 360f / screen.width
+        val thumbnailScaleY = 360f / screen.height
+        val thumbnail = Size(
+            width = screen.width * thumbnailScaleX,
+            height = screen.height * thumbnailScaleY
+        )
+        val crop = ContentScale.Crop.computeScaleFactor(source, thumbnail)
+        val fit = ContentScale.Fit.computeScaleFactor(source, screen)
 
-        val beforeStart = transitionContentScale(-1f).computeScaleFactor(source, destination)
-        val afterEnd = transitionContentScale(2f).computeScaleFactor(source, destination)
+        val beforeStart = transitionContentScale(
+            -1f, thumbnailScaleX, thumbnailScaleY
+        ).computeScaleFactor(source, screen)
+        val afterEnd = transitionContentScale(
+            2f, thumbnailScaleX, thumbnailScaleY
+        ).computeScaleFactor(source, screen)
 
-        assertEquals(crop.scaleX, beforeStart.scaleX, 0.001f)
-        assertEquals(crop.scaleY, beforeStart.scaleY, 0.001f)
+        assertEquals(crop.scaleX, beforeStart.scaleX * thumbnailScaleX, 0.001f)
+        assertEquals(crop.scaleY, beforeStart.scaleY * thumbnailScaleY, 0.001f)
         assertEquals(fit.scaleX, afterEnd.scaleX, 0.001f)
         assertEquals(fit.scaleY, afterEnd.scaleY, 0.001f)
     }

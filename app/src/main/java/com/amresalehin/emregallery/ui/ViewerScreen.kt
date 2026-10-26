@@ -543,7 +543,9 @@ fun ViewerScreen(
                         if (isCurrent) isCurrentZoomed = zoomed
                     },
                     transitionProgress = progress,
-                    hasTargetBounds = targetBounds != null
+                    hasTargetBounds = targetBounds != null,
+                    thumbnailScaleX = destScaleX,
+                    thumbnailScaleY = destScaleY
                 )
             }
 
@@ -764,6 +766,8 @@ private fun ZoomableMediaItem(
     onZoomChanged: (Boolean) -> Unit,
     transitionProgress: Float = 1f,
     hasTargetBounds: Boolean = false,
+    thumbnailScaleX: Float = 1f,
+    thumbnailScaleY: Float = 1f,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -1008,7 +1012,11 @@ private fun ZoomableMediaItem(
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = if (hasTargetBounds) {
-                    transitionContentScale(transitionProgress)
+                    transitionContentScale(
+                        progress = transitionProgress,
+                        thumbnailScaleX = thumbnailScaleX,
+                        thumbnailScaleY = thumbnailScaleY
+                    )
                 } else {
                     ContentScale.Fit
                 }
@@ -1023,21 +1031,43 @@ private fun ZoomableMediaItem(
 }
 
 /**
- * Continuously interpolates image scale factors from cover/crop at the thumbnail end
- * of the shared-element transition to contain/fit at the fullscreen end.
+ * Interpolates the rendered image scale from the source thumbnail's crop to the
+ * full-screen fit while compensating for the pager's animated, non-uniform bounds.
+ *
+ * The pager still animates from the fullscreen rectangle to the thumbnail rectangle
+ * using separate X/Y scales. Without compensation, the image would be cropped for
+ * the fullscreen viewport and then distorted by those parent scales. Instead, compute
+ * the crop for the actual thumbnail size, interpolate one aspect-preserving rendered
+ * scale, and divide out the pager scale on each axis.
  */
-internal fun transitionContentScale(progress: Float): ContentScale {
+internal fun transitionContentScale(
+    progress: Float,
+    thumbnailScaleX: Float,
+    thumbnailScaleY: Float
+): ContentScale {
     val fraction = progress.coerceIn(0f, 1f)
+    val startScaleX = thumbnailScaleX.coerceIn(0.01f, 1f)
+    val startScaleY = thumbnailScaleY.coerceIn(0.01f, 1f)
+
     return object : ContentScale {
         override fun computeScaleFactor(
             srcSize: androidx.compose.ui.geometry.Size,
             dstSize: androidx.compose.ui.geometry.Size
         ): ScaleFactor {
-            val crop = ContentScale.Crop.computeScaleFactor(srcSize, dstSize)
+            val thumbnailSize = androidx.compose.ui.geometry.Size(
+                width = dstSize.width * startScaleX,
+                height = dstSize.height * startScaleY
+            )
+            val crop = ContentScale.Crop.computeScaleFactor(srcSize, thumbnailSize)
             val fit = ContentScale.Fit.computeScaleFactor(srcSize, dstSize)
+            val renderedScale = crop.scaleX + (fit.scaleX - crop.scaleX) * fraction
+
+            val parentScaleX = startScaleX + (1f - startScaleX) * fraction
+            val parentScaleY = startScaleY + (1f - startScaleY) * fraction
+
             return ScaleFactor(
-                scaleX = crop.scaleX + (fit.scaleX - crop.scaleX) * fraction,
-                scaleY = crop.scaleY + (fit.scaleY - crop.scaleY) * fraction
+                scaleX = renderedScale / parentScaleX,
+                scaleY = renderedScale / parentScaleY
             )
         }
     }
