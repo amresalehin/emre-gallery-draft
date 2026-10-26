@@ -1,24 +1,26 @@
 package com.amresalehin.emregallery.ui
 
-import android.content.Context
 import android.net.Uri
-import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -35,25 +37,31 @@ import kotlinx.coroutines.isActive
 
 /**
  * State holder for video playback in the media viewer.
+ * Respects session-wide playback intent so manually paused videos don't autoplay when swiping.
  */
 @Stable
 class ViewerVideoState(
     val player: ExoPlayer?,
-    val isVideo: Boolean
+    val isVideo: Boolean,
+    initialPlayIntent: Boolean,
+    private val onPlayIntentChange: (Boolean) -> Unit
 ) {
     var isFirstFrameRendered by mutableStateOf(false)
-    var isPlaying by mutableStateOf(true)
+    var isPlaying by mutableStateOf(if (isVideo && player != null) initialPlayIntent else false)
     var positionMs by mutableLongStateOf(0L)
     var durationMs by mutableLongStateOf(0L)
     var isMuted by mutableStateOf(false)
+    var isFullscreen by mutableStateOf(false)
 
     fun togglePlayPause() {
-        if (player == null) return
-        if (isPlaying) {
-            player.pause()
+        val targetPlay = !isPlaying
+        if (targetPlay) {
+            player?.play()
         } else {
-            player.play()
+            player?.pause()
         }
+        isPlaying = targetPlay
+        onPlayIntentChange(targetPlay)
     }
 
     fun seekTo(position: Long) {
@@ -66,16 +74,23 @@ class ViewerVideoState(
         isMuted = newMuted
         player?.volume = if (newMuted) 0f else 1f
     }
+
+    fun toggleFullscreen() {
+        isFullscreen = !isFullscreen
+    }
 }
 
 /**
  * Manages the ExoPlayer lifecycle and produces a [ViewerVideoState].
+ * Applies [sessionPlayIntent] when creating and preparing new media items.
  */
 @Composable
 fun rememberViewerVideoState(
     uri: String,
     isVideo: Boolean,
-    showControls: Boolean
+    showControls: Boolean,
+    sessionPlayIntent: Boolean = true,
+    onPlayIntentChange: (Boolean) -> Unit = {}
 ): ViewerVideoState {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -99,7 +114,8 @@ fun rememberViewerVideoState(
                     repeatMode = Player.REPEAT_MODE_ONE
                     videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
                     prepare()
-                    playWhenReady = true
+                    // Respect user's playback intent for this session:
+                    playWhenReady = sessionPlayIntent
                 }
         } else {
             null
@@ -107,10 +123,15 @@ fun rememberViewerVideoState(
     }
 
     val state = remember(uri, isVideo) {
-        ViewerVideoState(player = player, isVideo = isVideo)
+        ViewerVideoState(
+            player = player,
+            isVideo = isVideo,
+            initialPlayIntent = sessionPlayIntent,
+            onPlayIntentChange = onPlayIntentChange
+        )
     }
 
-    // Attach ExoPlayer listener
+    // Attach ExoPlayer listener to current active player
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() {
@@ -201,7 +222,9 @@ fun VideoPlayerSurface(
 }
 
 /**
- * Floating video playback controller bar (Play/Pause, scrub slider, timestamps, mute).
+ * Floating video playback controller bar overlay (Play/Pause, timestamps, seek slider, mute, fullscreen).
+ * Features spacious touch targets, adaptive seek slider compression, distinct adjacent buttons,
+ * and clean translucent styling that never overlaps surrounding action bars.
  */
 @Composable
 fun VideoPlayerControlsBar(
@@ -214,53 +237,116 @@ fun VideoPlayerControlsBar(
     val duration = videoState.durationMs
     val isPlaying = videoState.isPlaying
     val isMuted = videoState.isMuted
+    val isFullscreen = videoState.isFullscreen
 
-    Row(
+    Surface(
         modifier = modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 18.dp)
-            .padding(bottom = 76.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            .padding(horizontal = 14.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(26.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 4.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        )
     ) {
-        IconButton(
-            onClick = { videoState.togglePlayPause() },
-            modifier = Modifier.size(40.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(
-                if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (isPlaying) "Pause video" else "Play video"
+            // Play / Pause button with generous touch target
+            IconButton(
+                onClick = { videoState.togglePlayPause() },
+                modifier = Modifier
+                    .size(42.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause video" else "Play video",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Current time with tabular figures
+            Text(
+                text = formatTime(position),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFeatureSettings = "tnum",
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
             )
-        }
-        Text(
-            text = formatTime(position),
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1
-        )
-        Slider(
-            value = position.toFloat().coerceAtMost(duration.coerceAtLeast(1L).toFloat()),
-            onValueChange = { videoState.positionMs = it.toLong() },
-            onValueChangeFinished = { videoState.seekTo(videoState.positionMs) },
-            valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
-            modifier = Modifier.weight(1f)
-        )
-        Text(
-            text = formatTime(duration),
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1
-        )
-        IconButton(
-            onClick = { videoState.toggleMute() },
-            modifier = Modifier.size(40.dp)
-        ) {
-            Icon(
-                if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                contentDescription = if (isMuted) "Unmute video" else "Mute video"
+
+            // Flexible Seek Slider that shrinks before compressing timestamps or buttons
+            Slider(
+                value = position.toFloat().coerceAtMost(duration.coerceAtLeast(1L).toFloat()),
+                onValueChange = { videoState.positionMs = it.toLong() },
+                onValueChangeFinished = { videoState.seekTo(videoState.positionMs) },
+                valueRange = 0f..duration.coerceAtLeast(1L).toFloat(),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
+                ),
+                modifier = Modifier
+                    .weight(1f, fill = true)
+                    .padding(horizontal = 2.dp)
             )
+
+            // Duration with tabular figures
+            Text(
+                text = formatTime(duration),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFeatureSettings = "tnum",
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+
+            // Adjacent Mute and Fullscreen buttons with distinct touch targets
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Mute toggle
+                IconButton(
+                    onClick = { videoState.toggleMute() },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = if (isMuted) "Unmute video" else "Mute video",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Fullscreen toggle
+                IconButton(
+                    onClick = { videoState.toggleFullscreen() },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.75f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                        contentDescription = if (isFullscreen) "Exit fullscreen" else "Enter fullscreen",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }

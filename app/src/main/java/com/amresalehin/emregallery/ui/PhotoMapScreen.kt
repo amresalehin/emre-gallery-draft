@@ -50,6 +50,10 @@ fun showEasternHemisphereView(map: MapView, animated: Boolean = false) {
 }
 
 fun focusSinglePhoto(map: MapView, point: GeoPoint, animated: Boolean = true) {
+    if (map.width <= 0 || map.height <= 0) {
+        map.post { focusSinglePhoto(map, point, animated) }
+        return
+    }
     if (animated) map.controller.animateTo(point) else map.controller.setCenter(point)
     map.controller.setZoom(15.0)
     map.invalidate()
@@ -142,50 +146,47 @@ fun PhotoMapScreen(
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var mapFramed by remember { mutableStateOf(false) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
-    var reportedMissingGpsForUri by remember { mutableStateOf<String?>(null) }
     var userHasMovedMap by remember { mutableStateOf(false) }
+    var lastFocusedUri by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(media) {
         viewModel.loadAndScanMedia(media)
     }
 
-    LaunchedEffect(uiState.locatedMedia, focusItem, uiState.loading, mapRef) {
+    // Direct camera focus for requested item
+    LaunchedEffect(focusItem?.uri, mapRef) {
         val requestedItem = focusItem ?: return@LaunchedEffect
-        val match = uiState.locatedMedia.firstOrNull { it.first.uri == requestedItem.uri }
-        if (match == null && !uiState.loading && reportedMissingGpsForUri != requestedItem.uri) {
-            reportedMissingGpsForUri = requestedItem.uri
+        val map = mapRef ?: return@LaunchedEffect
+        if (lastFocusedUri == requestedItem.uri) return@LaunchedEffect
+
+        val point = viewModel.getLocationForMedia(context, requestedItem.uri)
+        if (point != null) {
+            selectedMapMedia = requestedItem to point
+            focusSinglePhoto(map, point, animated = true)
+            lastFocusedUri = requestedItem.uri
+            mapFramed = true
+        } else {
+            lastFocusedUri = requestedItem.uri
             snackbarHostState.showSnackbar(
-                message = "Cannot focus on \"" + requestedItem.name + "\": no accessible GPS coordinates found.",
+                message = "Cannot focus on \"${requestedItem.name}\": no accessible GPS coordinates found.",
                 duration = SnackbarDuration.Short
             )
+            if (!userHasMovedMap && uiState.locatedMedia.isNotEmpty()) {
+                fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
+            } else if (!userHasMovedMap) {
+                showEasternHemisphereView(map, animated = true)
+            }
+            mapFramed = true
         }
     }
 
-    // The very first map visit starts with the requested eastern-hemisphere view.
-    // On later visits, wait until the location cache has been loaded and any missing
-    // coordinates have been indexed. Fit cached points automatically unless the user
-    // has actually dragged or pinched the map.
-    LaunchedEffect(mapRef, uiState.locatedMedia, uiState.loading, focusItem, firstMapVisit) {
+    // Framing for general map visits (when focusItem == null)
+    LaunchedEffect(mapRef, uiState.locatedMedia, uiState.loading, firstMapVisit) {
+        if (focusItem != null) return@LaunchedEffect
         val map = mapRef ?: return@LaunchedEffect
         if (mapFramed) return@LaunchedEffect
 
-        if (focusItem != null) {
-            val match = uiState.locatedMedia.firstOrNull { it.first.uri == focusItem.uri }
-            when {
-                match != null -> {
-                    focusSinglePhoto(map, match.second, animated = false)
-                    mapFramed = true
-                }
-                !uiState.loading -> {
-                    if (!userHasMovedMap && uiState.locatedMedia.isNotEmpty()) {
-                        fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = false)
-                    } else if (!userHasMovedMap) {
-                        showEasternHemisphereView(map, animated = false)
-                    }
-                    mapFramed = true
-                }
-            }
-        } else if (firstMapVisit) {
+        if (firstMapVisit) {
             showEasternHemisphereView(map, animated = false)
             mapFramed = true
         } else if (!uiState.loading) {

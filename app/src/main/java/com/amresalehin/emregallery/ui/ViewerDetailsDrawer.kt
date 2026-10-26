@@ -10,6 +10,8 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -21,12 +23,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
+import kotlin.math.abs
+import kotlin.math.hypot
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
@@ -128,8 +139,8 @@ fun rememberViewerDetailsState(
 
 /**
  * Slide-up details drawer containing Overview and Actions tabs.
- * Dimensions, positioning, top rounded corners, and gestures are preserved.
- * Switching tabs changes only the content area without resizing or dismissing the drawer.
+ * Coordinated directly with finger drag gestures, 6 detents (Closed, Compact ~35%, Medium ~50%, Initial ~65%, Large ~80%, Expanded ~95%),
+ * nested scrolling on content, directional gesture locking, and progressive scrim.
  */
 @Composable
 fun BoxScope.ViewerDetailsDrawer(
@@ -137,13 +148,11 @@ fun BoxScope.ViewerDetailsDrawer(
     items: List<MediaItem>,
     customAlbums: List<CustomAlbum>,
     customTags: Set<String>,
-    showDetails: Boolean,
-    detailsRevealTriggered: Boolean,
-    detailsRevealPx: Float,
-    detailsSheetHeightPx: Float,
-    onHeightMeasured: (Float) -> Unit,
-    onRevealPxChanged: (Float) -> Unit,
-    onToggleDetails: () -> Unit,
+    drawerVisibleHeight: Animatable<Float, AnimationVector1D>,
+    initialHeightPx: Float,
+    expandedHeightPx: Float,
+    onSettle: suspend (startHeight: Float, currentHeight: Float, velocity: Float) -> Unit,
+    onClose: () -> Unit,
     onShare: () -> Unit,
     onAddTo: () -> Unit,
     onToggleBin: () -> Unit,
@@ -156,9 +165,10 @@ fun BoxScope.ViewerDetailsDrawer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val viewConfiguration = ViewConfiguration.get(context)
     val coroutineScope = rememberCoroutineScope()
     val detailsState = rememberViewerDetailsState(item, defaultOcrLanguages, defaultOcrModel)
+    val viewConfig = ViewConfiguration.get(context)
+    val touchSlop = viewConfig.scaledTouchSlop.toFloat()
 
     var selectedTab by remember { mutableStateOf(DetailDrawerTab.OVERVIEW) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
@@ -168,78 +178,108 @@ fun BoxScope.ViewerDetailsDrawer(
         faceStore.facesForMedia(item.uri)
     }
 
-    // Dialog state for Actions tab
+    // Dialog state for Overview / Actions tabs
     var showAddLocationDialog by remember { mutableStateOf(false) }
     var showAddTagDialog by remember { mutableStateOf(false) }
     var renamingFace by remember { mutableStateOf<DetectedMediaFace?>(null) }
 
-    // Backdrop scrim
-    AnimatedVisibility(
-        visible = showDetails,
-        enter = fadeIn(animationSpec = tween(280)),
-        exit = fadeOut(animationSpec = tween(220)),
-        modifier = Modifier.fillMaxSize()
-    ) {
+    val currentVisibleH = drawerVisibleHeight.value
+    val sheetHeightDp = with(LocalDensity.current) { expandedHeightPx.toDp() }
+
+    // Synchronized progressive backdrop scrim
+    if (currentVisibleH > 0.5f) {
+        val scrimAlpha = (currentVisibleH / expandedHeightPx).coerceIn(0f, 1f) * 0.45f
         Box(
-            Modifier
+            modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.45f))
-                .pointerInput(showDetails) {
-                    var totalDragY = 0f
-                    val touchSlop = viewConfiguration.scaledTouchSlop.toFloat()
-                    val dismissThreshold = touchSlop * 3.5f
-                    detectDragGestures(
-                        onDragStart = { totalDragY = 0f },
-                        onDragEnd = {
-                            if (totalDragY > dismissThreshold) {
-                                onToggleDetails()
-                            }
-                        },
-                        onDragCancel = { totalDragY = 0f }
-                    ) { change, dragAmount ->
-                        totalDragY += dragAmount.y
-                        if (kotlin.math.abs(totalDragY) > touchSlop) {
-                            change.consume()
-                        }
+                .background(Color.Black.copy(alpha = scrimAlpha))
+                .clickable {
+                    coroutineScope.launch {
+                        drawerVisibleHeight.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            )
+                        )
+                        onClose()
                     }
                 }
-                .clickable { onToggleDetails() }
         )
     }
 
-    val sheetDragOffsetY = remember { Animatable(0f) }
-    LaunchedEffect(showDetails) {
-        sheetDragOffsetY.snapTo(0f)
-        if (showDetails && !detailsRevealTriggered) {
-            onRevealPxChanged(detailsSheetHeightPx)
-        } else if (!showDetails) {
-            onRevealPxChanged(0f)
+    // Track scroll gesture start height for nested scroll deliberate dismissal calculation
+    var nestedScrollStartHeight by remember { mutableFloatStateOf(0f) }
+    var isNestedScrollActive by remember { mutableStateOf(false) }
+
+    // Nested scroll connection for the inner scrollable content
+    val nestedScrollConnection = remember(expandedHeightPx, initialHeightPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = -available.y // delta > 0 is upward drag, delta < 0 is downward drag
+                if (!isNestedScrollActive && (delta != 0f)) {
+                    nestedScrollStartHeight = drawerVisibleHeight.value
+                    isNestedScrollActive = true
+                }
+                // When dragging up and sheet is not yet expanded: expand sheet first
+                if (delta > 0 && drawerVisibleHeight.value < expandedHeightPx - 1f) {
+                    val newH = (drawerVisibleHeight.value + delta).coerceAtMost(expandedHeightPx)
+                    val consumed = newH - drawerVisibleHeight.value
+                    coroutineScope.launch { drawerVisibleHeight.snapTo(newH) }
+                    return Offset(0f, -consumed)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                val delta = -available.y // delta < 0 is downward drag when content is already at top
+                if (!isNestedScrollActive && (delta != 0f)) {
+                    nestedScrollStartHeight = drawerVisibleHeight.value
+                    isNestedScrollActive = true
+                }
+                if (delta < 0 && drawerVisibleHeight.value > 0f) {
+                    val newH = (drawerVisibleHeight.value + delta).coerceAtLeast(0f)
+                    val consumedH = drawerVisibleHeight.value - newH
+                    coroutineScope.launch { drawerVisibleHeight.snapTo(newH) }
+                    return Offset(0f, -consumedH)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val velocity = -available.y
+                val startH = if (nestedScrollStartHeight > 0f) nestedScrollStartHeight else drawerVisibleHeight.value
+                isNestedScrollActive = false
+                nestedScrollStartHeight = 0f
+                if (velocity > 0 && drawerVisibleHeight.value < expandedHeightPx - 1f) {
+                    onSettle(startH, drawerVisibleHeight.value, velocity)
+                    return available
+                }
+                return Velocity.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                val velocity = -available.y
+                val startH = if (nestedScrollStartHeight > 0f) nestedScrollStartHeight else drawerVisibleHeight.value
+                isNestedScrollActive = false
+                nestedScrollStartHeight = 0f
+                if (drawerVisibleHeight.value < expandedHeightPx) {
+                    onSettle(startH, drawerVisibleHeight.value, velocity)
+                    return available
+                }
+                return Velocity.Zero
+            }
         }
     }
 
-    AnimatedVisibility(
-        visible = showDetails,
-        enter = fadeIn(animationSpec = tween(120)),
-        exit = slideOutVertically(
-            targetOffsetY = { it },
-            animationSpec = tween(280, easing = FastOutLinearInEasing)
-        ) + fadeOut(animationSpec = tween(180)),
-        modifier = modifier.align(Alignment.BottomCenter)
-    ) {
+    if (currentVisibleH > 0f) {
         Surface(
-            Modifier
+            modifier = modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.50f)
-                .onSizeChanged {
-                    val h = it.height.toFloat()
-                    onHeightMeasured(h)
-                    if (showDetails && !detailsRevealTriggered) {
-                        onRevealPxChanged(h)
-                    }
-                }
+                .height(sheetHeightDp)
+                .align(Alignment.BottomCenter)
                 .graphicsLayer {
-                    translationY = (detailsSheetHeightPx - detailsRevealPx).coerceAtLeast(0f) +
-                        sheetDragOffsetY.value.coerceAtLeast(0f)
+                    translationY = (expandedHeightPx - currentVisibleH).coerceAtLeast(0f)
                 },
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -247,66 +287,58 @@ fun BoxScope.ViewerDetailsDrawer(
             shadowElevation = 10.dp
         ) {
             Column(Modifier.fillMaxSize()) {
-                // Top drag handle with drag down dismiss
+                // Top drag handle with direction lock and deliberate dismissal tracking
                 Box(
-                    Modifier
+                    modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp, bottom = 4.dp)
-                        .pointerInput(showDetails) {
-                            val velocityTracker = VelocityTracker()
-                            val minFling = viewConfiguration.scaledMinimumFlingVelocity.toFloat()
-                            val dismissDist = 80.dp.toPx()
-                            detectDragGestures(
-                                onDragStart = {
-                                    velocityTracker.resetTracking()
-                                    coroutineScope.launch { sheetDragOffsetY.snapTo(0f) }
-                                },
-                                onDragEnd = {
-                                    val velocityY = velocityTracker.calculateVelocity().y
-                                    coroutineScope.launch {
-                                        when {
-                                            (sheetDragOffsetY.value > dismissDist || velocityY > minFling) -> {
-                                                sheetDragOffsetY.animateTo(
-                                                    targetValue = detailsSheetHeightPx.coerceAtLeast(600f),
-                                                    initialVelocity = velocityY,
-                                                    animationSpec = spring(
-                                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                                        stiffness = Spring.StiffnessMediumLow
-                                                    )
-                                                )
-                                                onToggleDetails()
-                                                sheetDragOffsetY.snapTo(0f)
-                                            }
-                                            else -> {
-                                                sheetDragOffsetY.animateTo(
-                                                    targetValue = 0f,
-                                                    initialVelocity = velocityY,
-                                                    animationSpec = spring(
-                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                        stiffness = Spring.StiffnessMedium
-                                                    )
-                                                )
+                        .pointerInput(expandedHeightPx, touchSlop) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val velocityTracker = VelocityTracker()
+                                velocityTracker.addPosition(down.uptimeMillis, down.position)
+                                var isVerticalDrag = false
+                                var isHorizontal = false
+                                var totalDx = 0f
+                                var totalDy = 0f
+                                var gestureStartH = drawerVisibleHeight.value
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) {
+                                        if (isVerticalDrag) {
+                                            val velocityY = velocityTracker.calculateVelocity().y
+                                            coroutineScope.launch {
+                                                onSettle(gestureStartH, drawerVisibleHeight.value, -velocityY)
                                             }
                                         }
+                                        break
                                     }
-                                },
-                                onDragCancel = {
-                                    coroutineScope.launch {
-                                        sheetDragOffsetY.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessMedium
-                                            )
-                                        )
+
+                                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                    val posChange = change.positionChange()
+                                    totalDx += posChange.x
+                                    totalDy += posChange.y
+
+                                    if (!isVerticalDrag && !isHorizontal) {
+                                        val dist = hypot(totalDx, totalDy)
+                                        if (dist > touchSlop) {
+                                            if (abs(totalDx) > abs(totalDy)) {
+                                                isHorizontal = true
+                                            } else {
+                                                isVerticalDrag = true
+                                                gestureStartH = drawerVisibleHeight.value
+                                                change.consume()
+                                                val nextH = (drawerVisibleHeight.value - posChange.y).coerceIn(0f, expandedHeightPx)
+                                                coroutineScope.launch { drawerVisibleHeight.snapTo(nextH) }
+                                            }
+                                        }
+                                    } else if (isVerticalDrag) {
+                                        change.consume()
+                                        val nextH = (drawerVisibleHeight.value - posChange.y).coerceIn(0f, expandedHeightPx)
+                                        coroutineScope.launch { drawerVisibleHeight.snapTo(nextH) }
                                     }
-                                }
-                            ) { change, dragAmount ->
-                                change.consume()
-                                velocityTracker.addPosition(change.uptimeMillis, change.position)
-                                coroutineScope.launch {
-                                    val next = (sheetDragOffsetY.value + dragAmount.y).coerceAtLeast(0f)
-                                    sheetDragOffsetY.snapTo(next)
                                 }
                             }
                         },
@@ -321,27 +353,82 @@ fun BoxScope.ViewerDetailsDrawer(
                     )
                 }
 
-                // Pinned Header & Tabs at top of drawer
+                // Pinned Header & Tabs at top of drawer with directional gesture locking
                 DetailDrawerHeader(
                     item = item,
                     selectedTab = selectedTab,
-                    onSelectTab = { selectedTab = it }
+                    onSelectTab = { selectedTab = it },
+                    modifier = Modifier.pointerInput(expandedHeightPx, touchSlop) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val velocityTracker = VelocityTracker()
+                            velocityTracker.addPosition(down.uptimeMillis, down.position)
+                            var isVerticalDrag = false
+                            var isHorizontal = false
+                            var totalDx = 0f
+                            var totalDy = 0f
+                            var gestureStartH = drawerVisibleHeight.value
+
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) {
+                                    if (isVerticalDrag) {
+                                        val velocityY = velocityTracker.calculateVelocity().y
+                                        coroutineScope.launch {
+                                            onSettle(gestureStartH, drawerVisibleHeight.value, -velocityY)
+                                        }
+                                    }
+                                    break
+                                }
+
+                                velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                val posChange = change.positionChange()
+                                totalDx += posChange.x
+                                totalDy += posChange.y
+
+                                if (!isVerticalDrag && !isHorizontal) {
+                                    val dist = hypot(totalDx, totalDy)
+                                    if (dist > touchSlop) {
+                                        if (abs(totalDx) > abs(totalDy)) {
+                                            isHorizontal = true
+                                        } else {
+                                            isVerticalDrag = true
+                                            gestureStartH = drawerVisibleHeight.value
+                                            change.consume()
+                                            val nextH = (drawerVisibleHeight.value - posChange.y).coerceIn(0f, expandedHeightPx)
+                                            coroutineScope.launch { drawerVisibleHeight.snapTo(nextH) }
+                                        }
+                                    }
+                                } else if (isVerticalDrag) {
+                                    change.consume()
+                                    val nextH = (drawerVisibleHeight.value - posChange.y).coerceIn(0f, expandedHeightPx)
+                                    coroutineScope.launch { drawerVisibleHeight.snapTo(nextH) }
+                                }
+                            }
+                        }
+                    }
                 )
 
-                // Scrollable content area (Overview and Actions share exact same container dimensions)
+                // Scrollable content area
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
+                        .nestedScroll(nestedScrollConnection)
                 ) {
                     when (selectedTab) {
                         DetailDrawerTab.OVERVIEW -> {
                             OverviewTabContent(
                                 item = item,
+                                customAlbums = customAlbums,
                                 customTags = customTags,
                                 detectedFaces = detectedFaces,
                                 metadata = detailsState.metadata,
-                                onOpenMap = onOpenMap
+                                onOpenMap = onOpenMap,
+                                onAddToAlbum = onAddTo,
+                                onAddTag = { showAddTagDialog = true },
+                                onEditLocation = { showAddLocationDialog = true }
                             )
                         }
                         DetailDrawerTab.ACTIONS -> {
@@ -351,9 +438,6 @@ fun BoxScope.ViewerDetailsDrawer(
                                 detectedFaces = detectedFaces,
                                 metadata = detailsState.metadata,
                                 detailsState = detailsState,
-                                onAddTo = onAddTo,
-                                onAddLocationClick = { showAddLocationDialog = true },
-                                onAddTagClick = { showAddTagDialog = true },
                                 onRenameFaceClick = { renamingFace = it }
                             )
                         }

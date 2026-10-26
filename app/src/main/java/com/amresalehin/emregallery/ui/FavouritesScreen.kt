@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -38,9 +39,11 @@ fun FavouritesScreen(
     onRemoveFavourite: (MediaItem) -> Unit
 ) {
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        val returnProgress = LocalViewerCoordinatedProgress.current
         Row(
             modifier = Modifier.fillMaxWidth().statusBarsPadding()
-                .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 10.dp),
+                .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 10.dp)
+                .destinationTopBarEntrance(returnProgress),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
@@ -92,7 +95,8 @@ fun FavouritesScreen(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                     ) {
                         Column {
-                            Box {
+                            Box(modifier = Modifier.trackThumbnailBounds(item.uri)) {
+                                val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
                                 AsyncImage(
                                     model = ImageRequest.Builder(LocalContext.current)
                                         .data(Uri.parse(item.uri))
@@ -103,10 +107,11 @@ fun FavouritesScreen(
                                     contentDescription = item.name,
                                     modifier = Modifier.fillMaxWidth().aspectRatio(1f)
                                         .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                                        .clickable { onOpen(item) },
+                                        .clickable { onOpen(item) }
+                                        .alpha(if (isThumbnailActiveInViewer) 0f else 1f),
                                     contentScale = ContentScale.Crop
                                 )
-                                if (item.isVideo) {
+                                if (item.isVideo && !isThumbnailActiveInViewer) {
                                     Icon(
                                         Icons.Default.PlayCircle,
                                         contentDescription = "Video",

@@ -71,7 +71,7 @@ fun BoxScope.ViewerEdgeShading(
  * Top action bar with back, share, favorite, and more options.
  */
 @Composable
-fun BoxScope.ViewerTopAppBar(
+fun ViewerTopAppBar(
     isFavourite: Boolean,
     onBack: () -> Unit,
     onShare: () -> Unit,
@@ -82,7 +82,6 @@ fun BoxScope.ViewerTopAppBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .align(Alignment.TopCenter)
             .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -103,7 +102,7 @@ fun BoxScope.ViewerTopAppBar(
  * Bottom action bar with Edit and Delete/Restore buttons.
  */
 @Composable
-fun BoxScope.ViewerBottomActionBar(
+fun ViewerBottomActionBar(
     isBin: Boolean,
     onEdit: () -> Unit,
     onToggleBin: () -> Unit,
@@ -113,10 +112,9 @@ fun BoxScope.ViewerBottomActionBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .align(Alignment.BottomCenter)
-            .navigationBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
     ) {
         if (isBin) {
             ViewerAction(

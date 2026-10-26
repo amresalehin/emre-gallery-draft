@@ -21,6 +21,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -68,7 +69,9 @@ fun BinScreen(
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .destinationTopBarEntrance(LocalViewerCoordinatedProgress.current)
         ) {
             Row(
                 modifier = Modifier
@@ -341,10 +344,12 @@ private fun BinItemCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {
+            val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
+                    .trackThumbnailBounds(item.uri)
                     .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                     .combinedClickable(
                         onClick = onOpen,
@@ -359,10 +364,10 @@ private fun BinItemCard(
                         .precision(Precision.INEXACT)
                         .build(),
                     contentDescription = item.name,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().alpha(if (isThumbnailActiveInViewer) 0f else 1f),
                     contentScale = ContentScale.Crop
                 )
-                if (item.isVideo) {
+                if (item.isVideo && !isThumbnailActiveInViewer) {
                     Icon(
                         Icons.Default.PlayCircle,
                         contentDescription = "Video",

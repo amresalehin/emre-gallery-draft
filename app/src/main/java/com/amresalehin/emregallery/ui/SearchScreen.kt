@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -45,8 +46,14 @@ fun SearchScreen(
     videosOnly: Boolean,
     onVideosOnly: (Boolean) -> Unit
 ) {
+    val returnProgress = LocalViewerCoordinatedProgress.current
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp)) {
-        Row(Modifier.padding(top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .padding(top = 8.dp, bottom = 12.dp)
+                .destinationTopBarEntrance(returnProgress),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
             OutlinedTextField(
                 value = query,
@@ -141,7 +148,15 @@ fun SearchScreen(
                 }
                 LazyVerticalGrid(columns = GridCells.Fixed(3), contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     gridItems(results) { item ->
-                        Box(Modifier.fillMaxWidth().aspectRatio(.82f).clip(RoundedCornerShape(5.dp)).clickable { onOpen(item) }) {
+                        val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(.82f)
+                                .trackThumbnailBounds(item.uri)
+                                .clip(RoundedCornerShape(5.dp))
+                                .clickable { onOpen(item) }
+                        ) {
                             AsyncImage(
                                 model = ImageRequest.Builder(LocalContext.current)
                                     .data(Uri.parse(item.uri))
@@ -152,10 +167,12 @@ fun SearchScreen(
                                     .memoryCacheKey("${item.uri}_thumb")
                                     .build(),
                                 item.name,
-                                Modifier.fillMaxSize(),
+                                Modifier.fillMaxSize().alpha(if (isThumbnailActiveInViewer) 0f else 1f),
                                 contentScale = ContentScale.Crop
                             )
-                            if (item.isVideo) Icon(Icons.Default.PlayArrow, null, Modifier.align(Alignment.BottomEnd).padding(4.dp), tint = Color.White)
+                            if (item.isVideo && !isThumbnailActiveInViewer) {
+                                Icon(Icons.Default.PlayArrow, null, Modifier.align(Alignment.BottomEnd).padding(4.dp), tint = Color.White)
+                            }
                         }
                     }
                 }

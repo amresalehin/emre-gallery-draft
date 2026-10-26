@@ -91,7 +91,9 @@ fun LockedFolderScreen(
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .destinationTopBarEntrance(LocalViewerCoordinatedProgress.current)
             ) {
                 Row(
                     modifier = Modifier

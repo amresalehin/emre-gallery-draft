@@ -175,8 +175,12 @@ fun HomeScreen(
                     else -> Icons.Default.Folder
                 }
                 item {
+                    val returnProgress = LocalViewerCoordinatedProgress.current
                     Surface(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .destinationTopBarEntrance(returnProgress),
                         shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer
                     ) {

@@ -15,7 +15,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import android.content.Context
 import org.osmdroid.util.BoundingBox
+import org.osmdroid.util.GeoPoint
 
 /**
  * ViewModel managing the photo GPS indexing, location cache, and UI state for the Photo Map screen.
@@ -27,6 +29,18 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
 
     private val _uiState = MutableStateFlow(PhotoMapUiState())
     val uiState: StateFlow<PhotoMapUiState> = _uiState.asStateFlow()
+
+    suspend fun getLocationForMedia(context: Context, uri: String): GeoPoint? {
+        return withContext(Dispatchers.IO) {
+            val cached = locationCache.loadAll()[uri]?.point
+            if (cached != null) return@withContext cached
+            val extracted = PhotoMapLocationCache.extractLocation(context, uri)
+            if (extracted != null) {
+                locationCache.save(uri, extracted)
+            }
+            extracted
+        }
+    }
 
     fun loadAndScanMedia(media: List<MediaItem>, forceRescan: Boolean = false) {
         indexingJob?.cancel()

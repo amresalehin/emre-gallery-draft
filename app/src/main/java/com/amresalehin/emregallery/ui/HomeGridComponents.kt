@@ -309,6 +309,7 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
                 )
                 Box(
                     Modifier.width(132.dp).height(184.dp)
+                        .trackThumbnailBounds(cover.uri)
                         .graphicsLayer {
                             scaleX = memScale
                             scaleY = memScale
@@ -320,6 +321,7 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
                             onClick = { onOpen(cover) }
                         )
                 ) {
+                    val isCoverActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == cover.uri
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(Uri.parse(cover.uri))
@@ -330,7 +332,9 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
             .memoryCacheKey("${cover.uri}_memory_story")
                             .build(),
                         contentDescription = title,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                            alpha = if (isCoverActiveInViewer) 0f else 1f
+                        },
                         contentScale = ContentScale.Crop
                     )
                     Box(
@@ -531,6 +535,7 @@ fun MosaicMediaItem(
 
     Box(
         modifier = modifier
+            .trackThumbnailBounds(item.uri)
             .graphicsLayer {
                 scaleX = itemScale
                 scaleY = itemScale
@@ -549,10 +554,13 @@ fun MosaicMediaItem(
                 onLongClick = { onLongPress() }
             )
     ) {
+        val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
         AsyncImage(
             model = imageRequest,
             contentDescription = item.name,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                alpha = if (isThumbnailActiveInViewer) 0f else 1f
+            },
             contentScale = ContentScale.Crop
         )
         if (selected) {
@@ -569,7 +577,7 @@ fun MosaicMediaItem(
                 Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.padding(4.dp))
             }
         }
-        if (item.isVideo) {
+        if (item.isVideo && !isThumbnailActiveInViewer) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -633,6 +641,7 @@ fun MediaGridItem(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(aspect)
+            .trackThumbnailBounds(item.uri)
             .graphicsLayer {
                 scaleX = itemScale
                 scaleY = itemScale
@@ -646,13 +655,16 @@ fun MediaGridItem(
                 onClick = { onOpen(item) }
             )
     ) {
+        val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
         AsyncImage(
             model = imageRequest,
             contentDescription = item.name,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().graphicsLayer {
+                alpha = if (isThumbnailActiveInViewer) 0f else 1f
+            },
             contentScale = ContentScale.Crop
         )
-        if (item.isVideo) {
+        if (item.isVideo && !isThumbnailActiveInViewer) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)

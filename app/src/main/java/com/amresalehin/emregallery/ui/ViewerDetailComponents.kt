@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.face.DetectedMediaFace
 import com.amresalehin.emregallery.face.FaceClusterStore
@@ -252,18 +253,23 @@ fun DetailDrawerHeader(
 
 /**
  * Overview Tab content:
- * 1. Tags (compact chips, hidden if empty)
- * 2. People (individual large portraits, horizontal scroll, no visible scrollbar, hidden if empty)
- * 3. Location (preview box + place name, entire card clickable to open map, hidden if empty)
- * 4. Metadata (compact heading with downward chevron, no duplicate fields, thin dividers)
+ * 1. Albums (membership chips + add control in header, minimal empty state if none)
+ * 2. Tags (clean monochrome chips + add control in header, minimal empty state if none)
+ * 3. People (individual large portraits, horizontal scroll, hidden if empty)
+ * 4. Location (monochrome preview box + place name, preview opens map, edit control in header/card opens edit dialog, placeholder if none)
+ * 5. Metadata (compact heading with downward chevron, no duplicate fields, thin dividers)
  */
 @Composable
 fun OverviewTabContent(
     item: MediaItem,
+    customAlbums: List<CustomAlbum>,
     customTags: Set<String>,
     detectedFaces: List<DetectedMediaFace>,
     metadata: Map<String, String>,
     onOpenMap: () -> Unit,
+    onAddToAlbum: () -> Unit,
+    onAddTag: () -> Unit,
+    onEditLocation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -272,6 +278,9 @@ fun OverviewTabContent(
     val hasTags = customTags.isNotEmpty()
     val hasPeople = detectedFaces.isNotEmpty()
     val hasLocation = metadata["location"]?.isNotBlank() == true || metadata.containsKey("latitude")
+    val assignedAlbums = remember(item.uri, customAlbums) {
+        customAlbums.filter { item.uri in it.mediaUris }
+    }
 
     // Readable place split into primary and secondary
     val rawLocation = metadata["location"].orEmpty()
@@ -302,16 +311,114 @@ fun OverviewTabContent(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        // 1. Tags Section
-        if (hasTags) {
-            item(key = "overview_tags") {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // 1. Albums Section
+        item(key = "overview_albums") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Albums",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    IconButton(
+                        onClick = onAddToAlbum,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add to album",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                if (assignedAlbums.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        assignedAlbums.forEach { album ->
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                                modifier = Modifier.clickable { onAddToAlbum() }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Default.PhotoAlbum,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = album.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onAddToAlbum() }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Not in any album",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        // 2. Tags Section
+        item(key = "overview_tags") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Text(
                         text = "Tags",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    IconButton(
+                        onClick = onAddTag,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add tag",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                if (hasTags) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -327,7 +434,7 @@ fun OverviewTabContent(
                             ) {
                                 Text(
                                     text = tag,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.Medium,
                                     color = MaterialTheme.colorScheme.onSurface
@@ -335,11 +442,26 @@ fun OverviewTabContent(
                             }
                         }
                     }
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onAddTag() }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "No tags added",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
         }
 
-        // 2. People Section
+        // 3. People Section
         if (hasPeople) {
             item(key = "overview_people") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -364,16 +486,33 @@ fun OverviewTabContent(
             }
         }
 
-        // 3. Location Section
-        if (hasLocation) {
-            item(key = "overview_location") {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // 4. Location Section
+        item(key = "overview_location") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Text(
                         text = "Location",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    IconButton(
+                        onClick = onEditLocation,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = if (hasLocation) "Edit location" else "Add location",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                if (hasLocation) {
                     DetailCard(onClick = onOpenMap) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -383,7 +522,7 @@ fun OverviewTabContent(
                                 modifier = Modifier
                                     .size(52.dp)
                                     .clip(RoundedCornerShape(12.dp))
-                                    .background(Color(0xFF22342E)),
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(
@@ -393,14 +532,14 @@ fun OverviewTabContent(
                                     Icon(
                                         Icons.Default.LocationOn,
                                         contentDescription = null,
-                                        tint = Color(0xFF81C784),
+                                        tint = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(Modifier.height(2.dp))
                                     Text(
                                         text = "Map",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = Color(0xFF81C784),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 10.sp
                                     )
                                 }
@@ -425,6 +564,59 @@ fun OverviewTabContent(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
+                            }
+                        }
+                    }
+                } else {
+                    DetailCard(onClick = onEditLocation) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.AddLocationAlt,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = "Add",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "No location set",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = "Tap to add a location",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
@@ -644,15 +836,13 @@ fun ActionsTabContent(
     detectedFaces: List<DetectedMediaFace>,
     metadata: Map<String, String>,
     detailsState: ViewerDetailsState,
-    onAddTo: () -> Unit,
-    onAddLocationClick: () -> Unit,
-    onAddTagClick: () -> Unit,
     onRenameFaceClick: (DetectedMediaFace) -> Unit,
+    onAddTo: (() -> Unit)? = null,
+    onAddLocationClick: (() -> Unit)? = null,
+    onAddTagClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
-    val hasLocation = metadata["location"]?.isNotBlank() == true || metadata.containsKey("latitude")
-    val hasTags = customTags.isNotEmpty()
     val hasPeople = detectedFaces.isNotEmpty()
 
     var selectedEngine by remember { mutableStateOf("Tesseract") }
@@ -665,105 +855,7 @@ fun ActionsTabContent(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // 1. Media actions
-        item(key = "media_actions") {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // Row: Add to album
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onAddTo() }
-                        .padding(vertical = 12.dp, horizontal = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Add to album",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    IconButton(
-                        onClick = onAddTo,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = "Add to album",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                // Row: Add location (only when media has no saved location)
-                if (!hasLocation) {
-                    HorizontalDivider(
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onAddLocationClick() }
-                            .padding(vertical = 12.dp, horizontal = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Add location",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        IconButton(
-                            onClick = onAddLocationClick,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Add location",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Row: Add tags (only when media has no assigned tags)
-                if (!hasTags) {
-                    HorizontalDivider(
-                        thickness = 0.5.dp,
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onAddTagClick() }
-                            .padding(vertical = 12.dp, horizontal = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "Add tags",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        IconButton(
-                            onClick = onAddTagClick,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Add tags",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. People (same detected faces, smaller portraits, muted look, pencil directly beneath)
+        // 1. People (detected faces, smaller portraits, muted look, pencil directly beneath)
         if (hasPeople) {
             item(key = "actions_people") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

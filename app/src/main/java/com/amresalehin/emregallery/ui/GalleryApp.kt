@@ -32,6 +32,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -62,6 +63,8 @@ data class NavBackStackEntry(
     val albumFilterReturnDestination: Destination = Destination.ALBUMS
 )
 
+val LocalViewerCoordinatedProgress = compositionLocalOf { 0f }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryApp() {
@@ -80,6 +83,7 @@ fun GalleryApp() {
     var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
     val backStack = remember { mutableStateListOf<NavBackStackEntry>() }
+    val viewerTransitionProgress = remember { Animatable(0f) }
     var showViewerControls by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(false) }
     var searchStage by remember { mutableStateOf(SearchStage.DISCOVERY) }
@@ -451,6 +455,7 @@ fun GalleryApp() {
         viewerMediaList = safeList
         showViewerControls = false
         showDetails = false
+        scope.launch { viewerTransitionProgress.snapTo(0f) }
         navigateTo(
             dest = Destination.VIEWER,
             rememberPrevious = true,
@@ -465,6 +470,7 @@ fun GalleryApp() {
             return
         }
         isNavigatingBack = true
+        scope.launch { viewerTransitionProgress.snapTo(0f) }
         if (destination == Destination.LOCKED_FOLDER) {
             isLockedFolderUnlocked = false
         }
@@ -625,8 +631,13 @@ fun GalleryApp() {
                 )
             }
 
-            AnimatedContent(
-                targetState = destination,
+            val baseDestination = if (destination == Destination.VIEWER) previousDestination else destination
+            val coordinatedProgress = if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f
+            val returnDestination = if (destination == Destination.VIEWER) previousDestination else destination
+
+            CompositionLocalProvider(LocalViewerCoordinatedProgress provides coordinatedProgress) {
+                AnimatedContent(
+                    targetState = baseDestination,
                 transitionSpec = {
                     val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
                     val initialIndex = mainPages.indexOf(initialState)
@@ -634,30 +645,7 @@ fun GalleryApp() {
                     val isOpeningAlbumDetail = targetState == Destination.HOME && albumFilter != null
                     val isExitingAlbumDetail = initialState == Destination.HOME && albumFilter != null && isNavigatingBack
 
-                    if (targetState == Destination.VIEWER) {
-                        if (isNavigatingBack) {
-                            (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
-                                scaleIn(initialScale = 1.04f, animationSpec = tween(180, easing = FastOutSlowInEasing)))
-                                .togetherWith(
-                                    fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing)) +
-                                    scaleOut(targetScale = 0.80f, animationSpec = tween(180, easing = FastOutSlowInEasing))
-                                )
-                        } else {
-                            (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
-                                scaleIn(initialScale = 0.80f, animationSpec = spring(dampingRatio = 0.84f, stiffness = 420f)))
-                                .togetherWith(
-                                    fadeOut(animationSpec = tween(140)) +
-                                    scaleOut(targetScale = 1.05f, animationSpec = tween(140))
-                                )
-                        }
-                    } else if (initialState == Destination.VIEWER) {
-                        (fadeIn(animationSpec = tween(180, easing = LinearOutSlowInEasing)) +
-                            scaleIn(initialScale = 1.04f, animationSpec = tween(180, easing = FastOutSlowInEasing)))
-                            .togetherWith(
-                                fadeOut(animationSpec = tween(160, easing = FastOutLinearInEasing)) +
-                                scaleOut(targetScale = 0.80f, animationSpec = tween(180, easing = FastOutSlowInEasing))
-                            )
-                    } else if (isOpeningAlbumDetail) {
+                    if (isOpeningAlbumDetail) {
                         // Forward push when drilling down into an album
                         (slideInHorizontally(
                             animationSpec = tween(240, easing = FastOutSlowInEasing),
@@ -1075,112 +1063,122 @@ fun GalleryApp() {
                             onVideosOnly = { searchVideosOnly = it }
                         )
                     }
-                    Destination.VIEWER -> selectedMedia?.let { item ->
-                        val isItemBinned = item.isTrashed || item.uri in inBin
-                        val itemsForViewer = remember(viewerMediaList, item) {
-                            if (viewerMediaList.any { it.uri == item.uri }) viewerMediaList else listOf(item)
-                        }
-                        ViewerScreen(
-                            item = item,
-                            items = itemsForViewer,
-                            defaultOcrLanguages = ocrLanguagesPref,
-                            defaultOcrModel = ocrModelPref,
-                            favourite = item.uri in favourites,
-                            isHidden = item.uri in hidden,
-                            isBin = isItemBinned,
-                            isArchived = item.uri in archive,
-                            showControls = showViewerControls,
-                            showDetails = showDetails,
-                            customAlbums = customAlbums,
-                            customTags = customTagsMap[item.uri] ?: emptySet(),
-                            customPeople = customPeopleMap[item.uri] ?: emptySet(),
-                            onAddTag = { tag -> scope.launch { prefs.addTagForMedia(item.uri, tag) } },
-                            onAddPerson = { person -> scope.launch { prefs.addPersonForMedia(item.uri, person) } },
-                            onToggleControls = { showViewerControls = !showViewerControls },
-                            onToggleDetails = { showDetails = !showDetails; showViewerControls = true },
-                            onBack = { performBackNavigation() },
-                            onFavourite = { scope.launch { prefs.toggleFavourite(item.uri) } },
-                            onToggleHide = {
-                                val isAlreadyLocked = item.relativePath == "Locked" || item.uri in lockedVaultItems.map { it.uri }
-                                if (!isAlreadyLocked && lockedFolderPinHash.isNullOrBlank()) {
-                                    showLockedFolderSetupPrompt = true
-                                } else {
-                                    scope.launch {
-                                        if (!isAlreadyLocked) {
-                                            val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(listOf(item)) }
-                                            lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
-                                            prefs.setHidden(item.uri, true)
-                                            refreshMedia()
-                                            val res = snackbarHostState.showSnackbar(
-                                                message = "Moved to Locked folder",
-                                                actionLabel = "Undo",
-                                                duration = SnackbarDuration.Short
-                                            )
-                                            if (res == SnackbarResult.ActionPerformed) {
-                                                withContext(Dispatchers.IO) { lockedVaultManager.unlockItems(lockedList) }
-                                                lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
-                                                prefs.setHidden(item.uri, false)
-                                                refreshMedia()
-                                            }
-                                        } else {
-                                            withContext(Dispatchers.IO) { lockedVaultManager.unlockItems(listOf(item)) }
-                                            lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
-                                            prefs.setHidden(item.uri, false)
-                                            refreshMedia()
-                                            snackbarHostState.showSnackbar("Restored to gallery", duration = SnackbarDuration.Short)
-                                        }
-                                    }
-                                    performBackNavigation()
-                                }
-                            },
-                            onToggleBin = {
-                                if (isItemBinned) {
-                                    restoreFromDeviceTrash(listOf(item))
-                                } else {
-                                    moveToDeviceTrash(listOf(item))
-                                }
-                                performBackNavigation()
-                            },
-                            onDeletePermanently = if (isItemBinned) {
-                                {
-                                    permanentlyDelete(listOf(item))
-                                    performBackNavigation()
-                                }
-                            } else null,
-                            onToggleArchive = {
-                                val willArchive = item.uri !in archive
-                                scope.launch {
-                                    prefs.setArchived(item.uri, willArchive)
-                                    val msg = if (willArchive) "Archived" else "Unarchived"
-                                    val res = snackbarHostState.showSnackbar(
-                                        message = msg,
-                                        actionLabel = "Undo",
-                                        duration = SnackbarDuration.Short
-                                    )
-                                    if (res == SnackbarResult.ActionPerformed) {
-                                        prefs.setArchived(item.uri, !willArchive)
-                                    }
-                                }
-                                performBackNavigation()
-                            },
-                            onAddTo = { mediaForAddToAlbum = item; showAddToAlbumSheet = true },
-                            onOpenNeighbor = { selectedMedia = it; showDetails = false },
-                            onOpenMap = {
-                                showDetails = false
-                                navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = item)
-                            }
-                        )
+                    Destination.VIEWER -> {
+                        Box(Modifier.fillMaxSize())
                     }
                 }
             }
+        }
 
-        // Wider top and bottom edge blur across app screens
-        if (destination != Destination.VIEWER) {
+        // Top-layer Media Viewer with continuous thumbnail-to-fullscreen & return shared animation
+        if (destination == Destination.VIEWER && selectedMedia != null) {
+            val currentItem = selectedMedia!!
+            val isItemBinned = currentItem.isTrashed || currentItem.uri in inBin
+            val itemsForViewer = remember(viewerMediaList, currentItem) {
+                if (viewerMediaList.any { it.uri == currentItem.uri }) viewerMediaList else listOf(currentItem)
+            }
+            ViewerScreen(
+                item = currentItem,
+                items = itemsForViewer,
+                defaultOcrLanguages = ocrLanguagesPref,
+                defaultOcrModel = ocrModelPref,
+                favourite = currentItem.uri in favourites,
+                isHidden = currentItem.uri in hidden,
+                isBin = isItemBinned,
+                isArchived = currentItem.uri in archive,
+                showControls = showViewerControls,
+                showDetails = showDetails,
+                customAlbums = customAlbums,
+                customTags = customTagsMap[currentItem.uri] ?: emptySet(),
+                customPeople = customPeopleMap[currentItem.uri] ?: emptySet(),
+                onAddTag = { tag -> scope.launch { prefs.addTagForMedia(currentItem.uri, tag) } },
+                onAddPerson = { person -> scope.launch { prefs.addPersonForMedia(currentItem.uri, person) } },
+                onToggleControls = { showViewerControls = !showViewerControls },
+                onToggleDetails = { showDetails = !showDetails; showViewerControls = true },
+                onBack = { performBackNavigation() },
+                onFavourite = { scope.launch { prefs.toggleFavourite(currentItem.uri) } },
+                onToggleHide = {
+                    val isAlreadyLocked = currentItem.relativePath == "Locked" || currentItem.uri in lockedVaultItems.map { it.uri }
+                    if (!isAlreadyLocked && lockedFolderPinHash.isNullOrBlank()) {
+                        showLockedFolderSetupPrompt = true
+                    } else {
+                        scope.launch {
+                            if (!isAlreadyLocked) {
+                                val lockedList = withContext(Dispatchers.IO) { lockedVaultManager.lockItems(listOf(currentItem)) }
+                                lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
+                                prefs.setHidden(currentItem.uri, true)
+                                refreshMedia()
+                                val res = snackbarHostState.showSnackbar(
+                                    message = "Moved to Locked folder",
+                                    actionLabel = "Undo",
+                                    duration = SnackbarDuration.Short
+                                )
+                                if (res == SnackbarResult.ActionPerformed) {
+                                    withContext(Dispatchers.IO) { lockedVaultManager.unlockItems(lockedList) }
+                                    lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
+                                    prefs.setHidden(currentItem.uri, false)
+                                    refreshMedia()
+                                }
+                            } else {
+                                withContext(Dispatchers.IO) { lockedVaultManager.unlockItems(listOf(currentItem)) }
+                                lockedVaultItems = withContext(Dispatchers.IO) { lockedVaultManager.getVaultItems() }
+                                prefs.setHidden(currentItem.uri, false)
+                                refreshMedia()
+                                snackbarHostState.showSnackbar("Restored to gallery", duration = SnackbarDuration.Short)
+                            }
+                        }
+                        performBackNavigation()
+                    }
+                },
+                onToggleBin = {
+                    if (isItemBinned) {
+                        restoreFromDeviceTrash(listOf(currentItem))
+                    } else {
+                        moveToDeviceTrash(listOf(currentItem))
+                    }
+                    performBackNavigation()
+                },
+                onDeletePermanently = if (isItemBinned) {
+                    {
+                        permanentlyDelete(listOf(currentItem))
+                        performBackNavigation()
+                    }
+                } else null,
+                onToggleArchive = {
+                    val willArchive = currentItem.uri !in archive
+                    scope.launch {
+                        prefs.setArchived(currentItem.uri, willArchive)
+                        val msg = if (willArchive) "Archived" else "Unarchived"
+                        val res = snackbarHostState.showSnackbar(
+                            message = msg,
+                            actionLabel = "Undo",
+                            duration = SnackbarDuration.Short
+                        )
+                        if (res == SnackbarResult.ActionPerformed) {
+                            prefs.setArchived(currentItem.uri, !willArchive)
+                        }
+                    }
+                    performBackNavigation()
+                },
+                onAddTo = { mediaForAddToAlbum = currentItem; showAddToAlbumSheet = true },
+                onOpenNeighbor = { selectedMedia = it; showDetails = false },
+                onOpenMap = {
+                    showDetails = false
+                    navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = currentItem)
+                },
+                transitionProgress = viewerTransitionProgress
+            )
+        }
+
+        // Wider top and bottom edge blur across app screens, smoothly fading with return progress
+        val showEdgeBlurs = destination != Destination.VIEWER || coordinatedProgress < 0.99f
+        if (showEdgeBlurs) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(0.045f)
+                    .graphicsLayer { alpha = (1f - coordinatedProgress).coerceIn(0f, 1f) }
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
@@ -1198,6 +1196,7 @@ fun GalleryApp() {
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(0.045f)
+                    .graphicsLayer { alpha = (1f - coordinatedProgress).coerceIn(0f, 1f) }
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
@@ -1211,103 +1210,123 @@ fun GalleryApp() {
             )
         }
 
-        // Floating search bar across Home and Albums
-        if (destination in listOf(Destination.HOME, Destination.ALBUMS)) {
+        // Floating search bar across Home and Albums - coordinated entrance downward from above screen edge
+        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS)
+        if (showSearchBar) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clipToBounds()
             ) {
-                FloatingSearchPill(
-                    label = when (destination) {
-                        Destination.ALBUMS -> "Search folders, albums…"
-                        else -> "Search photos, people, places…"
-                    },
-                    showMoreOptions = destination == Destination.HOME,
-                    onMenuClick = { showSidePanel = true },
-                    onOptionsClick = { showHomeViewOptionsSheet = true },
-                    onClick = {
-                        navigateTo(Destination.SEARCH)
-                        searchStage = SearchStage.DISCOVERY
-                        searchQuery = ""
-                    }
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .graphicsLayer {
+                            translationY = -(size.height + 60.dp.toPx()) * coordinatedProgress
+                            alpha = (1f - coordinatedProgress * 1.15f).coerceIn(0f, 1f)
+                        }
+                ) {
+                    FloatingSearchPill(
+                        label = when (returnDestination) {
+                            Destination.ALBUMS -> "Search folders, albums…"
+                            else -> "Search photos, people, places…"
+                        },
+                        showMoreOptions = returnDestination == Destination.HOME,
+                        onMenuClick = { showSidePanel = true },
+                        onOptionsClick = { showHomeViewOptionsSheet = true },
+                        onClick = {
+                            navigateTo(Destination.SEARCH)
+                            searchStage = SearchStage.DISCOVERY
+                            searchQuery = ""
+                        }
+                    )
+                }
             }
         }
 
-        // Floating Bottom Navigation Bar across Home, Albums, Settings (covered by selection toolbar when selecting media)
-        val showBottomBarContainer = (destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()
+        // Floating Bottom Navigation Bar across Home, Albums, Settings - coordinated entrance upward from below screen edge
+        val showBottomBarContainer = (returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 12.dp)
+                    .clipToBounds()
             ) {
-                if (albumFilter == null && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
-                    FloatingNavigationBar(
-                        current = destination,
-                        onSelect = { dest ->
-                            if (dest == destination) {
-                                if (dest == Destination.HOME) {
-                                    scope.launch {
-                                        homeListState.animateScrollToItem(0)
-                                    }
-                                }
-                            } else {
-                                backStack.clear()
-                                albumFilter = null
-                                homeSelectedUris = emptySet()
-                                navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)
-                            }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 24.dp, vertical = 12.dp)
+                        .graphicsLayer {
+                            translationY = (size.height + 60.dp.toPx()) * coordinatedProgress
+                            alpha = (1f - coordinatedProgress * 1.15f).coerceIn(0f, 1f)
                         }
-                    )
-                }
-
-                // Floating Selection Toolbar overlying the bottom navigation bar:
-                // Opaque, exact size and position as bottom navigation bar, hiding it completely.
-                AnimatedVisibility(
-                    visible = homeSelectedUris.isNotEmpty(),
-                    enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
-                    exit = fadeOut(tween(160)) + slideOutVertically(tween(180)) { it / 2 }
                 ) {
-                    HomeSelectionToolbar(
-                        selectedUris = homeSelectedUris,
-                        totalCount = visibleMedia.size,
-                        onClose = { homeSelectedUris = emptySet() },
-                        onSelectAllToggle = {
-                            homeSelectedUris = if (homeSelectedUris.size == visibleMedia.size) {
-                                emptySet()
-                            } else {
-                                visibleMedia.map { it.uri }.toSet()
+                    if (albumFilter == null && returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
+                        FloatingNavigationBar(
+                            current = returnDestination,
+                            onSelect = { dest ->
+                                if (dest == destination) {
+                                    if (dest == Destination.HOME) {
+                                        scope.launch {
+                                            homeListState.animateScrollToItem(0)
+                                        }
+                                    }
+                                } else {
+                                    backStack.clear()
+                                    albumFilter = null
+                                    homeSelectedUris = emptySet()
+                                    navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)
+                                }
                             }
-                        },
-                        onShare = {
-                            shareMultipleMediaItems(context, visibleMedia.filter { it.uri in homeSelectedUris })
-                        },
-                        onMoveToLocked = {
-                            val targets = homeSelectedUris
-                            homeSelectedUris = emptySet()
-                            moveItemsToLocked(targets)
-                        },
-                        onMoveToBin = {
-                            val targets = homeSelectedUris
-                            homeSelectedUris = emptySet()
-                            moveToDeviceTrash(visibleMedia.filter { it.uri in targets })
-                        },
-                        onAddToAlbum = {
-                            val targets = homeSelectedUris
-                            homeSelectedUris = emptySet()
-                            val first = visibleMedia.firstOrNull { it.uri in targets }
-                            if (first != null) {
-                                mediaForAddToAlbum = first
-                                showAddToAlbumSheet = true
+                        )
+                    }
+
+                    // Floating Selection Toolbar overlying the bottom navigation bar:
+                    AnimatedVisibility(
+                        visible = homeSelectedUris.isNotEmpty(),
+                        enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
+                        exit = fadeOut(tween(160)) + slideOutVertically(tween(180)) { it / 2 }
+                    ) {
+                        HomeSelectionToolbar(
+                            selectedUris = homeSelectedUris,
+                            totalCount = visibleMedia.size,
+                            onClose = { homeSelectedUris = emptySet() },
+                            onSelectAllToggle = {
+                                homeSelectedUris = if (homeSelectedUris.size == visibleMedia.size) {
+                                    emptySet()
+                                } else {
+                                    visibleMedia.map { it.uri }.toSet()
+                                }
+                            },
+                            onShare = {
+                                shareMultipleMediaItems(context, visibleMedia.filter { it.uri in homeSelectedUris })
+                            },
+                            onMoveToLocked = {
+                                val targets = homeSelectedUris
+                                homeSelectedUris = emptySet()
+                                moveItemsToLocked(targets)
+                            },
+                            onMoveToBin = {
+                                val targets = homeSelectedUris
+                                homeSelectedUris = emptySet()
+                                moveToDeviceTrash(visibleMedia.filter { it.uri in targets })
+                            },
+                            onAddToAlbum = {
+                                val targets = homeSelectedUris
+                                homeSelectedUris = emptySet()
+                                val first = visibleMedia.firstOrNull { it.uri in targets }
+                                if (first != null) {
+                                    mediaForAddToAlbum = first
+                                    showAddToAlbumSheet = true
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
