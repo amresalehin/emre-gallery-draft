@@ -3,117 +3,149 @@ package com.amresalehin.emregallery.ui
 import kotlin.math.abs
 
 /**
- * Authoritative physics, detents, and settlement calculations for the Media Details Drawer.
- *
- * The drawer supports six discrete resting positions:
- * 1. Closed (~0%)
- * 2. Compact (~35%)
- * 3. Medium (~50%)
- * 4. Initial (~65%)
- * 5. Large (~80%)
- * 6. Expanded (~95%)
- *
- * Supports fast, intentional deliberate dismissal directly from any open detent (including Expanded)
- * without stepping through intermediate detents, while preventing accidental closures during
- * ordinary downward drags or small flicks.
+ * 3-Anchor Resting Model for Google Photos-Style Overlay Detail Sheet:
+ * - Anchor 0 (Closed): Y_closed = Screen Height (completely off-screen, visible height = 0)
+ * - Anchor 1 (Half / Peek): Y_half ≈ 45% of screen height (visible height ≈ 55%, primary summary details visible)
+ * - Anchor 2 (Fully Expanded): Y_full ≈ 15% from screen top (visible height ≈ 85%, top margin reveals dimmed media)
  */
+enum class SheetAnchor {
+    CLOSED,
+    HALF,
+    FULLY_EXPANDED
+}
+
 object ViewerDrawerPhysics {
+    // Continuous vertical top offset (Y) fractions of screen height:
+    const val Y_CLOSED_FRACTION = 1.0f
+    const val Y_HALF_FRACTION = 0.45f
+    const val Y_FULL_FRACTION = 0.15f
+
+    // Visible height fractions (1f - Y_FRACTION):
     const val DETENT_CLOSED_FRACTION = 0f
-    const val DETENT_COMPACT_FRACTION = 0.35f
-    const val DETENT_MEDIUM_FRACTION = 0.50f
-    const val DETENT_INITIAL_FRACTION = 0.65f
-    const val DETENT_LARGE_FRACTION = 0.80f
-    const val DETENT_EXPANDED_FRACTION = 0.95f
+    const val DETENT_HALF_FRACTION = 0.55f
+    const val DETENT_EXPANDED_FRACTION = 0.85f
 
-    // Deliberate dismissal criteria
-    // Meaningful travel distance targeting ~20-25% of screen height from gesture start
-    const val DISMISS_DISTANCE_FRACTION = 0.22f
+    // Velocity thresholds in dp/s
+    const val FLING_THRESHOLD_DP = 1000f
+    const val EXTREME_FLING_THRESHOLD_DP = 2500f
 
-    // Minimum downward distance traveled required before any fling can qualify for dismissal
-    const val MEANINGFUL_DOWNWARD_TRAVEL_FRACTION = 0.12f
+    fun getYClosed(screenHeightPx: Float): Float = screenHeightPx * Y_CLOSED_FRACTION
+    fun getYHalf(screenHeightPx: Float): Float = screenHeightPx * Y_HALF_FRACTION
+    fun getYFull(screenHeightPx: Float): Float = screenHeightPx * Y_FULL_FRACTION
 
-    /**
-     * Returns all open resting detent heights in pixels, sorted in ascending order.
-     */
-    fun getOpenDetentHeights(screenHeightPx: Float): List<Float> {
-        return listOf(
-            screenHeightPx * DETENT_COMPACT_FRACTION,
-            screenHeightPx * DETENT_MEDIUM_FRACTION,
-            screenHeightPx * DETENT_INITIAL_FRACTION,
-            screenHeightPx * DETENT_LARGE_FRACTION,
-            screenHeightPx * DETENT_EXPANDED_FRACTION
-        )
+    // Settling Midpoints for Low-Velocity Release:
+    // Threshold_0_to_1 = (Y_closed + Y_half) / 2
+    // Threshold_1_to_2 = (Y_half + Y_full) / 2
+    fun getThreshold0To1(screenHeightPx: Float): Float {
+        return (getYClosed(screenHeightPx) + getYHalf(screenHeightPx)) / 2f
+    }
+
+    fun getThreshold1To2(screenHeightPx: Float): Float {
+        return (getYHalf(screenHeightPx) + getYFull(screenHeightPx)) / 2f
     }
 
     /**
-     * Determines the authoritative target height for the drawer at gesture release.
+     * Determines the authoritative target top offset Y for the sheet at gesture release.
      *
-     * @param gestureStartHeightPx Height of the drawer when the current gesture started.
-     * @param currentHeightPx Current rendered height of the drawer at touch release.
-     * @param upwardVelocityPx Upward velocity in px/s (positive = moving up, negative = moving down).
+     * @param startY Top offset Y when the current gesture started.
+     * @param currentY Current top offset Y of the sheet at touch release.
+     * @param velocityY Vertical velocity in px/s (positive = moving down, negative = moving up).
      * @param screenHeightPx Available screen height in pixels.
-     * @param minFlingVelocity Minimum velocity threshold for a fling.
-     * @return Target height in pixels: 0f for Closed, or one of the open detents.
+     * @param density Display density (to convert dp/s to px/s).
+     * @return Target Y in pixels: Y_closed, Y_half, or Y_full.
      */
-    fun calculateTargetHeight(
-        gestureStartHeightPx: Float,
-        currentHeightPx: Float,
-        upwardVelocityPx: Float,
+    fun calculateTargetY(
+        startY: Float,
+        currentY: Float,
+        velocityY: Float,
         screenHeightPx: Float,
-        minFlingVelocity: Float
+        density: Float
     ): Float {
-        val openDetents = getOpenDetentHeights(screenHeightPx)
-        val compactPx = openDetents[0]
-        val initialPx = openDetents[2]
-        val expandedPx = openDetents[4]
+        val yClosed = getYClosed(screenHeightPx)
+        val yHalf = getYHalf(screenHeightPx)
+        val yFull = getYFull(screenHeightPx)
 
-        val downwardTravel = gestureStartHeightPx - currentHeightPx
-        val dismissDistanceThreshold = screenHeightPx * DISMISS_DISTANCE_FRACTION
-        val meaningfulDownwardTravel = screenHeightPx * MEANINGFUL_DOWNWARD_TRAVEL_FRACTION
-        val decisiveDownwardFling = minFlingVelocity * 1.5f
+        val threshold0To1 = getThreshold0To1(screenHeightPx)
+        val threshold1To2 = getThreshold1To2(screenHeightPx)
 
-        // Condition 1: Deliberate downward dismissal by distance
-        // User dragged downward by >= ~22% of screen height from gesture start,
-        // and is releasing or moving downward (not vigorously reversing upward).
-        if (downwardTravel >= dismissDistanceThreshold && upwardVelocityPx <= minFlingVelocity * 0.4f) {
-            return 0f // Transition directly to Closed!
+        // Convert velocity into dp/s: vyDp = velocityY / density
+        // Negative = upward fling (decreasing Y), positive = downward fling (increasing Y)
+        val effectiveDensity = if (density > 0f) density else 1f
+        val vyDp = velocityY / effectiveDensity
+
+        // 1. Extreme Upward Fling (Vy < -2500 dp/s) from Closed/lower zone: jump straight to Fully Expanded
+        if (vyDp < -EXTREME_FLING_THRESHOLD_DP) {
+            return yFull
         }
 
-        // Condition 2: Decisive downward fling AFTER meaningful downward travel
-        // (Must have travelled downward by at least ~12% screen height; strong velocity alone after tiny movement does NOT close)
-        if (downwardTravel >= meaningfulDownwardTravel && upwardVelocityPx < -decisiveDownwardFling) {
-            return 0f // Transition directly to Closed!
+        // 2. Standard Upward Fling (Vy < -1000 dp/s)
+        if (vyDp < -FLING_THRESHOLD_DP) {
+            // From Closed (or lower half zone) snaps to Half. From Half snaps to Fully Expanded.
+            return if (startY >= threshold0To1 || currentY > threshold0To1) {
+                yHalf
+            } else {
+                yFull
+            }
         }
 
-        // Condition 3: Dragged well below Compact and released while moving downward
-        if (currentHeightPx < compactPx * 0.55f && downwardTravel > 0f && upwardVelocityPx <= 0f) {
-            return 0f
+        // 3. Standard Downward Fling (Vy > 1000 dp/s)
+        if (vyDp > FLING_THRESHOLD_DP) {
+            // From Fully Expanded snaps to Half (does NOT bypass intermediate state on standard fling).
+            // From Half snaps to Closed.
+            return if (startY <= threshold1To2 && currentY <= threshold0To1) {
+                yHalf
+            } else {
+                yClosed
+            }
         }
 
-        // --- If dismissal criteria are NOT met, settle at an appropriate OPEN detent ---
-
-        // Upward fling: move to the next higher open detent
-        if (upwardVelocityPx > minFlingVelocity) {
-            val nextHigher = openDetents.firstOrNull { it > currentHeightPx + 15f }
-            return nextHigher ?: expandedPx
+        // 4. Low-Velocity Drag Release: Settle to the nearest anchor determined by midpoints
+        return when {
+            currentY > threshold0To1 -> yClosed
+            currentY > threshold1To2 -> yHalf
+            else -> yFull
         }
-
-        // Downward fling that did NOT meet deliberate dismissal (e.g., Expanded -> Large or flick after small travel):
-        // Move to the next lower open detent instead of closing
-        if (upwardVelocityPx < -minFlingVelocity) {
-            val nextLower = openDetents.lastOrNull { it < currentHeightPx - 15f }
-            return nextLower ?: compactPx
-        }
-
-        // Ordinary drag with low velocity: settle at nearest open detent without overshoot
-        return openDetents.minByOrNull { abs(it - currentHeightPx) } ?: initialPx
     }
 
     /**
-     * Settle to nearest open detent (for cancellation or fallback without closing).
+     * Piecewise Scrim Opacity Mapping:
+     * - Closed to Half scales from 0.0 to 0.2
+     * - Half to Fully Expanded scales from 0.2 to 0.6
      */
-    fun nearestOpenDetent(currentHeightPx: Float, screenHeightPx: Float): Float {
-        val openDetents = getOpenDetentHeights(screenHeightPx)
-        return openDetents.minByOrNull { abs(it - currentHeightPx) } ?: (screenHeightPx * DETENT_INITIAL_FRACTION)
+    fun calculateScrimAlpha(currentY: Float, screenHeightPx: Float): Float {
+        val yClosed = getYClosed(screenHeightPx)
+        val yHalf = getYHalf(screenHeightPx)
+        val yFull = getYFull(screenHeightPx)
+
+        return when {
+            currentY >= yClosed -> 0.0f
+            currentY >= yHalf -> {
+                val fraction = ((yClosed - currentY) / (yClosed - yHalf)).coerceIn(0f, 1f)
+                fraction * 0.2f
+            }
+            currentY >= yFull -> {
+                val fraction = ((yHalf - currentY) / (yHalf - yFull)).coerceIn(0f, 1f)
+                0.2f + fraction * 0.4f
+            }
+            else -> 0.6f
+        }
+    }
+
+    /**
+     * Viewer Chrome Layer Opacity Mapping:
+     * Chrome alpha fades out from 1.0 to 0.0 as the sheet progresses from Closed to Half.
+     */
+    fun calculateChromeAlpha(currentY: Float, screenHeightPx: Float): Float {
+        val yClosed = getYClosed(screenHeightPx)
+        val yHalf = getYHalf(screenHeightPx)
+
+        return when {
+            currentY >= yClosed -> 1.0f
+            currentY <= yHalf -> 0.0f
+            else -> {
+                val fraction = ((yClosed - currentY) / (yClosed - yHalf)).coerceIn(0f, 1f)
+                (1.0f - fraction).coerceIn(0f, 1f)
+            }
+        }
     }
 }

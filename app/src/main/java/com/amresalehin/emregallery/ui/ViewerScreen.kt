@@ -220,55 +220,87 @@ fun ViewerScreen(
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val screenWidthPx = constraints.maxWidth.toFloat()
         val screenHeightPx = constraints.maxHeight.toFloat()
-        val initialHeightPx = screenHeightPx * ViewerDrawerPhysics.DETENT_INITIAL_FRACTION
-        val expandedHeightPx = screenHeightPx * ViewerDrawerPhysics.DETENT_EXPANDED_FRACTION
+        val screenDensity = density.density
 
-        // Authoritative details drawer visible height
-        val drawerVisibleHeight = remember { Animatable(0f) }
+        val yClosed = ViewerDrawerPhysics.getYClosed(screenHeightPx)
+        val yHalf = ViewerDrawerPhysics.getYHalf(screenHeightPx)
+        val yFull = ViewerDrawerPhysics.getYFull(screenHeightPx)
+        val threshold0To1 = ViewerDrawerPhysics.getThreshold0To1(screenHeightPx)
+        val threshold1To2 = ViewerDrawerPhysics.getThreshold1To2(screenHeightPx)
 
-        // Coordinate parent showDetails with drawerVisibleHeight
+        // Continuous vertical top offset (Y) for the Google Photos-style overlay detail sheet
+        val drawerTopY = remember { Animatable(yClosed) }
+
+        // Sync drawerTopY when screen height is measured or changes
+        LaunchedEffect(screenHeightPx) {
+            if (drawerTopY.value == 0f || abs(drawerTopY.value - screenHeightPx) > screenHeightPx * 0.9f && !showDetails) {
+                drawerTopY.snapTo(yClosed)
+            }
+        }
+
+        val DrawerSpringSpec = remember {
+            spring<Float>(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = 400f
+            )
+        }
+
+        val ReturnSpringSpec = remember {
+            spring<Float>(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = 380f
+            )
+        }
+
+        // Coordinate parent showDetails with drawerTopY
         LaunchedEffect(showDetails) {
-            if (showDetails && drawerVisibleHeight.value < initialHeightPx * 0.5f) {
-                drawerVisibleHeight.animateTo(
-                    targetValue = initialHeightPx,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    )
+            if (showDetails && drawerTopY.value > yHalf + 10f) {
+                drawerTopY.animateTo(
+                    targetValue = yHalf,
+                    animationSpec = DrawerSpringSpec
                 )
-            } else if (!showDetails && drawerVisibleHeight.value > 0f) {
-                drawerVisibleHeight.animateTo(
-                    targetValue = 0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    )
+            } else if (!showDetails && drawerTopY.value < yClosed - 10f && drawerTopY.targetValue != yClosed) {
+                drawerTopY.animateTo(
+                    targetValue = yClosed,
+                    animationSpec = DrawerSpringSpec
                 )
             }
         }
 
-        val isDrawerOpen = drawerVisibleHeight.value > 10f
+        val currentAnchor by remember {
+            derivedStateOf {
+                val y = drawerTopY.value
+                when {
+                    y >= threshold0To1 -> SheetAnchor.CLOSED
+                    y >= threshold1To2 -> SheetAnchor.HALF
+                    else -> SheetAnchor.FULLY_EXPANDED
+                }
+            }
+        }
 
-        // Settle helper for drawer detents using ViewerDrawerPhysics
-        suspend fun settleDrawer(startHeight: Float, currentHeight: Float, velocity: Float) {
-            val targetH = ViewerDrawerPhysics.calculateTargetHeight(
-                gestureStartHeightPx = startHeight,
-                currentHeightPx = currentHeight,
-                upwardVelocityPx = velocity,
+        val isDrawerOpen = currentAnchor != SheetAnchor.CLOSED
+
+        // Authoritative 3-anchor settling helper using ViewerDrawerPhysics
+        suspend fun settleDrawer(startY: Float, currentY: Float, velocityY: Float) {
+            val targetY = ViewerDrawerPhysics.calculateTargetY(
+                startY = startY,
+                currentY = currentY,
+                velocityY = velocityY,
                 screenHeightPx = screenHeightPx,
-                minFlingVelocity = minFlingVelocity
+                density = screenDensity
             )
 
-            drawerVisibleHeight.animateTo(
-                targetValue = targetH,
-                initialVelocity = velocity,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMedium
-                )
+            val clampedVelocity = velocityY.coerceIn(-800f, 800f)
+            // When settling to closed, use 0f initial velocity so closing is as smooth as back navigation
+            val settleVelocity = if (targetY >= yClosed - 5f) 0f else clampedVelocity
+
+            drawerTopY.animateTo(
+                targetValue = targetY,
+                initialVelocity = settleVelocity,
+                animationSpec = DrawerSpringSpec
             )
 
-            if (targetH == 0f) {
+            if (targetY >= yClosed - 5f) {
                 if (showDetails) onToggleDetails()
             } else {
                 if (!showDetails) onToggleDetails()
@@ -281,16 +313,13 @@ fun ViewerScreen(
                 isClosing = true
                 coroutineScope.launch {
                     if (isDrawerOpen) {
-                        drawerVisibleHeight.animateTo(0f, animationSpec = spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium))
+                        drawerTopY.animateTo(yClosed, animationSpec = DrawerSpringSpec)
                         if (showDetails) onToggleDetails()
                     }
                     ThumbnailBoundsTracker.activeViewerUri = item.uri
                     transitionProgress.animateTo(
                         targetValue = 0f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = 450f
-                        )
+                        animationSpec = ReturnSpringSpec
                     )
                     ThumbnailBoundsTracker.activeViewerUri = null
                     onBack()
@@ -304,22 +333,29 @@ fun ViewerScreen(
             videoState.isFullscreen = false
         }
 
-        // Priority 2: Details drawer closes next in one single action from any detent
-        BackHandler(enabled = !videoState.isFullscreen && isDrawerOpen) {
+        // Priority 2a: If sheet is at Fully Expanded, Back transitions it to Half
+        BackHandler(enabled = !videoState.isFullscreen && currentAnchor == SheetAnchor.FULLY_EXPANDED) {
             coroutineScope.launch {
-                drawerVisibleHeight.animateTo(
-                    targetValue = 0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessMedium
-                    )
+                drawerTopY.animateTo(
+                    targetValue = yHalf,
+                    animationSpec = DrawerSpringSpec
+                )
+            }
+        }
+
+        // Priority 2b: If sheet is at Half, Back transitions it to Closed
+        BackHandler(enabled = !videoState.isFullscreen && currentAnchor == SheetAnchor.HALF) {
+            coroutineScope.launch {
+                drawerTopY.animateTo(
+                    targetValue = yClosed,
+                    animationSpec = DrawerSpringSpec
                 )
                 if (showDetails) onToggleDetails()
             }
         }
 
-        // Priority 3: System Predictive Back handling for media return
-        PredictiveBackHandler(enabled = !videoState.isFullscreen && !isDrawerOpen && !isClosing) { progressFlow: Flow<BackEventCompat> ->
+        // Priority 3: Only when sheet is Closed does Predictive Back exit the viewer
+        PredictiveBackHandler(enabled = !videoState.isFullscreen && currentAnchor == SheetAnchor.CLOSED && !isClosing) { progressFlow: Flow<BackEventCompat> ->
             try {
                 ThumbnailBoundsTracker.activeViewerUri = item.uri
                 progressFlow.collect { backEvent ->
@@ -328,37 +364,32 @@ fun ViewerScreen(
                 isClosing = true
                 transitionProgress.animateTo(
                     targetValue = 0f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = 450f
-                    )
+                    animationSpec = ReturnSpringSpec
                 )
                 ThumbnailBoundsTracker.activeViewerUri = null
                 onBack()
             } catch (e: CancellationException) {
-                // Return transition was cancelled or interrupted: restore consistent layout without leaving bars partially translated
+                // Return transition was cancelled or interrupted
                 transitionProgress.animateTo(
                     targetValue = 1f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = 450f
-                    )
+                    animationSpec = ReturnSpringSpec
                 )
             }
         }
 
-        // Priority 3: Media returns to original thumbnail in the gallery on standard Back
-        BackHandler(enabled = !videoState.isFullscreen && !isDrawerOpen && !isClosing) {
+        // Standard Back when Closed
+        BackHandler(enabled = !videoState.isFullscreen && currentAnchor == SheetAnchor.CLOSED && !isClosing) {
             initiateClose()
         }
 
         // Calculate geometry for shared-element transition toward original source thumbnail
         val progress = transitionProgress.value
-        val targetBounds = remember(item.uri, progress) { ThumbnailBoundsTracker.getBounds(item.uri) }
+        val targetBounds = remember(item.uri) { ThumbnailBoundsTracker.getBounds(item.uri) }
 
         val destTransX: Float
         val destTransY: Float
-        val destScale: Float
+        val destScaleX: Float
+        val destScaleY: Float
         if (targetBounds != null) {
             val thumbW = targetBounds.width
             val thumbH = targetBounds.height
@@ -368,25 +399,31 @@ fun ViewerScreen(
             val screenCenterY = screenHeightPx / 2f
             destTransX = thumbCenterX - screenCenterX
             destTransY = thumbCenterY - screenCenterY
-            destScale = maxOf(thumbW / screenWidthPx, thumbH / screenHeightPx).coerceIn(0.05f, 1f)
+            destScaleX = (thumbW / screenWidthPx).coerceIn(0.01f, 1f)
+            destScaleY = (thumbH / screenHeightPx).coerceIn(0.01f, 1f)
         } else {
             destTransX = 0f
             destTransY = 0f
-            destScale = 0.85f
+            destScaleX = 0.85f
+            destScaleY = 0.85f
         }
 
-        val currentScale = destScale + (1f - destScale) * progress
+        val currentScaleX = destScaleX + (1f - destScaleX) * progress
+        val currentScaleY = destScaleY + (1f - destScaleY) * progress
         val currentTransX = destTransX * (1f - progress)
         val currentTransY = destTransY * (1f - progress) + dismissOffsetY.value * progress
-        val cornerRadius = ((1f - progress) * 16f).dp
-        val fallbackAlpha = if (targetBounds == null && isClosing) progress.coerceIn(0f, 1f) else 1f
+        val cornerRadius = ((1f - progress) * 10f).dp
+        // Do NOT fade out the image before reaching progress == 0 when targetBounds is present.
+        // It stays fully opaque so it lands directly on top of the thumbnail with zero blank dip/flicker.
+        val viewerAlpha = if (targetBounds == null && isClosing) progress.coerceIn(0f, 1f) else 1f
 
         // Background scrim calculation
         val currentDismissY = dismissOffsetY.value
         val dismissFraction = (abs(currentDismissY) / 540f).coerceIn(0f, 1f)
         val backdropAlpha = (1f - dismissFraction * 0.70f).coerceIn(0.30f, 1f)
         val scrimAlpha = if (videoState.isFullscreen) 1f else (progress * backdropAlpha).coerceIn(0f, 1f)
-        val controlsAlpha = if (isClosing) ((progress - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
+        val chromeAlpha = ViewerDrawerPhysics.calculateChromeAlpha(drawerTopY.value, screenHeightPx)
+        val controlsAlpha = if (isClosing) ((progress - 0.35f) / 0.65f).coerceIn(0f, 1f) else chromeAlpha
         val outgoingTopBarOffset = with(density) { -(80.dp.toPx()) * (1f - progress) }
         val outgoingBottomBarOffset = with(density) { (80.dp.toPx()) * (1f - progress) }
 
@@ -405,16 +442,16 @@ fun ViewerScreen(
             HorizontalPager(
                 state = pagerState,
                 flingBehavior = PagerDefaults.flingBehavior(state = pagerState),
-                userScrollEnabled = !isCurrentZoomed && !videoState.isFullscreen,
+                userScrollEnabled = !isCurrentZoomed && !videoState.isFullscreen && currentAnchor == SheetAnchor.CLOSED,
                 pageSpacing = 16.dp,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
                         translationX = currentTransX
                         translationY = currentTransY
-                        scaleX = currentScale
-                        scaleY = currentScale
-                        alpha = fallbackAlpha
+                        scaleX = currentScaleX
+                        scaleY = currentScaleY
+                        alpha = viewerAlpha
                         clip = progress < 0.99f || dismissFraction > 0.02f
                         shape = RoundedCornerShape(cornerRadius)
                     },
@@ -436,23 +473,25 @@ fun ViewerScreen(
                     onLongPress = {
                         if (!isDrawerOpen && !videoState.isFullscreen) showMore = true
                     },
-                    onSwipeUpDelta = { deltaUp ->
+                    onSwipeUpDelta = { deltaY ->
+                        // Media Swipe-Up Trigger: upward drag directly on resting media initiates sheet drag
                         if (!isCurrentZoomed && !videoState.isFullscreen) {
                             coroutineScope.launch {
-                                val next = (drawerVisibleHeight.value + deltaUp).coerceIn(0f, expandedHeightPx)
-                                drawerVisibleHeight.snapTo(next)
+                                val next = (drawerTopY.value + deltaY).coerceIn(yFull, yClosed)
+                                drawerTopY.snapTo(next)
                             }
                         }
                     },
-                    onSwipeUpRelease = { velocityUp ->
+                    onSwipeUpRelease = { velocityY ->
                         if (!isCurrentZoomed && !videoState.isFullscreen) {
                             coroutineScope.launch {
-                                settleDrawer(drawerVisibleHeight.value, drawerVisibleHeight.value, velocityUp)
+                                settleDrawer(drawerTopY.value, drawerTopY.value, velocityY)
                             }
                         }
                     },
                     onSwipeDownDelta = { deltaDown ->
-                        if (!isCurrentZoomed && !isDrawerOpen && !videoState.isFullscreen) {
+                        // Downward gesture on media is strictly for media closing when sheet is CLOSED
+                        if (!isCurrentZoomed && currentAnchor == SheetAnchor.CLOSED && !videoState.isFullscreen) {
                             coroutineScope.launch {
                                 val next = (dismissOffsetY.value + deltaDown).coerceAtLeast(0f)
                                 dismissOffsetY.snapTo(next)
@@ -462,19 +501,22 @@ fun ViewerScreen(
                         }
                     },
                     onSwipeDownRelease = { velocityDown ->
-                        if (!isCurrentZoomed && !isDrawerOpen && !videoState.isFullscreen) {
+                        // Media closer cannot activate while drawer is open
+                        if (!isCurrentZoomed && currentAnchor == SheetAnchor.CLOSED && !videoState.isFullscreen) {
                             val dismissDistanceThreshold = screenHeightPx * 0.15f
                             if (dismissOffsetY.value > dismissDistanceThreshold || velocityDown > minFlingVelocity * 1.3f) {
                                 coroutineScope.launch {
                                     isClosing = true
                                     ThumbnailBoundsTracker.activeViewerUri = item.uri
-                                    launch { dismissOffsetY.animateTo(0f, animationSpec = tween(200)) }
+                                    launch {
+                                        dismissOffsetY.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = ReturnSpringSpec
+                                        )
+                                    }
                                     transitionProgress.animateTo(
                                         targetValue = 0f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioNoBouncy,
-                                            stiffness = 450f
-                                        )
+                                        animationSpec = ReturnSpringSpec
                                     )
                                     ThumbnailBoundsTracker.activeViewerUri = null
                                     onBack()
@@ -485,18 +527,12 @@ fun ViewerScreen(
                                         dismissOffsetY.animateTo(
                                             targetValue = 0f,
                                             initialVelocity = velocityDown,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                                stiffness = Spring.StiffnessMedium
-                                            )
+                                            animationSpec = ReturnSpringSpec
                                         )
                                     }
                                     transitionProgress.animateTo(
                                         targetValue = 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioNoBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        )
+                                        animationSpec = ReturnSpringSpec
                                     )
                                 }
                             }
@@ -504,17 +540,19 @@ fun ViewerScreen(
                     },
                     onZoomChanged = { zoomed ->
                         if (isCurrent) isCurrentZoomed = zoomed
-                    }
+                    },
+                    isReturning = isClosing || progress < 0.98f,
+                    hasTargetBounds = targetBounds != null
                 )
             }
 
-            // Edge gradient shading behind top and bottom bars (hidden in fullscreen)
+            // Edge gradient shading behind top and bottom bars (hidden in fullscreen or when sheet rises)
             if (!videoState.isFullscreen) {
-                ViewerEdgeShading(visible = showControls && !isDrawerOpen && !isClosing)
+                ViewerEdgeShading(visible = showControls && chromeAlpha > 0.01f && !isClosing)
             }
 
-            // Top App Bar in standard view
-            if (showControls && !isDrawerOpen && !videoState.isFullscreen) {
+            // Top App Bar in standard view with Viewer Chrome Layer fading
+            if (showControls && chromeAlpha > 0.01f && !videoState.isFullscreen) {
                 ViewerTopAppBar(
                     isFavourite = favourite,
                     onBack = { initiateClose() },
@@ -551,8 +589,8 @@ fun ViewerScreen(
             }
 
             // Coordinated bottom controls cluster: Video Player Controls Bar stacked cleanly above ViewerBottomActionBar.
-            // Never overlaps or intercepts clicks intended for gallery action buttons.
-            if (showControls && !isDrawerOpen) {
+            // Viewer Chrome Layer: Chrome alpha fades out from 1.0 to 0.0 as the sheet progresses from Closed to Half.
+            if (showControls && chromeAlpha > 0.01f) {
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -590,17 +628,17 @@ fun ViewerScreen(
                 }
             }
 
-            // Coordinated details drawer
+            // Overlay Detail Sheet (Foreground)
             if (!videoState.isFullscreen && !isClosing) {
                 ViewerDetailsDrawer(
                     item = item,
                     items = items,
                     customAlbums = customAlbums,
                     customTags = customTags,
-                    drawerVisibleHeight = drawerVisibleHeight,
-                    initialHeightPx = initialHeightPx,
-                    expandedHeightPx = expandedHeightPx,
-                    onSettle = { startH, currentH, velocity -> settleDrawer(startH, currentH, velocity) },
+                    drawerTopY = drawerTopY,
+                    screenHeightPx = screenHeightPx,
+                    density = screenDensity,
+                    onSettle = { startY, currentY, velocityY -> settleDrawer(startY, currentY, velocityY) },
                     onClose = {
                         if (showDetails) onToggleDetails()
                     },
@@ -723,6 +761,8 @@ private fun ZoomableMediaItem(
     onSwipeDownDelta: (Float) -> Unit,
     onSwipeDownRelease: (Float) -> Unit,
     onZoomChanged: (Boolean) -> Unit,
+    isReturning: Boolean = false,
+    hasTargetBounds: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -765,6 +805,7 @@ private fun ZoomableMediaItem(
                         var isPinching = false
                         var isDragging = false
                         var isVerticalSwipe = false
+                        var isHorizontalBrowse = false
                         var swipeDirection = 0 // 1 = down (dismiss), -1 = up (drawer)
                         var totalMovementX = 0f
                         var totalMovementY = 0f
@@ -772,7 +813,7 @@ private fun ZoomableMediaItem(
 
                         val longPressJob = launch {
                             delay(500L)
-                            if (!isDragging && !isPinching && scale <= 1.05f) {
+                            if (!isDragging && !isPinching && scale <= 1.02f) {
                                 longPressTriggered = true
                                 onLongPress()
                             }
@@ -822,7 +863,10 @@ private fun ZoomableMediaItem(
                                     longPressJob.cancel()
                                 }
 
-                                if (scale > 1.05f && !isVideo) {
+                                if (scale > 1.02f && !isVideo) {
+                                    // Zero-Tolerance Zoom Lock:
+                                    // If underlying media is zoomed in beyond 1.0x scale, disable all sheet gestures.
+                                    // All drag touches must strictly belong to media panning.
                                     val maxX = (width * (scale - 1f)) / 2f
                                     val maxY = (height * (scale - 1f)) / 2f
 
@@ -830,15 +874,25 @@ private fun ZoomableMediaItem(
                                     offsetY = (offsetY + posChange.y).coerceIn(-maxY, maxY)
                                     change.consume()
                                 } else {
-                                    if (!isVerticalSwipe && totalMovementY > touchSlop && totalMovementY > totalMovementX * 1.25f) {
-                                        isVerticalSwipe = true
-                                        swipeDirection = if (posChange.y < 0) -1 else 1
+                                    // Directional Slop Disambiguation:
+                                    // If |dx| > |dy|, yield control to horizontal pager browsing.
+                                    // Lock into vertical sheet manipulation only when |dy| > |dx|.
+                                    if (!isVerticalSwipe && !isHorizontalBrowse) {
+                                        val dist = kotlin.math.hypot(totalMovementX, totalMovementY)
+                                        if (dist > touchSlop) {
+                                            if (totalMovementX >= totalMovementY) {
+                                                isHorizontalBrowse = true
+                                            } else {
+                                                isVerticalSwipe = true
+                                                swipeDirection = if (posChange.y < 0) -1 else 1
+                                            }
+                                        }
                                     }
 
                                     if (isVerticalSwipe) {
                                         change.consume()
                                         if (posChange.y < 0) {
-                                            onSwipeUpDelta(-posChange.y)
+                                            onSwipeUpDelta(posChange.y)
                                         } else if (posChange.y > 0) {
                                             onSwipeDownDelta(posChange.y)
                                         }
@@ -853,8 +907,8 @@ private fun ZoomableMediaItem(
 
                         val velocityY = velocityTracker.calculateVelocity().y
                         if (isVerticalSwipe) {
-                            if (swipeDirection < 0 || velocityY < -minFlingVelocity) {
-                                onSwipeUpRelease(-velocityY)
+                            if (swipeDirection < 0) {
+                                onSwipeUpRelease(velocityY)
                             } else {
                                 onSwipeDownRelease(velocityY)
                             }
@@ -934,7 +988,7 @@ private fun ZoomableMediaItem(
                     .build(),
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
+                contentScale = if (isReturning && hasTargetBounds) ContentScale.Crop else ContentScale.Fit
             )
 
             // Video Surface when current item is a video

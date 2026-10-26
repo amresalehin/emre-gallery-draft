@@ -2,181 +2,154 @@ package com.amresalehin.emregallery
 
 import com.amresalehin.emregallery.ui.ViewerDrawerPhysics
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class ViewerDrawerPhysicsTest {
 
     private val screenHeight = 2400f
-    private val minFling = 500f
+    private val density = 2.5f
 
-    private val compact = screenHeight * ViewerDrawerPhysics.DETENT_COMPACT_FRACTION // 840
-    private val medium = screenHeight * ViewerDrawerPhysics.DETENT_MEDIUM_FRACTION // 1200
-    private val initial = screenHeight * ViewerDrawerPhysics.DETENT_INITIAL_FRACTION // 1560
-    private val large = screenHeight * ViewerDrawerPhysics.DETENT_LARGE_FRACTION // 1920
-    private val expanded = screenHeight * ViewerDrawerPhysics.DETENT_EXPANDED_FRACTION // 2280
+    private val yClosed = ViewerDrawerPhysics.getYClosed(screenHeight) // 2400f
+    private val yHalf = ViewerDrawerPhysics.getYHalf(screenHeight)     // 1080f
+    private val yFull = ViewerDrawerPhysics.getYFull(screenHeight)     // 360f
+
+    private val threshold0To1 = ViewerDrawerPhysics.getThreshold0To1(screenHeight) // (2400 + 1080) / 2 = 1740f
+    private val threshold1To2 = ViewerDrawerPhysics.getThreshold1To2(screenHeight) // (1080 + 360) / 2 = 720f
 
     @Test
-    fun testSmallDownwardDragSettlesAtNearestOpenDetent() {
-        // Small downward drag from Expanded: 2280 -> 2200 (travel = 80px, < 12%)
-        val resultExpanded = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = expanded,
-            currentHeightPx = expanded - 80f,
-            upwardVelocityPx = 0f,
+    fun testLowVelocitySettlingByMidpoints() {
+        // Below Threshold 0->1 (> 1740): settles to Closed
+        val settleClosed = ViewerDrawerPhysics.calculateTargetY(
+            startY = yClosed,
+            currentY = threshold0To1 + 50f,
+            velocityY = 0f,
             screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
+            density = density
         )
-        assertEquals("Small drag from Expanded must settle back at Expanded", expanded, resultExpanded, 1f)
+        assertEquals("Release below threshold0To1 must settle to Closed", yClosed, settleClosed, 1f)
 
-        // Small downward drag from Large: 1920 -> 1850 (travel = 70px)
-        val resultLarge = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = large,
-            currentHeightPx = large - 70f,
-            upwardVelocityPx = 0f,
+        // Between Threshold 0->1 and Threshold 1->2 (720 < Y <= 1740): settles to Half
+        val settleHalf = ViewerDrawerPhysics.calculateTargetY(
+            startY = yClosed,
+            currentY = threshold0To1 - 50f,
+            velocityY = 0f,
             screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
+            density = density
         )
-        assertEquals("Small drag from Large must settle back at Large", large, resultLarge, 1f)
+        assertEquals("Release between midpoints must settle to Half", yHalf, settleHalf, 1f)
 
-        // Small downward drag from Initial: 1560 -> 1500 (travel = 60px)
-        val resultInitial = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = initial,
-            currentHeightPx = initial - 60f,
-            upwardVelocityPx = 0f,
+        // Above Threshold 1->2 (<= 720): settles to Fully Expanded
+        val settleFull = ViewerDrawerPhysics.calculateTargetY(
+            startY = yHalf,
+            currentY = threshold1To2 - 50f,
+            velocityY = 0f,
             screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
+            density = density
         )
-        assertEquals("Small drag from Initial must settle back at Initial", initial, resultInitial, 1f)
-
-        // Small downward drag from Medium: 1200 -> 1140 (travel = 60px)
-        val resultMedium = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = medium,
-            currentHeightPx = medium - 60f,
-            upwardVelocityPx = 0f,
-            screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
-        )
-        assertEquals("Small drag from Medium must settle back at Medium", medium, resultMedium, 1f)
-
-        // Small downward drag from Compact: 840 -> 800 (travel = 40px)
-        val resultCompact = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = compact,
-            currentHeightPx = compact - 40f,
-            upwardVelocityPx = 0f,
-            screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
-        )
-        assertEquals("Small drag from Compact must settle back at Compact and not snap to Closed", compact, resultCompact, 1f)
+        assertEquals("Release above threshold1To2 must settle to Fully Expanded", yFull, settleFull, 1f)
     }
 
     @Test
-    fun testDeliberateDownwardDismissalFromAllOpenDetents() {
-        // Deliberate dismissal travel >= 22% of screen height (528px)
-        val deliberateTravel = screenHeight * 0.24f // 576px
-
-        // From Expanded
-        val closeFromExpanded = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = expanded,
-            currentHeightPx = expanded - deliberateTravel,
-            upwardVelocityPx = -200f,
+    fun testStandardUpwardFling() {
+        // Upward fling (-1200 dp/s = -3000 px/s with density=2.5) from Closed: snaps to Half
+        val flingFromClosed = ViewerDrawerPhysics.calculateTargetY(
+            startY = yClosed,
+            currentY = yClosed - 200f,
+            velocityY = -1200f * density,
             screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
+            density = density
         )
-        assertEquals("Deliberate dismissal from Expanded must transition directly to Closed (0f)", 0f, closeFromExpanded, 0.01f)
+        assertEquals("Standard upward fling from Closed snaps to Half", yHalf, flingFromClosed, 1f)
 
-        // From Large
-        val closeFromLarge = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = large,
-            currentHeightPx = large - deliberateTravel,
-            upwardVelocityPx = -200f,
+        // Upward fling (-1200 dp/s) from Half: snaps to Fully Expanded
+        val flingFromHalf = ViewerDrawerPhysics.calculateTargetY(
+            startY = yHalf,
+            currentY = yHalf - 150f,
+            velocityY = -1200f * density,
             screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
+            density = density
         )
-        assertEquals("Deliberate dismissal from Large must transition directly to Closed (0f)", 0f, closeFromLarge, 0.01f)
-
-        // From Initial
-        val closeFromInitial = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = initial,
-            currentHeightPx = initial - deliberateTravel,
-            upwardVelocityPx = -200f,
-            screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
-        )
-        assertEquals("Deliberate dismissal from Initial must transition directly to Closed (0f)", 0f, closeFromInitial, 0.01f)
-
-        // From Medium
-        val closeFromMedium = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = medium,
-            currentHeightPx = medium - deliberateTravel,
-            upwardVelocityPx = -200f,
-            screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
-        )
-        assertEquals("Deliberate dismissal from Medium must transition directly to Closed (0f)", 0f, closeFromMedium, 0.01f)
-
-        // From Compact
-        val closeFromCompact = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = compact,
-            currentHeightPx = compact - deliberateTravel,
-            upwardVelocityPx = -200f,
-            screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
-        )
-        assertEquals("Deliberate dismissal from Compact must transition directly to Closed (0f)", 0f, closeFromCompact, 0.01f)
+        assertEquals("Standard upward fling from Half snaps to Fully Expanded", yFull, flingFromHalf, 1f)
     }
 
     @Test
-    fun testFastDownwardGestureAfterMinimalTravelDoesNotClose() {
-        // High downward velocity (-1200 px/s) after only tiny downward travel (travel = 50px = ~2% screen height)
-        val result = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = expanded,
-            currentHeightPx = expanded - 50f,
-            upwardVelocityPx = -1200f,
+    fun testExtremeUpwardFlingJumpsStraightToFull() {
+        // Extreme upward fling (-2800 dp/s) from Closed jumps straight to Fully Expanded
+        val extremeFling = ViewerDrawerPhysics.calculateTargetY(
+            startY = yClosed,
+            currentY = yClosed - 200f,
+            velocityY = -2800f * density,
             screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
+            density = density
         )
-        // Strong velocity alone after minimal travel must NOT close the drawer!
-        assertNotEquals("Strong velocity after tiny travel must not close drawer", 0f, result)
-        assertEquals("Should move to next lower detent (Large)", large, result, 1f)
+        assertEquals("Extreme upward fling from Closed jumps straight to Fully Expanded", yFull, extremeFling, 1f)
     }
 
     @Test
-    fun testDecisiveDownwardFlingAfterMeaningfulTravelCloses() {
-        // Travel = 15% of screen height (> 12% meaningful travel) and decisive fling (-1000 px/s)
-        val meaningfulTravel = screenHeight * 0.15f // 360px
-        val result = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = expanded,
-            currentHeightPx = expanded - meaningfulTravel,
-            upwardVelocityPx = -1000f,
+    fun testStandardDownwardFling() {
+        // Downward fling (+1200 dp/s) from Fully Expanded: snaps to Half (does not bypass intermediate state)
+        val flingFromFull = ViewerDrawerPhysics.calculateTargetY(
+            startY = yFull,
+            currentY = yFull + 150f,
+            velocityY = 1200f * density,
             screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
+            density = density
         )
-        assertEquals("Decisive downward fling after meaningful travel must close drawer", 0f, result, 0.01f)
+        assertEquals("Standard downward fling from Full snaps to Half", yHalf, flingFromFull, 1f)
+
+        // Downward fling (+1200 dp/s) from Half: snaps to Closed
+        val flingFromHalf = ViewerDrawerPhysics.calculateTargetY(
+            startY = yHalf,
+            currentY = yHalf + 200f,
+            velocityY = 1200f * density,
+            screenHeightPx = screenHeight,
+            density = density
+        )
+        assertEquals("Standard downward fling from Half snaps to Closed", yClosed, flingFromHalf, 1f)
     }
 
     @Test
-    fun testDragFromExpandedTowardLargeDoesNotClose() {
-        // User drags from Expanded (2280) to Large (1920): travel = 360px (~15% screen height) with low velocity
-        val result = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = expanded,
-            currentHeightPx = large,
-            upwardVelocityPx = 0f,
-            screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
-        )
-        assertEquals("Dragging from Expanded to Large must settle at Large", large, result, 1f)
+    fun testPiecewiseScrimAlpha() {
+        // At Closed: alpha = 0.0
+        val scrimClosed = ViewerDrawerPhysics.calculateScrimAlpha(yClosed, screenHeight)
+        assertEquals(0.0f, scrimClosed, 0.001f)
+
+        // At Half: alpha = 0.2
+        val scrimHalf = ViewerDrawerPhysics.calculateScrimAlpha(yHalf, screenHeight)
+        assertEquals(0.2f, scrimHalf, 0.001f)
+
+        // Midpoint between Closed and Half: alpha = 0.1
+        val midClosedHalf = (yClosed + yHalf) / 2f
+        val scrimMid1 = ViewerDrawerPhysics.calculateScrimAlpha(midClosedHalf, screenHeight)
+        assertEquals(0.1f, scrimMid1, 0.01f)
+
+        // At Fully Expanded: alpha = 0.6
+        val scrimFull = ViewerDrawerPhysics.calculateScrimAlpha(yFull, screenHeight)
+        assertEquals(0.6f, scrimFull, 0.001f)
+
+        // Midpoint between Half and Full: alpha = 0.4
+        val midHalfFull = (yHalf + yFull) / 2f
+        val scrimMid2 = ViewerDrawerPhysics.calculateScrimAlpha(midHalfFull, screenHeight)
+        assertEquals(0.4f, scrimMid2, 0.01f)
     }
 
     @Test
-    fun testUpwardFlingMovesToNextHigherDetent() {
-        // At Medium, flinging upward (+800 px/s)
-        val result = ViewerDrawerPhysics.calculateTargetHeight(
-            gestureStartHeightPx = medium,
-            currentHeightPx = medium + 50f,
-            upwardVelocityPx = 800f,
-            screenHeightPx = screenHeight,
-            minFlingVelocity = minFling
-        )
-        assertEquals("Upward fling from Medium must settle at Initial", initial, result, 1f)
+    fun testViewerChromeAlpha() {
+        // At Closed: alpha = 1.0
+        val chromeClosed = ViewerDrawerPhysics.calculateChromeAlpha(yClosed, screenHeight)
+        assertEquals(1.0f, chromeClosed, 0.001f)
+
+        // Midpoint between Closed and Half: alpha = 0.5
+        val midClosedHalf = (yClosed + yHalf) / 2f
+        val chromeMid = ViewerDrawerPhysics.calculateChromeAlpha(midClosedHalf, screenHeight)
+        assertEquals(0.5f, chromeMid, 0.01f)
+
+        // At Half: alpha = 0.0
+        val chromeHalf = ViewerDrawerPhysics.calculateChromeAlpha(yHalf, screenHeight)
+        assertEquals(0.0f, chromeHalf, 0.001f)
+
+        // At Full: alpha = 0.0
+        val chromeFull = ViewerDrawerPhysics.calculateChromeAlpha(yFull, screenHeight)
+        assertEquals(0.0f, chromeFull, 0.001f)
     }
 }

@@ -12,8 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,12 +32,9 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Velocity
-import kotlin.math.abs
-import kotlin.math.hypot
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
@@ -50,6 +47,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.osmdroid.util.GeoPoint
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
  * State holder for the media details drawer (metadata and OCR).
@@ -138,9 +137,17 @@ fun rememberViewerDetailsState(
 }
 
 /**
- * Slide-up details drawer containing Overview and Actions tabs.
- * Coordinated directly with finger drag gestures, 6 detents (Closed, Compact ~35%, Medium ~50%, Initial ~65%, Large ~80%, Expanded ~95%),
- * nested scrolling on content, directional gesture locking, and progressive scrim.
+ * Elastic Google Photos-Style Overlay Detail Sheet with 3 Snap Anchors:
+ * - Anchor 0 (Closed): Y = Screen Height (completely off-screen)
+ * - Anchor 1 (Half / Peek): Y ≈ 45% of screen height (visible height ≈ 55%)
+ * - Anchor 2 (Fully Expanded): Y ≈ 15% from top (visible height ≈ 85%, revealing dimmed media behind)
+ *
+ * Implements:
+ * - Dynamic Piecewise Scrim (Closed -> Half: 0.0 -> 0.2; Half -> Full: 0.2 -> 0.6)
+ * - Two-Phase Nested Scroll Resolution (Pre-scroll expands sheet, child scrolls when full, post-scroll collapses sheet)
+ * - Header Interception bypassing nested scroll
+ * - Top-Boundary Fling Dissipation preventing accidental sheet collapse
+ * - State-locked list scrolling (scrollable body only scrolls when anchored at Y_full)
  */
 @Composable
 fun BoxScope.ViewerDetailsDrawer(
@@ -148,10 +155,10 @@ fun BoxScope.ViewerDetailsDrawer(
     items: List<MediaItem>,
     customAlbums: List<CustomAlbum>,
     customTags: Set<String>,
-    drawerVisibleHeight: Animatable<Float, AnimationVector1D>,
-    initialHeightPx: Float,
-    expandedHeightPx: Float,
-    onSettle: suspend (startHeight: Float, currentHeight: Float, velocity: Float) -> Unit,
+    drawerTopY: Animatable<Float, AnimationVector1D>,
+    screenHeightPx: Float,
+    density: Float,
+    onSettle: suspend (startY: Float, currentY: Float, velocityY: Float) -> Unit,
     onClose: () -> Unit,
     onShare: () -> Unit,
     onAddTo: () -> Unit,
@@ -178,29 +185,77 @@ fun BoxScope.ViewerDetailsDrawer(
         faceStore.facesForMedia(item.uri)
     }
 
+    // List states for Overview and Actions tabs
+    val overviewListState = rememberLazyListState()
+    val actionsListState = rememberLazyListState()
+
     // Dialog state for Overview / Actions tabs
     var showAddLocationDialog by remember { mutableStateOf(false) }
     var showAddTagDialog by remember { mutableStateOf(false) }
     var renamingFace by remember { mutableStateOf<DetectedMediaFace?>(null) }
 
-    val currentVisibleH = drawerVisibleHeight.value
-    val sheetHeightDp = with(LocalDensity.current) { expandedHeightPx.toDp() }
+    var isScanningPeople by remember { mutableStateOf(false) }
+    val scanFacesForThisItem: () -> Unit = {
+        if (!isScanningPeople && !item.isVideo) {
+            isScanningPeople = true
+            coroutineScope.launch {
+                try {
+                    val repo = com.amresalehin.emregallery.face.FaceIndexingRepository(context.applicationContext)
+                    repo.indexNewMedia(
+                        media = listOf(item),
+                        store = faceStore,
+                        allowNativeFallback = true
+                    )
+                    faceReloadKey++
+                } catch (_: Exception) {
+                } finally {
+                    isScanningPeople = false
+                }
+            }
+        }
+    }
 
-    // Synchronized progressive backdrop scrim
-    if (currentVisibleH > 0.5f) {
-        val scrimAlpha = (currentVisibleH / expandedHeightPx).coerceIn(0f, 1f) * 0.45f
+    val yClosed = ViewerDrawerPhysics.getYClosed(screenHeightPx)
+    val yHalf = ViewerDrawerPhysics.getYHalf(screenHeightPx)
+    val yFull = ViewerDrawerPhysics.getYFull(screenHeightPx)
+
+    val currentTopY = drawerTopY.value
+    val isClosed = currentTopY >= yClosed - 1f
+    val isFullyExpanded = abs(currentTopY - yFull) < 5f
+
+    val drawerSpring = remember {
+        spring<Float>(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = 400f
+        )
+    }
+
+    // Reset list scroll offsets back to 0 on dismiss
+    LaunchedEffect(isClosed) {
+        if (isClosed) {
+            overviewListState.scrollToItem(0)
+            actionsListState.scrollToItem(0)
+        }
+    }
+
+    // 1. Dynamic Backdrop Scrim Layer with Piecewise Opacity:
+    // Closed to Half: scales from 0.0 to 0.2
+    // Half to Fully Expanded: scales from 0.2 to 0.6
+    // Tapping the visible scrim when sheet is at Half or Fully Expanded immediately animates sheet to Closed.
+    if (!isClosed) {
+        val scrimAlpha = ViewerDrawerPhysics.calculateScrimAlpha(currentTopY, screenHeightPx)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = scrimAlpha))
-                .clickable {
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null
+                ) {
                     coroutineScope.launch {
-                        drawerVisibleHeight.animateTo(
-                            targetValue = 0f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMedium
-                            )
+                        drawerTopY.animateTo(
+                            targetValue = yClosed,
+                            animationSpec = drawerSpring
                         )
                         onClose()
                     }
@@ -208,78 +263,100 @@ fun BoxScope.ViewerDetailsDrawer(
         )
     }
 
-    // Track scroll gesture start height for nested scroll deliberate dismissal calculation
-    var nestedScrollStartHeight by remember { mutableFloatStateOf(0f) }
+    // 2. Two-Phase Nested Scroll Resolution for internal scrollable metadata body
+    var nestedScrollStartY by remember { mutableFloatStateOf(0f) }
     var isNestedScrollActive by remember { mutableStateOf(false) }
 
-    // Nested scroll connection for the inner scrollable content
-    val nestedScrollConnection = remember(expandedHeightPx, initialHeightPx) {
+    val nestedScrollConnection = remember(screenHeightPx, density, yFull, yClosed) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                val delta = -available.y // delta > 0 is upward drag, delta < 0 is downward drag
-                if (!isNestedScrollActive && (delta != 0f)) {
-                    nestedScrollStartHeight = drawerVisibleHeight.value
+                val dy = available.y // dy < 0 is upward drag, dy > 0 is downward drag
+                if (!isNestedScrollActive && dy != 0f) {
+                    nestedScrollStartY = drawerTopY.value
                     isNestedScrollActive = true
                 }
-                // When dragging up and sheet is not yet expanded: expand sheet first
-                if (delta > 0 && drawerVisibleHeight.value < expandedHeightPx - 1f) {
-                    val newH = (drawerVisibleHeight.value + delta).coerceAtMost(expandedHeightPx)
-                    val consumed = newH - drawerVisibleHeight.value
-                    coroutineScope.launch { drawerVisibleHeight.snapTo(newH) }
-                    return Offset(0f, -consumed)
+
+                // Dragging Upward (dy < 0): Pre-Scroll
+                // If the sheet is below Y_full, parent consumes 100% of dy to expand toward Y_full.
+                // The internal list scroll position remains clamped at 0.
+                // Once anchored at Y_full, parent consumes 0, and internal list consumes dy.
+                if (dy < 0f && drawerTopY.value > yFull) {
+                    val newY = (drawerTopY.value + dy).coerceAtLeast(yFull)
+                    val consumedY = newY - drawerTopY.value
+                    coroutineScope.launch { drawerTopY.snapTo(newY) }
+                    return Offset(0f, consumedY)
                 }
+
                 return Offset.Zero
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                val delta = -available.y // delta < 0 is downward drag when content is already at top
-                if (!isNestedScrollActive && (delta != 0f)) {
-                    nestedScrollStartHeight = drawerVisibleHeight.value
+                val dy = available.y // dy > 0 is downward drag when internal list is at scrollY == 0
+                if (!isNestedScrollActive && dy != 0f) {
+                    nestedScrollStartY = drawerTopY.value
                     isNestedScrollActive = true
                 }
-                if (delta < 0 && drawerVisibleHeight.value > 0f) {
-                    val newH = (drawerVisibleHeight.value + delta).coerceAtLeast(0f)
-                    val consumedH = drawerVisibleHeight.value - newH
-                    coroutineScope.launch { drawerVisibleHeight.snapTo(newH) }
-                    return Offset(0f, -consumedH)
+
+                // Dragging Downward (dy > 0): Child First
+                // If internal list is scrolled down (scrollY > 0), list consumes dy to scroll back to top.
+                // Post-Scroll: Once list reaches scrollY == 0, remaining downward delta moves the sheet
+                // from Fully Expanded down toward Half or Closed.
+                if (dy > 0f && drawerTopY.value < yClosed) {
+                    val newY = (drawerTopY.value + dy).coerceAtMost(yClosed)
+                    val consumedY = newY - drawerTopY.value
+                    coroutineScope.launch { drawerTopY.snapTo(newY) }
+                    return Offset(0f, consumedY)
                 }
+
                 return Offset.Zero
             }
 
             override suspend fun onPreFling(available: Velocity): Velocity {
-                val velocity = -available.y
-                val startH = if (nestedScrollStartHeight > 0f) nestedScrollStartHeight else drawerVisibleHeight.value
+                val startY = if (nestedScrollStartY > 0f) nestedScrollStartY else drawerTopY.value
                 isNestedScrollActive = false
-                nestedScrollStartHeight = 0f
-                if (velocity > 0 && drawerVisibleHeight.value < expandedHeightPx - 1f) {
-                    onSettle(startH, drawerVisibleHeight.value, velocity)
+                nestedScrollStartY = 0f
+
+                // If flinging upward while expanding toward Y_full:
+                if (available.y < 0 && drawerTopY.value > yFull) {
+                    onSettle(startY, drawerTopY.value, available.y)
                     return available
                 }
                 return Velocity.Zero
             }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                val velocity = -available.y
-                val startH = if (nestedScrollStartHeight > 0f) nestedScrollStartHeight else drawerVisibleHeight.value
+                val startY = if (nestedScrollStartY > 0f) nestedScrollStartY else drawerTopY.value
                 isNestedScrollActive = false
-                nestedScrollStartHeight = 0f
-                if (drawerVisibleHeight.value < expandedHeightPx) {
-                    onSettle(startH, drawerVisibleHeight.value, velocity)
+                nestedScrollStartY = 0f
+
+                // Top-Boundary Fling Dissipation:
+                // If user flings downward inside metadata body, dissipate velocity once list hits scrollY == 0.
+                // Do NOT carry that fling momentum into an accidental sheet collapse during the same gesture.
+                if (available.y > 0) {
+                    return available // Dissipates downward fling momentum completely
+                }
+
+                if (drawerTopY.value > yFull && drawerTopY.value < yClosed) {
+                    onSettle(startY, drawerTopY.value, available.y)
                     return available
                 }
+
                 return Velocity.Zero
             }
         }
     }
 
-    if (currentVisibleH > 0f) {
+    // 3. Overlay Detail Sheet Surface (Foreground)
+    if (currentTopY < yClosed + 5f) {
+        val sheetHeightDp = with(LocalDensity.current) { (screenHeightPx - yFull).toDp() }
+
         Surface(
             modifier = modifier
                 .fillMaxWidth()
                 .height(sheetHeightDp)
-                .align(Alignment.BottomCenter)
+                .align(Alignment.TopCenter)
                 .graphicsLayer {
-                    translationY = (expandedHeightPx - currentVisibleH).coerceAtLeast(0f)
+                    translationY = currentTopY.coerceIn(yFull, yClosed)
                 },
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -287,12 +364,12 @@ fun BoxScope.ViewerDetailsDrawer(
             shadowElevation = 10.dp
         ) {
             Column(Modifier.fillMaxSize()) {
-                // Top drag handle with direction lock and deliberate dismissal tracking
+                // Header Interception: Non-scrollable header (drag handle + filename + date + tabs/actions)
+                // Any touch originating here bypasses nested scroll logic and drives sheet translation directly.
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 10.dp, bottom = 4.dp)
-                        .pointerInput(expandedHeightPx, touchSlop) {
+                        .pointerInput(screenHeightPx, density, touchSlop) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false)
                                 val velocityTracker = VelocityTracker()
@@ -301,7 +378,7 @@ fun BoxScope.ViewerDetailsDrawer(
                                 var isHorizontal = false
                                 var totalDx = 0f
                                 var totalDy = 0f
-                                var gestureStartH = drawerVisibleHeight.value
+                                var headerDragStartY = drawerTopY.value
 
                                 while (true) {
                                     val event = awaitPointerEvent()
@@ -310,7 +387,7 @@ fun BoxScope.ViewerDetailsDrawer(
                                         if (isVerticalDrag) {
                                             val velocityY = velocityTracker.calculateVelocity().y
                                             coroutineScope.launch {
-                                                onSettle(gestureStartH, drawerVisibleHeight.value, -velocityY)
+                                                onSettle(headerDragStartY, drawerTopY.value, velocityY.coerceIn(-800f, 800f))
                                             }
                                         }
                                         break
@@ -328,89 +405,50 @@ fun BoxScope.ViewerDetailsDrawer(
                                                 isHorizontal = true
                                             } else {
                                                 isVerticalDrag = true
-                                                gestureStartH = drawerVisibleHeight.value
+                                                headerDragStartY = drawerTopY.value
                                                 change.consume()
-                                                val nextH = (drawerVisibleHeight.value - posChange.y).coerceIn(0f, expandedHeightPx)
-                                                coroutineScope.launch { drawerVisibleHeight.snapTo(nextH) }
+                                                val nextY = (drawerTopY.value + posChange.y).coerceIn(yFull, yClosed)
+                                                coroutineScope.launch { drawerTopY.snapTo(nextY) }
                                             }
                                         }
                                     } else if (isVerticalDrag) {
                                         change.consume()
-                                        val nextH = (drawerVisibleHeight.value - posChange.y).coerceIn(0f, expandedHeightPx)
-                                        coroutineScope.launch { drawerVisibleHeight.snapTo(nextH) }
+                                        val nextY = (drawerTopY.value + posChange.y).coerceIn(yFull, yClosed)
+                                        coroutineScope.launch { drawerTopY.snapTo(nextY) }
                                     }
-                                }
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        Modifier
-                            .width(42.dp)
-                            .height(5.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                    )
-                }
-
-                // Pinned Header & Tabs at top of drawer with directional gesture locking
-                DetailDrawerHeader(
-                    item = item,
-                    selectedTab = selectedTab,
-                    onSelectTab = { selectedTab = it },
-                    modifier = Modifier.pointerInput(expandedHeightPx, touchSlop) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            val velocityTracker = VelocityTracker()
-                            velocityTracker.addPosition(down.uptimeMillis, down.position)
-                            var isVerticalDrag = false
-                            var isHorizontal = false
-                            var totalDx = 0f
-                            var totalDy = 0f
-                            var gestureStartH = drawerVisibleHeight.value
-
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                if (!change.pressed) {
-                                    if (isVerticalDrag) {
-                                        val velocityY = velocityTracker.calculateVelocity().y
-                                        coroutineScope.launch {
-                                            onSettle(gestureStartH, drawerVisibleHeight.value, -velocityY)
-                                        }
-                                    }
-                                    break
-                                }
-
-                                velocityTracker.addPosition(change.uptimeMillis, change.position)
-                                val posChange = change.positionChange()
-                                totalDx += posChange.x
-                                totalDy += posChange.y
-
-                                if (!isVerticalDrag && !isHorizontal) {
-                                    val dist = hypot(totalDx, totalDy)
-                                    if (dist > touchSlop) {
-                                        if (abs(totalDx) > abs(totalDy)) {
-                                            isHorizontal = true
-                                        } else {
-                                            isVerticalDrag = true
-                                            gestureStartH = drawerVisibleHeight.value
-                                            change.consume()
-                                            val nextH = (drawerVisibleHeight.value - posChange.y).coerceIn(0f, expandedHeightPx)
-                                            coroutineScope.launch { drawerVisibleHeight.snapTo(nextH) }
-                                        }
-                                    }
-                                } else if (isVerticalDrag) {
-                                    change.consume()
-                                    val nextH = (drawerVisibleHeight.value - posChange.y).coerceIn(0f, expandedHeightPx)
-                                    coroutineScope.launch { drawerVisibleHeight.snapTo(nextH) }
                                 }
                             }
                         }
-                    }
-                )
+                ) {
+                    Column {
+                        // Drag Handle
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp, bottom = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                Modifier
+                                    .width(42.dp)
+                                    .height(5.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                            )
+                        }
 
-                // Scrollable content area
+                        // Pinned Header & Tabs at top of drawer
+                        DetailDrawerHeader(
+                            item = item,
+                            selectedTab = selectedTab,
+                            onSelectTab = { selectedTab = it }
+                        )
+                    }
+                }
+
+                // Scrollable Body (EXIF metadata, technical camera parameters, map/location preview, tags)
+                // State-Locked Scrolling: When sheet is at Closed or Half, internal list scrolling is clamped at 0.
+                // Internal list scrolling is unlocked ONLY when sheet is resting at Fully Expanded (Y = Y_full).
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -428,7 +466,10 @@ fun BoxScope.ViewerDetailsDrawer(
                                 onOpenMap = onOpenMap,
                                 onAddToAlbum = onAddTo,
                                 onAddTag = { showAddTagDialog = true },
-                                onEditLocation = { showAddLocationDialog = true }
+                                onEditLocation = { showAddLocationDialog = true },
+                                listState = overviewListState,
+                                onScanPeople = scanFacesForThisItem,
+                                isScanningPeople = isScanningPeople
                             )
                         }
                         DetailDrawerTab.ACTIONS -> {
@@ -438,7 +479,8 @@ fun BoxScope.ViewerDetailsDrawer(
                                 detectedFaces = detectedFaces,
                                 metadata = detailsState.metadata,
                                 detailsState = detailsState,
-                                onRenameFaceClick = { renamingFace = it }
+                                onRenameFaceClick = { renamingFace = it },
+                                listState = actionsListState
                             )
                         }
                     }
