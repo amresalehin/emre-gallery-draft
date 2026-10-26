@@ -46,8 +46,6 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     private var currentOcrLanguages: Set<String> = emptySet()
     private var currentOcrModel: String = "fast"
 
-    var allowNativeFallback: Boolean = false
-        private set
     var rescanAllRequested: Boolean = false
         private set
 
@@ -302,7 +300,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         )
     }
 
-    fun toggleFaceFinding(onShowFallbackChoice: (rescanAll: Boolean) -> Unit) {
+    fun toggleFaceFinding(onNeedsModelDownload: (rescanAll: Boolean) -> Unit) {
         val state = _uiState.value
         if (!state.countsReady || currentPhotos.isEmpty()) return
         if (state.faceFinding.isRunning) {
@@ -314,16 +312,16 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         if (state.ocr.isRunning || state.modelDownload.isDownloading) return
         if (state.faceFinding.processed >= currentPhotos.size) return
 
-        if (!state.engine.isBuffaloLInstalled && !allowNativeFallback) {
+        if (!state.engine.isBuffaloLInstalled) {
             rescanAllRequested = false
-            onShowFallbackChoice(false)
+            onNeedsModelDownload(false)
             return
         }
 
         faceStartTimeMillis = System.currentTimeMillis()
         faceStartProcessed = state.faceFinding.processed
         _uiState.update { it.copy(faceFinding = it.faceFinding.copy(isRunning = true, isPaused = false)) }
-        IndexingForegroundService.startFace(context, allowNative = allowNativeFallback)
+        IndexingForegroundService.startFace(context)
     }
 
     fun stopFaceFinding() {
@@ -332,19 +330,19 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         refreshCounts()
     }
 
-    fun clearAndRescanFaces(onShowFallbackChoice: () -> Unit) {
+    fun clearAndRescanFaces(onNeedsModelDownload: () -> Unit) {
         val state = _uiState.value
         if (state.ocr.isRunning || state.faceFinding.isRunning || state.modelDownload.isDownloading) return
-        if (!state.engine.isBuffaloLInstalled && !allowNativeFallback) {
+        if (!state.engine.isBuffaloLInstalled) {
             rescanAllRequested = true
-            onShowFallbackChoice()
+            onNeedsModelDownload()
             return
         }
 
         faceStartTimeMillis = System.currentTimeMillis()
         faceStartProcessed = 0
         _uiState.update { it.copy(faceFinding = it.faceFinding.copy(isRunning = true, isPaused = false)) }
-        IndexingForegroundService.startFace(context, rescanAll = true, allowNative = allowNativeFallback)
+        IndexingForegroundService.startFace(context, rescanAll = true)
     }
 
     fun startModelDownload(force: Boolean = false) {
@@ -370,20 +368,6 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         _uiState.update {
             it.copy(modelDownload = it.modelDownload.copy(isDownloading = false, isPaused = false))
         }
-    }
-
-    fun setAllowNativeFallback(allow: Boolean) {
-        allowNativeFallback = allow
-    }
-
-    fun confirmFallbackChoiceAndStart(rescanAll: Boolean) {
-        allowNativeFallback = true
-        rescanAllRequested = false
-        val state = _uiState.value
-        faceStartTimeMillis = System.currentTimeMillis()
-        faceStartProcessed = if (rescanAll) 0 else state.faceFinding.processed
-        _uiState.update { it.copy(faceFinding = it.faceFinding.copy(isRunning = true, isPaused = false)) }
-        IndexingForegroundService.startFace(context, rescanAll = rescanAll, allowNative = true)
     }
 
     fun updateDetectionConfidence(confidence: Float) {

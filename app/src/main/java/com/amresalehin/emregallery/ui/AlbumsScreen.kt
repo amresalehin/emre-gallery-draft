@@ -55,6 +55,7 @@ fun AlbumsScreen(
     onDeleteAlbum: (String) -> Unit,
     onRenameAlbum: (String, String) -> Unit
 ) {
+    val context = LocalContext.current
     val normalMedia = remember(media, hidden, inBin, archive) {
         media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive }
     }
@@ -125,8 +126,17 @@ fun AlbumsScreen(
                     .fillMaxWidth()
                     .testTag("albums_people_card")
             ) {
+                val detectedPeople = remember(media, context) {
+                    runCatching {
+                        val store = com.amresalehin.emregallery.face.FaceClusterStore(context.applicationContext)
+                        store.personSummaries()
+                    }.getOrDefault(emptyList())
+                }
+                val avatarSlots = remember(detectedPeople) {
+                    val peopleUris = detectedPeople.mapNotNull { it.sampleUri }
+                    (peopleUris + List((14 - peopleUris.size).coerceAtLeast(0)) { null }).take(14)
+                }
                 Box(modifier = Modifier.padding(14.dp)) {
-                    // 2 rows of empty avatar frames
                     LazyHorizontalGrid(
                         rows = GridCells.Fixed(2),
                         modifier = Modifier
@@ -135,7 +145,7 @@ fun AlbumsScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        gridItems(List(14) { it }) { _ ->
+                        gridItems(avatarSlots) { uri ->
                             Surface(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -143,7 +153,19 @@ fun AlbumsScreen(
                                 modifier = Modifier
                                     .size(58.dp)
                                     .clickable { onFilter("People") }
-                            ) {}
+                            ) {
+                                if (uri != null) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(Uri.parse(uri))
+                                            .crossfade(false)
+                                            .build(),
+                                        contentDescription = "Person",
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                            }
                         }
                     }
 

@@ -17,7 +17,6 @@ import ai.onnxruntime.OrtSession
 import ai.onnxruntime.TensorInfo
 import java.io.BufferedInputStream
 import java.io.File
-import java.io.FilterInputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -29,54 +28,9 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
- * Counts bytes read from the HTTP response stream (the compressed ZIP), not bytes
- * emitted by ZipInputStream after decompression.
- */
-private class CountingInputStream(
-    input: InputStream,
-    private val onBytesRead: (Long) -> Unit
-) : FilterInputStream(input) {
-    var bytesRead: Long = 0L
-        private set
-
-    override fun read(): Int {
-        val value = super.read()
-        if (value >= 0) {
-            bytesRead++
-            onBytesRead(bytesRead)
-        }
-        return value
-    }
-
-    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-        val count = super.read(buffer, offset, length)
-        if (count > 0) {
-            bytesRead += count
-            onBytesRead(bytesRead)
-        }
-        return count
-    }
-}
-
-data class DetectedFaceEmbedding(
-    val faceIndex: Int,
-    val bounds: RectF,
-    val embedding: FloatArray
-)
-
-interface FaceEngine : AutoCloseable {
-    fun embed(uri: Uri): List<DetectedFaceEmbedding>
-    override fun close() {}
-}
-
-/**
- * Local InsightFace buffalo_l inference.
- *
- * The SCRFD-10GF model detects faces and returns five alignment landmarks. The W600K_R50
- * model produces the 512-dimensional ArcFace embedding used by incremental clustering.
- * The other three official pack models are installed and validated with the pack; they are
- * optional heads (2D/3D landmark detail and age/gender) and are deliberately not run during
- * routine gallery indexing because those outputs are not required to group faces.
+ * Production face detection and recognition engine using InsightFace buffalo_l models:
+ * - SCRFD-10GF for high-recall face detection and 5-point landmark localization.
+ * - W600K_R50 ArcFace for 512-dimensional normalized embeddings.
  */
 class BuffaloLFaceEngine private constructor(
     private val context: Context,
@@ -85,36 +39,56 @@ class BuffaloLFaceEngine private constructor(
     private val detectionThreshold: Float
 ) : FaceEngine {
 
+    override val engineId: String get() = ENGINE_ID
+    override val modelVersion: String get() = MODEL_VERSION
+    override val embeddingDimension: Int get() = EMBEDDING_DIMENSION
+    override val formatVersion: Int get() = FORMAT_VERSION
+
     private data class FaceDetection(val bounds: RectF, val landmarks: FloatArray, val score: Float)
 
     override fun embed(uri: Uri): List<DetectedFaceEmbedding> {
         val bitmap = decodeOrientedBitmap(uri)
-            ?: error("Could not decode this image.")
-        try {
-            val detections = detect(bitmap)
-            return detections.mapIndexedNotNull { index, face ->
-                if (face.bounds.width() < MIN_FACE_SIZE || face.bounds.height() < MIN_FACE_SIZE) {
-                    return@mapIndexedNotNull null
-                }
-                val aligned = alignFace(bitmap, face.landmarks)
-                try {
-                    DetectedFaceEmbedding(index, RectF(face.bounds), inferEmbedding(aligned))
-                } finally {
-                    aligned.recycle()
-                }
-            }
+            ?: error("Could not decode image at URI: $uri")
+        return try {
+            embedBitmap(bitmap)
         } finally {
             bitmap.recycle()
         }
     }
 
+    override fun embedBitmap(bitmap: Bitmap): List<DetectedFaceEmbedding> {
+        val detections = detect(bitmap)
+        return detections.mapIndexedNotNull { index, face ->
+            if (face.bounds.width() < MIN_FACE_SIZE || face.bounds.height() < MIN_FACE_SIZE) {
+                return@mapIndexedNotNull null
+            }
+            val aligned = alignFace(bitmap, face.landmarks)
+            try {
+                val embedding = inferEmbedding(aligned)
+                val faceArea = (face.bounds.width() * face.bounds.height()).coerceAtLeast(1f)
+                val imageArea = (bitmap.width * bitmap.height).coerceAtLeast(1).toFloat()
+                val sizeRatio = (faceArea / imageArea).coerceIn(0.001f, 1.0f)
+                val aspect = face.bounds.width() / face.bounds.height().coerceAtLeast(1f)
+                val aspectScore = (1f - kotlin.math.abs(aspect - 0.85f)).coerceIn(0.2f, 1.0f)
+                val quality = (face.score * 0.5f + kotlin.math.min(sizeRatio * 10f, 0.3f) + aspectScore * 0.2f).coerceIn(0f, 1f)
+                DetectedFaceEmbedding(index, RectF(face.bounds), embedding, face.score, quality)
+            } finally {
+                aligned.recycle()
+            }
+        }
+    }
+
     private fun decodeOrientedBitmap(uri: Uri): Bitmap? {
         val orientation = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { ExifInterface(it).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
-            ) } ?: ExifInterface.ORIENTATION_NORMAL
+            context.contentResolver.openInputStream(uri)?.use {
+                ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            } ?: ExifInterface.ORIENTATION_NORMAL
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-        val decoded = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+
+        val decoded = context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it)
+        } ?: return null
+
         val matrix = Matrix()
         when (orientation) {
             ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
@@ -133,7 +107,7 @@ class BuffaloLFaceEngine private constructor(
         }.getOrElse { decoded }
     }
 
-    /** SCRFD-10GF, 640px input, BGR with (pixel - 127.5) / 128 normalization. */
+    /** SCRFD-10GF: 640px input, BGR channel order with (pixel - 127.5) / 128 normalization. */
     private fun detect(bitmap: Bitmap): List<FaceDetection> {
         val scale = min(DETECT_SIZE.toFloat() / bitmap.width, DETECT_SIZE.toFloat() / bitmap.height)
         val resizedWidth = (bitmap.width * scale).toInt().coerceAtLeast(1)
@@ -169,7 +143,23 @@ class BuffaloLFaceEngine private constructor(
         }
     }
 
-    private data class Output(val name: String, val shape: LongArray, val values: FloatArray)
+    private data class Output(val name: String, val shape: LongArray, val values: FloatArray) {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is Output) return false
+            if (name != other.name) return false
+            if (!shape.contentEquals(other.shape)) return false
+            if (!values.contentEquals(other.values)) return false
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = name.hashCode()
+            result = 31 * result + shape.contentHashCode()
+            result = 31 * result + values.contentHashCode()
+            return result
+        }
+    }
 
     private fun decodeScrfd(
         outputs: List<Output>,
@@ -177,8 +167,6 @@ class BuffaloLFaceEngine private constructor(
         originalHeight: Int,
         scale: Float
     ): List<FaceDetection> {
-        // ONNX exports may preserve semantic names (scores_8/bbox_8/kps_8) or use numeric names.
-        // Resolve by semantic name first, then by tensor's final channel dimension and row count.
         val candidates = mutableListOf<FaceDetection>()
         for (stride in STRIDES) {
             val anchorCount = (DETECT_SIZE / stride) * (DETECT_SIZE / stride) * 2
@@ -191,9 +179,9 @@ class BuffaloLFaceEngine private constructor(
             val keypointOutput = outputs.firstOrNull {
                 it.name.contains("kps_$stride", true) || it.name.contains("landmark_$stride", true)
             } ?: outputs.firstOrNull { lastDim(it.shape) == 10L && rowCount(it.shape) == anchorCount.toLong() }
+
             check(scoreOutput != null && boxOutput != null) {
-                "Unsupported SCRFD output layout for stride $stride. Outputs: " +
-                    outputs.joinToString { it.name + ":" + it.shape.contentToString() }
+                "Unsupported SCRFD output layout for stride $stride."
             }
             val scores = scoreOutput.values
             val boxes = boxOutput.values
@@ -241,6 +229,7 @@ class BuffaloLFaceEngine private constructor(
         return nonMaximumSuppression(candidates)
     }
 
+    /** ArcFace W600K_R50: 112px input, BGR channel order with (pixel - 127.5) / 127.5 normalization. */
     private fun inferEmbedding(face: Bitmap): FloatArray {
         val input = imageTensorData(face, RECOGNITION_SIZE, 127.5f, 127.5f)
         val tensor = OnnxTensor.createTensor(
@@ -250,8 +239,8 @@ class BuffaloLFaceEngine private constructor(
         try {
             recognitionSession.run(mapOf(recognitionSession.inputNames.first() to tensor)).use { result ->
                 val embedding = flatten(result.get(recognitionSession.outputNames.first()).get().value)
-                check(embedding.size == 512) {
-                    "Unexpected buffalo_l embedding size: ${embedding.size} (expected 512)."
+                check(embedding.size == EMBEDDING_DIMENSION) {
+                    "Unexpected Buffalo_L embedding size: ${embedding.size} (expected $EMBEDDING_DIMENSION)."
                 }
                 var normSquared = 0.0
                 embedding.forEach { normSquared += it * it }
@@ -266,9 +255,6 @@ class BuffaloLFaceEngine private constructor(
     private fun alignFace(source: Bitmap, landmarks: FloatArray): Bitmap {
         val output = Bitmap.createBitmap(RECOGNITION_SIZE, RECOGNITION_SIZE, Bitmap.Config.ARGB_8888)
         val matrix = Matrix()
-        // ArcFace canonical 112px template. Three point pairs define the affine transform;
-        // SCRFD's remaining two mouth landmarks are retained in the detector result for future
-        // five-point least-squares alignment if a dedicated alignment implementation is added.
         val src = floatArrayOf(landmarks[0], landmarks[1], landmarks[2], landmarks[3], landmarks[4], landmarks[5])
         val dst = floatArrayOf(38.2946f, 51.6963f, 73.5318f, 51.5014f, 56.0252f, 71.7366f)
         if (!matrix.setPolyToPoly(src, 0, dst, 0, 3)) {
@@ -290,6 +276,7 @@ class BuffaloLFaceEngine private constructor(
         return output
     }
 
+    /** Prepares CHW BGR float array tensor from bitmap pixels. */
     private fun imageTensorData(bitmap: Bitmap, size: Int, mean: Float, std: Float): FloatArray {
         val scaled = if (bitmap.width == size && bitmap.height == size) bitmap
             else Bitmap.createScaledBitmap(bitmap, size, size, true)
@@ -367,6 +354,11 @@ class BuffaloLFaceEngine private constructor(
     }
 
     companion object {
+        const val ENGINE_ID = "buffalo_l"
+        const val MODEL_VERSION = "w600k_r50"
+        const val EMBEDDING_DIMENSION = 512
+        const val FORMAT_VERSION = 1
+
         private const val DETECT_SIZE = 640
         private const val RECOGNITION_SIZE = 112
         private const val MIN_FACE_SIZE = 28
@@ -412,11 +404,6 @@ class BuffaloLFaceEngine private constructor(
             error("Too many redirects connecting to $initialUrl")
         }
 
-        /**
-         * Installs the model pack shipped in the APK assets into app-private storage.
-         * The copy runs on a background dispatcher during startup, and open() retries it
-         * if face indexing starts before the startup copy has completed.
-         */
         @Synchronized
         fun installBundledModel(context: Context) {
             if (isModelInstalled(context)) return
@@ -426,7 +413,7 @@ class BuffaloLFaceEngine private constructor(
             }
             val availableBytes = StatFs(modelDir.absolutePath).availableBytes
             check(availableBytes >= MIN_FREE_SPACE_BYTES) {
-                "At least 60 MB of free storage is required to install the bundled buffalo_l model."
+                "At least 60 MB of free storage is required to install Buffalo_L model."
             }
 
             REQUIRED_MODELS.forEach { name ->
@@ -438,7 +425,7 @@ class BuffaloLFaceEngine private constructor(
                         temporary.outputStream().buffered().use { output -> input.copyTo(output) }
                     }
                     check(temporary.length() > 1024 * 1024) {
-                        "Bundled buffalo_l model file is incomplete: $name"
+                        "Bundled Buffalo_L model file is incomplete: $name"
                     }
                     if (target.exists()) target.delete()
                     if (!temporary.renameTo(target)) temporary.copyTo(target, overwrite = true)
@@ -446,23 +433,8 @@ class BuffaloLFaceEngine private constructor(
                     temporary.delete()
                 }
             }
-
-            runCatching {
-                context.assets.list("face-models/buffalo_l").orEmpty()
-                    .filter { it.contains("LICENSE", ignoreCase = true) }
-                    .forEach { name ->
-                        val target = modelDir.resolve(name)
-                        if (!target.exists()) {
-                            context.assets.open("face-models/buffalo_l/$name").use { input ->
-                                target.outputStream().buffered().use { output -> input.copyTo(output) }
-                            }
-                        }
-                    }
-            }
-            check(isModelInstalled(context)) { "Bundled buffalo_l model installation failed validation." }
         }
 
-        /** Explicit, resumable-in-the-sense-of-retryable download; all pack files are installed. */
         suspend fun downloadModel(
             context: Context,
             force: Boolean = false,
@@ -475,7 +447,7 @@ class BuffaloLFaceEngine private constructor(
             if (!force && isModelInstalled(context)) return
             val availableBytes = StatFs(modelDir.absolutePath).availableBytes
             check(availableBytes >= MIN_FREE_SPACE_BYTES) {
-                "At least 60 MB of free storage is required to install the complete buffalo_l pack."
+                "At least 60 MB of free storage is required to install Buffalo_L."
             }
 
             val archive = File(modelDir, "buffalo_l.zip.part")
@@ -484,7 +456,7 @@ class BuffaloLFaceEngine private constructor(
             var responseTotal = -1L
             try {
                 if (connection.responseCode !in 200..299) {
-                    error("Could not download buffalo_l model pack (HTTP ${connection.responseCode}).")
+                    error("Could not download Buffalo_L model pack (HTTP ${connection.responseCode}).")
                 }
                 val total = connection.contentLengthLong.coerceAtLeast(-1L)
                 responseTotal = total
@@ -529,13 +501,6 @@ class BuffaloLFaceEngine private constructor(
                                         output.write(buffer, 0, count)
                                     }
                                 }
-                            } else {
-                                val buffer = ByteArray(64 * 1024)
-                                while (true) {
-                                    awaitIfResumed()
-                                    if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
-                                    if (zip.read(buffer) < 0) break
-                                }
                             }
                         }
                         zip.closeEntry()
@@ -545,7 +510,7 @@ class BuffaloLFaceEngine private constructor(
                 val missing = REQUIRED_MODELS.filter { name ->
                     staging.resolve(name).let { !it.isFile || it.length() < 1024 * 1024 }
                 }
-                if (missing.isNotEmpty()) error("Incomplete buffalo_l archive; missing or invalid: " + missing.joinToString())
+                if (missing.isNotEmpty()) error("Incomplete Buffalo_L archive; missing: " + missing.joinToString())
 
                 onStage("installing")
                 REQUIRED_MODELS.forEach { name ->
@@ -559,7 +524,7 @@ class BuffaloLFaceEngine private constructor(
                 staging.listFiles()?.filter { it.isFile && it.name.contains("LICENSE", true) }?.forEach {
                     it.copyTo(modelDir.resolve(it.name), overwrite = true)
                 }
-                check(isModelInstalled(context)) { "buffalo_l model pack installation failed validation." }
+                check(isModelInstalled(context)) { "Buffalo_L model installation failed validation." }
                 if (responseTotal > 0L) onProgress(responseTotal, responseTotal)
                 onStage("ready")
             } finally {
@@ -568,14 +533,15 @@ class BuffaloLFaceEngine private constructor(
             }
         }
 
-        fun open(context: Context, detectionThreshold: Float = FaceRecognitionSettings.DEFAULT_DETECTION_CONFIDENCE): BuffaloLFaceEngine {
+        fun open(
+            context: Context,
+            detectionThreshold: Float = FaceRecognitionSettings.DEFAULT_DETECTION_CONFIDENCE
+        ): BuffaloLFaceEngine {
             if (!isModelInstalled(context)) {
                 runCatching { installBundledModel(context) }
             }
-            // Model downloads are suspendable and are managed by the indexing service.
-            // open() only installs bundled assets synchronously; it never starts network I/O.
             check(isModelInstalled(context)) {
-                "The complete buffalo_l pack is not installed."
+                "Buffalo_L model is not installed. Please download it first."
             }
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             val options = OrtSession.SessionOptions().apply {
@@ -587,11 +553,44 @@ class BuffaloLFaceEngine private constructor(
             val detector = env.createSession(modelDir.resolve("det_10g.onnx").absolutePath, options)
             try {
                 val recognizer = env.createSession(modelDir.resolve("w600k_r50.onnx").absolutePath, options)
-                return BuffaloLFaceEngine(context.applicationContext, detector, recognizer, detectionThreshold.coerceIn(0.30f, 0.90f))
+                return BuffaloLFaceEngine(
+                    context.applicationContext,
+                    detector,
+                    recognizer,
+                    detectionThreshold.coerceIn(0.30f, 0.90f)
+                )
             } catch (error: Throwable) {
                 detector.close()
                 throw error
             }
         }
+    }
+}
+
+/**
+ * Factory for Buffalo_L engine registered with FaceEngineRegistry.
+ */
+object BuffaloLFaceEngineFactory : FaceEngineFactory {
+    override val engineId: String = BuffaloLFaceEngine.ENGINE_ID
+    override val displayName: String = "Buffalo_L (InsightFace ONNX 512-d)"
+    override val modelVersion: String = BuffaloLFaceEngine.MODEL_VERSION
+    override val embeddingDimension: Int = BuffaloLFaceEngine.EMBEDDING_DIMENSION
+    override val isExperimental: Boolean = false
+
+    override fun isInstalled(context: Context): Boolean = BuffaloLFaceEngine.isModelInstalled(context)
+
+    override fun create(context: Context, detectionThreshold: Float): FaceEngine =
+        BuffaloLFaceEngine.open(context, detectionThreshold)
+
+    override suspend fun downloadModel(
+        context: Context,
+        force: Boolean,
+        onProgress: (Long, Long) -> Unit,
+        onStage: (String) -> Unit,
+        awaitIfResumed: suspend () -> Unit
+    ) = BuffaloLFaceEngine.downloadModel(context, force, onProgress, onStage, awaitIfResumed)
+
+    init {
+        FaceEngineRegistry.register(this)
     }
 }

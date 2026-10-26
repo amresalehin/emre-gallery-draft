@@ -9,28 +9,43 @@ import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
 
 object FaceThumbnailHelper {
-    private val memoryCache = LruCache<String, Bitmap>(60)
+    private val memoryCache = LruCache<String, Bitmap>(100)
 
     fun getFaceCrop(context: Context, uri: Uri, faceIndex: Int): Bitmap? {
         val cacheKey = "${uri}_$faceIndex"
         memoryCache.get(cacheKey)?.let { return it }
 
         return runCatching {
-            val engine = AndroidNativeFaceEngine(context)
-            val detections = engine.embed(uri)
-            val match = detections.firstOrNull { it.faceIndex == faceIndex } ?: detections.getOrNull(faceIndex)
-            val bounds = match?.bounds ?: return null
+            val store = FaceClusterStore(context.applicationContext)
+            val bounds = store.getFaceBounds(uri.toString(), faceIndex)
 
             val original = decodeOrientedBitmap(context, uri) ?: return null
             try {
-                val cropWidth = bounds.width().toInt().coerceIn(1, original.width)
-                val cropHeight = bounds.height().toInt().coerceIn(1, original.height)
-                val cropX = bounds.left.toInt().coerceIn(0, (original.width - cropWidth).coerceAtLeast(0))
-                val cropY = bounds.top.toInt().coerceIn(0, (original.height - cropHeight).coerceAtLeast(0))
+                val crop = if (bounds != null && bounds.width() > 10f && bounds.height() > 10f) {
+                    // Expand bounds slightly for better framing
+                    val marginX = bounds.width() * 0.15f
+                    val marginY = bounds.height() * 0.15f
+                    val left = (bounds.left - marginX).coerceIn(0f, original.width.toFloat())
+                    val top = (bounds.top - marginY).coerceIn(0f, original.height.toFloat())
+                    val right = (bounds.right + marginX).coerceIn(0f, original.width.toFloat())
+                    val bottom = (bounds.bottom + marginY).coerceIn(0f, original.height.toFloat())
 
-                val faceCrop = Bitmap.createBitmap(original, cropX, cropY, cropWidth, cropHeight)
-                val scaled = Bitmap.createScaledBitmap(faceCrop, 128, 128, true)
-                if (scaled !== faceCrop) faceCrop.recycle()
+                    val cropWidth = (right - left).toInt().coerceIn(1, original.width)
+                    val cropHeight = (bottom - top).toInt().coerceIn(1, original.height)
+                    val cropX = left.toInt().coerceIn(0, (original.width - cropWidth).coerceAtLeast(0))
+                    val cropY = top.toInt().coerceIn(0, (original.height - cropHeight).coerceAtLeast(0))
+
+                    Bitmap.createBitmap(original, cropX, cropY, cropWidth, cropHeight)
+                } else {
+                    // Fallback to square center crop
+                    val size = minOf(original.width, original.height)
+                    val cropX = ((original.width - size) / 2).coerceAtLeast(0)
+                    val cropY = ((original.height - size) / 2).coerceAtLeast(0)
+                    Bitmap.createBitmap(original, cropX, cropY, size, size)
+                }
+
+                val scaled = Bitmap.createScaledBitmap(crop, 128, 128, true)
+                if (scaled !== crop) crop.recycle()
                 memoryCache.put(cacheKey, scaled)
                 scaled
             } finally {

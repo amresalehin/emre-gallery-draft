@@ -38,7 +38,6 @@ fun FaceRecognitionCard(
     onCancelDownload: () -> Unit,
     onClusterFaces: (Float) -> Unit,
     onResetClusters: () -> Unit,
-    onSelectNativeFallback: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val faceProgress = if (totalPhotos > 0) (faceFindingState.processed.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
@@ -312,7 +311,7 @@ fun FaceRecognitionCard(
                                 when {
                                     modelDownloadState.isDownloading -> "Downloading $downloadPercent%"
                                     engineState.isBuffaloLInstalled -> "Buffalo_L"
-                                    else -> "Default"
+                                    else -> "Download Buffalo_L"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
@@ -338,7 +337,7 @@ fun FaceRecognitionCard(
                                 Column {
                                     Text("Buffalo_L (InsightFace)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                     Text(
-                                        if (engineState.isBuffaloLInstalled) "Installed on device" else "Download model (288 MB)",
+                                        if (engineState.isBuffaloLInstalled) "Installed on device (512-d ArcFace)" else "Download model (288 MB)",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -358,24 +357,6 @@ fun FaceRecognitionCard(
                                 if (!engineState.isBuffaloLInstalled && !modelDownloadState.isDownloading) {
                                     onDownloadModel(true)
                                 }
-                            }
-                        )
-
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text("Default (Native)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                    Text("Android FaceDetector", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            },
-                            trailingIcon = {
-                                if (!engineState.isBuffaloLInstalled && !modelDownloadState.isDownloading) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                                }
-                            },
-                            onClick = {
-                                modelMenuExpanded = false
-                                onSelectNativeFallback()
                             }
                         )
                     }

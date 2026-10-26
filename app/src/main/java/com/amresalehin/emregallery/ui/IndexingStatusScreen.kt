@@ -51,7 +51,7 @@ fun IndexingStatusScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var showFaceScanOptions by remember { mutableStateOf(false) }
-    var showFallbackChoice by remember { mutableStateOf(false) }
+    var showModelRequiredDialog by remember { mutableStateOf(false) }
 
     // Request notification permission on Android 13+ (POST_NOTIFICATIONS)
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -156,17 +156,14 @@ fun IndexingStatusScreen(
                 onMinGroupFacesChange = viewModel::updateMinGroupFaces,
                 onClusterDistanceChange = viewModel::updateClusterDistance,
                 onToggleFaceFinding = {
-                    viewModel.toggleFaceFinding { showFallbackChoice = true }
+                    viewModel.toggleFaceFinding { showModelRequiredDialog = true }
                 },
                 onStopFaceFinding = viewModel::stopFaceFinding,
                 onRescanRequested = { showFaceScanOptions = true },
                 onDownloadModel = viewModel::startModelDownload,
                 onCancelDownload = viewModel::cancelModelDownload,
                 onClusterFaces = viewModel::runFaceClustering,
-                onResetClusters = viewModel::resetFaceClusters,
-                onSelectNativeFallback = {
-                    viewModel.setAllowNativeFallback(true)
-                }
+                onResetClusters = viewModel::resetFaceClusters
             )
 
             Spacer(Modifier.navigationBarsPadding())
@@ -228,25 +225,21 @@ fun IndexingStatusScreen(
             onDismiss = { showFaceScanOptions = false },
             onRescanAll = {
                 showFaceScanOptions = false
-                viewModel.clearAndRescanFaces { showFallbackChoice = true }
+                viewModel.clearAndRescanFaces { showModelRequiredDialog = true }
             },
             onRemainingOnly = {
                 showFaceScanOptions = false
-                viewModel.toggleFaceFinding { showFallbackChoice = true }
+                viewModel.toggleFaceFinding { showModelRequiredDialog = true }
             }
         )
     }
 
-    if (showFallbackChoice) {
-        FallbackChoiceDialog(
-            onDismiss = { showFallbackChoice = false },
+    if (showModelRequiredDialog) {
+        ModelDownloadRequiredDialog(
+            onDismiss = { showModelRequiredDialog = false },
             onDownloadModel = {
-                showFallbackChoice = false
+                showModelRequiredDialog = false
                 viewModel.startModelDownload()
-            },
-            onUseFallback = {
-                showFallbackChoice = false
-                viewModel.confirmFallbackChoiceAndStart(viewModel.rescanAllRequested)
             }
         )
     }

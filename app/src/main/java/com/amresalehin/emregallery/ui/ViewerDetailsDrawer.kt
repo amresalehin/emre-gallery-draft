@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -203,8 +203,7 @@ fun BoxScope.ViewerDetailsDrawer(
                     val repo = com.amresalehin.emregallery.face.FaceIndexingRepository(context.applicationContext)
                     repo.indexNewMedia(
                         media = listOf(item),
-                        store = faceStore,
-                        allowNativeFallback = true
+                        store = faceStore
                     )
                     faceReloadKey++
                 } catch (_: Exception) {
@@ -612,9 +611,10 @@ fun BoxScope.ViewerDetailsDrawer(
         )
     }
 
-    // Rename Person Dialog
+    // Rename / Manage Person Dialog
     if (renamingFace != null) {
         val face = renamingFace!!
+        val personId = face.personId ?: face.clusterId
         var nameInput by remember(face) {
             val initial = if (face.displayName.equals("Unknown", ignoreCase = true)) "" else face.displayName
             mutableStateOf(initial)
@@ -622,23 +622,37 @@ fun BoxScope.ViewerDetailsDrawer(
         AlertDialog(
             onDismissRequest = { renamingFace = null },
             title = {
-                Text(if (face.displayName.isBlank() || face.displayName.equals("Unknown", ignoreCase = true)) "Name this person" else "Rename person")
+                Text(if (face.displayName.isBlank() || face.displayName.equals("Unknown", ignoreCase = true)) "Name this person" else "Person details")
             },
             text = {
-                OutlinedTextField(
-                    value = nameInput,
-                    onValueChange = { nameInput = it },
-                    label = { Text("Person name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        label = { Text("Person name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    TextButton(
+                        onClick = {
+                            faceStore.removeFaceFromPerson(face.mediaUri, face.faceIndex)
+                            faceReloadKey++
+                            renamingFace = null
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Remove face from this person")
+                    }
+                }
             },
             confirmButton = {
                 Button(
                     onClick = {
                         val cleanName = nameInput.trim()
                         if (cleanName.isNotEmpty()) {
-                            faceStore.renameCluster(face.clusterId, cleanName)
+                            faceStore.renamePerson(personId, cleanName)
                             faceReloadKey++
                             renamingFace = null
                         }

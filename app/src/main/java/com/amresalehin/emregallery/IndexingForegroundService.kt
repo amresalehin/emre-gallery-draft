@@ -107,8 +107,7 @@ class IndexingForegroundService : Service() {
                         intent?.getStringExtra(EXTRA_MODEL) ?: "fast"
                     )
                     ACTION_START_FACE -> runFace(
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
-                        intent?.getBooleanExtra(EXTRA_ALLOW_NATIVE, false) == true
+                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
                     )
                     ACTION_START_LOCATION -> runLocation(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
@@ -156,17 +155,21 @@ class IndexingForegroundService : Service() {
         }
     }
 
-    private suspend fun runFace(rescanAll: Boolean, allowNative: Boolean) {
+    private suspend fun runFace(rescanAll: Boolean) {
         val photos = loadPhotos()
         val store = FaceClusterStore(applicationContext)
-        if (rescanAll) withContext(Dispatchers.IO) { store.clearAllFaceData() }
+        if (rescanAll) {
+            withContext(Dispatchers.IO) {
+                // Reset indexed status for active engine to reprocess photos without wiping identities
+                store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(BuffaloLFaceEngine.ENGINE_ID))
+            }
+        }
         val alreadyDone = store.indexedMediaCount(photos.map { it.uri })
         updateState(task = TASK_FACE, running = true, paused = false, processed = alreadyDone, total = photos.size, faces = store.indexedFaceCount(), failed = store.failedMediaCount(), error = null)
         postProgress("Face indexing", "Preparing face detector", alreadyDone, photos.size)
         FaceIndexingRepository(applicationContext).indexNewMedia(
             media = photos,
             store = store,
-            allowNativeFallback = allowNative,
             detectionThreshold = FaceRecognitionSettings.detectionConfidence(applicationContext),
             recognitionDistance = FaceRecognitionSettings.recognitionDistance(applicationContext),
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
@@ -347,7 +350,6 @@ class IndexingForegroundService : Service() {
         private const val EXTRA_LANGUAGES = "languages"
         private const val EXTRA_RESCAN_ALL = "rescan_all"
         private const val EXTRA_MODEL = "ocr_model"
-        private const val EXTRA_ALLOW_NATIVE = "allow_native"
         private const val EXTRA_FORCE = "force"
 
         private fun command(context: Context, action: String, configure: Intent.() -> Unit = {}) {
@@ -371,10 +373,9 @@ class IndexingForegroundService : Service() {
                 putExtra(EXTRA_MODEL, modelId)
             }
 
-        fun startFace(context: Context, rescanAll: Boolean = false, allowNative: Boolean = false) =
+        fun startFace(context: Context, rescanAll: Boolean = false) =
             command(context, ACTION_START_FACE) {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
-                putExtra(EXTRA_ALLOW_NATIVE, allowNative)
             }
 
         fun startLocation(context: Context, rescanAll: Boolean = false) =

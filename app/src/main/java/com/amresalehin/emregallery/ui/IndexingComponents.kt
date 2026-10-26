@@ -62,23 +62,19 @@ fun FaceScanOptionsDialog(
 }
 
 @Composable
-fun FallbackChoiceDialog(
+fun ModelDownloadRequiredDialog(
     onDismiss: () -> Unit,
-    onDownloadModel: () -> Unit,
-    onUseFallback: () -> Unit
+    onDownloadModel: () -> Unit
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Buffalo_L model unavailable") },
-        text = { Text("Download the Buffalo_L model for higher-quality face recognition, or explicitly choose the built-in Android face detector. The native detector has lower-dimensional embeddings and may group faces less accurately.") },
+        title = { Text("Buffalo_L Model Required") },
+        text = { Text("Face recognition uses the on-device Buffalo_L model (InsightFace SCRFD + ArcFace 512-d). Please download the model pack to enable face detection and identity clustering.") },
         confirmButton = {
-            TextButton(onClick = onDownloadModel) { Text("Download model") }
+            Button(onClick = onDownloadModel) { Text("Download model") }
         },
         dismissButton = {
-            Row {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-                TextButton(onClick = onUseFallback) { Text("Use native fallback") }
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }

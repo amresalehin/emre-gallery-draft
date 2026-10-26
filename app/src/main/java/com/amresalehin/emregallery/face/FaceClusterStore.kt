@@ -4,10 +4,47 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.graphics.RectF
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
 import kotlin.math.sqrt
+
+data class EmbeddingProvenance(
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+    val modelVersion: String = BuffaloLFaceEngine.MODEL_VERSION,
+    val dimension: Int = BuffaloLFaceEngine.EMBEDDING_DIMENSION,
+    val formatVersion: Int = BuffaloLFaceEngine.FORMAT_VERSION
+) {
+    fun isCompatibleWith(other: EmbeddingProvenance): Boolean {
+        return engineId == other.engineId &&
+               modelVersion == other.modelVersion &&
+               dimension == other.dimension &&
+               formatVersion == other.formatVersion
+    }
+
+    companion object {
+        val BUFFALO_L = EmbeddingProvenance(
+            engineId = BuffaloLFaceEngine.ENGINE_ID,
+            modelVersion = BuffaloLFaceEngine.MODEL_VERSION,
+            dimension = BuffaloLFaceEngine.EMBEDDING_DIMENSION,
+            formatVersion = BuffaloLFaceEngine.FORMAT_VERSION
+        )
+        val BUFFALO_L_512 = BUFFALO_L
+    }
+}
+
+data class PersonSummary(
+    val id: String,
+    val displayName: String,
+    val faceCount: Int,
+    val sampleUri: String?,
+    val isHidden: Boolean = false,
+    val isNamed: Boolean = false,
+    val clusterCount: Int = 1,
+    val updatedAt: Long = 0L,
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID
+)
 
 data class FaceClusterSummary(
     val id: String,
@@ -20,69 +57,236 @@ data class StoredFace(
     val mediaUri: String,
     val faceIndex: Int,
     val clusterId: String,
-    val embedding: FloatArray
-)
+    val embedding: FloatArray,
+    val personId: String? = null,
+    val boxLeft: Float = 0f,
+    val boxTop: Float = 0f,
+    val boxRight: Float = 0f,
+    val boxBottom: Float = 0f,
+    val confidence: Float = 1f,
+    val quality: Float = 1f,
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+    val modelVersion: String = BuffaloLFaceEngine.MODEL_VERSION
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is StoredFace) return false
+        if (mediaUri != other.mediaUri) return false
+        if (faceIndex != other.faceIndex) return false
+        if (clusterId != other.clusterId) return false
+        if (personId != other.personId) return false
+        if (engineId != other.engineId) return false
+        if (!embedding.contentEquals(other.embedding)) return false
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = mediaUri.hashCode()
+        result = 31 * result + faceIndex
+        result = 31 * result + clusterId.hashCode()
+        result = 31 * result + (personId?.hashCode() ?: 0)
+        result = 31 * result + engineId.hashCode()
+        result = 31 * result + embedding.contentHashCode()
+        return result
+    }
+}
 
 data class DetectedMediaFace(
     val mediaUri: String,
     val faceIndex: Int,
     val clusterId: String,
-    val displayName: String
+    val displayName: String,
+    val personId: String? = null,
+    val boxLeft: Float = 0f,
+    val boxTop: Float = 0f,
+    val boxRight: Float = 0f,
+    val boxBottom: Float = 0f,
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID
+)
+
+data class ReviewSuggestion(
+    val id: String,
+    val faceId: String,
+    val mediaUri: String,
+    val faceIndex: Int,
+    val suggestedPersonId: String,
+    val suggestedPersonName: String,
+    val distance: Float,
+    val status: String = "pending",
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID
+)
+
+data class EngineComparisonFace(
+    val faceIndex: Int,
+    val bounds: RectF,
+    val confidence: Float,
+    val quality: Float
+)
+
+data class EngineComparisonResult(
+    val mediaUri: String,
+    val engineA: String,
+    val facesA: List<EngineComparisonFace>,
+    val engineB: String,
+    val facesB: List<EngineComparisonFace>,
+    val matchingFaceCount: Int
 )
 
 /**
- * Persistent, incremental face grouping. Embeddings and identity groups stay in app-private storage.
- * Recognition uses cosine distance (1 - cosine similarity); smaller distances mean closer matches.
+ * Modern, multi-engine face clustering and identity management store.
+ *
+ * Engines (production and experimental) operate with complete isolation:
+ * - Engine-specific embeddings and model versions.
+ * - Engine-partitioned face indexing status (indexing under one engine never causes another engine to skip a photo).
+ * - Isolated clustering and people identities preventing experimental engines from corrupting production identities.
+ * - Direct cross-engine comparison mechanism on shared photograph sets.
  */
 class FaceClusterStore(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "face_index.db", null, DATABASE_VERSION) {
+    SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
-            """CREATE TABLE clusters (
+            """CREATE TABLE people (
                 id TEXT PRIMARY KEY,
-                display_name TEXT NOT NULL,
-                centroid BLOB NOT NULL,
-                face_count INTEGER NOT NULL DEFAULT 0,
+                name TEXT NOT NULL DEFAULT '',
+                cover_face_id TEXT,
+                cover_media_uri TEXT,
+                is_hidden INTEGER NOT NULL DEFAULT 0,
+                engine_id TEXT NOT NULL DEFAULT 'buffalo_l',
+                created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )""".trimIndent()
         )
+        db.execSQL("CREATE INDEX idx_people_engine ON people(engine_id)")
+
+        db.execSQL(
+            """CREATE TABLE clusters (
+                id TEXT PRIMARY KEY,
+                person_id TEXT,
+                display_name TEXT NOT NULL,
+                centroid BLOB NOT NULL,
+                embedding_dim INTEGER NOT NULL DEFAULT 512,
+                engine_id TEXT NOT NULL DEFAULT 'buffalo_l',
+                model_version TEXT NOT NULL DEFAULT 'w600k_r50',
+                face_count INTEGER NOT NULL DEFAULT 0,
+                representative_face_id TEXT,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL,
+                FOREIGN KEY(person_id) REFERENCES people(id) ON DELETE SET NULL
+            )""".trimIndent()
+        )
+        db.execSQL("CREATE INDEX idx_clusters_person ON clusters(person_id)")
+        db.execSQL("CREATE INDEX idx_clusters_engine ON clusters(engine_id, model_version)")
+
         db.execSQL(
             """CREATE TABLE faces (
                 media_uri TEXT NOT NULL,
                 face_index INTEGER NOT NULL,
-                cluster_id TEXT NOT NULL,
+                engine_id TEXT NOT NULL DEFAULT 'buffalo_l',
+                face_id TEXT,
+                cluster_id TEXT,
+                person_id TEXT,
                 embedding BLOB NOT NULL,
-                PRIMARY KEY(media_uri, face_index),
-                FOREIGN KEY(cluster_id) REFERENCES clusters(id)
+                model_version TEXT NOT NULL DEFAULT 'w600k_r50',
+                embedding_dim INTEGER NOT NULL DEFAULT 512,
+                format_version INTEGER NOT NULL DEFAULT 1,
+                box_left REAL NOT NULL DEFAULT 0.0,
+                box_top REAL NOT NULL DEFAULT 0.0,
+                box_right REAL NOT NULL DEFAULT 0.0,
+                box_bottom REAL NOT NULL DEFAULT 0.0,
+                detection_confidence REAL NOT NULL DEFAULT 1.0,
+                quality_score REAL NOT NULL DEFAULT 1.0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(media_uri, face_index, engine_id),
+                FOREIGN KEY(cluster_id) REFERENCES clusters(id) ON DELETE SET NULL,
+                FOREIGN KEY(person_id) REFERENCES people(id) ON DELETE SET NULL
             )""".trimIndent()
         )
-        db.execSQL("CREATE INDEX faces_cluster_idx ON faces(cluster_id)")
+        db.execSQL("CREATE INDEX idx_faces_engine_cluster ON faces(engine_id, cluster_id)")
+        db.execSQL("CREATE INDEX idx_faces_engine_person ON faces(engine_id, person_id)")
+        db.execSQL("CREATE INDEX idx_faces_media ON faces(media_uri)")
+
         db.execSQL(
             """CREATE TABLE indexed_media (
-                media_uri TEXT PRIMARY KEY,
+                media_uri TEXT NOT NULL,
+                engine_id TEXT NOT NULL DEFAULT 'buffalo_l',
                 indexed_at INTEGER NOT NULL,
                 face_count INTEGER NOT NULL,
-                status TEXT NOT NULL
+                status TEXT NOT NULL,
+                PRIMARY KEY(media_uri, engine_id)
             )""".trimIndent()
         )
+        db.execSQL("CREATE INDEX idx_indexed_media_engine ON indexed_media(engine_id, status)")
+
+        db.execSQL(
+            """CREATE TABLE face_feedback (
+                id TEXT PRIMARY KEY,
+                feedback_type TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                engine_id TEXT NOT NULL DEFAULT 'buffalo_l',
+                notes TEXT,
+                created_at INTEGER NOT NULL
+            )""".trimIndent()
+        )
+        db.execSQL("CREATE INDEX idx_feedback_source ON face_feedback(source_id)")
+        db.execSQL("CREATE INDEX idx_feedback_target ON face_feedback(target_id)")
+        db.execSQL("CREATE INDEX idx_feedback_engine ON face_feedback(engine_id)")
+
+        db.execSQL(
+            """CREATE TABLE review_suggestions (
+                id TEXT PRIMARY KEY,
+                face_id TEXT NOT NULL,
+                media_uri TEXT NOT NULL,
+                face_index INTEGER NOT NULL,
+                engine_id TEXT NOT NULL DEFAULT 'buffalo_l',
+                suggested_person_id TEXT NOT NULL,
+                distance REAL NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at INTEGER NOT NULL
+            )""".trimIndent()
+        )
+        db.execSQL("CREATE INDEX idx_suggestions_face ON review_suggestions(face_id)")
+        db.execSQL("CREATE INDEX idx_suggestions_person ON review_suggestions(suggested_person_id)")
+        db.execSQL("CREATE INDEX idx_suggestions_engine ON review_suggestions(engine_id)")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // Keep existing face data when schema versions are added in future.
+        // Schema evolution versioning for future upgrades.
     }
 
+    // --- Face Bounds Lookup ---
+
     @Synchronized
-    fun isMediaIndexed(uri: String): Boolean =
+    fun getFaceBounds(mediaUri: String, faceIndex: Int, engineId: String = BuffaloLFaceEngine.ENGINE_ID): RectF? {
+        return readableDatabase.rawQuery(
+            "SELECT box_left, box_top, box_right, box_bottom FROM faces WHERE media_uri=? AND face_index=? AND engine_id=? LIMIT 1",
+            arrayOf(mediaUri, faceIndex.toString(), engineId)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                val left = cursor.getFloat(0)
+                val top = cursor.getFloat(1)
+                val right = cursor.getFloat(2)
+                val bottom = cursor.getFloat(3)
+                if (right > left && bottom > top) RectF(left, top, right, bottom) else null
+            } else null
+        }
+    }
+
+    // --- Media Indexing Status Partitioned by Engine ---
+
+    @Synchronized
+    fun isMediaIndexed(uri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Boolean =
         readableDatabase.rawQuery(
-            "SELECT 1 FROM indexed_media WHERE media_uri=? AND status='done' LIMIT 1",
-            arrayOf(uri)
+            "SELECT 1 FROM indexed_media WHERE media_uri=? AND engine_id=? AND status='done' LIMIT 1",
+            arrayOf(uri, engineId)
         ).use { it.moveToFirst() }
 
     @Synchronized
-    fun markMediaFailed(uri: String) {
+    fun markMediaFailed(uri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
         val values = ContentValues().apply {
             put("media_uri", uri)
+            put("engine_id", engineId)
             put("indexed_at", System.currentTimeMillis())
             put("face_count", 0)
             put("status", "failed")
@@ -90,67 +294,11 @@ class FaceClusterStore(context: Context) :
         writableDatabase.insertWithOnConflict("indexed_media", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
 
-    /** Inserts one face and assigns it to the closest existing centroid, or creates a new person. */
     @Synchronized
-    fun addFace(mediaUri: String, faceIndex: Int, rawEmbedding: FloatArray, maxDistance: Float = 0.40f): String {
-        require(rawEmbedding.isNotEmpty()) { "Face embedding is empty." }
-        val embedding = normalize(rawEmbedding)
-        val db = writableDatabase
-        val existing = db.rawQuery(
-            "SELECT cluster_id FROM faces WHERE media_uri=? AND face_index=?",
-            arrayOf(mediaUri, faceIndex.toString())
-        ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-        if (existing != null) return existing
-
-        var bestId: String? = null
-        var bestDistance = Float.POSITIVE_INFINITY
-        db.rawQuery("SELECT id, centroid FROM clusters", null).use { cursor ->
-            while (cursor.moveToNext()) {
-                val centroid = bytesToFloats(cursor.getBlob(1))
-                val distance = cosineDistance(embedding, centroid)
-                if (distance < bestDistance) {
-                    bestDistance = distance
-                    bestId = cursor.getString(0)
-                }
-            }
-        }
-
-        val clusterId = if (bestId != null && bestDistance <= maxDistance) {
-            bestId!!
-        } else {
-            UUID.randomUUID().toString().also { id ->
-                val values = ContentValues().apply {
-                    put("id", id)
-                    put("display_name", "Person ${nextPersonNumber(db)}")
-                    put("centroid", floatsToBytes(embedding))
-                    put("face_count", 0)
-                    put("updated_at", System.currentTimeMillis())
-                }
-                db.insertOrThrow("clusters", null, values)
-            }
-        }
-
-        db.beginTransaction()
-        try {
-            val faceValues = ContentValues().apply {
-                put("media_uri", mediaUri)
-                put("face_index", faceIndex)
-                put("cluster_id", clusterId)
-                put("embedding", floatsToBytes(embedding))
-            }
-            db.insertOrThrow("faces", null, faceValues)
-            recomputeCentroid(db, clusterId)
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
-        return clusterId
-    }
-
-    @Synchronized
-    fun markMediaIndexed(uri: String, detectedFaces: Int) {
+    fun markMediaIndexed(uri: String, detectedFaces: Int, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
         val values = ContentValues().apply {
             put("media_uri", uri)
+            put("engine_id", engineId)
             put("indexed_at", System.currentTimeMillis())
             put("face_count", detectedFaces)
             put("status", "done")
@@ -159,203 +307,918 @@ class FaceClusterStore(context: Context) :
     }
 
     @Synchronized
-    fun summaries(): List<FaceClusterSummary> {
-        val result = mutableListOf<FaceClusterSummary>()
+    fun indexedMediaCount(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int =
         readableDatabase.rawQuery(
-            """SELECT c.id, c.display_name, c.face_count,
-               (SELECT f.media_uri FROM faces f WHERE f.cluster_id=c.id LIMIT 1)
-               FROM clusters c ORDER BY c.face_count DESC, c.display_name""".trimIndent(),
-            null
-        ).use { cursor ->
-            while (cursor.moveToNext()) {
-                result += FaceClusterSummary(
-                    id = cursor.getString(0),
-                    displayName = cursor.getString(1),
-                    faceCount = cursor.getInt(2),
-                    sampleUri = if (cursor.isNull(3)) null else cursor.getString(3)
-                )
-            }
-        }
-        return result
-    }
+            "SELECT COUNT(*) FROM indexed_media WHERE engine_id=? AND status='done'",
+            arrayOf(engineId)
+        ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
     @Synchronized
-    fun facesForCluster(clusterId: String): List<StoredFace> {
-        val result = mutableListOf<StoredFace>()
-        readableDatabase.rawQuery(
-            "SELECT media_uri, face_index, cluster_id, embedding FROM faces WHERE cluster_id=?",
-            arrayOf(clusterId)
-        ).use { cursor ->
-            while (cursor.moveToNext()) {
-                result += StoredFace(
-                    mediaUri = cursor.getString(0),
-                    faceIndex = cursor.getInt(1),
-                    clusterId = cursor.getString(2),
-                    embedding = bytesToFloats(cursor.getBlob(3))
-                )
-            }
-        }
-        return result
-    }
-
-    @Synchronized
-    fun facesForMedia(mediaUri: String): List<DetectedMediaFace> {
-        val result = mutableListOf<DetectedMediaFace>()
-        readableDatabase.rawQuery(
-            """SELECT f.media_uri, f.face_index, f.cluster_id, c.display_name
-               FROM faces f
-               JOIN clusters c ON f.cluster_id = c.id
-               WHERE f.media_uri = ?
-               ORDER BY f.face_index""".trimIndent(),
-            arrayOf(mediaUri)
-        ).use { cursor ->
-            while (cursor.moveToNext()) {
-                result += DetectedMediaFace(
-                    mediaUri = cursor.getString(0),
-                    faceIndex = cursor.getInt(1),
-                    clusterId = cursor.getString(2),
-                    displayName = cursor.getString(3)
-                )
-            }
-        }
-        return result
-    }
-
-    @Synchronized
-    fun renameCluster(clusterId: String, name: String) {
-        val cleanName = name.trim().take(80)
-        if (cleanName.isEmpty()) return
-        writableDatabase.update(
-            "clusters",
-            ContentValues().apply { put("display_name", cleanName) },
-            "id=?",
-            arrayOf(clusterId)
-        )
-    }
-
-    @Synchronized
-    fun indexedMediaCount(): Int =
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM indexed_media WHERE status='done'", null)
-            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
-
-    /** Counts successfully indexed media only within the supplied library scope. */
-    @Synchronized
-    fun indexedMediaCount(mediaUris: List<String>): Int {
+    fun indexedMediaCount(mediaUris: List<String>, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int {
         val uniqueUris = mediaUris.distinct()
         if (uniqueUris.isEmpty()) return 0
         return uniqueUris.chunked(800).sumOf { batch ->
             val placeholders = batch.joinToString(",") { "?" }
+            val args = arrayOf(engineId, *batch.toTypedArray())
             readableDatabase.rawQuery(
-                "SELECT COUNT(*) FROM indexed_media WHERE status='done' AND media_uri IN ($placeholders)",
-                batch.toTypedArray()
+                "SELECT COUNT(*) FROM indexed_media WHERE engine_id=? AND status='done' AND media_uri IN ($placeholders)",
+                args
             ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
         }
     }
 
     @Synchronized
-    fun indexedFaceCount(): Int =
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM faces", null)
+    fun indexedFaceCount(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM faces WHERE engine_id=?", arrayOf(engineId))
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
     @Synchronized
-    fun failedMediaCount(): Int =
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM indexed_media WHERE status='failed'", null)
+    fun failedMediaCount(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int =
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM indexed_media WHERE engine_id=? AND status='failed'",
+            arrayOf(engineId)
+        ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    @Synchronized
+    fun clusterCount(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM clusters WHERE engine_id=?", arrayOf(engineId))
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
     @Synchronized
-    fun clusterCount(): Int =
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM clusters", null)
+    fun personCount(includeHidden: Boolean = false, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int {
+        val clause = if (includeHidden) "WHERE engine_id=?" else "WHERE engine_id=? AND is_hidden = 0"
+        return readableDatabase.rawQuery("SELECT COUNT(*) FROM people $clause", arrayOf(engineId))
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
+    }
+
+    // --- Face Ingestion & Clustering ---
 
     @Synchronized
-    fun reclusterAll(maxDistance: Float = 0.40f): Int {
+    fun addFace(
+        mediaUri: String,
+        faceIndex: Int,
+        rawEmbedding: FloatArray,
+        maxDistance: Float = 0.60f,
+        bounds: RectF? = null,
+        confidence: Float = 1.0f,
+        quality: Float = 1.0f,
+        provenance: EmbeddingProvenance = EmbeddingProvenance.BUFFALO_L
+    ): String {
+        require(rawEmbedding.isNotEmpty()) { "Face embedding cannot be empty." }
+        require(rawEmbedding.size == provenance.dimension) {
+            "Embedding dimension mismatch: expected ${provenance.dimension}, got ${rawEmbedding.size}"
+        }
+        val embedding = normalize(rawEmbedding)
+        val faceId = "${provenance.engineId}#${mediaUri}#${faceIndex}"
+        val db = writableDatabase
+
+        // 1. Check if observation already processed for this engine
+        val existingCluster = db.rawQuery(
+            "SELECT cluster_id FROM faces WHERE media_uri=? AND face_index=? AND engine_id=?",
+            arrayOf(mediaUri, faceIndex.toString(), provenance.engineId)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+        if (existingCluster != null) return existingCluster
+
+        // 2. Check user feedback exclusions for this face in this engine
+        val excludedPersonIds = mutableSetOf<String>()
+        db.rawQuery(
+            """SELECT target_id FROM face_feedback
+               WHERE source_id=? AND engine_id=? AND feedback_type IN ('REJECTED_MATCH', 'REMOVE_FACE_FROM_PERSON')""",
+            arrayOf(faceId, provenance.engineId)
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                excludedPersonIds.add(cursor.getString(0))
+            }
+        }
+
+        // 3. Search best candidate among compatible clusters for this engine only
+        var bestClusterId: String? = null
+        var bestPersonId: String? = null
+        var bestDistance = Float.POSITIVE_INFINITY
+        var secondBestDistance = Float.POSITIVE_INFINITY
+
+        db.rawQuery(
+            """SELECT c.id, c.centroid, c.person_id
+               FROM clusters c
+               WHERE c.engine_id=? AND c.model_version=? AND c.embedding_dim=?""",
+            arrayOf(provenance.engineId, provenance.modelVersion, provenance.dimension.toString())
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val clusterId = cursor.getString(0)
+                val centroid = bytesToFloats(cursor.getBlob(1))
+                val personId = if (cursor.isNull(2)) null else cursor.getString(2)
+
+                if (personId != null && personId in excludedPersonIds) continue
+
+                val distance = cosineDistance(embedding, centroid)
+                if (distance < bestDistance) {
+                    secondBestDistance = bestDistance
+                    bestDistance = distance
+                    bestClusterId = clusterId
+                    bestPersonId = personId
+                } else if (distance < secondBestDistance) {
+                    secondBestDistance = distance
+                }
+            }
+        }
+
+        val effectiveThreshold = if (quality < 0.40f) maxDistance * 0.85f else maxDistance
+        val isConfidentMatch = bestClusterId != null && bestDistance <= effectiveThreshold
+        val isAmbiguous = isConfidentMatch && (secondBestDistance - bestDistance < 0.05f) && bestDistance > (effectiveThreshold * 0.8f)
+
+        db.beginTransaction()
+        try {
+            val assignedClusterId: String
+            val assignedPersonId: String
+
+            if (isConfidentMatch && !isAmbiguous) {
+                assignedClusterId = bestClusterId!!
+                assignedPersonId = bestPersonId ?: bestClusterId!!
+            } else {
+                val newId = UUID.randomUUID().toString()
+                assignedClusterId = newId
+                assignedPersonId = newId
+
+                val personValues = ContentValues().apply {
+                    put("id", newId)
+                    put("name", "")
+                    put("cover_media_uri", mediaUri)
+                    put("is_hidden", 0)
+                    put("engine_id", provenance.engineId)
+                    put("created_at", System.currentTimeMillis())
+                    put("updated_at", System.currentTimeMillis())
+                }
+                db.insertOrThrow("people", null, personValues)
+
+                val clusterValues = ContentValues().apply {
+                    put("id", newId)
+                    put("person_id", newId)
+                    put("display_name", "")
+                    put("centroid", floatsToBytes(embedding))
+                    put("embedding_dim", provenance.dimension)
+                    put("engine_id", provenance.engineId)
+                    put("model_version", provenance.modelVersion)
+                    put("face_count", 0)
+                    put("representative_face_id", faceId)
+                    put("created_at", System.currentTimeMillis())
+                    put("updated_at", System.currentTimeMillis())
+                }
+                db.insertOrThrow("clusters", null, clusterValues)
+
+                if (bestPersonId != null && bestDistance <= maxDistance * 1.15f) {
+                    val suggestionValues = ContentValues().apply {
+                        put("id", UUID.randomUUID().toString())
+                        put("face_id", faceId)
+                        put("media_uri", mediaUri)
+                        put("face_index", faceIndex)
+                        put("engine_id", provenance.engineId)
+                        put("suggested_person_id", bestPersonId)
+                        put("distance", bestDistance)
+                        put("status", "pending")
+                        put("created_at", System.currentTimeMillis())
+                    }
+                    db.insertWithOnConflict("review_suggestions", null, suggestionValues, SQLiteDatabase.CONFLICT_REPLACE)
+                }
+            }
+
+            val faceValues = ContentValues().apply {
+                put("media_uri", mediaUri)
+                put("face_index", faceIndex)
+                put("engine_id", provenance.engineId)
+                put("face_id", faceId)
+                put("cluster_id", assignedClusterId)
+                put("person_id", assignedPersonId)
+                put("embedding", floatsToBytes(embedding))
+                put("model_version", provenance.modelVersion)
+                put("embedding_dim", provenance.dimension)
+                put("format_version", provenance.formatVersion)
+                put("box_left", bounds?.left ?: 0f)
+                put("box_top", bounds?.top ?: 0f)
+                put("box_right", bounds?.right ?: 0f)
+                put("box_bottom", bounds?.bottom ?: 0f)
+                put("detection_confidence", confidence)
+                put("quality_score", quality)
+                put("created_at", System.currentTimeMillis())
+            }
+            db.insertOrThrow("faces", null, faceValues)
+
+            recomputeCentroid(db, assignedClusterId, provenance.engineId, provenance.modelVersion)
+            db.setTransactionSuccessful()
+            return assignedClusterId
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    // --- People & Identity Management ---
+
+    @Synchronized
+    fun renamePerson(personId: String, name: String) {
+        val cleanName = name.trim().take(80)
         val db = writableDatabase
         db.beginTransaction()
         try {
-            data class StoredFaceRow(val mediaUri: String, val faceIndex: Int, val embedding: FloatArray)
-            val faceRows = mutableListOf<StoredFaceRow>()
-            db.rawQuery("SELECT media_uri, face_index, embedding FROM faces", null).use { cursor ->
-                while (cursor.moveToNext()) {
-                    faceRows += StoredFaceRow(
-                        mediaUri = cursor.getString(0),
-                        faceIndex = cursor.getInt(1),
-                        embedding = bytesToFloats(cursor.getBlob(2))
-                    )
-                }
+            val now = System.currentTimeMillis()
+            val personVals = ContentValues().apply {
+                put("name", cleanName)
+                put("updated_at", now)
             }
-            if (faceRows.isEmpty()) {
-                db.setTransactionSuccessful()
-                return 0
+            db.update("people", personVals, "id=?", arrayOf(personId))
+
+            val clusterVals = ContentValues().apply {
+                put("display_name", cleanName)
+                put("updated_at", now)
             }
+            db.update("clusters", clusterVals, "person_id=?", arrayOf(personId))
 
-            db.delete("faces", null, null)
-            db.delete("clusters", null, null)
-
-            class WorkingCluster(val id: String, var centroid: FloatArray, val faces: MutableList<StoredFaceRow>)
-            val clusterList = mutableListOf<WorkingCluster>()
-            var personIdx = 1
-
-            for (face in faceRows) {
-                val normVec = normalize(face.embedding)
-                var bestCluster: WorkingCluster? = null
-                var bestDistance = Float.POSITIVE_INFINITY
-                for (c in clusterList) {
-                    val distance = cosineDistance(normVec, c.centroid)
-                    if (distance < bestDistance) {
-                        bestDistance = distance
-                        bestCluster = c
-                    }
-                }
-
-                if (bestCluster != null && bestDistance <= maxDistance) {
-                    bestCluster.faces.add(face)
-                    val dim = normVec.size
-                    val mean = FloatArray(dim)
-                    for (f in bestCluster.faces) {
-                        val v = normalize(f.embedding)
-                        for (i in 0 until dim) mean[i] += v[i]
-                    }
-                    bestCluster.centroid = normalize(mean)
-                } else {
-                    val newId = UUID.randomUUID().toString()
-                    clusterList.add(WorkingCluster(newId, normVec.copyOf(), mutableListOf(face)))
-                }
-            }
-
-            for (c in clusterList) {
-                val clusterVals = ContentValues().apply {
-                    put("id", c.id)
-                    put("display_name", "Person ${personIdx++}")
-                    put("centroid", floatsToBytes(c.centroid))
-                    put("face_count", c.faces.size)
-                    put("updated_at", System.currentTimeMillis())
-                }
-                db.insertOrThrow("clusters", null, clusterVals)
-                for (f in c.faces) {
-                    val faceVals = ContentValues().apply {
-                        put("media_uri", f.mediaUri)
-                        put("face_index", f.faceIndex)
-                        put("cluster_id", c.id)
-                        put("embedding", floatsToBytes(normalize(f.embedding)))
-                    }
-                    db.insertOrThrow("faces", null, faceVals)
-                }
-            }
-
+            recordFeedback(db, "RENAME_PERSON", personId, cleanName)
             db.setTransactionSuccessful()
-            return clusterList.size
         } finally {
             db.endTransaction()
         }
     }
 
     @Synchronized
-    fun resetClustersOnly() {
+    fun renameCluster(clusterId: String, name: String) {
+        val personId = getPersonIdForCluster(clusterId) ?: clusterId
+        renamePerson(personId, name)
+    }
+
+    @Synchronized
+    fun mergePeople(sourcePersonId: String, targetPersonId: String): Boolean {
+        if (sourcePersonId == targetPersonId) return false
         val db = writableDatabase
         db.beginTransaction()
         try {
-            db.delete("clusters", null, null)
-            db.delete("faces", null, null)
+            val sourceName = getPersonName(db, sourcePersonId)
+            val targetName = getPersonName(db, targetPersonId)
+            val finalName = if (targetName.isNotBlank()) targetName else sourceName
+            val now = System.currentTimeMillis()
+
+            val clusterVals = ContentValues().apply {
+                put("person_id", targetPersonId)
+                put("display_name", finalName)
+                put("updated_at", now)
+            }
+            db.update("clusters", clusterVals, "person_id=?", arrayOf(sourcePersonId))
+
+            val faceVals = ContentValues().apply {
+                put("person_id", targetPersonId)
+            }
+            db.update("faces", faceVals, "person_id=?", arrayOf(sourcePersonId))
+
+            val targetVals = ContentValues().apply {
+                put("name", finalName)
+                put("updated_at", now)
+            }
+            db.update("people", targetVals, "id=?", arrayOf(targetPersonId))
+
+            recordFeedback(db, "MERGE_PEOPLE", sourcePersonId, targetPersonId)
+            db.delete("people", "id=?", arrayOf(sourcePersonId))
+            db.delete("review_suggestions", "suggested_person_id=?", arrayOf(sourcePersonId))
+
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun splitCluster(clusterId: String, newPersonName: String = ""): String {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val newPersonId = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+
+            var engineId = BuffaloLFaceEngine.ENGINE_ID
+            db.rawQuery("SELECT engine_id FROM clusters WHERE id=?", arrayOf(clusterId)).use {
+                if (it.moveToFirst() && !it.isNull(0)) engineId = it.getString(0)
+            }
+
+            val personVals = ContentValues().apply {
+                put("id", newPersonId)
+                put("name", newPersonName.trim().take(80))
+                put("is_hidden", 0)
+                put("engine_id", engineId)
+                put("created_at", now)
+                put("updated_at", now)
+            }
+            db.insertOrThrow("people", null, personVals)
+
+            val clusterVals = ContentValues().apply {
+                put("person_id", newPersonId)
+                put("display_name", newPersonName.trim().take(80))
+                put("updated_at", now)
+            }
+            db.update("clusters", clusterVals, "id=?", arrayOf(clusterId))
+
+            val faceVals = ContentValues().apply {
+                put("person_id", newPersonId)
+            }
+            db.update("faces", faceVals, "cluster_id=?", arrayOf(clusterId))
+
+            recordFeedback(db, "SPLIT_CLUSTER", clusterId, newPersonId, engineId = engineId)
+            db.setTransactionSuccessful()
+            return newPersonId
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun removeFaceFromPerson(
+        mediaUri: String,
+        faceIndex: Int,
+        engineId: String = BuffaloLFaceEngine.ENGINE_ID
+    ): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            var oldClusterId: String? = null
+            var oldPersonId: String? = null
+
+            db.rawQuery(
+                "SELECT cluster_id, person_id FROM faces WHERE media_uri=? AND face_index=? AND engine_id=?",
+                arrayOf(mediaUri, faceIndex.toString(), engineId)
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    oldClusterId = cursor.getString(0)
+                    oldPersonId = if (cursor.isNull(1)) null else cursor.getString(1)
+                }
+            }
+
+            if (oldClusterId == null) return false
+
+            val faceId = "${engineId}#${mediaUri}#${faceIndex}"
+            val newClusterId = UUID.randomUUID().toString()
+            val newPersonId = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+
+            val personVals = ContentValues().apply {
+                put("id", newPersonId)
+                put("name", "")
+                put("cover_media_uri", mediaUri)
+                put("is_hidden", 0)
+                put("engine_id", engineId)
+                put("created_at", now)
+                put("updated_at", now)
+            }
+            db.insertOrThrow("people", null, personVals)
+
+            var embBlob: ByteArray? = null
+            var modelVersion = BuffaloLFaceEngine.MODEL_VERSION
+            var dim = BuffaloLFaceEngine.EMBEDDING_DIMENSION
+            db.rawQuery(
+                "SELECT embedding, model_version, embedding_dim FROM faces WHERE media_uri=? AND face_index=? AND engine_id=?",
+                arrayOf(mediaUri, faceIndex.toString(), engineId)
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    embBlob = cursor.getBlob(0)
+                    modelVersion = cursor.getString(1).orEmpty()
+                    dim = cursor.getInt(2)
+                }
+            }
+
+            val clusterVals = ContentValues().apply {
+                put("id", newClusterId)
+                put("person_id", newPersonId)
+                put("display_name", "")
+                put("centroid", embBlob ?: ByteArray(0))
+                put("embedding_dim", dim)
+                put("engine_id", engineId)
+                put("model_version", modelVersion)
+                put("face_count", 1)
+                put("created_at", now)
+                put("updated_at", now)
+            }
+            db.insertOrThrow("clusters", null, clusterVals)
+
+            val faceVals = ContentValues().apply {
+                put("cluster_id", newClusterId)
+                put("person_id", newPersonId)
+            }
+            db.update("faces", faceVals, "media_uri=? AND face_index=? AND engine_id=?", arrayOf(mediaUri, faceIndex.toString(), engineId))
+
+            if (oldPersonId != null) {
+                recordFeedback(db, "REMOVE_FACE_FROM_PERSON", faceId, oldPersonId!!, engineId = engineId)
+            }
+            recomputeCentroid(db, oldClusterId!!, engineId, modelVersion)
+
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun setPersonHidden(personId: String, isHidden: Boolean) {
+        val vals = ContentValues().apply {
+            put("is_hidden", if (isHidden) 1 else 0)
+            put("updated_at", System.currentTimeMillis())
+        }
+        writableDatabase.update("people", vals, "id=?", arrayOf(personId))
+    }
+
+    @Synchronized
+    fun setPersonCover(personId: String, mediaUri: String) {
+        val vals = ContentValues().apply {
+            put("cover_media_uri", mediaUri)
+            put("updated_at", System.currentTimeMillis())
+        }
+        writableDatabase.update("people", vals, "id=?", arrayOf(personId))
+    }
+
+    // --- Query APIs ---
+
+    @Synchronized
+    fun personSummaries(
+        includeHidden: Boolean = false,
+        engineId: String = BuffaloLFaceEngine.ENGINE_ID
+    ): List<PersonSummary> {
+        val result = mutableListOf<PersonSummary>()
+        val hiddenClause = if (includeHidden) "WHERE p.engine_id = ?" else "WHERE p.engine_id = ? AND p.is_hidden = 0"
+        readableDatabase.rawQuery(
+            """SELECT p.id, p.name,
+                      COUNT(DISTINCT f.face_id) AS face_count,
+                      COALESCE(p.cover_media_uri, (SELECT f2.media_uri FROM faces f2 WHERE f2.person_id=p.id AND f2.engine_id=p.engine_id LIMIT 1)) AS sample_uri,
+                      p.is_hidden,
+                      COUNT(DISTINCT c.id) AS cluster_count,
+                      p.updated_at,
+                      p.engine_id
+               FROM people p
+               LEFT JOIN clusters c ON c.person_id = p.id AND c.engine_id = p.engine_id
+               LEFT JOIN faces f ON f.person_id = p.id AND f.engine_id = p.engine_id
+               $hiddenClause
+               GROUP BY p.id
+               ORDER BY face_count DESC, p.updated_at DESC""".trimIndent(),
+            arrayOf(engineId)
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getString(0)
+                val rawName = cursor.getString(1).orEmpty()
+                val faceCount = cursor.getInt(2)
+                val sampleUri = if (cursor.isNull(3)) null else cursor.getString(3)
+                val isHidden = cursor.getInt(4) == 1
+                val clusterCount = cursor.getInt(5)
+                val updatedAt = cursor.getLong(6)
+                val engId = cursor.getString(7).orEmpty()
+
+                val isNamed = rawName.isNotBlank() && !rawName.equals("Unknown", ignoreCase = true)
+                result += PersonSummary(
+                    id = id,
+                    displayName = rawName,
+                    faceCount = faceCount,
+                    sampleUri = sampleUri,
+                    isHidden = isHidden,
+                    isNamed = isNamed,
+                    clusterCount = clusterCount,
+                    updatedAt = updatedAt,
+                    engineId = engId
+                )
+            }
+        }
+        return result
+    }
+
+    @Synchronized
+    fun summaries(engineId: String = BuffaloLFaceEngine.ENGINE_ID): List<FaceClusterSummary> {
+        val people = personSummaries(includeHidden = false, engineId = engineId)
+        return people.map { p ->
+            FaceClusterSummary(
+                id = p.id,
+                displayName = p.displayName,
+                faceCount = p.faceCount,
+                sampleUri = p.sampleUri
+            )
+        }
+    }
+
+    @Synchronized
+    fun facesForCluster(clusterOrPersonId: String, engineId: String? = null): List<StoredFace> {
+        val result = mutableListOf<StoredFace>()
+        val engineClause = if (engineId != null) "AND engine_id=?" else ""
+        val args = if (engineId != null) arrayOf(clusterOrPersonId, clusterOrPersonId, engineId)
+            else arrayOf(clusterOrPersonId, clusterOrPersonId)
+
+        readableDatabase.rawQuery(
+            """SELECT media_uri, face_index, cluster_id, embedding, person_id,
+                      box_left, box_top, box_right, box_bottom, detection_confidence,
+                      quality_score, engine_id, model_version
+               FROM faces
+               WHERE (person_id=? OR cluster_id=?) $engineClause""",
+            args
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                result += StoredFace(
+                    mediaUri = cursor.getString(0),
+                    faceIndex = cursor.getInt(1),
+                    clusterId = cursor.getString(2).orEmpty(),
+                    embedding = bytesToFloats(cursor.getBlob(3)),
+                    personId = if (cursor.isNull(4)) null else cursor.getString(4),
+                    boxLeft = cursor.getFloat(5),
+                    boxTop = cursor.getFloat(6),
+                    boxRight = cursor.getFloat(7),
+                    boxBottom = cursor.getFloat(8),
+                    confidence = cursor.getFloat(9),
+                    quality = cursor.getFloat(10),
+                    engineId = cursor.getString(11).orEmpty(),
+                    modelVersion = cursor.getString(12).orEmpty()
+                )
+            }
+        }
+        return result
+    }
+
+    @Synchronized
+    fun facesForMedia(mediaUri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID): List<DetectedMediaFace> {
+        val result = mutableListOf<DetectedMediaFace>()
+        readableDatabase.rawQuery(
+            """SELECT f.media_uri, f.face_index, f.cluster_id, COALESCE(p.name, c.display_name, ''),
+                      f.person_id, f.box_left, f.box_top, f.box_right, f.box_bottom, f.engine_id
+               FROM faces f
+               LEFT JOIN clusters c ON f.cluster_id = c.id AND f.engine_id = c.engine_id
+               LEFT JOIN people p ON f.person_id = p.id AND f.engine_id = p.engine_id
+               WHERE f.media_uri = ? AND f.engine_id = ?
+               ORDER BY f.face_index""".trimIndent(),
+            arrayOf(mediaUri, engineId)
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                result += DetectedMediaFace(
+                    mediaUri = cursor.getString(0),
+                    faceIndex = cursor.getInt(1),
+                    clusterId = cursor.getString(2).orEmpty(),
+                    displayName = cursor.getString(3).orEmpty(),
+                    personId = if (cursor.isNull(4)) null else cursor.getString(4),
+                    boxLeft = cursor.getFloat(5),
+                    boxTop = cursor.getFloat(6),
+                    boxRight = cursor.getFloat(7),
+                    boxBottom = cursor.getFloat(8),
+                    engineId = cursor.getString(9).orEmpty()
+                )
+            }
+        }
+        return result
+    }
+
+    // --- Cross-Engine Detection Comparison Mechanism ---
+
+    @Synchronized
+    fun compareEnginesOnMedia(mediaUri: String, engineA: String, engineB: String): EngineComparisonResult {
+        fun loadFaces(eng: String): List<EngineComparisonFace> {
+            val list = mutableListOf<EngineComparisonFace>()
+            readableDatabase.rawQuery(
+                """SELECT face_index, box_left, box_top, box_right, box_bottom, detection_confidence, quality_score
+                   FROM faces WHERE media_uri=? AND engine_id=? ORDER BY face_index""",
+                arrayOf(mediaUri, eng)
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    list.add(
+                        EngineComparisonFace(
+                            faceIndex = cursor.getInt(0),
+                            bounds = RectF(cursor.getFloat(1), cursor.getFloat(2), cursor.getFloat(3), cursor.getFloat(4)),
+                            confidence = cursor.getFloat(5),
+                            quality = cursor.getFloat(6)
+                        )
+                    )
+                }
+            }
+            return list
+        }
+
+        val facesA = loadFaces(engineA)
+        val facesB = loadFaces(engineB)
+
+        // Calculate overlap count using IoU > 0.4
+        var matches = 0
+        val matchedB = mutableSetOf<Int>()
+        for (a in facesA) {
+            for (b in facesB) {
+                if (b.faceIndex in matchedB) continue
+                if (calculateIoU(a.bounds, b.bounds) >= 0.4f) {
+                    matches++
+                    matchedB.add(b.faceIndex)
+                    break
+                }
+            }
+        }
+
+        return EngineComparisonResult(
+            mediaUri = mediaUri,
+            engineA = engineA,
+            facesA = facesA,
+            engineB = engineB,
+            facesB = facesB,
+            matchingFaceCount = matches
+        )
+    }
+
+    private fun calculateIoU(a: RectF, b: RectF): Float {
+        val interLeft = maxOf(a.left, b.left)
+        val interTop = maxOf(a.top, b.top)
+        val interRight = minOf(a.right, b.right)
+        val interBottom = minOf(a.bottom, b.bottom)
+        if (interRight <= interLeft || interBottom <= interTop) return 0f
+        val interArea = (interRight - interLeft) * (interBottom - interTop)
+        val areaA = (a.right - a.left) * (a.bottom - a.top)
+        val areaB = (b.right - b.left) * (b.bottom - b.top)
+        val unionArea = areaA + areaB - interArea
+        return if (unionArea > 0f) interArea / unionArea else 0f
+    }
+
+    // --- Review Suggestions ---
+
+    @Synchronized
+    fun getPendingSuggestions(engineId: String = BuffaloLFaceEngine.ENGINE_ID): List<ReviewSuggestion> {
+        val result = mutableListOf<ReviewSuggestion>()
+        readableDatabase.rawQuery(
+            """SELECT s.id, s.face_id, s.media_uri, s.face_index, s.suggested_person_id,
+                      COALESCE(p.name, 'Person'), s.distance, s.engine_id
+               FROM review_suggestions s
+               JOIN people p ON s.suggested_person_id = p.id
+               WHERE s.status = 'pending' AND s.engine_id = ?
+               ORDER BY s.distance ASC LIMIT 50""".trimIndent(),
+            arrayOf(engineId)
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                result += ReviewSuggestion(
+                    id = cursor.getString(0),
+                    faceId = cursor.getString(1),
+                    mediaUri = cursor.getString(2),
+                    faceIndex = cursor.getInt(3),
+                    suggestedPersonId = cursor.getString(4),
+                    suggestedPersonName = cursor.getString(5),
+                    distance = cursor.getFloat(6),
+                    engineId = cursor.getString(7)
+                )
+            }
+        }
+        return result
+    }
+
+    @Synchronized
+    fun acceptSuggestion(suggestionId: String): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            var faceId: String? = null
+            var suggestedPersonId: String? = null
+            var engineId = BuffaloLFaceEngine.ENGINE_ID
+
+            db.rawQuery(
+                "SELECT face_id, suggested_person_id, engine_id FROM review_suggestions WHERE id=?",
+                arrayOf(suggestionId)
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    faceId = cursor.getString(0)
+                    suggestedPersonId = cursor.getString(1)
+                    engineId = cursor.getString(2)
+                }
+            }
+
+            if (faceId == null || suggestedPersonId == null) return false
+
+            val parts = faceId!!.split("#")
+            // parts: engineId#mediaUri#faceIndex or mediaUri#faceIndex
+            val uri = if (parts.size >= 3) parts[1] else parts[0]
+            val index = if (parts.size >= 3) parts[2].toIntOrNull() ?: 0 else parts.getOrNull(1)?.toIntOrNull() ?: 0
+
+            val vals = ContentValues().apply { put("person_id", suggestedPersonId) }
+            db.update("faces", vals, "media_uri=? AND face_index=? AND engine_id=?", arrayOf(uri, index.toString(), engineId))
+            recordFeedback(db, "ASSIGN_FACE_TO_PERSON", faceId!!, suggestedPersonId!!, engineId = engineId)
+
+            val statusVal = ContentValues().apply { put("status", "accepted") }
+            db.update("review_suggestions", statusVal, "id=?", arrayOf(suggestionId))
+
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun rejectSuggestion(suggestionId: String): Boolean {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            var faceId: String? = null
+            var suggestedPersonId: String? = null
+            var engineId = BuffaloLFaceEngine.ENGINE_ID
+
+            db.rawQuery(
+                "SELECT face_id, suggested_person_id, engine_id FROM review_suggestions WHERE id=?",
+                arrayOf(suggestionId)
+            ).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    faceId = cursor.getString(0)
+                    suggestedPersonId = cursor.getString(1)
+                    engineId = cursor.getString(2)
+                }
+            }
+
+            if (faceId != null && suggestedPersonId != null) {
+                recordFeedback(db, "REJECTED_MATCH", faceId!!, suggestedPersonId!!, engineId = engineId)
+            }
+
+            val statusVal = ContentValues().apply { put("status", "rejected") }
+            db.update("review_suggestions", statusVal, "id=?", arrayOf(suggestionId))
+
+            db.setTransactionSuccessful()
+            return true
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    // --- Safe, Non-Destructive Reclustering (Engine-Isolated) ---
+
+    @Synchronized
+    fun reclusterAllSafely(
+        maxDistance: Float = 0.60f,
+        engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+        modelVersion: String = BuffaloLFaceEngine.MODEL_VERSION
+    ): Int {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            data class FaceEntry(
+                val mediaUri: String,
+                val faceIndex: Int,
+                val faceId: String,
+                val personId: String?,
+                val embedding: FloatArray,
+                val bounds: RectF,
+                val confidence: Float,
+                val quality: Float
+            )
+
+            val engineFaces = mutableListOf<FaceEntry>()
+            db.rawQuery(
+                """SELECT media_uri, face_index, face_id, person_id, embedding,
+                          box_left, box_top, box_right, box_bottom, detection_confidence, quality_score
+                   FROM faces
+                   WHERE engine_id=? AND model_version=?""",
+                arrayOf(engineId, modelVersion)
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val mediaUri = cursor.getString(0)
+                    val faceIndex = cursor.getInt(1)
+                    val faceId = cursor.getString(2) ?: "${engineId}#${mediaUri}#${faceIndex}"
+                    val personId = if (cursor.isNull(3)) null else cursor.getString(3)
+                    val emb = bytesToFloats(cursor.getBlob(4))
+                    val bounds = RectF(cursor.getFloat(5), cursor.getFloat(6), cursor.getFloat(7), cursor.getFloat(8))
+                    val conf = cursor.getFloat(9)
+                    val qual = cursor.getFloat(10)
+                    engineFaces += FaceEntry(mediaUri, faceIndex, faceId, personId, emb, bounds, conf, qual)
+                }
+            }
+
+            if (engineFaces.isEmpty()) {
+                db.setTransactionSuccessful()
+                return 0
+            }
+
+            // Identify faces locked by manual feedback
+            val lockedFaceIds = mutableSetOf<String>()
+            db.rawQuery(
+                "SELECT source_id FROM face_feedback WHERE engine_id=? AND feedback_type IN ('ASSIGN_FACE_TO_PERSON', 'REMOVE_FACE_FROM_PERSON')",
+                arrayOf(engineId)
+            ).use { cursor ->
+                while (cursor.moveToNext()) lockedFaceIds.add(cursor.getString(0))
+            }
+
+            val preservedPeopleNames = mutableMapOf<String, String>()
+            db.rawQuery("SELECT id, name FROM people WHERE engine_id=?", arrayOf(engineId)).use { cursor ->
+                while (cursor.moveToNext()) {
+                    preservedPeopleNames[cursor.getString(0)] = cursor.getString(1)
+                }
+            }
+
+            class TempCluster(
+                val id: String,
+                var personId: String,
+                var centroid: FloatArray,
+                val faces: MutableList<FaceEntry>
+            )
+
+            val tempClusters = mutableListOf<TempCluster>()
+
+            val (lockedOrNamedFaces, fluidFaces) = engineFaces.partition {
+                it.faceId in lockedFaceIds || (it.personId != null && preservedPeopleNames[it.personId].orEmpty().isNotBlank())
+            }
+
+            val groupedByPerson = lockedOrNamedFaces.groupBy { it.personId ?: UUID.randomUUID().toString() }
+            for ((personId, faces) in groupedByPerson) {
+                val clusterId = UUID.randomUUID().toString()
+                val dim = faces.first().embedding.size
+                val mean = FloatArray(dim)
+                faces.forEach { f ->
+                    val norm = normalize(f.embedding)
+                    for (i in 0 until dim) mean[i] += norm[i]
+                }
+                val centroid = normalize(mean)
+                tempClusters.add(TempCluster(clusterId, personId, centroid, faces.toMutableList()))
+            }
+
+            for (face in fluidFaces) {
+                val normVec = normalize(face.embedding)
+                var best: TempCluster? = null
+                var bestDist = Float.POSITIVE_INFINITY
+                for (c in tempClusters) {
+                    val dist = cosineDistance(normVec, c.centroid)
+                    if (dist < bestDist) {
+                        bestDist = dist
+                        best = c
+                    }
+                }
+
+                val effThresh = if (face.quality < 0.40f) maxDistance * 0.85f else maxDistance
+                if (best != null && bestDist <= effThresh) {
+                    best.faces.add(face)
+                    val dim = normVec.size
+                    val mean = FloatArray(dim)
+                    for (f in best.faces) {
+                        val v = normalize(f.embedding)
+                        for (i in 0 until dim) mean[i] += v[i]
+                    }
+                    best.centroid = normalize(mean)
+                } else {
+                    val newClusterId = UUID.randomUUID().toString()
+                    val newPersonId = UUID.randomUUID().toString()
+                    tempClusters.add(TempCluster(newClusterId, newPersonId, normVec.copyOf(), mutableListOf(face)))
+                }
+            }
+
+            // Only delete clusters belonging to this specific engine
+            db.delete("clusters", "engine_id=? AND model_version=?", arrayOf(engineId, modelVersion))
+
+            val now = System.currentTimeMillis()
+            val dim = engineFaces.first().embedding.size
+            for (c in tempClusters) {
+                val existingName = preservedPeopleNames[c.personId].orEmpty()
+                val personVals = ContentValues().apply {
+                    put("id", c.personId)
+                    put("name", existingName)
+                    put("is_hidden", 0)
+                    put("engine_id", engineId)
+                    put("created_at", now)
+                    put("updated_at", now)
+                }
+                db.insertWithOnConflict("people", null, personVals, SQLiteDatabase.CONFLICT_REPLACE)
+
+                val clusterVals = ContentValues().apply {
+                    put("id", c.id)
+                    put("person_id", c.personId)
+                    put("display_name", existingName)
+                    put("centroid", floatsToBytes(c.centroid))
+                    put("face_count", c.faces.size)
+                    put("embedding_dim", dim)
+                    put("engine_id", engineId)
+                    put("model_version", modelVersion)
+                    put("representative_face_id", c.faces.firstOrNull()?.faceId)
+                    put("created_at", now)
+                    put("updated_at", now)
+                }
+                db.insertOrThrow("clusters", null, clusterVals)
+
+                for (f in c.faces) {
+                    val faceVals = ContentValues().apply {
+                        put("cluster_id", c.id)
+                        put("person_id", c.personId)
+                    }
+                    db.update(
+                        "faces",
+                        faceVals,
+                        "media_uri=? AND face_index=? AND engine_id=?",
+                        arrayOf(f.mediaUri, f.faceIndex.toString(), engineId)
+                    )
+                }
+            }
+
+            db.setTransactionSuccessful()
+            return tempClusters.size
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun reclusterAll(maxDistance: Float = 0.60f): Int = reclusterAllSafely(maxDistance)
+
+    @Synchronized
+    fun resetClustersOnly(engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("clusters", "engine_id=?", arrayOf(engineId))
+            db.delete("faces", "engine_id=?", arrayOf(engineId))
+            db.delete("people", "engine_id=?", arrayOf(engineId))
+            db.delete("review_suggestions", "engine_id=?", arrayOf(engineId))
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -369,6 +1232,9 @@ class FaceClusterStore(context: Context) :
         try {
             db.delete("faces", null, null)
             db.delete("clusters", null, null)
+            db.delete("people", null, null)
+            db.delete("face_feedback", null, null)
+            db.delete("review_suggestions", null, null)
             db.delete("indexed_media", null, null)
             db.setTransactionSuccessful()
         } finally {
@@ -376,37 +1242,72 @@ class FaceClusterStore(context: Context) :
         }
     }
 
-    private fun recomputeCentroid(db: SQLiteDatabase, clusterId: String) {
+    // --- Internal Helpers ---
+
+    private fun recomputeCentroid(
+        db: SQLiteDatabase,
+        clusterId: String,
+        engineId: String,
+        modelVersion: String
+    ) {
         val vectors = mutableListOf<FloatArray>()
-        db.rawQuery("SELECT embedding FROM faces WHERE cluster_id=?", arrayOf(clusterId)).use { cursor ->
+        db.rawQuery(
+            "SELECT embedding FROM faces WHERE cluster_id=? AND engine_id=? AND model_version=?",
+            arrayOf(clusterId, engineId, modelVersion)
+        ).use { cursor ->
             while (cursor.moveToNext()) vectors += bytesToFloats(cursor.getBlob(0))
         }
+
         if (vectors.isEmpty()) {
             db.delete("clusters", "id=?", arrayOf(clusterId))
             return
         }
+
         val dimensions = vectors.first().size
         val mean = FloatArray(dimensions)
         vectors.forEach { vector ->
-            if (vector.size == dimensions) for (i in vector.indices) mean[i] += vector[i]
+            if (vector.size == dimensions) {
+                for (i in vector.indices) mean[i] += vector[i]
+            }
         }
         val centroid = normalize(mean)
-        db.update(
-            "clusters",
-            ContentValues().apply {
-                put("centroid", floatsToBytes(centroid))
-                put("face_count", vectors.size)
-                put("updated_at", System.currentTimeMillis())
-            },
-            "id=?",
-            arrayOf(clusterId)
-        )
+        val vals = ContentValues().apply {
+            put("centroid", floatsToBytes(centroid))
+            put("face_count", vectors.size)
+            put("updated_at", System.currentTimeMillis())
+        }
+        db.update("clusters", vals, "id=?", arrayOf(clusterId))
     }
 
-    private fun nextPersonNumber(db: SQLiteDatabase): Int =
-        db.rawQuery("SELECT COUNT(*) FROM clusters", null).use {
-            if (it.moveToFirst()) it.getInt(0) + 1 else 1
+    private fun recordFeedback(
+        db: SQLiteDatabase,
+        type: String,
+        sourceId: String,
+        targetId: String,
+        notes: String? = null,
+        engineId: String = BuffaloLFaceEngine.ENGINE_ID
+    ) {
+        val vals = ContentValues().apply {
+            put("id", UUID.randomUUID().toString())
+            put("feedback_type", type)
+            put("source_id", sourceId)
+            put("target_id", targetId)
+            put("engine_id", engineId)
+            put("notes", notes)
+            put("created_at", System.currentTimeMillis())
         }
+        db.insertWithOnConflict("face_feedback", null, vals, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    private fun getPersonIdForCluster(clusterId: String): String? {
+        return readableDatabase.rawQuery("SELECT person_id FROM clusters WHERE id=?", arrayOf(clusterId))
+            .use { if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null }
+    }
+
+    private fun getPersonName(db: SQLiteDatabase, personId: String): String {
+        return db.rawQuery("SELECT name FROM people WHERE id=?", arrayOf(personId))
+            .use { if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else "" }
+    }
 
     private fun normalize(values: FloatArray): FloatArray {
         val norm = sqrt(values.sumOf { it.toDouble() * it.toDouble() }).toFloat()
@@ -433,6 +1334,7 @@ class FaceClusterStore(context: Context) :
     }
 
     companion object {
-        private const val DATABASE_VERSION = 1
+        const val DATABASE_NAME = "face_index.db"
+        const val DATABASE_VERSION = 1
     }
 }
