@@ -1,9 +1,3 @@
----
-name: "design-system"
-description: >-
-  HIGHEST PRIORITY DESIGN SYSTEM for Emre Gallery. Enforces strict Monochrome palette (neutrals: whites, grays, and near-blacks; color is not decoration, accent is rare), Low Clutter (every element justifies its presence; no decorative cards or redundant labels; density from content, not chrome), Calm Hierarchy (visual order through generous spacing and type weight rather than borders, dividers, or background boxes), and Physical Connection (direct tactile gestures, drags, and swipes; motion as an immediate direct response to input; spatial transitions). Must be adhered to across all screens and components.
----
-
 # Emre Gallery — Primary Design System
 
 This skill defines the core design ethos and strict implementation standards for Emre Gallery. All UI generation, screen refactoring, and component authoring must adhere to these four foundational pillars with top priority.
