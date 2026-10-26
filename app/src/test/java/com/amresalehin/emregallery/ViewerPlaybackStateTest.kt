@@ -1,7 +1,10 @@
 package com.amresalehin.emregallery
 
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.ContentScale
 import com.amresalehin.emregallery.ui.ThumbnailBoundsTracker
+import com.amresalehin.emregallery.ui.transitionContentScale
 import com.amresalehin.emregallery.ui.ViewerVideoState
 import org.junit.Assert.*
 import org.junit.Before
@@ -12,6 +15,41 @@ class ViewerPlaybackStateTest {
     @Before
     fun setUp() {
         ThumbnailBoundsTracker.clear()
+    }
+
+    @Test
+    fun transitionContentScaleInterpolatesCropToFitContinuously() {
+        val source = Size(width = 200f, height = 100f)
+        val destination = Size(width = 100f, height = 100f)
+        val crop = ContentScale.Crop.computeScaleFactor(source, destination)
+        val fit = ContentScale.Fit.computeScaleFactor(source, destination)
+
+        val atStart = transitionContentScale(0f).computeScaleFactor(source, destination)
+        val atMiddle = transitionContentScale(0.5f).computeScaleFactor(source, destination)
+        val atEnd = transitionContentScale(1f).computeScaleFactor(source, destination)
+
+        assertEquals(crop.scaleX, atStart.scaleX, 0.001f)
+        assertEquals(crop.scaleY, atStart.scaleY, 0.001f)
+        assertEquals((crop.scaleX + fit.scaleX) / 2f, atMiddle.scaleX, 0.001f)
+        assertEquals((crop.scaleY + fit.scaleY) / 2f, atMiddle.scaleY, 0.001f)
+        assertEquals(fit.scaleX, atEnd.scaleX, 0.001f)
+        assertEquals(fit.scaleY, atEnd.scaleY, 0.001f)
+    }
+
+    @Test
+    fun transitionContentScaleClampsProgressToValidRange() {
+        val source = Size(width = 200f, height = 100f)
+        val destination = Size(width = 100f, height = 100f)
+        val crop = ContentScale.Crop.computeScaleFactor(source, destination)
+        val fit = ContentScale.Fit.computeScaleFactor(source, destination)
+
+        val beforeStart = transitionContentScale(-1f).computeScaleFactor(source, destination)
+        val afterEnd = transitionContentScale(2f).computeScaleFactor(source, destination)
+
+        assertEquals(crop.scaleX, beforeStart.scaleX, 0.001f)
+        assertEquals(crop.scaleY, beforeStart.scaleY, 0.001f)
+        assertEquals(fit.scaleX, afterEnd.scaleX, 0.001f)
+        assertEquals(fit.scaleY, afterEnd.scaleY, 0.001f)
     }
 
     @Test

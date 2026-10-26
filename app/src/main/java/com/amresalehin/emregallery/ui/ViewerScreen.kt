@@ -51,6 +51,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.ScaleFactor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
@@ -541,7 +542,7 @@ fun ViewerScreen(
                     onZoomChanged = { zoomed ->
                         if (isCurrent) isCurrentZoomed = zoomed
                     },
-                    isReturning = isClosing || progress < 0.98f,
+                    transitionProgress = progress,
                     hasTargetBounds = targetBounds != null
                 )
             }
@@ -761,7 +762,7 @@ private fun ZoomableMediaItem(
     onSwipeDownDelta: (Float) -> Unit,
     onSwipeDownRelease: (Float) -> Unit,
     onZoomChanged: (Boolean) -> Unit,
-    isReturning: Boolean = false,
+    transitionProgress: Float = 1f,
     hasTargetBounds: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -770,6 +771,33 @@ private fun ZoomableMediaItem(
     var offsetX by remember(item.uri) { mutableFloatStateOf(0f) }
     var offsetY by remember(item.uri) { mutableFloatStateOf(0f) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    // Keep video posters on the same cached MediaStore thumbnail used by the grid.
+    // Decoding an independent video frame here can make the poster change before ExoPlayer's first frame.
+    val context = LocalContext.current
+    val imageRequest = remember(item.uri, isVideo, context) {
+        val request = ImageRequest.Builder(context)
+            .data(Uri.parse(item.uri))
+            .diskCachePolicy(CachePolicy.ENABLED)
+
+        if (isVideo) {
+            request
+                .size(480, 480)
+                .precision(Precision.INEXACT)
+                .crossfade(false)
+                .diskCacheKey("${item.uri}_thumb")
+                .memoryCacheKey("${item.uri}_thumb")
+        } else {
+            request
+                .size(Size.ORIGINAL)
+                .precision(Precision.EXACT)
+                .placeholderMemoryCacheKey("${item.uri}_thumb")
+                .diskCacheKey("${item.uri}:viewer-original")
+                .memoryCacheKey("${item.uri}:viewer-original")
+                .crossfade(100)
+        }
+        request.build()
+    }
 
     // Reset zoom when navigating away from this page
     LaunchedEffect(isCurrentPage) {
@@ -974,27 +1002,43 @@ private fun ZoomableMediaItem(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Media Image preview (always preserves aspect ratio with ContentScale.Fit)
+            // Keep this poster in place throughout video preparation and the first-frame handoff.
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(Uri.parse(item.uri))
-                    .size(Size.ORIGINAL)
-                    .precision(Precision.EXACT)
-                    .placeholderMemoryCacheKey("${item.uri}_thumb")
-                    .diskCacheKey("${item.uri}:viewer-original")
-                    .diskCachePolicy(CachePolicy.ENABLED)
-                    .memoryCacheKey("${item.uri}:viewer-original")
-                    .crossfade(100)
-                    .build(),
+                model = imageRequest,
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = if (isReturning && hasTargetBounds) ContentScale.Crop else ContentScale.Fit
+                contentScale = if (hasTargetBounds) {
+                    transitionContentScale(transitionProgress)
+                } else {
+                    ContentScale.Fit
+                }
             )
 
             // Video Surface when current item is a video
             if (isVideo && videoState != null) {
                 VideoPlayerSurface(videoState = videoState)
             }
+        }
+    }
+}
+
+/**
+ * Continuously interpolates image scale factors from cover/crop at the thumbnail end
+ * of the shared-element transition to contain/fit at the fullscreen end.
+ */
+internal fun transitionContentScale(progress: Float): ContentScale {
+    val fraction = progress.coerceIn(0f, 1f)
+    return object : ContentScale {
+        override fun computeScaleFactor(
+            srcSize: androidx.compose.ui.geometry.Size,
+            dstSize: androidx.compose.ui.geometry.Size
+        ): ScaleFactor {
+            val crop = ContentScale.Crop.computeScaleFactor(srcSize, dstSize)
+            val fit = ContentScale.Fit.computeScaleFactor(srcSize, dstSize)
+            return ScaleFactor(
+                scaleX = crop.scaleX + (fit.scaleX - crop.scaleX) * fraction,
+                scaleY = crop.scaleY + (fit.scaleY - crop.scaleY) * fraction
+            )
         }
     }
 }

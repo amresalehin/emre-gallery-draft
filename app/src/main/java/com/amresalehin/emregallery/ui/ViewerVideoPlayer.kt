@@ -1,6 +1,8 @@
 package com.amresalehin.emregallery.ui
 
 import android.net.Uri
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -195,6 +197,14 @@ fun VideoPlayerSurface(
 ) {
     if (!videoState.isVideo || videoState.player == null) return
 
+    // Keep the cached poster underneath and fade the first rendered video frame in over it.
+    // SurfaceView alpha is supported on API 26+, which is this app's minimum Android version.
+    val surfaceAlpha by animateFloatAsState(
+        targetValue = if (videoState.isFirstFrameRendered) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "video_frame_handoff"
+    )
+
     AndroidView(
         factory = { ctx ->
             PlayerView(ctx).apply {
@@ -209,7 +219,7 @@ fun VideoPlayerSurface(
         },
         modifier = modifier
             .fillMaxSize()
-            .alpha(if (videoState.isFirstFrameRendered) 1f else 0f),
+            .alpha(surfaceAlpha),
         update = { pv ->
             if (pv.player != videoState.player) {
                 pv.player = videoState.player
