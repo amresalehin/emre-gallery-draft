@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
 import com.amresalehin.emregallery.ui.ThumbnailBoundsTracker
 import com.amresalehin.emregallery.ui.transitionContentScale
+import com.amresalehin.emregallery.ui.shouldUseVideoFirstFramePoster
 import com.amresalehin.emregallery.ui.ViewerVideoState
 import org.junit.Assert.*
 import org.junit.Before
@@ -88,6 +89,17 @@ class ViewerPlaybackStateTest {
         assertEquals(crop.scaleY, beforeStart.scaleY * thumbnailScaleY, 0.001f)
         assertEquals(fit.scaleX, afterEnd.scaleX, 0.001f)
         assertEquals(fit.scaleY, afterEnd.scaleY, 0.001f)
+    }
+
+    @Test
+    fun videoPosterSwitchesToFrameZeroOnlyAfterPlaybackStartsAndOpeningCompletes() {
+        assertFalse(shouldUseVideoFirstFramePoster(true, true, 0.5f, true, false))
+        assertFalse(shouldUseVideoFirstFramePoster(true, true, 1f, false, false))
+        assertFalse(shouldUseVideoFirstFramePoster(false, true, 1f, true, false))
+        assertFalse(shouldUseVideoFirstFramePoster(true, false, 1f, true, false))
+        assertTrue(shouldUseVideoFirstFramePoster(true, true, 1f, true, false))
+        // Keep the accurate poster available if playback is paused after a frame was rendered.
+        assertTrue(shouldUseVideoFirstFramePoster(true, true, 1f, false, true))
     }
 
     @Test

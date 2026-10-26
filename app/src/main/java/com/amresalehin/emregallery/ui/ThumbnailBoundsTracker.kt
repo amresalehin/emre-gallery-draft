@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -15,7 +16,7 @@ import androidx.compose.ui.unit.dp
  * Used to coordinate smooth shared-element return animations when opening or closing the media viewer.
  */
 object ThumbnailBoundsTracker {
-    private val boundsMap = mutableMapOf<String, Rect>()
+    private val boundsMap = mutableStateMapOf<String, Rect>()
 
     /**
      * Currently active viewer media item URI.

@@ -62,6 +62,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import coil.request.videoFrameMicros
 import coil.size.Precision
 import coil.size.Size
 import com.amresalehin.emregallery.data.CustomAlbum
@@ -385,7 +386,9 @@ fun ViewerScreen(
 
         // Calculate geometry for shared-element transition toward original source thumbnail
         val progress = transitionProgress.value
-        val targetBounds = remember(item.uri) { ThumbnailBoundsTracker.getBounds(item.uri) }
+        // A first-time layout callback can publish bounds after the viewer has been composed.
+        // Read directly from the snapshot map so that update invalidates this composition.
+        val targetBounds = ThumbnailBoundsTracker.getBounds(item.uri)
 
         val destTransX: Float
         val destTransY: Float
@@ -779,18 +782,37 @@ private fun ZoomableMediaItem(
     // Keep video posters on the same cached MediaStore thumbnail used by the grid.
     // Decoding an independent video frame here can make the poster change before ExoPlayer's first frame.
     val context = LocalContext.current
-    val imageRequest = remember(item.uri, isVideo, context) {
+    val useVideoFirstFramePoster = shouldUseVideoFirstFramePoster(
+        isVideo = isVideo,
+        isCurrentPage = isCurrentPage,
+        transitionProgress = transitionProgress,
+        isPlaying = videoState?.isPlaying == true,
+        hasRenderedFirstFrame = videoState?.isFirstFrameRendered == true
+    )
+    val imageRequest = remember(item.uri, isVideo, context, useVideoFirstFramePoster) {
         val request = ImageRequest.Builder(context)
             .data(Uri.parse(item.uri))
             .diskCachePolicy(CachePolicy.ENABLED)
 
         if (isVideo) {
-            request
-                .size(480, 480)
-                .precision(Precision.INEXACT)
-                .crossfade(false)
-                .diskCacheKey("${item.uri}_thumb")
-                .memoryCacheKey("${item.uri}_thumb")
+            if (useVideoFirstFramePoster) {
+                request
+                    // Bypass the <=600px MediaStore thumbnail fetcher to decode the true frame zero.
+                    .size(720, 720)
+                    .precision(Precision.INEXACT)
+                    .videoFrameMicros(0L)
+                    .placeholderMemoryCacheKey("${item.uri}_thumb")
+                    .diskCacheKey("${item.uri}:viewer-first-frame")
+                    .memoryCacheKey("${item.uri}:viewer-first-frame")
+                    .crossfade(false)
+            } else {
+                request
+                    .size(480, 480)
+                    .precision(Precision.INEXACT)
+                    .crossfade(false)
+                    .diskCacheKey("${item.uri}_thumb")
+                    .memoryCacheKey("${item.uri}_thumb")
+            }
         } else {
             request
                 .size(Size.ORIGINAL)
@@ -1029,6 +1051,19 @@ private fun ZoomableMediaItem(
         }
     }
 }
+
+/**
+ * Use the real frame-zero poster only after shared-element opening completes and the
+ * current video starts playing. This avoids decoding frames for every grid thumbnail.
+ */
+internal fun shouldUseVideoFirstFramePoster(
+    isVideo: Boolean,
+    isCurrentPage: Boolean,
+    transitionProgress: Float,
+    isPlaying: Boolean,
+    hasRenderedFirstFrame: Boolean
+): Boolean = isVideo && isCurrentPage && transitionProgress >= 0.99f &&
+    (isPlaying || hasRenderedFirstFrame)
 
 /**
  * Interpolates the rendered image scale from the source thumbnail's crop to the
