@@ -2,7 +2,7 @@ name: Android build
 
 on:
   push:
-    branches: [Develop, 'integration/**']
+    branches: [Develop, 'integration/**', 'fix/**']
   pull_request:
     branches: [Develop, 'integration/**']
   workflow_dispatch:
