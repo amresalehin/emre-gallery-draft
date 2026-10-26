@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
  */
 object ThumbnailBoundsTracker {
     private val boundsMap = mutableStateMapOf<String, Rect>()
+    private val openingBoundsMap = mutableMapOf<String, Rect?>()
 
     /**
      * Currently active viewer media item URI.
@@ -33,12 +34,28 @@ object ThumbnailBoundsTracker {
 
     fun getBounds(uri: String): Rect? = boundsMap[uri]
 
+    fun captureOpeningBounds(uri: String) {
+        openingBoundsMap[uri] = boundsMap[uri]
+    }
+
+    fun getOpeningBounds(uri: String): Rect? {
+        // Subscribe to live layout changes, but prefer the exact rectangle captured at tap time.
+        val liveBounds = boundsMap[uri]
+        return if (openingBoundsMap.containsKey(uri)) openingBoundsMap[uri] else liveBounds
+    }
+
+    fun clearOpeningBounds(uri: String) {
+        openingBoundsMap.remove(uri)
+    }
+
     fun removeBounds(uri: String) {
         boundsMap.remove(uri)
+        openingBoundsMap.remove(uri)
     }
 
     fun clear() {
         boundsMap.clear()
+        openingBoundsMap.clear()
         activeViewerUri = null
     }
 }

@@ -18,6 +18,12 @@ import coil.size.Dimension
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/**
+ * Identifies MediaStore video paths such as /external/video/media/123.
+ */
+internal fun isVideoMediaStorePath(pathSegments: List<String>): Boolean =
+    pathSegments.any { it.equals("video", ignoreCase = true) }
+
 class MediaStoreThumbnailFetcher(
     private val context: Context,
     private val uri: Uri,
@@ -71,7 +77,11 @@ class MediaStoreThumbnailFetcher(
 
     class Factory(private val context: Context) : Fetcher.Factory<Uri> {
         override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
-            if (data.scheme == "content" && (data.authority == "media" || data.authority == MediaStore.AUTHORITY)) {
+            if (
+                data.scheme == "content" &&
+                (data.authority == "media" || data.authority == MediaStore.AUTHORITY) &&
+                !isVideoMediaStorePath(data.pathSegments)
+            ) {
                 val widthDim = options.size.width
                 val heightDim = options.size.height
                 if (widthDim is Dimension.Pixels && heightDim is Dimension.Pixels) {

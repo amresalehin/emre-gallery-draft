@@ -5,7 +5,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
 import com.amresalehin.emregallery.ui.ThumbnailBoundsTracker
 import com.amresalehin.emregallery.ui.transitionContentScale
-import com.amresalehin.emregallery.ui.shouldUseVideoFirstFramePoster
+import com.amresalehin.emregallery.data.isVideoMediaStorePath
 import com.amresalehin.emregallery.ui.ViewerVideoState
 import org.junit.Assert.*
 import org.junit.Before
@@ -41,7 +41,9 @@ class ViewerPlaybackStateTest {
                 val scale = transitionContentScale(
                     progress = progress,
                     thumbnailScaleX = thumbnailScaleX,
-                    thumbnailScaleY = thumbnailScaleY
+                    thumbnailScaleY = thumbnailScaleY,
+                    sourceImageWidth = source.width.toInt(),
+                    sourceImageHeight = source.height.toInt()
                 ).computeScaleFactor(source, screen)
                 val fraction = progress.coerceIn(0f, 1f)
                 val parentScaleX = thumbnailScaleX + (1f - thumbnailScaleX) * fraction
@@ -79,10 +81,18 @@ class ViewerPlaybackStateTest {
         val fit = ContentScale.Fit.computeScaleFactor(source, screen)
 
         val beforeStart = transitionContentScale(
-            -1f, thumbnailScaleX, thumbnailScaleY
+            progress = -1f,
+            thumbnailScaleX = thumbnailScaleX,
+            thumbnailScaleY = thumbnailScaleY,
+            sourceImageWidth = source.width.toInt(),
+            sourceImageHeight = source.height.toInt()
         ).computeScaleFactor(source, screen)
         val afterEnd = transitionContentScale(
-            2f, thumbnailScaleX, thumbnailScaleY
+            progress = 2f,
+            thumbnailScaleX = thumbnailScaleX,
+            thumbnailScaleY = thumbnailScaleY,
+            sourceImageWidth = source.width.toInt(),
+            sourceImageHeight = source.height.toInt()
         ).computeScaleFactor(source, screen)
 
         assertEquals(crop.scaleX, beforeStart.scaleX * thumbnailScaleX, 0.001f)
@@ -92,14 +102,49 @@ class ViewerPlaybackStateTest {
     }
 
     @Test
-    fun videoPosterSwitchesToFrameZeroOnlyAfterPlaybackStartsAndOpeningCompletes() {
-        assertFalse(shouldUseVideoFirstFramePoster(true, true, 0.5f, true, false))
-        assertFalse(shouldUseVideoFirstFramePoster(true, true, 1f, false, false))
-        assertFalse(shouldUseVideoFirstFramePoster(false, true, 1f, true, false))
-        assertFalse(shouldUseVideoFirstFramePoster(true, false, 1f, true, false))
-        assertTrue(shouldUseVideoFirstFramePoster(true, true, 1f, true, false))
-        // Keep the accurate poster available if playback is paused after a frame was rendered.
-        assertTrue(shouldUseVideoFirstFramePoster(true, true, 1f, false, true))
+    fun transitionGeometryKeepsDisplayedSizeStableAcrossPlaceholderAndOriginal() {
+        val screen = Size(width = 1080f, height = 2400f)
+        val thumbnailScaleX = 360f / screen.width
+        val thumbnailScaleY = 360f / screen.height
+        val original = Size(width = 4032f, height = 3024f)
+        val placeholder = Size(width = 180f, height = 135f)
+
+        listOf(0f, 0.5f, 1f).forEach { progress ->
+            val placeholderScale = transitionContentScale(
+                progress, thumbnailScaleX, thumbnailScaleY, 4032, 3024
+            ).computeScaleFactor(placeholder, screen)
+            val originalScale = transitionContentScale(
+                progress, thumbnailScaleX, thumbnailScaleY, 4032, 3024
+            ).computeScaleFactor(original, screen)
+            assertEquals(placeholderScale.scaleX * placeholder.width, originalScale.scaleX * original.width, 0.01f)
+            assertEquals(placeholderScale.scaleY * placeholder.height, originalScale.scaleY * original.height, 0.01f)
+        }
+    }
+
+    @Test
+    fun noBoundsFallbackFitsUsingActualSourceDimensions() {
+        val original = Size(width = 4032f, height = 3024f)
+        val placeholder = Size(width = 180f, height = 135f)
+        val screen = Size(width = 1080f, height = 2400f)
+        val expected = ContentScale.Fit.computeScaleFactor(original, screen)
+        val actual = transitionContentScale(
+            progress = 1f,
+            thumbnailScaleX = 1f,
+            thumbnailScaleY = 1f,
+            sourceImageWidth = original.width.toInt(),
+            sourceImageHeight = original.height.toInt()
+        ).computeScaleFactor(placeholder, screen)
+
+        assertEquals(expected.scaleX * original.width, actual.scaleX * placeholder.width, 0.01f)
+        assertEquals(expected.scaleY * original.height, actual.scaleY * placeholder.height, 0.01f)
+    }
+
+    @Test
+    fun mediaStoreVideoPathsBypassTheThumbnailShortcut() {
+        assertTrue(isVideoMediaStorePath(listOf("external", "video", "media", "42")))
+        assertTrue(isVideoMediaStorePath(listOf("external_primary", "VIDEO", "media", "42")))
+        assertFalse(isVideoMediaStorePath(listOf("external", "images", "media", "42")))
+        assertFalse(isVideoMediaStorePath(emptyList()))
     }
 
     @Test
@@ -176,6 +221,20 @@ class ViewerPlaybackStateTest {
 
         ThumbnailBoundsTracker.updateBounds(testUri, sampleBounds)
         assertEquals(sampleBounds, ThumbnailBoundsTracker.getBounds(testUri))
+
+        ThumbnailBoundsTracker.captureOpeningBounds(testUri)
+        val movedBounds = Rect(120f, 220f, 420f, 620f)
+        ThumbnailBoundsTracker.updateBounds(testUri, movedBounds)
+        assertEquals(sampleBounds, ThumbnailBoundsTracker.getOpeningBounds(testUri))
+        ThumbnailBoundsTracker.clearOpeningBounds(testUri)
+        assertEquals(movedBounds, ThumbnailBoundsTracker.getOpeningBounds(testUri))
+
+        val unmeasuredUri = "content://media/external/images/media/99"
+        ThumbnailBoundsTracker.captureOpeningBounds(unmeasuredUri)
+        ThumbnailBoundsTracker.updateBounds(unmeasuredUri, sampleBounds)
+        assertNull(ThumbnailBoundsTracker.getOpeningBounds(unmeasuredUri))
+        ThumbnailBoundsTracker.clearOpeningBounds(unmeasuredUri)
+        assertEquals(sampleBounds, ThumbnailBoundsTracker.getOpeningBounds(unmeasuredUri))
 
         ThumbnailBoundsTracker.activeViewerUri = testUri
         assertEquals(testUri, ThumbnailBoundsTracker.activeViewerUri)

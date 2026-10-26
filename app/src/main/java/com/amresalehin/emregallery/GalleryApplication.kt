@@ -37,6 +37,20 @@ class GalleryApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         disableTouchPointTaps(this)
+
+        // Old cache entries may contain MediaStore-generated posters instead of frame-zero frames.
+        // Thumbnail caches are regenerable, so invalidate the namespace and remove the old cache off-thread.
+        val obsoleteImageCache = File(cacheDir, "image_cache")
+        if (obsoleteImageCache.exists()) {
+            Thread(
+                { runCatching { obsoleteImageCache.deleteRecursively() } },
+                "clear-obsolete-image-cache"
+            ).apply {
+                isDaemon = true
+                start()
+            }
+        }
+
         val imageLoader = ImageLoader.Builder(this)
             .memoryCache {
                 MemoryCache.Builder(this)
@@ -46,7 +60,7 @@ class GalleryApplication : Application() {
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(File(cacheDir, "image_cache"))
+                    .directory(File(cacheDir, "image_cache_v2"))
                     .maxSizeBytes(262144000L)
                     .build()
             }

@@ -451,17 +451,22 @@ fun GalleryApp() {
 
     fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
         val safeList = if (list.any { it.uri == item.uri }) list else listOf(item)
-        selectedMedia = item
-        viewerMediaList = safeList
-        showViewerControls = false
-        showDetails = false
-        scope.launch { viewerTransitionProgress.snapTo(0f) }
-        navigateTo(
-            dest = Destination.VIEWER,
-            rememberPrevious = true,
-            newSelectedMedia = item,
-            newViewerMediaList = safeList
-        )
+        ThumbnailBoundsTracker.captureOpeningBounds(item.uri)
+
+        scope.launch {
+            // Reset before ViewerScreen is composed, avoiding an opening frame at progress=1f.
+            viewerTransitionProgress.snapTo(0f)
+            selectedMedia = item
+            viewerMediaList = safeList
+            showViewerControls = false
+            showDetails = false
+            navigateTo(
+                dest = Destination.VIEWER,
+                rememberPrevious = true,
+                newSelectedMedia = item,
+                newViewerMediaList = safeList
+            )
+        }
     }
 
     fun performBackNavigation() {

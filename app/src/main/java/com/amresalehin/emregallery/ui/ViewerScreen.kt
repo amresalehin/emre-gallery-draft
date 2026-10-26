@@ -62,7 +62,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
-import coil.request.videoFrameMicros
 import coil.size.Precision
 import coil.size.Size
 import com.amresalehin.emregallery.data.CustomAlbum
@@ -162,6 +161,7 @@ fun ViewerScreen(
                 stiffness = 420f
             )
         )
+        ThumbnailBoundsTracker.clearOpeningBounds(item.uri)
     }
 
     // "More" bottom sheet state
@@ -384,11 +384,10 @@ fun ViewerScreen(
             initiateClose()
         }
 
-        // Calculate geometry for shared-element transition toward original source thumbnail
+        // Use the tap-time rectangle for this opening. A missing rectangle stays missing until
+        // the opening finishes, rather than changing targets mid-animation.
         val progress = transitionProgress.value
-        // A first-time layout callback can publish bounds after the viewer has been composed.
-        // Read directly from the snapshot map so that update invalidates this composition.
-        val targetBounds = ThumbnailBoundsTracker.getBounds(item.uri)
+        val targetBounds = ThumbnailBoundsTracker.getOpeningBounds(item.uri)
 
         val destTransX: Float
         val destTransY: Float
@@ -406,10 +405,11 @@ fun ViewerScreen(
             destScaleX = (thumbW / screenWidthPx).coerceIn(0.01f, 1f)
             destScaleY = (thumbH / screenHeightPx).coerceIn(0.01f, 1f)
         } else {
+            // No source bounds: fit the real media to the viewport instead of inventing a 0.85x target.
             destTransX = 0f
             destTransY = 0f
-            destScaleX = 0.85f
-            destScaleY = 0.85f
+            destScaleX = 1f
+            destScaleY = 1f
         }
 
         val currentScaleX = destScaleX + (1f - destScaleX) * progress
@@ -779,40 +779,21 @@ private fun ZoomableMediaItem(
     var offsetY by remember(item.uri) { mutableFloatStateOf(0f) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
 
-    // Keep video posters on the same cached MediaStore thumbnail used by the grid.
-    // Decoding an independent video frame here can make the poster change before ExoPlayer's first frame.
+    // Videos use the same poster/cache key as the grid. Their MediaStore URI bypasses the
+    // custom thumbnail fetcher, allowing Coil's VideoFrameDecoder to generate frame zero.
     val context = LocalContext.current
-    val useVideoFirstFramePoster = shouldUseVideoFirstFramePoster(
-        isVideo = isVideo,
-        isCurrentPage = isCurrentPage,
-        transitionProgress = transitionProgress,
-        isPlaying = videoState?.isPlaying == true,
-        hasRenderedFirstFrame = videoState?.isFirstFrameRendered == true
-    )
-    val imageRequest = remember(item.uri, isVideo, context, useVideoFirstFramePoster) {
+    val imageRequest = remember(item.uri, isVideo, context) {
         val request = ImageRequest.Builder(context)
             .data(Uri.parse(item.uri))
             .diskCachePolicy(CachePolicy.ENABLED)
 
         if (isVideo) {
-            if (useVideoFirstFramePoster) {
-                request
-                    // Bypass the <=600px MediaStore thumbnail fetcher to decode the true frame zero.
-                    .size(720, 720)
-                    .precision(Precision.INEXACT)
-                    .videoFrameMicros(0L)
-                    .placeholderMemoryCacheKey("${item.uri}_thumb")
-                    .diskCacheKey("${item.uri}:viewer-first-frame")
-                    .memoryCacheKey("${item.uri}:viewer-first-frame")
-                    .crossfade(false)
-            } else {
-                request
-                    .size(480, 480)
-                    .precision(Precision.INEXACT)
-                    .crossfade(false)
-                    .diskCacheKey("${item.uri}_thumb")
-                    .memoryCacheKey("${item.uri}_thumb")
-            }
+            request
+                .size(480, 480)
+                .precision(Precision.INEXACT)
+                .crossfade(false)
+                .diskCacheKey("${item.uri}_thumb")
+                .memoryCacheKey("${item.uri}_thumb")
         } else {
             request
                 .size(Size.ORIGINAL)
@@ -1033,15 +1014,13 @@ private fun ZoomableMediaItem(
                 model = imageRequest,
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = if (hasTargetBounds) {
-                    transitionContentScale(
-                        progress = transitionProgress,
-                        thumbnailScaleX = thumbnailScaleX,
-                        thumbnailScaleY = thumbnailScaleY
-                    )
-                } else {
-                    ContentScale.Fit
-                }
+                contentScale = transitionContentScale(
+                    progress = if (hasTargetBounds) transitionProgress else 1f,
+                    thumbnailScaleX = if (hasTargetBounds) thumbnailScaleX else 1f,
+                    thumbnailScaleY = if (hasTargetBounds) thumbnailScaleY else 1f,
+                    sourceImageWidth = item.width,
+                    sourceImageHeight = item.height
+                )
             )
 
             // Video Surface when current item is a video
@@ -1053,32 +1032,19 @@ private fun ZoomableMediaItem(
 }
 
 /**
- * Use the real frame-zero poster only after shared-element opening completes and the
- * current video starts playing. This avoids decoding frames for every grid thumbnail.
- */
-internal fun shouldUseVideoFirstFramePoster(
-    isVideo: Boolean,
-    isCurrentPage: Boolean,
-    transitionProgress: Float,
-    isPlaying: Boolean,
-    hasRenderedFirstFrame: Boolean
-): Boolean = isVideo && isCurrentPage && transitionProgress >= 0.99f &&
-    (isPlaying || hasRenderedFirstFrame)
-
-/**
- * Interpolates the rendered image scale from the source thumbnail's crop to the
- * full-screen fit while compensating for the pager's animated, non-uniform bounds.
+ * Interpolates from source-thumbnail Crop to fullscreen Fit, compensating for the pager's
+ * non-uniform bounds animation.
  *
- * The pager still animates from the fullscreen rectangle to the thumbnail rectangle
- * using separate X/Y scales. Without compensation, the image would be cropped for
- * the fullscreen viewport and then distorted by those parent scales. Instead, compute
- * the crop for the actual thumbnail size, interpolate one aspect-preserving rendered
- * scale, and divide out the pager scale on each axis.
+ * MediaStore dimensions anchor the source geometry. Normalize the result to the painter
+ * currently drawn, so a low-resolution placeholder and the original image occupy the same
+ * screen-space size on the first opening.
  */
 internal fun transitionContentScale(
     progress: Float,
     thumbnailScaleX: Float,
-    thumbnailScaleY: Float
+    thumbnailScaleY: Float,
+    sourceImageWidth: Int = 0,
+    sourceImageHeight: Int = 0
 ): ContentScale {
     val fraction = progress.coerceIn(0f, 1f)
     val startScaleX = thumbnailScaleX.coerceIn(0.01f, 1f)
@@ -1089,20 +1055,26 @@ internal fun transitionContentScale(
             srcSize: androidx.compose.ui.geometry.Size,
             dstSize: androidx.compose.ui.geometry.Size
         ): ScaleFactor {
+            val geometrySourceSize = if (sourceImageWidth > 0 && sourceImageHeight > 0) {
+                androidx.compose.ui.geometry.Size(sourceImageWidth.toFloat(), sourceImageHeight.toFloat())
+            } else {
+                srcSize
+            }
             val thumbnailSize = androidx.compose.ui.geometry.Size(
                 width = dstSize.width * startScaleX,
                 height = dstSize.height * startScaleY
             )
-            val crop = ContentScale.Crop.computeScaleFactor(srcSize, thumbnailSize)
-            val fit = ContentScale.Fit.computeScaleFactor(srcSize, dstSize)
+            val crop = ContentScale.Crop.computeScaleFactor(geometrySourceSize, thumbnailSize)
+            val fit = ContentScale.Fit.computeScaleFactor(geometrySourceSize, dstSize)
             val renderedScale = crop.scaleX + (fit.scaleX - crop.scaleX) * fraction
-
+            val desiredWidth = geometrySourceSize.width * renderedScale
+            val desiredHeight = geometrySourceSize.height * renderedScale
             val parentScaleX = startScaleX + (1f - startScaleX) * fraction
             val parentScaleY = startScaleY + (1f - startScaleY) * fraction
 
             return ScaleFactor(
-                scaleX = renderedScale / parentScaleX,
-                scaleY = renderedScale / parentScaleY
+                scaleX = desiredWidth / srcSize.width / parentScaleX,
+                scaleY = desiredHeight / srcSize.height / parentScaleY
             )
         }
     }
