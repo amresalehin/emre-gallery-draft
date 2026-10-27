@@ -56,8 +56,10 @@ class MediaStoreThumbnailFetcher(
             if (data.scheme != "content") return null
             if (data.authority != "media" && data.authority != MediaStore.AUTHORITY) return null
             val hasImagePath = data.pathSegments.any { it.equals("images", ignoreCase = true) }
-            val mimeType = runCatching { context.contentResolver.getType(data) }.getOrNull()
-            if (!hasImagePath && mimeType?.startsWith("image/") != true) return null
+            if (!hasImagePath) {
+                val mimeType = runCatching { context.contentResolver.getType(data) }.getOrNull()
+                if (mimeType?.startsWith("image/") != true) return null
+            }
             val width = options.size.width as? Dimension.Pixels ?: return null
             val height = options.size.height as? Dimension.Pixels ?: return null
             if (width.px <= 600 && height.px <= 600) {
