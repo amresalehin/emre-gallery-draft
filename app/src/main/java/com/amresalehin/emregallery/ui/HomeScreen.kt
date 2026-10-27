@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import coil.Coil
 import coil.request.Priority
 import com.amresalehin.emregallery.data.ThumbnailRequestFactory
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
