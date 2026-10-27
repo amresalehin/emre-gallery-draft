@@ -62,7 +62,7 @@ fun AlbumsScreen(
     onRenameAlbum: (String, String) -> Unit
 ) {
     val context = LocalContext.current
-    val activeEngineId = remember(context) { FaceRecognitionSettings.getActiveEngine(context) }
+    val activeEngineId = FaceRecognitionSettings.getActiveEngine(context)
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     var detectedPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
     LaunchedEffect(activeEngineId) {

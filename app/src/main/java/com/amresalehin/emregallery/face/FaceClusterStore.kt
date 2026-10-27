@@ -887,6 +887,7 @@ class FaceClusterStore(context: Context) :
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
+            FaceStoreEvents.notifyAllUpdated()
         }
     }
 
@@ -938,6 +939,7 @@ class FaceClusterStore(context: Context) :
             return true
         } finally {
             db.endTransaction()
+            FaceStoreEvents.notifyAllUpdated()
         }
     }
 
@@ -981,6 +983,7 @@ class FaceClusterStore(context: Context) :
             return newPersonId
         } finally {
             db.endTransaction()
+            FaceStoreEvents.notifyAllUpdated()
         }
     }
 
@@ -1067,6 +1070,7 @@ class FaceClusterStore(context: Context) :
             return true
         } finally {
             db.endTransaction()
+            FaceStoreEvents.notifyAllUpdated()
         }
     }
 
@@ -1077,6 +1081,7 @@ class FaceClusterStore(context: Context) :
             put("updated_at", System.currentTimeMillis())
         }
         writableDatabase.update("people", vals, "id=?", arrayOf(personId))
+        FaceStoreEvents.notifyAllUpdated()
     }
 
     @Synchronized
@@ -1086,6 +1091,7 @@ class FaceClusterStore(context: Context) :
             put("updated_at", System.currentTimeMillis())
         }
         writableDatabase.update("people", vals, "id=?", arrayOf(personId))
+        FaceStoreEvents.notifyAllUpdated()
     }
 
 
@@ -1507,6 +1513,7 @@ class FaceClusterStore(context: Context) :
             return true
         } finally {
             db.endTransaction()
+            FaceStoreEvents.notifyAllUpdated()
         }
     }
 
@@ -1541,6 +1548,7 @@ class FaceClusterStore(context: Context) :
             return true
         } finally {
             db.endTransaction()
+            FaceStoreEvents.notifyAllUpdated()
         }
     }
 
