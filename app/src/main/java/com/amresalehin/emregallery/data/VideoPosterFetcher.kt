@@ -47,7 +47,8 @@ class VideoPosterFetcher(
         val width = options.size.width as? Dimension.Pixels ?: return@withContext null
         val height = options.size.height as? Dimension.Pixels ?: return@withContext null
         val target = ThumbnailRequestFactory.sizeFor(width.px, height.px)
-        val mediaSizeBytes = queryMediaSize(context, uri)
+        val mediaSizeBytes = ThumbnailRequestFactory.rememberedMediaSize(uri)
+            ?: queryMediaSize(context, uri).also { ThumbnailRequestFactory.rememberMediaSize(uri, it) }
         val key = ThumbnailRequestFactory.cacheKey(uri, true, target.width, target.height, mediaSizeBytes)
         val cache = VideoPosterCache(context)
         var file = VideoPosterWork.load(key) { cache.getOrCreate(uri, target, key) }
