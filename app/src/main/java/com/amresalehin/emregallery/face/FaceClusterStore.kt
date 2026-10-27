@@ -438,6 +438,35 @@ class FaceClusterStore(context: Context) :
         return list
     }
 
+    /**
+     * Returns failures scoped to the current media library, matching failedMediaCount(mediaUris, ...).
+     */
+    @Synchronized
+    fun getFailedMedia(
+        mediaUris: List<String>,
+        engineId: String = BuffaloLFaceEngine.ENGINE_ID
+    ): List<Pair<String, String?>> {
+        val uniqueUris = mediaUris.distinct()
+        if (uniqueUris.isEmpty()) return emptyList()
+        val list = mutableListOf<Pair<String, String?>>()
+        for (batch in uniqueUris.chunked(800)) {
+            val placeholders = batch.joinToString(",") { "?" }
+            val args = arrayOf(engineId, *batch.toTypedArray())
+            readableDatabase.rawQuery(
+                "SELECT media_uri, error_message FROM indexed_media WHERE engine_id=? AND status='failed' AND media_uri IN ($placeholders)",
+                args
+            ).use { cursor ->
+                val errorColumn = cursor.getColumnIndex("error_message")
+                while (cursor.moveToNext()) {
+                    val uri = cursor.getString(0)
+                    val error = if (errorColumn >= 0 && !cursor.isNull(errorColumn)) cursor.getString(errorColumn) else null
+                    list.add(uri to error)
+                }
+            }
+        }
+        return list
+    }
+
     @Synchronized
     fun markMediaFailed(uri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID, errorMessage: String? = null) {
         val values = ContentValues().apply {

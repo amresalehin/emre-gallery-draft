@@ -173,7 +173,23 @@ class EnteFacePipelineTest {
     }
 
     @Test
-    fun testEnteLinearIncrementalClustering()    @Test
+    @Test
+    fun testFailedMediaLogMatchesCurrentLibraryScope() {
+        val engineId = EnteFaceConstants.ENGINE_ID
+        val inLibrary = "content://media/current_library_failure"
+        val outsideLibrary = "content://media/other_library_failure"
+        store.markMediaFailed(inLibrary, engineId, "current library error")
+        store.markMediaFailed(outsideLibrary, engineId, "outside library error")
+
+        val scopedUris = listOf(inLibrary)
+        assertEquals(1, store.failedMediaCount(scopedUris, engineId))
+        assertEquals(
+            listOf(inLibrary to "current library error"),
+            store.getFailedMedia(scopedUris, engineId)
+        )
+    }
+
+    @Test
     fun testEnteLinearIncrementalClustering() {
         val prov = EnteFaceConstants.PROVENANCE
         val aliceEmb1 = createSyntheticEmbedding(0, 0f)

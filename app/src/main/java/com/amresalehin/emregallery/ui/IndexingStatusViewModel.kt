@@ -134,14 +134,14 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val bFaces = faceStore.indexedFaceCount(BuffaloLFaceEngine.ENGINE_ID)
                 val bFailures = faceStore.failedMediaCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
                 val bSummaries = faceStore.summaries(BuffaloLFaceEngine.ENGINE_ID)
-                val bFailedList = faceStore.getFailedMedia(BuffaloLFaceEngine.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
+                val bFailedList = faceStore.getFailedMedia(photoUris, BuffaloLFaceEngine.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
 
                 // Ente-Style counts
                 val eCount = faceStore.indexedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
                 val eFaces = faceStore.indexedFaceCount(EnteFaceConstants.ENGINE_ID)
                 val eFailures = faceStore.failedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
                 val eSummaries = faceStore.summaries(EnteFaceConstants.ENGINE_ID)
-                val eFailedList = faceStore.getFailedMedia(EnteFaceConstants.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
+                val eFailedList = faceStore.getFailedMedia(photoUris, EnteFaceConstants.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
 
                 val locCache = com.amresalehin.emregallery.data.PhotoMapLocationCache(context.applicationContext)
                 val locMap = locCache.loadAll()
