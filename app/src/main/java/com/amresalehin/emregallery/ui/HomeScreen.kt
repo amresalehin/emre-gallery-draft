@@ -30,6 +30,7 @@ import coil.Coil
 import com.amresalehin.emregallery.data.ThumbnailRequestFactory
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.delay
+import java.util.LinkedHashMap
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -147,6 +148,7 @@ fun HomeScreen(
 
     LaunchedEffect(gridState, gridMedia, gridPositionByKey, thumbnailImageLoader) {
         val recentlyPrefetched = LinkedHashSet<String>()
+        val recentFailures = LinkedHashMap<String, Long>()
         snapshotFlow {
             if (gridState.isScrollInProgress) {
                 null
@@ -165,18 +167,25 @@ fun HomeScreen(
 
             val firstIndex = lastVisibleIndex + 1
             val endExclusive = minOf(firstIndex + 8, gridMedia.size)
-            var successfulPrefetches = 0
-            var prefetchedVideo = false
+            var attemptedPrefetches = 0
+            var attemptedVideo = false
             for (index in firstIndex until endExclusive) {
-                if (successfulPrefetches >= 4) break
+                // Bound work by attempts, not successful decodes: broken files must not
+                // make the idle prefetch loop do more work than intended.
+                if (attemptedPrefetches >= 4) break
 
                 val item = gridMedia[index]
-                // Frame extraction is more expensive than still-image thumbnailing. Warm
-                // at most one video poster per idle window to keep CPU/IO work bounded.
-                if (item.isVideo && prefetchedVideo) continue
+                // Frame extraction is more expensive than still-image thumbnailing. Attempt
+                // at most one video poster per idle window, even if that request fails.
+                if (item.isVideo && attemptedVideo) continue
 
                 val prefetchKey = "${item.uri}|${item.sizeBytes}|${item.isVideo}"
                 if (prefetchKey in recentlyPrefetched) continue
+                val failedAt = recentFailures[prefetchKey]
+                if (failedAt != null && System.currentTimeMillis() - failedAt < 15_000L) continue
+
+                attemptedPrefetches += 1
+                if (item.isVideo) attemptedVideo = true
 
                 // Execute one request at a time. collectLatest cancels waiting requests when
                 // scrolling resumes, instead of enqueueing a large background batch.
@@ -190,10 +199,15 @@ fun HomeScreen(
                 )
                 if (result is coil.request.SuccessResult) {
                     recentlyPrefetched.add(prefetchKey)
-                    successfulPrefetches += 1
-                    if (item.isVideo) prefetchedVideo = true
+                    recentFailures.remove(prefetchKey)
                     if (recentlyPrefetched.size > 96) {
                         recentlyPrefetched.remove(recentlyPrefetched.first())
+                    }
+                } else {
+                    // Retry transient failures later, not on every tiny pause in scrolling.
+                    recentFailures[prefetchKey] = System.currentTimeMillis()
+                    if (recentFailures.size > 96) {
+                        recentFailures.remove(recentFailures.keys.first())
                     }
                 }
             }
