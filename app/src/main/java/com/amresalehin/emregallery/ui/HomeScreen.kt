@@ -272,7 +272,7 @@ fun HomeScreen(
 
                 groups.forEach { group ->
                     if (group.dayLabel.isNotBlank()) {
-                        item(key = "header_${group.dayKey}", contentType = "header") {
+                        staggeredItem(key = "header_${group.dayKey}", span = StaggeredGridItemSpan.FullLine, contentType = "header") {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
