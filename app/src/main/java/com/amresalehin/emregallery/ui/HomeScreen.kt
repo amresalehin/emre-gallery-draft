@@ -13,8 +13,14 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.foundation.lazy.staggeredgrid.item as staggeredItem
+import androidx.compose.foundation.lazy.staggeredgrid.items as staggeredItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,6 +44,7 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    gridState: LazyStaggeredGridState = rememberLazyStaggeredGridState(),
     media: List<MediaItem>,
     loading: Boolean,
     albumTitle: String? = null,
@@ -118,16 +125,12 @@ fun HomeScreen(
         }
     }
 
-    val groupedRows = remember(groups, pinchGridColumns) {
-        groups.map { group -> group to group.items.chunked(pinchGridColumns.coerceIn(1, 6)) }
-    }
-
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize()
     ) {
-        val containerWidth = maxWidth - 24.dp
-        LazyColumn(
-            state = listState,
+        LazyVerticalStaggeredGrid(
+            columns = StaggeredGridCells.Fixed(pinchGridColumns.coerceIn(1, 6)),
+            state = gridState,
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
@@ -161,7 +164,8 @@ fun HomeScreen(
                 top = topContentPadding,
                 bottom = bottomContentPadding
             ),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalItemSpacing = 14.dp
         ) {
             if (albumTitle != null) {
                 val isCollection = albumTitle in listOf("Locked folder", "Bin", "Archive", "Favourites", "Videos", "Recently added")
@@ -174,7 +178,7 @@ fun HomeScreen(
                     "Archive" -> Icons.Default.Archive
                     else -> Icons.Default.Folder
                 }
-                item {
+                staggeredItem(span = StaggeredGridItemSpan.FullLine) {
                     val returnProgress = LocalViewerCoordinatedProgress.current
                     Surface(
                         modifier = Modifier
@@ -215,7 +219,7 @@ fun HomeScreen(
             }
 
             if (loading && sortedMedia.isEmpty()) {
-                item {
+                staggeredItem(span = StaggeredGridItemSpan.FullLine) {
                     HomeScreenSkeleton(
                         gridColumns = pinchGridColumns,
                         gridStyle = gridStyle,
@@ -223,7 +227,7 @@ fun HomeScreen(
                     )
                 }
             } else if (sortedMedia.isEmpty()) {
-                item {
+                staggeredItem(span = StaggeredGridItemSpan.FullLine) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -253,11 +257,11 @@ fun HomeScreen(
                 }
             } else {
                 if (loading) {
-                    item { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
+                    staggeredItem(span = StaggeredGridItemSpan.FullLine) { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
                 }
                 if (albumTitle == null) {
-                    item { MemoriesStrip(sortedMedia, onOpen) }
-                    item {
+                    staggeredItem(span = StaggeredGridItemSpan.FullLine) { MemoriesStrip(sortedMedia, onOpen) }
+                    staggeredItem(span = StaggeredGridItemSpan.FullLine) {
                         HorizontalDivider(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
@@ -266,7 +270,7 @@ fun HomeScreen(
                     }
                 }
 
-                groupedRows.forEach { (group, rowChunks) ->
+                groups.forEach { group ->
                     if (group.dayLabel.isNotBlank()) {
                         item(key = "header_${group.dayKey}", contentType = "header") {
                             Row(
@@ -291,20 +295,30 @@ fun HomeScreen(
                         }
                     }
 
-                    items(
-                        count = rowChunks.size,
-                        key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
-                        contentType = { "photo_row" }
-                    ) { rowIndex ->
-                        JustifiedMosaicRow(
-                            items = rowChunks[rowIndex],
-                            containerWidth = containerWidth,
-                            rowIndex = rowIndex,
-                            isSquare = (gridStyle == "square"),
-                            selectedUris = selectedUris,
-                            onLongPress = { item -> onSelectionChange(selectedUris + item.uri) },
-                            onToggleSelection = { item -> onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) },
-                            onOpen = { item -> if (selectionMode) { onSelectionChange(if (item.uri in selectedUris) selectedUris - item.uri else selectedUris + item.uri) } else onOpen(item) }
+                    staggeredItems(
+                        items = group.items,
+                        key = { mediaItem -> "media_${group.dayKey}_${mediaItem.id}" },
+                        contentType = { "media_thumbnail" }
+                    ) { mediaItem ->
+                        val tileAspect = if (gridStyle == "square") {
+                            1f
+                        } else if (mediaItem.width > 0 && mediaItem.height > 0) {
+                            (mediaItem.width.toFloat() / mediaItem.height.toFloat()).coerceIn(0.55f, 1.8f)
+                        } else {
+                            when (mediaItem.id.hashCode().mod(4)) {
+                                0 -> 0.72f
+                                1 -> 0.9f
+                                2 -> 1.0f
+                                else -> 1.35f
+                            }
+                        }
+                        MosaicMediaItem(
+                            item = mediaItem,
+                            modifier = Modifier.fillMaxWidth().aspectRatio(tileAspect),
+                            selected = mediaItem.uri in selectedUris,
+                            onLongPress = { onSelectionChange(selectedUris + mediaItem.uri) },
+                            onToggleSelection = { onSelectionChange(if (mediaItem.uri in selectedUris) selectedUris - mediaItem.uri else selectedUris + mediaItem.uri) },
+                            onOpen = { opened -> if (selectionMode) { onSelectionChange(if (opened.uri in selectedUris) selectedUris - opened.uri else selectedUris + opened.uri) } else onOpen(opened) }
                         )
                     }
                 }
@@ -312,7 +326,7 @@ fun HomeScreen(
         }
 
         HomeFastScrollbar(
-            listState = listState,
+            gridState = gridState,
             topContentPadding = topContentPadding,
             bottomContentPadding = bottomContentPadding,
             thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
