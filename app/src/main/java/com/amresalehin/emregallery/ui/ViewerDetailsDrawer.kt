@@ -148,7 +148,8 @@ fun ViewerDetailsDrawer(
     isBin: Boolean,
     defaultOcrLanguages: Set<String> = setOf("eng"),
     defaultOcrModel: String = "fast",
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenPerson: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -174,6 +175,7 @@ fun ViewerDetailsDrawer(
     var lastScanError by remember(item.uri) { mutableStateOf<String?>(null) }
     var showErrorDetailsDialog by remember { mutableStateOf(false) }
     var showFaceChooserDialog by remember { mutableStateOf(false) }
+    var unassignedFace by remember { mutableStateOf<DetectedMediaFace?>(null) }
     var isInstallingModel by remember { mutableStateOf(false) }
     var modelInstallProgress by remember { mutableStateOf<String?>(null) }
 
@@ -392,6 +394,12 @@ fun ViewerDetailsDrawer(
     var showAddTagDialog by remember { mutableStateOf(false) }
     var renamingFace by remember { mutableStateOf<DetectedMediaFace?>(null) }
 
+    fun handleFaceThumbnailClick(face: DetectedMediaFace) {
+        val personId = face.personId
+        if (!personId.isNullOrBlank()) onOpenPerson(personId)
+        else unassignedFace = face
+    }
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     ModalBottomSheet(
@@ -453,9 +461,7 @@ fun ViewerDetailsDrawer(
                                     showAddTagDialog = true
                                 }
                             },
-                            onFaceClick = { face ->
-                                if (!face.personId.isNullOrBlank()) renamingFace = face
-                            }
+                            onFaceClick = { face -> handleFaceThumbnailClick(face) }
                         )
                     }
                     DetailDrawerTab.ACTIONS -> {
@@ -466,6 +472,7 @@ fun ViewerDetailsDrawer(
                             metadata = detailsState.metadata,
                             detailsState = detailsState,
                             onRenameFaceClick = { renamingFace = it },
+                            onFaceClick = { face -> handleFaceThumbnailClick(face) },
                             onRescanPhoto = { startScan(false) },
                             listState = actionsListState
                         )
@@ -653,6 +660,19 @@ fun ViewerDetailsDrawer(
                 TextButton(onClick = { renamingFace = null }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    if (unassignedFace != null) {
+        AlertDialog(
+            onDismissRequest = { unassignedFace = null },
+            title = { Text("Face not grouped yet") },
+            text = {
+                Text("This face has not been assigned to a person. Complete face grouping before naming it.")
+            },
+            confirmButton = {
+                TextButton(onClick = { unassignedFace = null }) { Text("Close") }
             }
         )
     }

@@ -6,8 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.CircleShape
@@ -32,7 +33,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import com.amresalehin.emregallery.face.BuffaloLFaceEngine
+import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterStore
+import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.face.FaceStoreEvents
 import com.amresalehin.emregallery.face.PersonSummary
@@ -60,16 +64,28 @@ fun AlbumsScreen(
     onOpen: (MediaItem) -> Unit,
     onCreateAlbumClick: (parentPreset: String) -> Unit,
     onDeleteAlbum: (String) -> Unit,
-    onRenameAlbum: (String, String) -> Unit
+    onRenameAlbum: (String, String) -> Unit,
+    onOpenPerson: (String) -> Unit = { onFilter("People") }
 ) {
     val context = LocalContext.current
-    val activeEngineId = FaceRecognitionSettings.getActiveEngine(context)
+    var activeEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     var detectedPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
-    LaunchedEffect(Unit) {
+    var peopleEngineMenuExpanded by remember { mutableStateOf(false) }
+
+    fun setPeopleEngine(engineId: String) {
+        peopleEngineMenuExpanded = false
+        if (activeEngineId == engineId) return
+        FaceRecognitionSettings.setActiveEngine(context, engineId)
+        FaceEngineRegistry.setActiveEngine(engineId)
+        activeEngineId = engineId
+    }
+
+    LaunchedEffect(activeEngineId) {
         suspend fun refreshPeople() {
-            val engine = FaceRecognitionSettings.getActiveEngine(context)
-            detectedPeople = withContext(Dispatchers.IO) { faceStore.personSummaries(engineId = engine) }
+            detectedPeople = withContext(Dispatchers.IO) {
+                faceStore.personSummaries(engineId = activeEngineId)
+            }
         }
         refreshPeople()
         kotlinx.coroutines.coroutineScope {
@@ -134,67 +150,137 @@ fun AlbumsScreen(
             bottom = bottomContentPadding
         )
     ) {
-        // 1. People & pets Card (empty faces, smaller floating arrow in corner)
+        // 1. People & pets: a single spacious horizontal row with no empty placeholders.
         item {
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 contentColor = MaterialTheme.colorScheme.onSurface,
-                tonalElevation = 2.dp,
-                shadowElevation = 5.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                tonalElevation = 1.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("albums_people_card")
             ) {
-                                val avatarSlots = remember(detectedPeople) {
-                    (detectedPeople + List((14 - detectedPeople.size).coerceAtLeast(0)) { null }).take(14)
-                }
-                Box(modifier = Modifier.padding(14.dp)) {
-                    LazyHorizontalGrid(
-                        rows = GridCells.Fixed(2),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(130.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        gridItems(avatarSlots) { person ->
+                        Box {
                             Surface(
-                                shape = CircleShape,
+                                shape = RoundedCornerShape(50),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                modifier = Modifier
-                                    .size(58.dp)
-                                    .clickable { onFilter("People") }
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                                modifier = Modifier.clickable { peopleEngineMenuExpanded = true }
                             ) {
-                                FaceCropThumbnail(                                    mediaUri = person?.portraitUri,
-                                    faceIndex = person?.portraitFaceIndex,
-                                    engineId = person?.engineId ?: activeEngineId,
-                                    contentDescription = person?.displayName?.takeIf { it.isNotBlank() } ?: "Person",
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = if (activeEngineId == BuffaloLFaceEngine.ENGINE_ID) "Buffalo-L" else "Ente",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                    Icon(
+                                        Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Choose face model",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = peopleEngineMenuExpanded,
+                                onDismissRequest = { peopleEngineMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Buffalo-L") },
+                                    onClick = { setPeopleEngine(BuffaloLFaceEngine.ENGINE_ID) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Ente") },
+                                    onClick = { setPeopleEngine(EnteFaceConstants.ENGINE_ID) }
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.weight(1f))
+
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                            modifier = Modifier.clickable { onFilter("People") }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text("See all", style = MaterialTheme.typography.labelLarge)
+                                Icon(
+                                    Icons.Default.ArrowForward,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     }
 
-                    // Circular arrow button in top right
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .size(28.dp)
-                            .align(Alignment.TopEnd)
-                            .clickable { onFilter("People") }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.ArrowForward,
-                                contentDescription = "Open People",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(14.dp)
-                            )
+                    if (detectedPeople.isEmpty()) {
+                        Text(
+                            text = "No people found yet",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            contentPadding = PaddingValues(end = 4.dp)
+                        ) {
+                            lazyItems(detectedPeople, key = { it.id }) { person ->
+                                Column(
+                                    modifier = Modifier
+                                        .width(92.dp)
+                                        .clickable { onOpenPerson(person.id) },
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                                        modifier = Modifier.size(82.dp)
+                                    ) {
+                                        FaceCropThumbnail(
+                                            mediaUri = person.portraitUri ?: person.sampleUri,
+                                            faceIndex = person.portraitFaceIndex,
+                                            engineId = person.engineId,
+                                            contentDescription = person.displayName.takeIf { person.isNamed && it.isNotBlank() },
+                                            modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                        )
+                                    }
+                                    if (person.isNamed && person.displayName.isNotBlank()) {
+                                        Text(
+                                            text = person.displayName,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

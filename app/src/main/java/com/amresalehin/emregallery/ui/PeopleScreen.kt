@@ -2,12 +2,14 @@ package com.amresalehin.emregallery.ui
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceThumbnailHelper
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -56,7 +58,9 @@ fun PeopleScreen(
     media: List<MediaItem>,
     onBack: () -> Unit,
     onOpenMedia: (MediaItem) -> Unit,
-    onOpenIndexStatus: () -> Unit
+    onOpenIndexStatus: () -> Unit,
+    initialPersonId: String? = null,
+    onInitialPersonOpened: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val store = remember { FaceClusterStore(context.applicationContext) }
@@ -73,9 +77,19 @@ fun PeopleScreen(
     var selectedPersonId by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) } // 0: People, 1: Review & Hidden, 2: Pets
     var searchQuery by remember { mutableStateOf("") }
+    var detailSearchQuery by remember { mutableStateOf("") }
     var showAllPeople by remember { mutableStateOf(false) }
+    var peopleSortMode by remember { mutableStateOf("photos") }
+    var peopleSortMenuExpanded by remember { mutableStateOf(false) }
+    var modelMenuExpanded by remember { mutableStateOf(false) }
+    var showAvatarPicker by remember { mutableStateOf(false) }
 
     fun setEngine(target: String) {
+        modelMenuExpanded = false
+        if (selectedEngineId == target) return
+        selectedPersonId = null
+        detailSearchQuery = ""
+        showAvatarPicker = false
         selectedEngineId = target
         FaceRecognitionSettings.setActiveEngine(context, target)
         FaceEngineRegistry.setActiveEngine(target)
@@ -112,7 +126,12 @@ fun PeopleScreen(
         }
     }
 
-    LaunchedEffect(selectedEngineId) { selectedPersonId = null }
+    LaunchedEffect(initialPersonId) {
+        if (!initialPersonId.isNullOrBlank()) {
+            selectedPersonId = initialPersonId
+            onInitialPersonOpened?.invoke()
+        }
+    }
 
     LaunchedEffect(selectedEngineId, photoByUri) {
         reload()
@@ -123,8 +142,10 @@ fun PeopleScreen(
     }
 
     val minimumGroupFaces = FaceRecognitionSettings.minGroupFaces(context, selectedEngineId)
-    val visiblePeople = remember(allPeople, personMediaIndex, photoByUri, minimumGroupFaces, selectedEngineId, showAllPeople) {
-        allPeople.mapNotNull { person ->
+    val visiblePeople = remember(
+        allPeople, personMediaIndex, photoByUri, minimumGroupFaces, selectedEngineId, showAllPeople, peopleSortMode
+    ) {
+        val people = allPeople.mapNotNull { person ->
             val index = personMediaIndex[person.id]
             val count = index?.faceCount ?: 0
             if (!showAllPeople && count < minimumGroupFaces && !person.isNamed) null
@@ -132,8 +153,22 @@ fun PeopleScreen(
                 faceCount = count,
                 sampleUri = person.sampleUri?.takeIf { it in photoByUri } ?: index?.mediaUris?.firstOrNull()
             )
-        }.sortedWith(compareByDescending<PersonSummary> { it.faceCount }
-            .thenBy { it.displayName.lowercase(Locale.getDefault()) })
+        }
+        when (peopleSortMode) {
+            "name" -> people.sortedWith(
+                compareBy<PersonSummary> { if (it.isNamed) 0 else 1 }
+                    .thenBy { it.displayName.lowercase(Locale.getDefault()) }
+                    .thenByDescending { it.faceCount }
+            )
+            "recent" -> people.sortedWith(
+                compareByDescending<PersonSummary> { it.updatedAt }
+                    .thenByDescending { it.faceCount }
+            )
+            else -> people.sortedWith(
+                compareByDescending<PersonSummary> { it.faceCount }
+                    .thenBy { it.displayName.lowercase(Locale.getDefault()) }
+            )
+        }
     }
 
     val selectedPerson = remember(visiblePeople, allPeople, selectedPersonId) {
@@ -154,6 +189,13 @@ fun PeopleScreen(
                 .sortedByDescending { it.dateTakenMillis.takeIf { d -> d > 0 } ?: it.dateAddedSeconds * 1000L }
         }.orEmpty()
     }
+    val visibleDetailMedia = remember(detailMedia, detailSearchQuery) {
+        if (detailSearchQuery.isBlank()) detailMedia
+        else detailMedia.filter {
+            it.name.contains(detailSearchQuery.trim(), ignoreCase = true) ||
+                it.relativePath.contains(detailSearchQuery.trim(), ignoreCase = true)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -162,139 +204,208 @@ fun PeopleScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Top App Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = {
-                    if (selectedPersonId != null) selectedPersonId = null else onBack()
-                }
+        // Compact floating search bar. List controls stay on one line; detail pages search within that person.
+        if (selectedPersonId == null) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+                shape = RoundedCornerShape(30.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
             ) {
-                Icon(
-                    Icons.Default.ArrowBack,
-                    contentDescription = if (selectedPersonId != null) "Back to people" else "Back to albums"
-                )
-            }
-
-            val titleText = when {
-                selectedPerson != null -> if (selectedPerson.isNamed) selectedPerson.displayName else "Unnamed Person"
-                selectedPersonId != null -> "Person"
-                else -> "People & pets"
-            }
-
-            Text(
-                text = titleText,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            if (selectedPersonId != null && selectedPerson != null) {
-                // Rename icon
-                IconButton(
-                    onClick = {
-                        renamePersonId = selectedPerson.id
-                        renameValue = selectedPerson.displayName
-                    }
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = "Rename person")
-                }
-
-                // More Options Menu (Merge, Hide, etc.)
-                Box {
-                    IconButton(onClick = { personMenuExpanded = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Person options")
+                    IconButton(onClick = onBack, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back to albums")
                     }
-                    DropdownMenu(
-                        expanded = personMenuExpanded,
-                        onDismissRequest = { personMenuExpanded = false }
+                    Box(
+                        Modifier.width(1.dp).height(22.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
+                    )
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.padding(start = 9.dp).size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Box(
+                        modifier = Modifier.weight(1f).padding(start = 8.dp, end = 2.dp),
+                        contentAlignment = Alignment.CenterStart
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Merge with someone") },
-                            leadingIcon = { Icon(Icons.Default.MergeType, contentDescription = null) },
-                            onClick = {
-                                personMenuExpanded = false
-                                personToMerge = selectedPerson
-                            }
+                        if (searchQuery.isBlank()) {
+                            Text(
+                                "People and pets",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        DropdownMenuItem(
-                            text = { Text(if (selectedPerson.isHidden) "Restore person" else "Hide person") },
-                            leadingIcon = {
-                                Icon(
-                                    if (selectedPerson.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                    contentDescription = null
+                    }
+                    Box {
+                        IconButton(
+                            onClick = { peopleSortMenuExpanded = true },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.Default.Sort, contentDescription = "Sort people", modifier = Modifier.size(21.dp))
+                        }
+                        DropdownMenu(
+                            expanded = peopleSortMenuExpanded,
+                            onDismissRequest = { peopleSortMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Most photos") },
+                                onClick = { peopleSortMode = "photos"; peopleSortMenuExpanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Name A–Z") },
+                                onClick = { peopleSortMode = "name"; peopleSortMenuExpanded = false }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Recently updated") },
+                                onClick = { peopleSortMode = "recent"; peopleSortMenuExpanded = false }
+                            )
+                        }
+                    }
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            modifier = Modifier.clickable { modelMenuExpanded = true }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Text(
+                                    if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) "Buffalo-L" else "Ente",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1
                                 )
-                            },
-                            onClick = {
-                                personMenuExpanded = false
-                                reloadScope.launch(Dispatchers.IO) {
-                                    store.setPersonHidden(selectedPerson.id, !selectedPerson.isHidden)
-                                    reload()
-                                }
-                                if (!selectedPerson.isHidden) selectedPersonId = null
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Choose face model", modifier = Modifier.size(18.dp))
                             }
-                        )
+                        }
+                        DropdownMenu(
+                            expanded = modelMenuExpanded,
+                            onDismissRequest = { modelMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Buffalo-L") },
+                                onClick = { setEngine(BuffaloLFaceEngine.ENGINE_ID) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Ente") },
+                                onClick = { setEngine(EnteFaceConstants.ENGINE_ID) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Refresh people") },
+                                onClick = { modelMenuExpanded = false; reload() }
+                            )
+                        }
                     }
                 }
             }
-
-            IconButton(onClick = { reload() }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh people and pets")
+        } else {
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 5.dp),
+                shape = RoundedCornerShape(30.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = { selectedPersonId = null; detailSearchQuery = ""; showAvatarPicker = false },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back to people")
+                    }
+                    Box(
+                        Modifier.width(1.dp).height(22.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f))
+                    )
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.padding(start = 9.dp).size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Box(
+                        modifier = Modifier.weight(1f).padding(start = 8.dp, end = 2.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        val searchedPersonName = selectedPerson
+                            ?.takeIf { it.isNamed && it.displayName.isNotBlank() }
+                            ?.displayName
+                        if (detailSearchQuery.isBlank()) {
+                            Text(
+                                "Search in ${searchedPersonName ?: "person"}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        BasicTextField(
+                            value = detailSearchQuery,
+                            onValueChange = { detailSearchQuery = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    if (selectedPerson != null) {
+                        val person = selectedPerson
+                        Box {
+                            IconButton(onClick = { personMenuExpanded = true }, modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Person options")
+                            }
+                            DropdownMenu(
+                                expanded = personMenuExpanded,
+                                onDismissRequest = { personMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Merge with someone") },
+                                    leadingIcon = { Icon(Icons.Default.MergeType, contentDescription = null) },
+                                    onClick = { personMenuExpanded = false; personToMerge = person }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(if (person.isHidden) "Restore person" else "Hide person") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (person.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        personMenuExpanded = false
+                                        reloadScope.launch(Dispatchers.IO) {
+                                            store.setPersonHidden(person.id, !person.isHidden)
+                                            reload()
+                                        }
+                                        if (!person.isHidden) selectedPersonId = null
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
         if (selectedPersonId == null) {
-            // Search Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
-                placeholder = { Text("Search people") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear search")
-                        }
-                    }
-                }
-            )
-
-            // Engine Selector Chips
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = selectedEngineId == BuffaloLFaceEngine.ENGINE_ID,
-                    onClick = { setEngine(BuffaloLFaceEngine.ENGINE_ID) },
-                    label = { Text("Buffalo_L (Default)") },
-                    leadingIcon = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) {
-                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    } else null
-                )
-                FilterChip(
-                    selected = selectedEngineId == EnteFaceConstants.ENGINE_ID,
-                    onClick = { setEngine(EnteFaceConstants.ENGINE_ID) },
-                    label = { Text("Ente (YOLO5Face)") },
-                    leadingIcon = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) {
-                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    } else null
-                )
-            }
-
             // Tabs: People, Review & Hidden, Pets
             TabRow(
                 selectedTabIndex = selectedTab,
@@ -304,16 +415,13 @@ fun PeopleScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("People (${visiblePeople.size})") },
+                    text = { Text("People") },
                     icon = { Icon(Icons.Default.Face, contentDescription = null) }
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = {
-                        val reviewBadge = pendingSuggestions.size + hiddenPeople.size
-                        Text(if (reviewBadge > 0) "Review ($reviewBadge)" else "Review")
-                    },
+                    text = { Text("Review") },
                     icon = { Icon(Icons.Default.Rule, contentDescription = null) }
                 )
                 Tab(
@@ -386,11 +494,11 @@ fun PeopleScreen(
                         }
                     } else {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 104.dp),
+                            columns = GridCells.Fixed(3),
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 28.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(20.dp)
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(18.dp)
                         ) {
                             gridItems(matchingPeople, key = { it.id }) { person ->
                                 Column(
@@ -398,50 +506,20 @@ fun PeopleScreen(
                                         .fillMaxWidth()
                                         .clickable { selectedPersonId = person.id },
                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Box(contentAlignment = Alignment.BottomEnd) {
-                                        PersonAvatar(person = person, size = 88.dp)
-
-                                        // Subtle compact pencil action for instant naming/renaming
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                            modifier = Modifier
-                                                .size(26.dp)
-                                                .clickable {
-                                                    renamePersonId = person.id
-                                                    renameValue = person.displayName
-                                                }
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    Icons.Default.Edit,
-                                                    contentDescription = "Edit name",
-                                                    modifier = Modifier.size(13.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurface
-                                                )
-                                            }
-                                        }
+                                    PersonAvatar(person = person, size = 94.dp)
+                                    if (person.isNamed && person.displayName.isNotBlank()) {
+                                        Text(
+                                            text = person.displayName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
-
-                                    // Display name (never "Unknown")
-                                    val label = if (person.isNamed) person.displayName else "Add name"
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (person.isNamed) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (person.isNamed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${person.faceCount} ${if (person.faceCount == 1) "photo" else "photos"}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                                    )
                                 }
                             }
                         }
@@ -614,52 +692,168 @@ fun PeopleScreen(
                 }
             }
         } else {
-            // Selected Person Details View
-            if (detailMedia.isEmpty()) {
-                Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "No photos in this group",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
+            if (selectedPerson == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 8.dp, bottom = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                val person = selectedPerson
+                // Naming and avatar selection are available only on this person's page.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    gridItems(detailMedia, key = { it.uri }) { item ->
-                        Box {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(Uri.parse(item.uri))
-                                    .crossfade(false)
-                                    .build(),
-                                contentDescription = item.name,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(1f)
-                                    .clickable { onOpenMedia(item) },
-                                contentScale = ContentScale.Crop
+                    Box(contentAlignment = Alignment.BottomEnd) {
+                        PersonAvatar(person = person, size = 104.dp)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clickable { showAvatarPicker = true }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.CameraAlt,
+                                    contentDescription = "Choose avatar",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        if (person.isNamed && person.displayName.isNotBlank()) {
+                            Text(
+                                text = person.displayName,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            // Menu button for photo-level action
-                            IconButton(
-                                onClick = { selectedMediaForAction = item },
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(32.dp)
-                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape)
-                            ) {
-                                Icon(Icons.Default.MoreHoriz, contentDescription = "Photo options", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(16.dp))
+                        }
+                        Text(
+                            text = "${detailMedia.size} ${if (detailMedia.size == 1) "photo" else "photos"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            renamePersonId = person.id
+                            renameValue = person.displayName
+                        }
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit person name")
+                    }
+                }
+
+                if (visibleDetailMedia.isEmpty()) {
+                    Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            if (detailSearchQuery.isBlank()) "No photos in this group" else "No matching photos",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 8.dp, bottom = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        gridItems(visibleDetailMedia, key = { it.uri }) { item ->
+                            Box {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(Uri.parse(item.uri))
+                                        .crossfade(false)
+                                        .build(),
+                                    contentDescription = item.name,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f)
+                                        .clickable { onOpenMedia(item) },
+                                    contentScale = ContentScale.Crop
+                                )
+                                IconButton(
+                                    onClick = { selectedMediaForAction = item },
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(32.dp)
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape)
+                                ) {
+                                    Icon(
+                                        Icons.Default.MoreHoriz,
+                                        contentDescription = "Photo options",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    // Avatar picker: choose a photo already belonging to this person.
+    if (showAvatarPicker && selectedPerson != null) {
+        val avatarPerson = selectedPerson
+        AlertDialog(
+            onDismissRequest = { showAvatarPicker = false },
+            title = { Text("Choose profile photo") },
+            text = {
+                if (detailMedia.isEmpty()) {
+                    Text("There are no photos available for this person yet.")
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp),
+                        contentPadding = PaddingValues(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        gridItems(detailMedia, key = { it.uri }) { photo ->
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(Uri.parse(photo.uri))
+                                    .crossfade(false)
+                                    .build(),
+                                contentDescription = photo.name,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        showAvatarPicker = false
+                                        reloadScope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                store.setPersonCover(avatarPerson.id, photo.uri)
+                                            }
+                                            reload()
+                                        }
+                                    }
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAvatarPicker = false }) { Text("Cancel") }
+            }
+        )
     }
 
     // Rename Person Dialog

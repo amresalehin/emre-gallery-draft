@@ -1187,10 +1187,6 @@ fun OverviewFacePortrait(
 
     val displayName = face.displayName.trim()
     val isNamed = displayName.isNotBlank() && !displayName.equals("Unknown", ignoreCase = true)
-    val width = kotlin.math.max(0, (face.boxRight - face.boxLeft).toInt())
-    val height = kotlin.math.max(0, (face.boxBottom - face.boxTop).toInt())
-    val boxText = if (width > 0 && height > 0) "${width}×${height}" else null
-
     val faceBounds = if (face.boxRight > face.boxLeft && face.boxBottom > face.boxTop) {
         RectF(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
     } else null
@@ -1214,26 +1210,19 @@ fun OverviewFacePortrait(
                 engineId = face.engineId,
                 bounds = if (portraitUri == face.mediaUri && portraitIndex == face.faceIndex) faceBounds else null,
                 fallbackText = if (isNamed) displayName else null,
-                contentDescription = if (isNamed) displayName else "Unnamed face",
+                contentDescription = if (isNamed) displayName else null,
                 modifier = Modifier.fillMaxSize().clip(CircleShape)
             )
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = if (isNamed) displayName else "Name this person",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (isNamed) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (isNamed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center
-        )
-        if (boxText != null) {
+        if (isNamed) {
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = boxText,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                text = displayName,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
             )
         }
@@ -1329,7 +1318,8 @@ fun ActionsTabContent(
     onRescanPhoto: (() -> Unit)? = null,
     onAddPersonClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    onFaceClick: ((DetectedMediaFace) -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val hasPeople = detectedFaces.isNotEmpty()
@@ -1381,7 +1371,8 @@ fun ActionsTabContent(
                         detectedFaces.forEach { face ->
                             ActionFacePortrait(
                                 face = face,
-                                onRename = { onRenameFaceClick(face) }
+                                onRename = { onRenameFaceClick(face) },
+                                onClick = { onFaceClick?.invoke(face) }
                             )
                         }
                     }
@@ -1612,7 +1603,8 @@ fun ActionsTabContent(
 fun ActionFacePortrait(
     face: DetectedMediaFace,
     onRename: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     val portraitUri = face.portraitMediaUri ?: face.mediaUri
     val portraitIndex = face.portraitFaceIndex ?: face.faceIndex
@@ -1631,6 +1623,7 @@ fun ActionFacePortrait(
             modifier = Modifier
                 .size(48.dp)
                 .graphicsLayer { alpha = 0.88f }
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
         ) {
             FaceCropThumbnail(
                 mediaUri = portraitUri,

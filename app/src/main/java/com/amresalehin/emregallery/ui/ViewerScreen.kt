@@ -107,7 +107,8 @@ fun ViewerScreen(
     onAddTo: () -> Unit,
     onOpenNeighbor: (MediaItem) -> Unit,
     onOpenMap: () -> Unit,
-    transitionProgress: Animatable<Float, AnimationVector1D> = remember { Animatable(0f) }
+    transitionProgress: Animatable<Float, AnimationVector1D> = remember { Animatable(0f) },
+    onOpenPerson: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -538,7 +539,11 @@ fun ViewerScreen(
                     onAddTag = onAddTag,
                     isBin = isBin,
                     defaultOcrLanguages = defaultOcrLanguages,
-                    defaultOcrModel = defaultOcrModel
+                    defaultOcrModel = defaultOcrModel,
+                    onOpenPerson = { personId ->
+                        if (showDetails) onToggleDetails()
+                        onOpenPerson(personId)
+                    }
                 )
             }
         }

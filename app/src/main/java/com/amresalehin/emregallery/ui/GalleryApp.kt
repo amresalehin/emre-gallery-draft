@@ -91,6 +91,7 @@ fun GalleryApp() {
     var submittedQuery by remember { mutableStateOf("") }
     var searchVideosOnly by remember { mutableStateOf(false) }
     var albumFilter by remember { mutableStateOf<String?>(null) }
+    var requestedPersonId by remember { mutableStateOf<String?>(null) }
     val favourites by prefs.favourites.collectAsStateWithLifecycle(initialValue = emptySet())
     val hidden by prefs.hidden.collectAsStateWithLifecycle(initialValue = emptySet())
     val inBin by prefs.bin.collectAsStateWithLifecycle(initialValue = emptySet())
@@ -797,7 +798,8 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null); "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        onFilter = { when (it) { "Map" -> navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null); "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { requestedPersonId = null; albumFilter = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        onOpenPerson = { personId -> requestedPersonId = personId; albumFilter = null; navigateTo(Destination.PEOPLE) },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -957,7 +959,9 @@ fun GalleryApp() {
                             media = peopleMedia,
                             onBack = { performBackNavigation() },
                             onOpenMedia = { item -> openMediaInViewer(item, peopleMedia) },
-                            onOpenIndexStatus = { navigateTo(Destination.INDEXING_STATUS) }
+                            onOpenIndexStatus = { navigateTo(Destination.INDEXING_STATUS) },
+                            initialPersonId = requestedPersonId,
+                            onInitialPersonOpened = { requestedPersonId = null }
                         )
                     }
                     Destination.MAP -> {
@@ -1175,6 +1179,7 @@ fun GalleryApp() {
                     showDetails = false
                     navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = currentItem)
                 },
+                onOpenPerson = { personId -> requestedPersonId = personId; navigateTo(Destination.PEOPLE) },
                 transitionProgress = viewerTransitionProgress
             )
         }
