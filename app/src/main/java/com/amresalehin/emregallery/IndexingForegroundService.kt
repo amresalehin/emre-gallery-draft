@@ -16,7 +16,6 @@ import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
-import com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory
 import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceIndexingRepository
@@ -36,16 +35,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * Owns long-running indexing jobs. No indexing coroutine is tied to a Compose lifecycle.
- * Completed media are checkpointed to the OCR cache / face-index database, so a later run
- * naturally continues with remaining media.
- */
+/** Owns long-running indexing jobs independently of Compose lifecycles. */
 class IndexingForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var taskJob: Job? = null
+    private var taskGeneration = 0L
     private val pauseSignal = MutableStateFlow(false)
     private val prefs by lazy { getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE) }
+    private var lastNotificationAt = 0L
+    private var lastNotificationSignature = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -61,45 +59,34 @@ class IndexingForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_STATUS
         if (action == ACTION_CANCEL && taskJob != null) {
-            taskJob?.cancel()
-            taskJob = null
-            pauseSignal.value = false
+            taskGeneration++
+            taskJob?.cancel(); taskJob = null; pauseSignal.value = false
             updateState(running = false, paused = false, error = "Cancelled")
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
             return START_NOT_STICKY
         }
         if (action == ACTION_PAUSE) {
-            pauseSignal.value = true
-            updateState(paused = true)
-            refreshNotification("Paused")
+            pauseSignal.value = true; updateState(paused = true); refreshNotification("Paused")
             return START_NOT_STICKY
         }
         if (action == ACTION_RESUME) {
-            pauseSignal.value = false
-            updateState(paused = false)
-            refreshNotification("Resuming")
+            pauseSignal.value = false; updateState(paused = false); refreshNotification("Resuming")
             return START_NOT_STICKY
         }
         if (action == ACTION_STATUS) {
-            // Reconcile stale persisted state after process death without restarting work.
-            if (taskJob?.isActive != true) {
-                updateState(running = false, paused = false)
-                stopSelf()
-            }
+            if (taskJob?.isActive != true) { updateState(running = false, paused = false); stopSelf() }
             return START_NOT_STICKY
         }
 
         val title = when (action) {
-            ACTION_START_OCR -> "OCR indexing"
-            ACTION_START_FACE -> "Face indexing"
-            ACTION_START_LOCATION -> "Map location indexing"
-            ACTION_DOWNLOAD_MODEL -> "Downloading face model"
+            ACTION_START_OCR -> "OCR indexing"; ACTION_START_FACE -> "Face indexing"
+            ACTION_START_LOCATION -> "Map location indexing"; ACTION_DOWNLOAD_MODEL -> "Downloading face model"
             else -> "Media indexing"
         }
         startForegroundCompat(buildNotification(title, "Starting…", 0, 0))
         if (taskJob?.isActive == true) return START_NOT_STICKY
 
+        val generation = ++taskGeneration
         taskJob = serviceScope.launch {
             try {
                 when (action) {
@@ -109,13 +96,11 @@ class IndexingForegroundService : Service() {
                         intent?.getStringExtra(EXTRA_MODEL) ?: "fast"
                     )
                     ACTION_START_FACE -> runFace(
-                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
-                        engineId = intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID,
-                        retryFailedOnly = intent?.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false) == true
+                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
+                        intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID,
+                        intent?.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false) == true
                     )
-                    ACTION_START_LOCATION -> runLocation(
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
-                    )
+                    ACTION_START_LOCATION -> runLocation(intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true)
                     ACTION_DOWNLOAD_MODEL -> downloadModel(
                         intent?.getBooleanExtra(EXTRA_FORCE, false) == true,
                         intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
@@ -123,15 +108,15 @@ class IndexingForegroundService : Service() {
                 }
                 updateState(running = false, paused = false, error = null)
             } catch (cancelled: CancellationException) {
-                updateState(running = false, paused = false, error = "Cancelled")
-                throw cancelled
+                updateState(running = false, paused = false, error = "Cancelled"); throw cancelled
             } catch (e: Exception) {
                 updateState(running = false, paused = false, error = e.localizedMessage ?: "Indexing failed")
             } finally {
-                taskJob = null
-                pauseSignal.value = false
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                // An obsolete coroutine must never clear or stop its replacement.
+                if (taskGeneration == generation) {
+                    taskJob = null; pauseSignal.value = false
+                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
+                }
             }
         }
         return START_NOT_STICKY
@@ -142,223 +127,121 @@ class IndexingForegroundService : Service() {
         val photos = loadPhotos()
         if (rescanAll) withContext(Dispatchers.IO) { TesseractOcr.clearCachedResults(this@IndexingForegroundService) }
         val pending = photos.filterNot { TesseractOcr.hasCachedResult(this, Uri.parse(it.uri)) }
-        updateState(task = TASK_OCR, running = true, paused = false, processed = photos.size - pending.size, total = photos.size, error = null)
-        postProgress("OCR indexing", "Preparing ${pending.size} images (${model.shortName})", photos.size - pending.size, photos.size)
         var completed = photos.size - pending.size
+        updateState(task = TASK_OCR, running = true, paused = false, processed = completed, total = photos.size, error = null)
+        postProgress("OCR indexing", "Preparing ${pending.size} images (${model.shortName})", completed, photos.size, true)
         for (item in pending) {
-            awaitResume()
-            currentCoroutineContext().ensureActive()
+            awaitResume(); currentCoroutineContext().ensureActive()
             try {
                 val text = TesseractOcr.recognize(this, Uri.parse(item.uri), languages, model)
                 TesseractOcr.saveCachedResult(this, Uri.parse(item.uri), text)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // Failed images are attempted once per run; successful results remain checkpointed.
-            }
+            } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { }
             completed++
             updateState(processed = completed, total = photos.size)
             postProgress("OCR indexing", "Processed $completed of ${photos.size} images (${model.title})", completed, photos.size)
         }
     }
 
-    private suspend fun runFace(
-        rescanAll: Boolean,
-        engineId: String = BuffaloLFaceEngine.ENGINE_ID,
-        retryFailedOnly: Boolean = false
-    ) {
+    private suspend fun runFace(rescanAll: Boolean, engineId: String = BuffaloLFaceEngine.ENGINE_ID, retryFailedOnly: Boolean = false) {
         val photos = loadPhotos()
         val store = FaceClusterStore(applicationContext)
-        val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
-
-        if (rescanAll) {
-            withContext(Dispatchers.IO) {
-                // Reset indexed status for selected engine to reprocess photos without wiping identities
-                store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId))
-            }
-        }
-
-        val targetUris = if (retryFailedOnly) {
-            store.getFailedMedia(engineId).map { it.first }.toSet()
-        } else null
-
+        val factory = FaceEngineRegistry.getFactory(engineId) ?: error("Unknown face engine: $engineId")
+        if (rescanAll) withContext(Dispatchers.IO) { store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId)) }
+        val targetUris = if (retryFailedOnly) store.getFailedMedia(engineId).map { it.first }.toSet() else null
         val relevantPhotos = if (targetUris != null) photos.filter { it.uri in targetUris } else photos
         val alreadyDone = if (retryFailedOnly) 0 else store.indexedMediaCount(relevantPhotos.map { it.uri }, engineId = engineId)
+        val initialFaces = store.indexedFaceCount(engineId)
+        val initialFailures = store.failedMediaCount(engineId)
 
-        updateState(
-            task = TASK_FACE,
-            running = true,
-            paused = false,
-            processed = alreadyDone,
-            total = relevantPhotos.size,
-            faces = store.indexedFaceCount(engineId),
-            failed = store.failedMediaCount(engineId),
-            engineId = engineId,
-            currentItemName = "Initializing ${factory.displayName}…",
-            currentItemStatus = "",
-            groupingStatus = "",
-            detectionState = "PENDING",
-            detectionProcessed = 0,
-            detectionTotal = relevantPhotos.size,
-            embeddingState = "PENDING",
-            embeddingProcessed = 0,
-            embeddingTotal = relevantPhotos.size,
-            clusteringState = "PENDING",
-            clusteringProcessed = 0,
-            clusteringTotal = relevantPhotos.size,
-            error = null
-        )
-        postProgress("Face indexing", "Preparing ${factory.displayName}", alreadyDone, relevantPhotos.size)
+        updateState(task = TASK_FACE, running = true, paused = false, processed = alreadyDone, total = relevantPhotos.size,
+            faces = initialFaces, failed = initialFailures, engineId = engineId, currentItemName = "Initializing ${factory.displayName}…",
+            currentItemStatus = "", groupingStatus = "", detectionState = "PENDING", detectionProcessed = 0,
+            detectionTotal = relevantPhotos.size, embeddingState = "PENDING", embeddingProcessed = 0,
+            embeddingTotal = relevantPhotos.size, clusteringState = "PENDING", clusteringProcessed = 0,
+            clusteringTotal = relevantPhotos.size, error = null)
+        postProgress("Face indexing", "Preparing ${factory.displayName}", alreadyDone, relevantPhotos.size, true)
 
         FaceIndexingRepository(applicationContext, factory).indexNewMedia(
-            media = relevantPhotos,
-            store = store,
+            media = relevantPhotos, store = store,
             detectionThreshold = FaceRecognitionSettings.detectionConfidence(applicationContext, engineId),
             recognitionDistance = FaceRecognitionSettings.recognitionDistance(applicationContext, engineId),
-            forceRescanUris = if (retryFailedOnly) targetUris ?: emptySet() else emptySet(),
-            targetUrisOnly = targetUris,
+            forceRescanUris = if (retryFailedOnly) targetUris ?: emptySet() else emptySet(), targetUrisOnly = targetUris,
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
             onProgress = { p ->
                 val done = (alreadyDone + p.processed).coerceAtMost(relevantPhotos.size)
-                updateState(
-                    processed = done,
-                    total = relevantPhotos.size,
-                    faces = store.indexedFaceCount(engineId),
-                    failed = store.failedMediaCount(relevantPhotos.map { it.uri }, engineId),
-                    engineId = engineId,
-                    currentItemName = p.currentItemName,
-                    currentItemStatus = p.currentItemStatus,
-                    groupingStatus = p.groupingStatus,
-                    detectionState = p.detectionStage.state.name,
-                    detectionProcessed = p.detectionStage.processed,
-                    detectionTotal = p.detectionStage.total,
-                    embeddingState = p.embeddingStage.state.name,
-                    embeddingProcessed = p.embeddingStage.processed,
-                    embeddingTotal = p.embeddingStage.total,
-                    clusteringState = p.clusteringStage.state.name,
-                    clusteringProcessed = p.clusteringStage.processed,
-                    clusteringTotal = p.clusteringStage.total
-                )
+                val knownFaces = initialFaces + p.facesFound
+                val knownFailures = (initialFailures + p.failed).coerceAtLeast(0)
+                updateState(processed = done, total = relevantPhotos.size, faces = knownFaces, failed = knownFailures,
+                    engineId = engineId, currentItemName = p.currentItemName, currentItemStatus = p.currentItemStatus,
+                    groupingStatus = p.groupingStatus, detectionState = p.detectionStage.state.name,
+                    detectionProcessed = p.detectionStage.processed, detectionTotal = p.detectionStage.total,
+                    embeddingState = p.embeddingStage.state.name, embeddingProcessed = p.embeddingStage.processed,
+                    embeddingTotal = p.embeddingStage.total, clusteringState = p.clusteringStage.state.name,
+                    clusteringProcessed = p.clusteringStage.processed, clusteringTotal = p.clusteringStage.total)
                 val targetName = if (p.currentItemName.isNotBlank()) " · ${p.currentItemName}" else ""
                 val statusSnippet = if (p.currentItemStatus.isNotBlank()) " (${p.currentItemStatus})" else ""
                 val groupingSnippet = if (p.groupingStatus.isNotBlank()) " · ${p.groupingStatus}" else ""
-                postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · ${store.indexedFaceCount(engineId)} faces$targetName$statusSnippet$groupingSnippet", done, relevantPhotos.size)
+                postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · $knownFaces faces$targetName$statusSnippet$groupingSnippet", done, relevantPhotos.size)
             }
         )
     }
 
     private suspend fun downloadModel(force: Boolean, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
-        val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
-
-        updateState(
-            task = TASK_MODEL,
-            running = true,
-            paused = false,
-            processed = 0,
-            total = 100,
-            bytes = 0L,
-            bytesTotal = 0L,
-            speed = 0L,
-            eta = 0L,
-            engineId = engineId,
-            error = null
-        )
-        postProgress("Downloading face model", "Starting download for ${factory.displayName}", 0, 100)
-
+        val factory = FaceEngineRegistry.getFactory(engineId) ?: error("Unknown face engine: $engineId")
+        updateState(task = TASK_MODEL, running = true, paused = false, processed = 0, total = 100,
+            bytes = 0L, bytesTotal = 0L, speed = 0L, eta = 0L, engineId = engineId, error = null)
+        postProgress("Downloading face model", "Starting download for ${factory.displayName}", 0, 100, true)
         FaceIndexingRepository(applicationContext, factory).downloadModel(
             force = force,
             onProgress = { received, total ->
-                updateState(
-                    bytes = received,
-                    bytesTotal = total,
-                    processed = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0,
-                    total = 100,
-                    engineId = engineId
-                )
-                postProgress("Downloading face model", "${received / (1024 * 1024)} MB of ${(total / (1024 * 1024)).coerceAtLeast(1)} MB", if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0, 100)
+                val progress = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0
+                updateState(bytes = received, bytesTotal = total, processed = progress, total = 100, engineId = engineId)
+                postProgress("Downloading face model", "${received / (1024 * 1024)} MB of ${(total / (1024 * 1024)).coerceAtLeast(1)} MB", progress, 100)
             },
             onStage = { stage ->
                 updateState(stage = stage, engineId = engineId)
                 postProgress("Preparing face model", when (stage) {
-                    "connecting" -> "Connecting to model repository…"
-                    "verifying" -> "Verifying cryptographic checksums…"
-                    "extracting" -> "Extracting model archive…"
-                    "installing" -> "Installing model files…"
-                    "ready" -> "${factory.displayName} ready"
-                    else -> "Preparing model…"
-                }, -1, 0)
+                    "connecting" -> "Connecting to model repository…"; "verifying" -> "Verifying model artifacts…"
+                    "extracting" -> "Extracting model archive…"; "installing" -> "Installing model files…"
+                    "ready" -> "${factory.displayName} ready"; else -> "Preparing model…"
+                }, -1, 0, true)
             },
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
             onDetailedProgress = { detail ->
-                updateState(
-                    bytes = detail.bytesReceived,
-                    bytesTotal = detail.totalBytes,
-                    speed = detail.speedBytesPerSec,
-                    eta = detail.etaSeconds,
-                    stage = detail.stage,
+                updateState(bytes = detail.bytesReceived, bytesTotal = detail.totalBytes, speed = detail.speedBytesPerSec,
+                    eta = detail.etaSeconds, stage = detail.stage,
                     processed = if (detail.totalBytes > 0) (detail.bytesReceived * 100 / detail.totalBytes).toInt().coerceIn(0, 100) else 0,
-                    total = 100,
-                    engineId = engineId
-                )
+                    total = 100, engineId = engineId)
             }
         )
     }
 
-    private suspend fun awaitResume() {
-        pauseSignal.first { paused -> !paused }
-        currentCoroutineContext().ensureActive()
-    }
+    private suspend fun awaitResume() { pauseSignal.first { !it }; currentCoroutineContext().ensureActive() }
 
     private suspend fun loadPhotos(): List<MediaItem> {
         val prefsRepo = PreferencesRepository(applicationContext)
         val hiddenUris = runCatching { prefsRepo.hidden.first() }.getOrDefault(emptySet())
         val binUris = runCatching { prefsRepo.bin.first() }.getOrDefault(emptySet())
-        return MediaRepository(contentResolver).loadMedia().filterNot {
-            it.isVideo || it.isTrashed || it.uri in hiddenUris || it.uri in binUris
-        }
+        return MediaRepository(contentResolver).loadMedia().filterNot { it.isVideo || it.isTrashed || it.uri in hiddenUris || it.uri in binUris }
     }
 
     private fun updateState(
-        task: String? = null,
-        running: Boolean? = null,
-        paused: Boolean? = null,
-        processed: Int? = null,
-        total: Int? = null,
-        faces: Int? = null,
-        failed: Int? = null,
-        stage: String? = null,
-        bytes: Long? = null,
-        bytesTotal: Long? = null,
-        speed: Long? = null,
-        eta: Long? = null,
-        engineId: String? = null,
-        currentItemName: String? = null,
-        currentItemStatus: String? = null,
-        groupingStatus: String? = null,
-        detectionState: String? = null,
-        detectionProcessed: Int? = null,
-        detectionTotal: Int? = null,
-        embeddingState: String? = null,
-        embeddingProcessed: Int? = null,
-        embeddingTotal: Int? = null,
-        clusteringState: String? = null,
-        clusteringProcessed: Int? = null,
-        clusteringTotal: Int? = null,
-        error: String? = null
+        task: String? = null, running: Boolean? = null, paused: Boolean? = null, processed: Int? = null,
+        total: Int? = null, faces: Int? = null, failed: Int? = null, stage: String? = null,
+        bytes: Long? = null, bytesTotal: Long? = null, speed: Long? = null, eta: Long? = null,
+        engineId: String? = null, currentItemName: String? = null, currentItemStatus: String? = null,
+        groupingStatus: String? = null, detectionState: String? = null, detectionProcessed: Int? = null,
+        detectionTotal: Int? = null, embeddingState: String? = null, embeddingProcessed: Int? = null,
+        embeddingTotal: Int? = null, clusteringState: String? = null, clusteringProcessed: Int? = null,
+        clusteringTotal: Int? = null, error: String? = null
     ) {
         prefs.edit().apply {
-            if (task != null) putString(KEY_TASK, task)
-            if (running != null) putBoolean(KEY_RUNNING, running)
-            if (paused != null) putBoolean(KEY_PAUSED, paused)
-            if (processed != null) putInt(KEY_PROCESSED, processed)
-            if (total != null) putInt(KEY_TOTAL, total)
-            if (faces != null) putInt(KEY_FACES, faces)
-            if (failed != null) putInt(KEY_FAILED, failed)
-            if (stage != null) putString(KEY_STAGE, stage)
-            if (bytes != null) putLong(KEY_BYTES, bytes)
-            if (bytesTotal != null) putLong(KEY_BYTES_TOTAL, bytesTotal)
-            if (speed != null) putLong(KEY_SPEED, speed)
-            if (eta != null) putLong(KEY_ETA, eta)
+            if (task != null) putString(KEY_TASK, task); if (running != null) putBoolean(KEY_RUNNING, running)
+            if (paused != null) putBoolean(KEY_PAUSED, paused); if (processed != null) putInt(KEY_PROCESSED, processed)
+            if (total != null) putInt(KEY_TOTAL, total); if (faces != null) putInt(KEY_FACES, faces)
+            if (failed != null) putInt(KEY_FAILED, failed); if (stage != null) putString(KEY_STAGE, stage)
+            if (bytes != null) putLong(KEY_BYTES, bytes); if (bytesTotal != null) putLong(KEY_BYTES_TOTAL, bytesTotal)
+            if (speed != null) putLong(KEY_SPEED, speed); if (eta != null) putLong(KEY_ETA, eta)
             if (engineId != null) putString(KEY_ENGINE_ID, engineId)
             if (currentItemName != null) putString(KEY_CURRENT_ITEM_NAME, currentItemName)
             if (currentItemStatus != null) putString(KEY_CURRENT_ITEM_STATUS, currentItemStatus)
@@ -372,16 +255,18 @@ class IndexingForegroundService : Service() {
             if (clusteringState != null) putString(KEY_CLUSTERING_STATE, clusteringState)
             if (clusteringProcessed != null) putInt(KEY_CLUSTERING_PROCESSED, clusteringProcessed)
             if (clusteringTotal != null) putInt(KEY_CLUSTERING_TOTAL, clusteringTotal)
-            putString(KEY_ERROR, error)
-            apply()
+            putString(KEY_ERROR, error); apply()
         }
     }
 
-    private fun postProgress(title: String, message: String, progress: Int, max: Int) {
+    private fun postProgress(title: String, message: String, progress: Int, max: Int, force: Boolean = false) {
         updateState()
-        val notification = buildNotification(title, message, progress, max)
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, notification)
+        val now = System.currentTimeMillis()
+        val signature = "$title|$message|$progress|$max"
+        if (!force && signature == lastNotificationSignature) return
+        if (!force && now - lastNotificationAt < 350L) return
+        lastNotificationAt = now; lastNotificationSignature = signature
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(title, message, progress, max))
     }
 
     private suspend fun runLocation(rescanAll: Boolean) {
@@ -391,100 +276,60 @@ class IndexingForegroundService : Service() {
         val cached = withContext(Dispatchers.IO) { cache.loadAll() }
         val pending = if (rescanAll) photos else photos.filterNot { cached.containsKey(it.uri) }
         var locatedCount = cached.values.count { it.point != null }
-        val doneCount = photos.size - pending.size
-        updateState(task = TASK_LOCATION, running = true, paused = false, processed = doneCount, total = photos.size, faces = locatedCount, error = null)
-        postProgress("Map location indexing", "Scanning ${pending.size} photos for GPS geotags", doneCount, photos.size)
-        var completed = doneCount
+        var completed = photos.size - pending.size
+        updateState(task = TASK_LOCATION, running = true, paused = false, processed = completed, total = photos.size, faces = locatedCount, error = null)
+        postProgress("Map location indexing", "Scanning ${pending.size} photos for GPS geotags", completed, photos.size, true)
         for (item in pending) {
-            awaitResume()
-            currentCoroutineContext().ensureActive()
-            val point = withContext(Dispatchers.IO) {
-                com.amresalehin.emregallery.data.PhotoMapLocationCache.extractLocation(applicationContext, item.uri)
-            }
-            withContext(Dispatchers.IO) {
-                cache.save(item.uri, point)
-            }
+            awaitResume(); currentCoroutineContext().ensureActive()
+            val point = withContext(Dispatchers.IO) { com.amresalehin.emregallery.data.PhotoMapLocationCache.extractLocation(applicationContext, item.uri) }
+            withContext(Dispatchers.IO) { cache.save(item.uri, point) }
             if (point != null) locatedCount++
             completed++
             updateState(processed = completed, total = photos.size, faces = locatedCount)
-            if (completed % 8 == 0 || completed == photos.size) {
-                postProgress("Map location indexing", "Scanned $completed of ${photos.size} photos · $locatedCount geotagged", completed, photos.size)
-            }
+            postProgress("Map location indexing", "Scanned $completed of ${photos.size} photos · $locatedCount geotagged", completed, photos.size, completed == photos.size)
         }
     }
 
     private fun refreshNotification(message: String) {
         val title = when (prefs.getString(KEY_TASK, "")) {
-            TASK_OCR -> "OCR indexing"
-            TASK_FACE -> "Face indexing"
-            TASK_LOCATION -> "Map location indexing"
-            TASK_MODEL -> "Downloading face model"
-            else -> "Media indexing"
+            TASK_OCR -> "OCR indexing"; TASK_FACE -> "Face indexing"; TASK_LOCATION -> "Map location indexing"
+            TASK_MODEL -> "Downloading face model"; else -> "Media indexing"
         }
-        val p = prefs.getInt(KEY_PROCESSED, 0)
-        val t = prefs.getInt(KEY_TOTAL, 0)
+        val p = prefs.getInt(KEY_PROCESSED, 0); val t = prefs.getInt(KEY_TOTAL, 0)
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(title, message, p, t))
     }
 
     private fun startForegroundCompat(notification: Notification) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        else startForeground(NOTIFICATION_ID, notification)
     }
 
     private fun buildNotification(title: String, message: String, progress: Int, max: Int): Notification {
-        val b = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle(title).setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setOngoing(true).setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-        if (progress >= 0 && max > 0) b.setProgress(max, progress.coerceIn(0, max), false)
-        else b.setProgress(0, 0, true)
+        val b = NotificationCompat.Builder(this, CHANNEL_ID).setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle(title).setContentText(message).setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS).setOngoing(true).setOnlyAlertOnce(true).setPriority(NotificationCompat.PRIORITY_LOW)
+        if (progress >= 0 && max > 0) b.setProgress(max, progress.coerceIn(0, max), false) else b.setProgress(0, 0, true)
         return b.build()
     }
 
-    override fun onDestroy() {
-        serviceScope.cancel()
-        super.onDestroy()
-    }
+    override fun onDestroy() { serviceScope.cancel(); super.onDestroy() }
 
     companion object {
         const val STATE_PREFS = "indexing_service_state"
-        const val KEY_TASK = "task"
-        const val KEY_RUNNING = "running"
-        const val KEY_PAUSED = "paused"
-        const val KEY_PROCESSED = "processed"
-        const val KEY_TOTAL = "total"
-        const val KEY_FACES = "faces"
-        const val KEY_FAILED = "failed"
-        const val KEY_STAGE = "stage"
-        const val KEY_BYTES = "bytes"
-        const val KEY_BYTES_TOTAL = "bytes_total"
-        const val KEY_SPEED = "speed"
-        const val KEY_ETA = "eta"
-        const val KEY_CURRENT_ITEM_NAME = "current_item_name"
-        const val KEY_CURRENT_ITEM_STATUS = "current_item_status"
-        const val KEY_GROUPING_STATUS = "grouping_status"
-        const val KEY_DETECTION_STATE = "detection_state"
-        const val KEY_DETECTION_PROCESSED = "detection_processed"
-        const val KEY_DETECTION_TOTAL = "detection_total"
-        const val KEY_EMBEDDING_STATE = "embedding_state"
-        const val KEY_EMBEDDING_PROCESSED = "embedding_processed"
-        const val KEY_EMBEDDING_TOTAL = "embedding_total"
-        const val KEY_CLUSTERING_STATE = "clustering_state"
-        const val KEY_CLUSTERING_PROCESSED = "clustering_processed"
-        const val KEY_CLUSTERING_TOTAL = "clustering_total"
-        const val KEY_ERROR = "error"
-        const val KEY_ENGINE_ID = "engine_id"
-
+        const val KEY_TASK = "task"; const val KEY_RUNNING = "running"; const val KEY_PAUSED = "paused"
+        const val KEY_PROCESSED = "processed"; const val KEY_TOTAL = "total"; const val KEY_FACES = "faces"
+        const val KEY_FAILED = "failed"; const val KEY_STAGE = "stage"; const val KEY_BYTES = "bytes"
+        const val KEY_BYTES_TOTAL = "bytes_total"; const val KEY_SPEED = "speed"; const val KEY_ETA = "eta"
+        const val KEY_CURRENT_ITEM_NAME = "current_item_name"; const val KEY_CURRENT_ITEM_STATUS = "current_item_status"
+        const val KEY_GROUPING_STATUS = "grouping_status"; const val KEY_DETECTION_STATE = "detection_state"
+        const val KEY_DETECTION_PROCESSED = "detection_processed"; const val KEY_DETECTION_TOTAL = "detection_total"
+        const val KEY_EMBEDDING_STATE = "embedding_state"; const val KEY_EMBEDDING_PROCESSED = "embedding_processed"
+        const val KEY_EMBEDDING_TOTAL = "embedding_total"; const val KEY_CLUSTERING_STATE = "clustering_state"
+        const val KEY_CLUSTERING_PROCESSED = "clustering_processed"; const val KEY_CLUSTERING_TOTAL = "clustering_total"
+        const val KEY_ERROR = "error"; const val KEY_ENGINE_ID = "engine_id"
         const val TASK_LOCATION = "location"
-        private const val TASK_OCR = "ocr"
-        private const val TASK_FACE = "face"
-        private const val TASK_MODEL = "model"
-        private const val CHANNEL_ID = "media_indexing"
-        private const val NOTIFICATION_ID = 4107
+        private const val TASK_OCR = "ocr"; private const val TASK_FACE = "face"; private const val TASK_MODEL = "model"
+        private const val CHANNEL_ID = "media_indexing"; private const val NOTIFICATION_ID = 4107
         private const val ACTION_START_OCR = "com.amresalehin.emregallery.indexing.START_OCR"
         private const val ACTION_START_FACE = "com.amresalehin.emregallery.indexing.START_FACE"
         private const val ACTION_START_LOCATION = "com.amresalehin.emregallery.indexing.START_LOCATION"
@@ -493,68 +338,28 @@ class IndexingForegroundService : Service() {
         private const val ACTION_RESUME = "com.amresalehin.emregallery.indexing.RESUME"
         private const val ACTION_CANCEL = "com.amresalehin.emregallery.indexing.CANCEL"
         private const val ACTION_STATUS = "com.amresalehin.emregallery.indexing.STATUS"
-        private const val EXTRA_LANGUAGES = "languages"
-        private const val EXTRA_RESCAN_ALL = "rescan_all"
-        private const val EXTRA_MODEL = "ocr_model"
-        private const val EXTRA_FORCE = "force"
-        const val EXTRA_ENGINE_ID = "engine_id"
-        const val EXTRA_RETRY_FAILED_ONLY = "retry_failed_only"
+        private const val EXTRA_LANGUAGES = "languages"; private const val EXTRA_RESCAN_ALL = "rescan_all"
+        private const val EXTRA_MODEL = "ocr_model"; private const val EXTRA_FORCE = "force"
+        const val EXTRA_ENGINE_ID = "engine_id"; const val EXTRA_RETRY_FAILED_ONLY = "retry_failed_only"
 
         private fun command(context: Context, action: String, configure: Intent.() -> Unit = {}) {
             val intent = Intent(context, IndexingForegroundService::class.java).setAction(action).apply(configure)
-            if (action == ACTION_PAUSE || action == ACTION_RESUME || action == ACTION_CANCEL || action == ACTION_STATUS) {
-                context.startService(intent)
-            } else {
-                ContextCompat.startForegroundService(context, intent)
-            }
+            if (action == ACTION_PAUSE || action == ACTION_RESUME || action == ACTION_CANCEL || action == ACTION_STATUS) context.startService(intent)
+            else ContextCompat.startForegroundService(context, intent)
         }
-
-        fun startOcr(
-            context: Context,
-            languages: List<String>,
-            rescanAll: Boolean = false,
-            modelId: String = "fast"
-        ) =
-            command(context, ACTION_START_OCR) {
-                putStringArrayListExtra(EXTRA_LANGUAGES, ArrayList(languages))
-                putExtra(EXTRA_RESCAN_ALL, rescanAll)
-                putExtra(EXTRA_MODEL, modelId)
-            }
-
-        fun startFace(
-            context: Context,
-            rescanAll: Boolean = false,
-            engineId: String = BuffaloLFaceEngine.ENGINE_ID
-        ) =
-            command(context, ACTION_START_FACE) {
-                putExtra(EXTRA_RESCAN_ALL, rescanAll)
-                putExtra(EXTRA_ENGINE_ID, engineId)
-            }
-
-        fun retryFailedFaces(
-            context: Context,
-            engineId: String = BuffaloLFaceEngine.ENGINE_ID
-        ) =
-            command(context, ACTION_START_FACE) {
-                putExtra(EXTRA_RETRY_FAILED_ONLY, true)
-                putExtra(EXTRA_ENGINE_ID, engineId)
-            }
-
-        fun startLocation(context: Context, rescanAll: Boolean = false) =
-            command(context, ACTION_START_LOCATION) {
-                putExtra(EXTRA_RESCAN_ALL, rescanAll)
-            }
-
-        fun downloadModel(
-            context: Context,
-            force: Boolean = false,
-            engineId: String = BuffaloLFaceEngine.ENGINE_ID
-        ) =
-            command(context, ACTION_DOWNLOAD_MODEL) {
-                putExtra(EXTRA_FORCE, force)
-                putExtra(EXTRA_ENGINE_ID, engineId)
-            }
-
+        fun startOcr(context: Context, languages: List<String>, rescanAll: Boolean = false, modelId: String = "fast") = command(context, ACTION_START_OCR) {
+            putStringArrayListExtra(EXTRA_LANGUAGES, ArrayList(languages)); putExtra(EXTRA_RESCAN_ALL, rescanAll); putExtra(EXTRA_MODEL, modelId)
+        }
+        fun startFace(context: Context, rescanAll: Boolean = false, engineId: String = BuffaloLFaceEngine.ENGINE_ID) = command(context, ACTION_START_FACE) {
+            putExtra(EXTRA_RESCAN_ALL, rescanAll); putExtra(EXTRA_ENGINE_ID, engineId)
+        }
+        fun retryFailedFaces(context: Context, engineId: String = BuffaloLFaceEngine.ENGINE_ID) = command(context, ACTION_START_FACE) {
+            putExtra(EXTRA_RETRY_FAILED_ONLY, true); putExtra(EXTRA_ENGINE_ID, engineId)
+        }
+        fun startLocation(context: Context, rescanAll: Boolean = false) = command(context, ACTION_START_LOCATION) { putExtra(EXTRA_RESCAN_ALL, rescanAll) }
+        fun downloadModel(context: Context, force: Boolean = false, engineId: String = BuffaloLFaceEngine.ENGINE_ID) = command(context, ACTION_DOWNLOAD_MODEL) {
+            putExtra(EXTRA_FORCE, force); putExtra(EXTRA_ENGINE_ID, engineId)
+        }
         fun pause(context: Context) = command(context, ACTION_PAUSE)
         fun resume(context: Context) = command(context, ACTION_RESUME)
         fun cancel(context: Context) = command(context, ACTION_CANCEL)
