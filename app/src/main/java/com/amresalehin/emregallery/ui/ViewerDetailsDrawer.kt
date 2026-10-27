@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -15,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -117,6 +119,14 @@ fun rememberViewerDetailsState(
     return state
 }
 
+private data class FaceStateSnapshot(
+    val allFaces: List<DetectedMediaFace>,
+    val visibleFaces: List<DetectedMediaFace>,
+    val info: FaceClusterStore.MediaIndexedInfo?,
+    val groupingRequired: Boolean,
+    val groupingError: String?
+)
+
 /**
  * Native Android media detail drawer implemented with Material 3 ModalBottomSheet.
  * Features native gestures, partial expansion, flinging, nested scrolling, scrim, and dismissal.
@@ -153,7 +163,10 @@ fun ViewerDetailsDrawer(
     }
 
     var detectedFaces by remember(item.uri, activeEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
+    var allDetectedFaces by remember(item.uri, activeEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
     var mediaIndexInfo by remember(item.uri, activeEngineId) { mutableStateOf<FaceClusterStore.MediaIndexedInfo?>(null) }
+    var groupingRequired by remember(item.uri, activeEngineId) { mutableStateOf(false) }
+    var groupingError by remember(item.uri, activeEngineId) { mutableStateOf<String?>(null) }
     var isLoadingIndexInfo by remember(item.uri, activeEngineId) { mutableStateOf(true) }
 
     var singleScanJob by remember(item.uri) { mutableStateOf<Job?>(null) }
@@ -164,29 +177,44 @@ fun ViewerDetailsDrawer(
     var isInstallingModel by remember { mutableStateOf(false) }
     var modelInstallProgress by remember { mutableStateOf<String?>(null) }
 
-    // Strict Engine Scoping: Query exclusively for activeEngineId, and subscribe to live store updates!
-    LaunchedEffect(item.uri, faceReloadKey, activeEngineId) {
-        withContext(Dispatchers.IO) {
-            val faces = faceStore.facesForMedia(item.uri, activeEngineId)
-            val info = faceStore.getMediaIndexedInfo(item.uri, activeEngineId)
-            withContext(Dispatchers.Main) {
-                detectedFaces = faces
-                mediaIndexInfo = info
-                isLoadingIndexInfo = false
+    LaunchedEffect(item.uri, faceReloadKey, activeEngineId, factory) {
+        suspend fun refreshFaceState() {
+            val snapshot = withContext(Dispatchers.IO) {
+                val allFaces = faceStore.facesForMedia(item.uri, activeEngineId)
+                val info = faceStore.getMediaIndexedInfo(item.uri, activeEngineId)
+                val strategy = factory.clusteringStrategy
+                val needsGrouping = strategy?.let {
+                    faceStore.isGroupingRequired(activeEngineId, factory.modelVersion, it.strategyVersion)
+                } ?: false
+                val error = strategy?.let {
+                    faceStore.groupingFailure(activeEngineId, factory.modelVersion, it.strategyVersion)
+                }
+                val visibleFaces = if (needsGrouping || error != null) {
+                    emptyList()
+                } else {
+                    allFaces.filter { !it.personId.isNullOrBlank() && it.clusterId.isNotBlank() }
+                }
+                FaceStateSnapshot(allFaces, visibleFaces, info, needsGrouping, error)
             }
+            allDetectedFaces = snapshot.allFaces
+            detectedFaces = snapshot.visibleFaces
+            mediaIndexInfo = snapshot.info
+            groupingRequired = snapshot.groupingRequired
+            groupingError = snapshot.groupingError
+            isLoadingIndexInfo = false
         }
-        FaceStoreEvents.mediaUpdates.collect { updatedUri ->
-            if (updatedUri == item.uri) {
-                withContext(Dispatchers.IO) {
-                    val faces = faceStore.facesForMedia(item.uri, activeEngineId)
-                    val info = faceStore.getMediaIndexedInfo(item.uri, activeEngineId)
-                    withContext(Dispatchers.Main) {
-                        detectedFaces = faces
-                        mediaIndexInfo = info
-                        isLoadingIndexInfo = false
-                    }
+
+        kotlinx.coroutines.coroutineScope {
+            launch {
+                FaceStoreEvents.mediaUpdates.collect { updatedUri ->
+                    if (updatedUri.isBlank() || updatedUri == item.uri) refreshFaceState()
                 }
             }
+            launch {
+                FaceStoreEvents.peopleUpdates.collect { refreshFaceState() }
+            }
+            // Start the initial read only after both update collectors have subscribed.
+            refreshFaceState()
         }
     }
 
@@ -204,15 +232,18 @@ fun ViewerDetailsDrawer(
             scanPhase = "Initializing..."
             singleScanJob = coroutineScope.launch {
                 try {
-                    withContext(Dispatchers.IO) {
-                        faceStore.clearMediaFaces(item.uri, activeEngineId)
+                    val retryGroupingOnly = groupingError != null || groupingRequired
+                    if (!retryGroupingOnly) {
+                        withContext(Dispatchers.IO) {
+                            faceStore.clearMediaFaces(item.uri, activeEngineId)
+                        }
                     }
                     val threshold = if (lowThreshold) 0.35f else FaceRecognitionSettings.detectionConfidence(context, activeEngineId)
                     val repo = FaceIndexingRepository(context.applicationContext, factory)
                     repo.indexNewMedia(
                         media = listOf(item),
                         store = faceStore,
-                        forceRescanUris = setOf(item.uri),
+                        forceRescanUris = if (retryGroupingOnly) emptySet() else setOf(item.uri),
                         targetUrisOnly = setOf(item.uri),
                         detectionThreshold = threshold,
                         onProgress = { progress ->
@@ -283,8 +314,12 @@ fun ViewerDetailsDrawer(
         detectedFaces,
         mediaIndexInfo,
         lastScanError,
-        isLoadingIndexInfo
+        isLoadingIndexInfo,
+        groupingRequired,
+        groupingError,
+        allDetectedFaces
     ) {
+        val detectedCount = maxOf(mediaIndexInfo?.faceCount ?: 0, allDetectedFaces.size)
         when {
             isScanning -> ViewerFaceUiState(
                 state = ViewerFaceState.IN_PROGRESS,
@@ -308,9 +343,28 @@ fun ViewerDetailsDrawer(
                 engineName = factory.displayName,
                 engineId = activeEngineId
             )
-            lastScanError != null && detectedFaces.isEmpty() -> ViewerFaceUiState(
+            lastScanError != null && detectedFaces.isEmpty() && groupingError == null -> ViewerFaceUiState(
                 state = ViewerFaceState.FAILED,
                 errorMessage = lastScanError,
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            mediaIndexInfo?.status == "failed" -> ViewerFaceUiState(
+                state = ViewerFaceState.FAILED,
+                errorMessage = mediaIndexInfo?.errorMessage ?: "Face scan failed for this photo",
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            groupingError != null -> ViewerFaceUiState(
+                state = ViewerFaceState.FAILED,
+                errorMessage = "Grouping failed: $groupingError",
+                engineName = factory.displayName,
+                engineId = activeEngineId,
+                groupingFailure = true
+            )
+            groupingRequired && detectedCount > 0 -> ViewerFaceUiState(
+                state = ViewerFaceState.WAITING_FOR_GROUPING,
+                progressPhase = "$detectedCount faces found · waiting to be grouped",
                 engineName = factory.displayName,
                 engineId = activeEngineId
             )
@@ -320,9 +374,9 @@ fun ViewerDetailsDrawer(
                 engineName = factory.displayName,
                 engineId = activeEngineId
             )
-            mediaIndexInfo?.status == "failed" -> ViewerFaceUiState(
-                state = ViewerFaceState.FAILED,
-                errorMessage = mediaIndexInfo?.errorMessage ?: "Face scan failed for this photo",
+            detectedCount > 0 -> ViewerFaceUiState(
+                state = ViewerFaceState.GROUPING_INCOMPLETE,
+                progressPhase = "$detectedCount faces found · waiting for a person group",
                 engineName = factory.displayName,
                 engineId = activeEngineId
             )
@@ -407,7 +461,9 @@ fun ViewerDetailsDrawer(
                                     showAddTagDialog = true
                                 }
                             },
-                            onFaceClick = { face -> renamingFace = face }
+                            onFaceClick = { face ->
+                                if (!face.personId.isNullOrBlank()) renamingFace = face
+                            }
                         )
                     }
                     DetailDrawerTab.ACTIONS -> {
@@ -553,7 +609,7 @@ fun ViewerDetailsDrawer(
     // Rename / Manage Person Dialog
     if (renamingFace != null) {
         val face = renamingFace!!
-        val personId = face.personId ?: face.clusterId
+        val personId = face.personId.orEmpty()
         var nameInput by remember(face) {
             val initial = if (face.displayName.isBlank() || face.displayName.equals("Unknown", ignoreCase = true)) "" else face.displayName
             mutableStateOf(initial)
@@ -591,12 +647,12 @@ fun ViewerDetailsDrawer(
                     onClick = {
                         val cleanName = nameInput.trim()
                         if (cleanName.isNotEmpty()) {
-                            faceStore.renamePerson(personId, cleanName)
+                            if (personId.isNotBlank()) faceStore.renamePerson(personId, cleanName)
                             faceReloadKey++
                             renamingFace = null
                         }
                     },
-                    enabled = nameInput.isNotBlank()
+                    enabled = nameInput.isNotBlank() && personId.isNotBlank()
                 ) {
                     Text("Save")
                 }
@@ -640,23 +696,26 @@ fun ViewerDetailsDrawer(
                                 modifier = Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    FaceCropThumbnail(
+                                        mediaUri = face.portraitMediaUri ?: face.mediaUri,
+                                        faceIndex = face.portraitFaceIndex ?: face.faceIndex,
+                                        engineId = face.engineId,
+                                        contentDescription = if (isNamed) face.displayName else "Person",
+                                        modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                    )
+                                }
                                 Spacer(Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = if (isNamed) face.displayName else "Face #${face.faceIndex + 1}",
+                                        text = if (isNamed) face.displayName else "Name this person",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Medium
                                     )
-                                    val w = (face.boxRight - face.boxLeft).toInt().coerceAtLeast(0)
-                                    val h = (face.boxBottom - face.boxTop).toInt().coerceAtLeast(0)
-                                    if (w > 0 && h > 0) {
-                                        Text(
-                                            text = "Bounds: ${w}×${h} px",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
                                 }
                             }
                         }

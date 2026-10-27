@@ -59,6 +59,8 @@ enum class DetailDrawerTab {
 enum class ViewerFaceState {
     NOT_INDEXED,
     IN_PROGRESS,
+    WAITING_FOR_GROUPING,
+    GROUPING_INCOMPLETE,
     COMPLETED_FACES_FOUND,
     COMPLETED_NO_FACES,
     MODEL_MISSING,
@@ -71,7 +73,8 @@ data class ViewerFaceUiState(
     val progressPhase: String? = null,
     val errorMessage: String? = null,
     val engineName: String = "",
-    val engineId: String = ""
+    val engineId: String = "",
+    val groupingFailure: Boolean = false
 )
 
 @Composable
@@ -366,6 +369,42 @@ fun ViewerFaceContainer(
                 }
             }
         }
+        ViewerFaceState.WAITING_FOR_GROUPING -> {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text(
+                        text = faceUiState.progressPhase ?: "Faces found · waiting to be grouped",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+        ViewerFaceState.GROUPING_INCOMPLETE -> {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = faceUiState.progressPhase ?: "Faces found, but no person group is available yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(14.dp)
+                )
+            }
+        }
         ViewerFaceState.COMPLETED_FACES_FOUND -> {
             Column(
                 modifier = modifier.fillMaxWidth(),
@@ -553,7 +592,7 @@ fun ViewerFaceContainer(
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Retry Scan")
+                            Text(if (faceUiState.groupingFailure) "Retry Grouping" else "Retry Scan")
                         }
                         OutlinedButton(
                             onClick = onViewErrorDetails,
@@ -1068,9 +1107,47 @@ fun OverviewTabContent(
 }
 
 /**
- * Large portrait for Overview tab.
- * Uses real face crop if available, falling back to clean stylized face avatar.
- * Displays assigned name only; never displays "Unknown".
+ * Loads a person's stored representative face crop. A missing crop remains blank,
+ * rather than substituting a fabricated face or the whole source photo.
+ */
+@Composable
+fun FaceCropThumbnail(
+    mediaUri: String?,
+    faceIndex: Int?,
+    engineId: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var faceCrop by remember(engineId, mediaUri, faceIndex) { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(engineId, mediaUri, faceIndex) {
+        faceCrop = if (mediaUri.isNullOrBlank() || faceIndex == null) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                FaceThumbnailHelper.getFaceCrop(
+                    context = context,
+                    uri = Uri.parse(mediaUri),
+                    faceIndex = faceIndex,
+                    engineId = engineId
+                )
+            }
+        }
+    }
+
+    faceCrop?.let { bitmap ->
+        Image(
+            bitmap = bitmap.asImageBitmap(),
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = ContentScale.Crop
+        )
+    }
+}
+
+/**
+ * Large portrait for Overview tab. Uses a person's persistent master-face identity.
  */
 @Composable
 fun OverviewFacePortrait(
@@ -1078,23 +1155,8 @@ fun OverviewFacePortrait(
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    var faceCrop by remember(face.engineId, face.mediaUri, face.faceIndex) { mutableStateOf<Bitmap?>(null) }
-
-    LaunchedEffect(face.engineId, face.mediaUri, face.faceIndex) {
-        withContext(Dispatchers.IO) {
-            val bounds = if (face.boxRight > face.boxLeft && face.boxBottom > face.boxTop) {
-                RectF(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
-            } else null
-            faceCrop = FaceThumbnailHelper.getFaceCrop(
-                context = context,
-                uri = Uri.parse(face.mediaUri),
-                faceIndex = face.faceIndex,
-                engineId = face.engineId,
-                providedBounds = bounds
-            )
-        }
-    }
+    val portraitUri = face.portraitMediaUri ?: face.mediaUri
+    val portraitIndex = face.portraitFaceIndex ?: face.faceIndex
 
     val displayName = face.displayName.trim()
     val isNamed = displayName.isNotBlank() && !displayName.equals("Unknown", ignoreCase = true)
@@ -1115,17 +1177,13 @@ fun OverviewFacePortrait(
             border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
             modifier = Modifier.size(64.dp)
         ) {
-            val crop = faceCrop
-            if (crop != null) {
-                Image(
-                    bitmap = crop.asImageBitmap(),
-                    contentDescription = if (isNamed) displayName else "Unnamed face",
-                    modifier = Modifier.fillMaxSize().clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                FaceAvatarIllustration(modifier = Modifier.fillMaxSize())
-            }
+            FaceCropThumbnail(
+                mediaUri = portraitUri,
+                faceIndex = portraitIndex,
+                engineId = face.engineId,
+                contentDescription = if (isNamed) displayName else "Unnamed face",
+                modifier = Modifier.fillMaxSize().clip(CircleShape)
+            )
         }
         Spacer(Modifier.height(6.dp))
         Text(
@@ -1523,23 +1581,8 @@ fun ActionFacePortrait(
     onRename: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    var faceCrop by remember(face.engineId, face.mediaUri, face.faceIndex) { mutableStateOf<Bitmap?>(null) }
-
-    LaunchedEffect(face.engineId, face.mediaUri, face.faceIndex) {
-        withContext(Dispatchers.IO) {
-            val bounds = if (face.boxRight > face.boxLeft && face.boxBottom > face.boxTop) {
-                RectF(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
-            } else null
-            faceCrop = FaceThumbnailHelper.getFaceCrop(
-                context = context,
-                uri = Uri.parse(face.mediaUri),
-                faceIndex = face.faceIndex,
-                engineId = face.engineId,
-                providedBounds = bounds
-            )
-        }
-    }
+    val portraitUri = face.portraitMediaUri ?: face.mediaUri
+    val portraitIndex = face.portraitFaceIndex ?: face.faceIndex
 
     val displayName = face.displayName.trim()
     val isNamed = displayName.isNotBlank() && !displayName.equals("Unknown", ignoreCase = true)
@@ -1556,17 +1599,13 @@ fun ActionFacePortrait(
                 .size(48.dp)
                 .graphicsLayer { alpha = 0.88f }
         ) {
-            val crop = faceCrop
-            if (crop != null) {
-                Image(
-                    bitmap = crop.asImageBitmap(),
-                    contentDescription = if (isNamed) displayName else null,
-                    modifier = Modifier.fillMaxSize().clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                FaceAvatarIllustration(modifier = Modifier.fillMaxSize())
-            }
+            FaceCropThumbnail(
+                mediaUri = portraitUri,
+                faceIndex = portraitIndex,
+                engineId = face.engineId,
+                contentDescription = if (isNamed) displayName else null,
+                modifier = Modifier.fillMaxSize().clip(CircleShape)
+            )
         }
         if (isNamed) {
             Spacer(Modifier.height(4.dp))

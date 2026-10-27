@@ -738,7 +738,12 @@ fun FaceRecognitionCard(
                             Text(currentFindingState.groupingStatus.removePrefix("Grouping failed: ").ifBlank { "Grouping could not finish." },
                                 style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        TextButton(onClick={onClusterFaces(currentClusteringState.clusterDistance,selectedEngineId)}) {
+                        TextButton(
+                            onClick = { onClusterFaces(currentClusteringState.clusterDistance, selectedEngineId) },
+                            enabled = !currentFindingState.isRunning &&
+                                !currentFindingState.isPaused &&
+                                !currentClusteringState.isClusteringRunning
+                        ) {
                             Text("Retry grouping")
                         }
                     }

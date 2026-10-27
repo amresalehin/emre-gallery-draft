@@ -361,6 +361,7 @@ class FaceIndexingRepository(
                                 }
                             }
                         )
+                        store.ensurePersonCovers(engineId)
                         val finalCount=store.faceEmbeddingCount(engineId,engineFactory.modelVersion)
                         store.markGroupingCompleted(engineId,engineFactory.modelVersion,strategy.strategyVersion,groupedPeople,finalCount)
                         clusteringStage=StageProgress(StageState.COMPLETED,faceTotal,faceTotal,100)
@@ -370,11 +371,13 @@ class FaceIndexingRepository(
                     } catch (cancelled: CancellationException) {
                         runCatching { store.markGroupingPending(engineId,engineFactory.modelVersion,strategy.strategyVersion,
                             store.faceEmbeddingCount(engineId,engineFactory.modelVersion)) }
+                        FaceStoreEvents.notifyAllUpdated()
                         throw cancelled
                     } catch (err: Exception) {
                         val detail=err.localizedMessage ?: err.message ?: "Unknown grouping error"
                         runCatching { store.markGroupingFailed(engineId,engineFactory.modelVersion,strategy.strategyVersion,detail,
                             store.faceEmbeddingCount(engineId,engineFactory.modelVersion)) }
+                        FaceStoreEvents.notifyAllUpdated()
                         clusteringStage=StageProgress(StageState.FAILED,clusteringStage.processed,faceTotal,clusteringStage.percentage)
                         groupingStatus="Grouping failed: $detail"
                     }

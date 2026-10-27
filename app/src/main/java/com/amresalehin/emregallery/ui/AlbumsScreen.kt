@@ -143,8 +143,7 @@ fun AlbumsScreen(
                     .testTag("albums_people_card")
             ) {
                                 val avatarSlots = remember(detectedPeople) {
-                    val peopleUris = detectedPeople.mapNotNull { it.sampleUri }
-                    (peopleUris + List((14 - peopleUris.size).coerceAtLeast(0)) { null }).take(14)
+                    (detectedPeople + List((14 - detectedPeople.size).coerceAtLeast(0)) { null }).take(14)
                 }
                 Box(modifier = Modifier.padding(14.dp)) {
                     LazyHorizontalGrid(
@@ -155,7 +154,7 @@ fun AlbumsScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        gridItems(avatarSlots) { uri ->
+                        gridItems(avatarSlots) { person ->
                             Surface(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -164,17 +163,12 @@ fun AlbumsScreen(
                                     .size(58.dp)
                                     .clickable { onFilter("People") }
                             ) {
-                                if (uri != null) {
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(LocalContext.current)
-                                            .data(Uri.parse(uri))
-                                            .crossfade(false)
-                                            .build(),
-                                        contentDescription = "Person",
-                                        modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                }
+                                FaceCropThumbnail(                                    mediaUri = person?.portraitUri,
+                                    faceIndex = person?.portraitFaceIndex,
+                                    engineId = person?.engineId ?: activeEngineId,
+                                    contentDescription = person?.displayName?.takeIf { it.isNotBlank() } ?: "Person",
+                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                )
                             }
                         }
                     }

@@ -46,6 +46,55 @@ class EnteFacePipelineTest {
     }
 
     @Test
+    fun testPersonPortraitUsesOneDeterministicMasterFace() {
+        val firstUri = "file:///portrait-first.jpg"
+        val bestUri = "file:///portrait-best.jpg"
+        val embedding = createSyntheticEmbedding(0)
+
+        store.addFace(
+            mediaUri = firstUri,
+            faceIndex = 0,
+            rawEmbedding = embedding,
+            bounds = RectF(10f, 10f, 40f, 45f),
+            quality = 0.45f,
+            provenance = EmbeddingProvenance.BUFFALO_L
+        )
+        store.addFace(
+            mediaUri = bestUri,
+            faceIndex = 2,
+            rawEmbedding = embedding,
+            bounds = RectF(20f, 15f, 60f, 65f),
+            quality = 0.95f,
+            provenance = EmbeddingProvenance.BUFFALO_L
+        )
+
+        val person = store.personSummaries(engineId = BuffaloLFaceEngine.ENGINE_ID).single()
+        assertEquals(bestUri, person.portraitUri)
+        assertEquals(2, person.portraitFaceIndex)
+
+        val anotherAppearance = store.facesForMedia(firstUri, BuffaloLFaceEngine.ENGINE_ID).single()
+        assertEquals(bestUri, anotherAppearance.portraitMediaUri)
+        assertEquals(2, anotherAppearance.portraitFaceIndex)
+    }
+
+    @Test
+    fun testCompletedGroupingStatePreventsUnnecessaryRegrouping() {
+        val uri = "file:///grouping-state.jpg"
+        store.addFace(
+            mediaUri = uri,
+            faceIndex = 0,
+            rawEmbedding = createSyntheticEmbedding(0),
+            bounds = RectF(10f, 10f, 40f, 45f),
+            provenance = EmbeddingProvenance.BUFFALO_L
+        )
+        val engine = BuffaloLFaceEngine.ENGINE_ID
+        val model = BuffaloLFaceEngine.MODEL_VERSION
+        assertTrue(store.isGroupingRequired(engine, model, 1))
+        store.markGroupingCompleted(engine, model, 1, store.personCount(engineId = engine))
+        assertFalse(store.isGroupingRequired(engine, model, 1))
+    }
+
+    @Test
     fun testFaceEngineRegistryDeterministicLookup() {
         val buffalo = FaceEngineRegistry.getFactory(BuffaloLFaceEngine.ENGINE_ID)
         val ente = FaceEngineRegistry.getFactory(EnteFaceConstants.ENGINE_ID)

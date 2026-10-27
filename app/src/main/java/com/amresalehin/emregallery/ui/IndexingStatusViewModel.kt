@@ -34,6 +34,10 @@ import kotlin.math.roundToInt
 
 class IndexingStatusViewModel(application: Application) : AndroidViewModel(application) {
 
+    private companion object {
+        const val MANUAL_CLUSTERING_STRATEGY_VERSION = 1
+    }
+
     private val context: Context get() = getApplication()
     private val faceStore = FaceClusterStore(context.applicationContext)
 
@@ -554,27 +558,48 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     ) {
         val state = _uiState.value
         val clusteringState = if (engineId == EnteFaceConstants.ENGINE_ID) state.enteClustering else state.clustering
-        if (clusteringState.isClusteringRunning) return
+        val findingState = if (engineId == EnteFaceConstants.ENGINE_ID) state.enteFaceFinding else state.faceFinding
+        if (clusteringState.isClusteringRunning || findingState.isRunning || findingState.isPaused) return
 
-        if (engineId == EnteFaceConstants.ENGINE_ID) {
-            _uiState.update {
+        // The foreground service owns the shared face DB. Reject a stale UI action even if
+        // its StateFlow hasn't yet reflected a newly started indexing job.
+        val prefs = context.getSharedPreferences(IndexingForegroundService.STATE_PREFS, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(IndexingForegroundService.KEY_RUNNING, false) &&
+            prefs.getString(IndexingForegroundService.KEY_TASK, "") == "face"
+        ) return
+
+        val modelVersion = if (engineId == EnteFaceConstants.ENGINE_ID) {
+            EnteFaceConstants.MODEL_VERSION
+        } else {
+            BuffaloLFaceEngine.MODEL_VERSION
+        }
+        val strategyVersion = if (engineId == EnteFaceConstants.ENGINE_ID) {
+            EnteFaceClusteringStrategy.strategyVersion
+        } else {
+            MANUAL_CLUSTERING_STRATEGY_VERSION
+        }
+
+        _uiState.update {
+            if (engineId == EnteFaceConstants.ENGINE_ID) {
                 it.copy(
                     enteClustering = it.enteClustering.copy(
                         isClusteringRunning = true,
-                        statusMessage = "Executing Ente linear incremental clustering..."
+                        statusMessage = "Grouping facial embeddings…"
                     ),
                     enteFaceFinding = it.enteFaceFinding.copy(
                         clusteringStage = StageProgress(StageState.RUNNING, 0, it.enteFaceFinding.totalDetected, 0),
                         groupingStatus = "Grouping people…"
                     )
                 )
-            }
-        } else {
-            _uiState.update {
+            } else {
                 it.copy(
                     clustering = it.clustering.copy(
                         isClusteringRunning = true,
-                        statusMessage = "Clustering facial embeddings..."
+                        statusMessage = "Grouping facial embeddings…"
+                    ),
+                    faceFinding = it.faceFinding.copy(
+                        clusteringStage = StageProgress(StageState.RUNNING, 0, it.faceFinding.totalDetected, 0),
+                        groupingStatus = "Grouping people…"
                     )
                 )
             }
@@ -582,50 +607,87 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
         viewModelScope.launch {
             try {
-                val resultCount = withContext(Dispatchers.IO) {
-                    if (engineId == EnteFaceConstants.ENGINE_ID) {
+                data class ClusteringResult(
+                    val grouped: Boolean,
+                    val peopleCount: Int,
+                    val faceCount: Int,
+                    val unassignedCount: Int,
+                    val summaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>
+                )
+
+                val result = withContext(Dispatchers.IO) {
+                    if (!faceStore.isGroupingRequired(engineId, modelVersion, strategyVersion)) {
+                        return@withContext ClusteringResult(
+                            grouped = false,
+                            peopleCount = faceStore.personCount(engineId = engineId),
+                            faceCount = faceStore.indexedFaceCount(engineId),
+                            unassignedCount = faceStore.unassignedFaceCount(engineId, modelVersion),
+                            summaries = faceStore.summaries(engineId)
+                        )
+                    }
+
+                    faceStore.markGroupingPending(engineId, modelVersion, strategyVersion)
+                    val peopleCount = if (engineId == EnteFaceConstants.ENGINE_ID) {
                         EnteFaceClusteringStrategy.reclusterChronologically(faceStore, threshold)
                     } else {
-                        faceStore.reclusterAll(threshold)
+                        faceStore.reclusterAllSafely(threshold, engineId, modelVersion)
                     }
-                }
-                val (summaries, detectedCount) = withContext(Dispatchers.IO) {
-                    Pair(faceStore.summaries(engineId), faceStore.indexedFaceCount(engineId))
-                }
-                val unassignedCount = withContext(Dispatchers.IO) {
-                    faceStore.unassignedFaceCount(
-                        engineId,
-                        if (engineId == EnteFaceConstants.ENGINE_ID) EnteFaceConstants.MODEL_VERSION else BuffaloLFaceEngine.MODEL_VERSION
+                    faceStore.ensurePersonCovers(engineId)
+                    val finalCount = faceStore.faceEmbeddingCount(engineId, modelVersion)
+                    faceStore.markGroupingCompleted(engineId, modelVersion, strategyVersion, peopleCount, finalCount)
+                    FaceStoreEvents.notifyAllUpdated()
+                    ClusteringResult(
+                        grouped = true,
+                        peopleCount = peopleCount,
+                        faceCount = faceStore.indexedFaceCount(engineId),
+                        unassignedCount = faceStore.unassignedFaceCount(engineId, modelVersion),
+                        summaries = faceStore.summaries(engineId)
                     )
                 }
 
+                val statusMessage = if (result.grouped) {
+                    "Successfully grouped into ${result.peopleCount} people profiles."
+                } else {
+                    "People are already grouped."
+                }
+                val groupingStatus = "Grouping complete · ${result.peopleCount} people · ${result.unassignedCount} unassigned"
                 _uiState.update {
                     if (engineId == EnteFaceConstants.ENGINE_ID) {
                         it.copy(
                             enteClustering = it.enteClustering.copy(
-                                summaries = summaries,
+                                summaries = result.summaries,
                                 isClusteringRunning = false,
-                                statusMessage = "Successfully grouped into $resultCount people profiles."
+                                statusMessage = statusMessage
                             ),
                             enteFaceFinding = it.enteFaceFinding.copy(
-                                totalDetected = detectedCount,
-                                clusteringStage = StageProgress(StageState.COMPLETED, detectedCount, detectedCount, 100),
-                                groupingStatus = "Grouping complete · $resultCount people · $unassignedCount unassigned"
+                                totalDetected = result.faceCount,
+                                clusteringStage = StageProgress(StageState.COMPLETED, result.faceCount, result.faceCount, 100),
+                                groupingStatus = groupingStatus
                             )
                         )
                     } else {
                         it.copy(
                             clustering = it.clustering.copy(
-                                summaries = summaries,
+                                summaries = result.summaries,
                                 isClusteringRunning = false,
-                                statusMessage = "Successfully grouped into $resultCount people profiles."
+                                statusMessage = statusMessage
                             ),
-                            faceFinding = it.faceFinding.copy(totalDetected = detectedCount)
+                            faceFinding = it.faceFinding.copy(
+                                totalDetected = result.faceCount,
+                                clusteringStage = StageProgress(StageState.COMPLETED, result.faceCount, result.faceCount, 100),
+                                groupingStatus = groupingStatus
+                            )
                         )
                     }
                 }
             } catch (e: Exception) {
-                val errorMsg = e.localizedMessage ?: "Clustering failed"
+                val errorMsg = e.localizedMessage ?: e.message ?: "Clustering failed"
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        faceStore.markGroupingFailed(engineId, modelVersion, strategyVersion, errorMsg)
+                    }
+                }
+                FaceStoreEvents.notifyAllUpdated()
                 _uiState.update {
                     if (engineId == EnteFaceConstants.ENGINE_ID) {
                         it.copy(
@@ -648,6 +710,15 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                             clustering = it.clustering.copy(
                                 isClusteringRunning = false,
                                 statusMessage = "Clustering error: $errorMsg"
+                            ),
+                            faceFinding = it.faceFinding.copy(
+                                clusteringStage = StageProgress(
+                                    StageState.FAILED,
+                                    it.faceFinding.clusteringStage.processed,
+                                    it.faceFinding.clusteringStage.total,
+                                    it.faceFinding.clusteringStage.percentage
+                                ),
+                                groupingStatus = "Grouping failed: $errorMsg"
                             )
                         )
                     }

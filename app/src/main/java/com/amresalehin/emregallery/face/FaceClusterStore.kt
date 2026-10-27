@@ -68,7 +68,9 @@ data class PersonSummary(
     val isNamed: Boolean = false,
     val clusterCount: Int = 1,
     val updatedAt: Long = 0L,
-    val engineId: String = BuffaloLFaceEngine.ENGINE_ID
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+    val portraitUri: String? = null,
+    val portraitFaceIndex: Int? = null
 )
 
 data class PersonMediaIndex(
@@ -131,7 +133,9 @@ data class DetectedMediaFace(
     val boxTop: Float = 0f,
     val boxRight: Float = 0f,
     val boxBottom: Float = 0f,
-    val engineId: String = BuffaloLFaceEngine.ENGINE_ID
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+    val portraitMediaUri: String? = null,
+    val portraitFaceIndex: Int? = null
 )
 
 data class ReviewSuggestion(
@@ -890,6 +894,7 @@ class FaceClusterStore(context: Context) :
 
     @Synchronized
     fun renamePerson(personId: String, name: String) {
+        if (personId.isBlank()) return
         val cleanName = name.trim().take(80)
         val db = writableDatabase
         db.beginTransaction()
@@ -1115,11 +1120,24 @@ class FaceClusterStore(context: Context) :
 
     @Synchronized
     fun setPersonCover(personId: String, mediaUri: String) {
+        val db = writableDatabase
+        val selectedFaceId = db.rawQuery(
+            """SELECT face_id FROM faces
+               WHERE person_id=? AND media_uri=?
+               ORDER BY quality_score DESC, detection_confidence DESC,
+                        ((box_right - box_left) * (box_bottom - box_top)) DESC,
+                        face_index ASC
+               LIMIT 1""".trimIndent(),
+            arrayOf(personId, mediaUri)
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
         val vals = ContentValues().apply {
             put("cover_media_uri", mediaUri)
+            // A cover photo is not necessarily a detected face. Only replace the stable
+            // representative-face ID if that photo contains a face for this person.
+            if (selectedFaceId != null) put("cover_face_id", selectedFaceId)
             put("updated_at", System.currentTimeMillis())
         }
-        writableDatabase.update("people", vals, "id=?", arrayOf(personId))
+        db.update("people", vals, "id=?", arrayOf(personId))
         FaceStoreEvents.notifyAllUpdated()
     }
 
@@ -1149,6 +1167,16 @@ class FaceClusterStore(context: Context) :
                 cursor.getInt(1) != strategyVersion || cursor.getInt(2) != count
         }
     }
+
+    @Synchronized
+    fun groupingFailure(engineId: String, modelVersion: String, strategyVersion: Int): String? =
+        readableDatabase.rawQuery(
+            "SELECT error_message FROM grouping_state WHERE engine_id=? AND model_version=? AND strategy_version=? AND status='failed' LIMIT 1",
+            arrayOf(engineId, modelVersion, strategyVersion.toString())
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) null
+            else cursor.getString(0)?.takeIf { it.isNotBlank() } ?: "Grouping failed"
+        }
 
     @Synchronized
     fun markGroupingPending(engineId: String, modelVersion: String, strategyVersion: Int,
@@ -1188,6 +1216,45 @@ class FaceClusterStore(context: Context) :
                    AND (fb.source_id=people.id OR fb.target_id=people.id))""".trimIndent(),
             arrayOf(engineId))
 
+    /**
+     * Keep a single representative face for each person. Explicit cover selection sets
+     * cover_face_id directly; otherwise choose the highest-quality observation deterministically.
+     */
+    @Synchronized
+    fun ensurePersonCovers(engineId: String) {
+        val db = writableDatabase
+        db.execSQL(
+            """UPDATE people
+               SET cover_face_id = (
+                   SELECT best_face.face_id
+                   FROM faces best_face
+                   WHERE best_face.person_id = people.id
+                     AND best_face.engine_id = people.engine_id
+                   ORDER BY best_face.quality_score DESC,
+                            best_face.detection_confidence DESC,
+                            ((best_face.box_right - best_face.box_left) *
+                             (best_face.box_bottom - best_face.box_top)) DESC,
+                            best_face.media_uri ASC, best_face.face_index ASC
+                   LIMIT 1
+               )
+               WHERE people.engine_id = ?
+                 AND EXISTS (
+                    SELECT 1 FROM faces f
+                    WHERE f.person_id = people.id AND f.engine_id = people.engine_id
+                 )
+                 AND (
+                    people.cover_face_id IS NULL OR
+                    NOT EXISTS (
+                        SELECT 1 FROM faces current_face
+                        WHERE current_face.face_id = people.cover_face_id
+                          AND current_face.person_id = people.id
+                          AND current_face.engine_id = people.engine_id
+                    )
+                 )""".trimIndent(),
+            arrayOf(engineId)
+        )
+    }
+
     // --- Query APIs ---
 
     @Synchronized
@@ -1195,12 +1262,42 @@ class FaceClusterStore(context: Context) :
         includeHidden: Boolean = false,
         engineId: String = BuffaloLFaceEngine.ENGINE_ID
     ): List<PersonSummary> {
+        ensurePersonCovers(engineId)
         val result = mutableListOf<PersonSummary>()
         val hiddenClause = if (includeHidden) "WHERE p.engine_id = ?" else "WHERE p.engine_id = ? AND p.is_hidden = 0"
         readableDatabase.rawQuery(
             """SELECT p.id, p.name,
                       COUNT(DISTINCT f.media_uri || '#' || f.face_index) AS face_count,
-                      COALESCE(p.cover_media_uri, (SELECT f2.media_uri FROM faces f2 WHERE f2.person_id=p.id AND f2.engine_id=p.engine_id LIMIT 1)) AS sample_uri,
+                      COALESCE(NULLIF(p.cover_media_uri, ''),
+                          (SELECT cover.media_uri FROM faces cover
+                           WHERE cover.face_id = p.cover_face_id AND cover.person_id = p.id
+                             AND cover.engine_id = p.engine_id LIMIT 1),
+                          (SELECT f2.media_uri FROM faces f2
+                           WHERE f2.person_id = p.id AND f2.engine_id = p.engine_id
+                           ORDER BY f2.quality_score DESC, f2.detection_confidence DESC,
+                                    ((f2.box_right - f2.box_left) * (f2.box_bottom - f2.box_top)) DESC,
+                                    f2.media_uri ASC, f2.face_index ASC LIMIT 1)
+                      ) AS sample_uri,
+                      COALESCE(
+                          (SELECT portrait.media_uri FROM faces portrait
+                           WHERE portrait.face_id = p.cover_face_id AND portrait.person_id = p.id
+                             AND portrait.engine_id = p.engine_id LIMIT 1),
+                          (SELECT f2.media_uri FROM faces f2
+                           WHERE f2.person_id = p.id AND f2.engine_id = p.engine_id
+                           ORDER BY f2.quality_score DESC, f2.detection_confidence DESC,
+                                    ((f2.box_right - f2.box_left) * (f2.box_bottom - f2.box_top)) DESC,
+                                    f2.media_uri ASC, f2.face_index ASC LIMIT 1)
+                      ) AS portrait_uri,
+                      COALESCE(
+                          (SELECT portrait.face_index FROM faces portrait
+                           WHERE portrait.face_id = p.cover_face_id AND portrait.person_id = p.id
+                             AND portrait.engine_id = p.engine_id LIMIT 1),
+                          (SELECT f2.face_index FROM faces f2
+                           WHERE f2.person_id = p.id AND f2.engine_id = p.engine_id
+                           ORDER BY f2.quality_score DESC, f2.detection_confidence DESC,
+                                    ((f2.box_right - f2.box_left) * (f2.box_bottom - f2.box_top)) DESC,
+                                    f2.media_uri ASC, f2.face_index ASC LIMIT 1)
+                      ) AS portrait_face_index,
                       p.is_hidden,
                       COUNT(DISTINCT c.id) AS cluster_count,
                       p.updated_at,
@@ -1219,11 +1316,12 @@ class FaceClusterStore(context: Context) :
                 val rawName = cursor.getString(1).orEmpty()
                 val faceCount = cursor.getInt(2)
                 val sampleUri = if (cursor.isNull(3)) null else cursor.getString(3)
-                val isHidden = cursor.getInt(4) == 1
-                val clusterCount = cursor.getInt(5)
-                val updatedAt = cursor.getLong(6)
-                val engId = cursor.getString(7).orEmpty()
-
+                val portraitUri = if (cursor.isNull(4)) null else cursor.getString(4)
+                val portraitFaceIndex = if (cursor.isNull(5)) null else cursor.getInt(5)
+                val isHidden = cursor.getInt(6) == 1
+                val clusterCount = cursor.getInt(7)
+                val updatedAt = cursor.getLong(8)
+                val engId = cursor.getString(9).orEmpty()
                 val isNamed = rawName.isNotBlank() && !rawName.equals("Unknown", ignoreCase = true)
                 result += PersonSummary(
                     id = id,
@@ -1234,7 +1332,9 @@ class FaceClusterStore(context: Context) :
                     isNamed = isNamed,
                     clusterCount = clusterCount,
                     updatedAt = updatedAt,
-                    engineId = engId
+                    engineId = engId,
+                    portraitUri = portraitUri,
+                    portraitFaceIndex = portraitFaceIndex
                 )
             }
         }
@@ -1318,13 +1418,17 @@ class FaceClusterStore(context: Context) :
 
     @Synchronized
     fun facesForMedia(mediaUri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID): List<DetectedMediaFace> {
+        ensurePersonCovers(engineId)
         val result = mutableListOf<DetectedMediaFace>()
         readableDatabase.rawQuery(
-            """SELECT f.media_uri, f.face_index, f.cluster_id, COALESCE(p.name, c.display_name, ''),
-                      f.person_id, f.box_left, f.box_top, f.box_right, f.box_bottom, f.engine_id
+            """SELECT f.media_uri, f.face_index, f.cluster_id, COALESCE(NULLIF(TRIM(p.name), ''), ''),
+                      f.person_id, f.box_left, f.box_top, f.box_right, f.box_bottom, f.engine_id,
+                      portrait.media_uri, portrait.face_index
                FROM faces f
                LEFT JOIN clusters c ON f.cluster_id = c.id AND f.engine_id = c.engine_id
                LEFT JOIN people p ON f.person_id = p.id AND f.engine_id = p.engine_id
+               LEFT JOIN faces portrait ON portrait.face_id = p.cover_face_id
+                    AND portrait.person_id = p.id AND portrait.engine_id = p.engine_id
                WHERE f.media_uri = ? AND f.engine_id = ?
                ORDER BY f.face_index""".trimIndent(),
             arrayOf(mediaUri, engineId)
@@ -1334,25 +1438,20 @@ class FaceClusterStore(context: Context) :
                 val boxTop = cursor.getFloat(6)
                 val boxRight = cursor.getFloat(7)
                 val boxBottom = cursor.getFloat(8)
-                // Entity integrity: ignore invalid coordinates where width or height <= 0
-                if (boxRight <= boxLeft || boxBottom <= boxTop) {
-                    continue
-                }
-                val rawName = cursor.getString(3).orEmpty().trim()
-                val faceIndex = cursor.getInt(1)
-                // A face index is local to a photo and is not a persistent person identity.
-                val displayName = rawName
+                if (boxRight <= boxLeft || boxBottom <= boxTop) continue
                 result += DetectedMediaFace(
                     mediaUri = cursor.getString(0),
-                    faceIndex = faceIndex,
+                    faceIndex = cursor.getInt(1),
                     clusterId = cursor.getString(2).orEmpty(),
-                    displayName = displayName,
+                    displayName = cursor.getString(3).orEmpty().trim(),
                     personId = if (cursor.isNull(4)) null else cursor.getString(4),
                     boxLeft = boxLeft,
                     boxTop = boxTop,
                     boxRight = boxRight,
                     boxBottom = boxBottom,
-                    engineId = cursor.getString(9).orEmpty()
+                    engineId = cursor.getString(9).orEmpty(),
+                    portraitMediaUri = if (cursor.isNull(10)) null else cursor.getString(10),
+                    portraitFaceIndex = if (cursor.isNull(11)) null else cursor.getInt(11)
                 )
             }
         }
