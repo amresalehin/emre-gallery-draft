@@ -45,7 +45,9 @@ class MediaStoreThumbnailFetcher(
         if (bitmap == null) null else DrawableResult(
             drawable = BitmapDrawable(context.resources, bitmap),
             isSampled = true,
-            dataSource = DataSource.DISK
+            // This bitmap came from MediaStore, not Coil's disk cache. Mark it LOCAL so Coil
+            // can persist the decoded thumbnail under the request's diskCacheKey.
+            dataSource = DataSource.LOCAL
         )
     }
 
