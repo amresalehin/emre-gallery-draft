@@ -221,14 +221,9 @@ class EnteFaceEngine private constructor(
             } ?: ExifInterface.ORIENTATION_NORMAL
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
 
-        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, boundsOptions)
-        } ?: return null
-
-        val rawW = boundsOptions.outWidth
-        val rawH = boundsOptions.outHeight
-        if (rawW <= 0 || rawH <= 0) return null
+        val bounds = FaceImageBoundsReader.read(context, uri) ?: return null
+        val rawW = bounds.width
+        val rawH = bounds.height
 
         val isTransposed = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
                 orientation == ExifInterface.ORIENTATION_ROTATE_270 ||

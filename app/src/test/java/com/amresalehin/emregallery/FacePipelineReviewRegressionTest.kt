@@ -3,10 +3,13 @@ package com.amresalehin.emregallery
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.RectF
+import android.graphics.Bitmap
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.face.*
 import com.amresalehin.emregallery.ui.isSuccessfulFaceIndexingCompletion
 import java.io.File
+import java.io.FileOutputStream
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -222,6 +225,28 @@ class FacePipelineReviewRegressionTest {
         modelDir.deleteRecursively()
     }
 
+
+    @Test
+    fun faceImageBoundsReaderAcceptsValidImageEvenThoughBoundsDecodeReturnsNull() {
+        val imageFile = File(context.cacheDir, "face-bounds-regression.jpg")
+        val bitmap = Bitmap.createBitmap(23, 17, Bitmap.Config.ARGB_8888)
+        try {
+            FileOutputStream(imageFile).use { output ->
+                assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output))
+            }
+        } finally {
+            bitmap.recycle()
+        }
+
+        try {
+            val bounds = FaceImageBoundsReader.read(context, Uri.fromFile(imageFile))
+            assertNotNull(bounds)
+            assertEquals(23, bounds!!.width)
+            assertEquals(17, bounds.height)
+        } finally {
+            imageFile.delete()
+        }
+    }
 
     @Test
     fun freshInstallDoesNotAssumeBuffaloWhenNoModelIsInstalled() {
