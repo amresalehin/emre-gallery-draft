@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import coil.request.CachePolicy
 import coil.request.ImageRequest
-import coil.request.Priority
 import coil.size.Precision
 import java.security.MessageDigest
 import java.util.LinkedHashMap
@@ -64,8 +63,7 @@ object ThumbnailRequestFactory {
         context: Context,
         item: MediaItem,
         targetWidthPx: Int,
-        targetHeightPx: Int,
-        priority: Priority = Priority.NORMAL
+        targetHeightPx: Int
     ): ImageRequest {
         val size = sizeFor(targetWidthPx, targetHeightPx)
         val uri = Uri.parse(item.uri)
@@ -75,7 +73,6 @@ object ThumbnailRequestFactory {
             .data(uri)
             .size(size.width, size.height)
             .precision(Precision.INEXACT)
-            .priority(priority)
             .crossfade(false)
             .memoryCacheKey(key)
             .memoryCachePolicy(CachePolicy.ENABLED)

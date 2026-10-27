@@ -27,9 +27,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import coil.Coil
-import coil.request.Priority
 import com.amresalehin.emregallery.data.ThumbnailRequestFactory
-import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -155,7 +154,7 @@ fun HomeScreen(
                     .mapNotNull { itemInfo -> gridPositionByKey[itemInfo.key.toString()] }
                     .maxOrNull()
             }
-        }.distinctUntilChanged().collect { lastVisibleIndex ->
+        }.distinctUntilChanged().collectLatest { lastVisibleIndex ->
             if (lastVisibleIndex == null || lastVisibleIndex < 0 || gridMedia.isEmpty()) {
                 return@collect
             }
@@ -165,20 +164,24 @@ fun HomeScreen(
             for (index in firstIndex until endExclusive) {
                 val item = gridMedia[index]
                 val prefetchKey = "${item.uri}|${item.sizeBytes}|${item.isVideo}"
-                if (!recentlyPrefetched.add(prefetchKey)) continue
-                if (recentlyPrefetched.size > 96) {
-                    recentlyPrefetched.remove(recentlyPrefetched.first())
-                }
+                if (prefetchKey in recentlyPrefetched) continue
 
-                thumbnailImageLoader.enqueue(
+                // Execute one preview at a time. collectLatest cancels warm-up as soon as
+                // scrolling resumes, so prefetch work does not build an unbounded queue.
+                val result = thumbnailImageLoader.execute(
                     ThumbnailRequestFactory.create(
                         context = context,
                         item = item,
                         targetWidthPx = 192,
-                        targetHeightPx = 192,
-                        priority = Priority.LOW
+                        targetHeightPx = 192
                     )
                 )
+                if (result is coil.request.SuccessResult) {
+                    recentlyPrefetched.add(prefetchKey)
+                    if (recentlyPrefetched.size > 96) {
+                        recentlyPrefetched.remove(recentlyPrefetched.first())
+                    }
+                }
             }
         }
     }
