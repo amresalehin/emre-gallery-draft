@@ -12,6 +12,7 @@ import android.content.Context
 import android.provider.Settings
 
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
+import com.amresalehin.emregallery.data.VideoPosterFetcher
 
 class GalleryApplication : Application() {
     companion object {
@@ -51,6 +52,7 @@ class GalleryApplication : Application() {
                     .build()
             }
             .components {
+                add(VideoPosterFetcher.Factory(this@GalleryApplication))
                 add(MediaStoreThumbnailFetcher.Factory(this@GalleryApplication))
                 add(VideoFrameDecoder.Factory())
             }

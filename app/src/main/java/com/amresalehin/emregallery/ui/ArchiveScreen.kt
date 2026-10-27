@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery.ui
 
-import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,15 +19,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import coil.size.Precision
-import coil.size.Size
 import com.amresalehin.emregallery.data.MediaItem
 
 @Composable
@@ -96,13 +90,8 @@ fun ArchiveScreen(
                         Column {
                             Box(modifier = Modifier.trackThumbnailBounds(item.uri)) {
                                 val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(Uri.parse(item.uri))
-                                        .crossfade(true)
-                                        .size(Size(720, 720))
-                                        .precision(Precision.INEXACT)
-                                        .build(),
+                                MediaThumbnail(
+                                    item = item,
                                     contentDescription = item.name,
                                     modifier = Modifier.fillMaxWidth().aspectRatio(1f)
                                         .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))

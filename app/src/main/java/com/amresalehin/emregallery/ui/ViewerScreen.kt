@@ -59,16 +59,17 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
-import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
 import coil.size.Size
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.data.ThumbnailRequestFactory
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Fullscreen media viewer screen supporting:
@@ -652,31 +653,31 @@ private fun ZoomableMediaItem(
     var offsetY by remember(item.uri) { mutableFloatStateOf(0f) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
 
-    // Keep video posters on the same cached MediaStore thumbnail used by the grid.
-    // Decoding an independent video frame here can make the poster change before ExoPlayer's first frame.
+    // Keep still-image viewing at original resolution. A shared thumbnail is used as its
+    // placeholder, while video posters are loaded through the common MediaThumbnail path below.
     val context = LocalContext.current
-    val imageRequest = remember(item.uri, isVideo, context) {
-        val request = ImageRequest.Builder(context)
+    val placeholderKey = remember(item.uri, item.sizeBytes, item.isVideo) {
+        val bounds = ThumbnailBoundsTracker.getBounds(item.uri)
+        val target = bounds?.let {
+            ThumbnailRequestFactory.sizeFor(it.width.roundToInt(), it.height.roundToInt())
+        } ?: ThumbnailRequestFactory.sizeFor(320, 320)
+        ThumbnailRequestFactory.cacheKey(
+            Uri.parse(item.uri), item.isVideo, target.width, target.height, item.sizeBytes
+        )
+    }
+    val viewerOriginalKey = remember(item.uri, item.sizeBytes) {
+        "viewer-original:v1:" + item.uri + ":" + item.sizeBytes
+    }
+    val imageRequest = remember(item.uri, item.sizeBytes, context, placeholderKey, viewerOriginalKey) {
+        ImageRequest.Builder(context)
             .data(Uri.parse(item.uri))
-            .diskCachePolicy(CachePolicy.ENABLED)
-
-        if (isVideo) {
-            request
-                .size(480, 480)
-                .precision(Precision.INEXACT)
-                .crossfade(false)
-                .diskCacheKey("${item.uri}_thumb")
-                .memoryCacheKey("${item.uri}_thumb")
-        } else {
-            request
-                .size(Size.ORIGINAL)
-                .precision(Precision.EXACT)
-                .placeholderMemoryCacheKey("${item.uri}_thumb")
-                .diskCacheKey("${item.uri}:viewer-original")
-                .memoryCacheKey("${item.uri}:viewer-original")
-                .crossfade(100)
-        }
-        request.build()
+            .size(Size.ORIGINAL)
+            .precision(Precision.EXACT)
+            .placeholderMemoryCacheKey(placeholderKey)
+            .diskCacheKey(viewerOriginalKey)
+            .memoryCacheKey(viewerOriginalKey)
+            .crossfade(100)
+            .build()
     }
 
     // Reset zoom when navigating away from this page
@@ -883,16 +884,29 @@ private fun ZoomableMediaItem(
             contentAlignment = Alignment.Center
         ) {
             // Keep this poster in place throughout video preparation and the first-frame handoff.
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = item.name,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = if (hasTargetBounds) {
-                    transitionContentScale(transitionProgress)
-                } else {
-                    ContentScale.Fit
-                }
-            )
+            if (isVideo) {
+                MediaThumbnail(
+                    item = item,
+                    contentDescription = item.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = if (hasTargetBounds) {
+                        transitionContentScale(transitionProgress)
+                    } else {
+                        ContentScale.Fit
+                    }
+                )
+            } else {
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = item.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = if (hasTargetBounds) {
+                        transitionContentScale(transitionProgress)
+                    } else {
+                        ContentScale.Fit
+                    }
+                )
+            }
 
             // Video Surface when current item is a video
             if (isVideo && videoState != null) {

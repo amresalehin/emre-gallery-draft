@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery.ui
 
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,13 +20,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.request.CachePolicy
-import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.MediaItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -117,15 +112,8 @@ fun SearchScreen(
                             headlineContent = { Text(item.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             supportingContent = { Text(item.relativePath, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             leadingContent = {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(Uri.parse(item.uri))
-                                        .size(150, 150)
-                                        .crossfade(false)
-                                        .diskCacheKey("${item.uri}_search_icon")
-                                        .diskCachePolicy(CachePolicy.ENABLED)
-                                        .memoryCacheKey("${item.uri}_search_icon")
-                                        .build(),
+                                MediaThumbnail(
+                                    item = item,
                                     contentDescription = null,
                                     modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
                                     contentScale = ContentScale.Crop
@@ -157,17 +145,10 @@ fun SearchScreen(
                                 .clip(RoundedCornerShape(5.dp))
                                 .clickable { onOpen(item) }
                         ) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(Uri.parse(item.uri))
-                                    .size(600, 600)
-                                    .crossfade(false)
-                                    .diskCacheKey("${item.uri}_thumb")
-                                    .diskCachePolicy(CachePolicy.ENABLED)
-                                    .memoryCacheKey("${item.uri}_thumb")
-                                    .build(),
-                                item.name,
-                                Modifier.fillMaxSize().alpha(if (isThumbnailActiveInViewer) 0f else 1f),
+                            MediaThumbnail(
+                                item = item,
+                                contentDescription = item.name,
+                                modifier = Modifier.fillMaxSize().alpha(if (isThumbnailActiveInViewer) 0f else 1f),
                                 contentScale = ContentScale.Crop
                             )
                             if (item.isVideo && !isThumbnailActiveInViewer) {

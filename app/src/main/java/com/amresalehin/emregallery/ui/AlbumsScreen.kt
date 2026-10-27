@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
-import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
@@ -280,16 +279,9 @@ fun AlbumsScreen(
                                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                     ) {
                                         if (cover != null) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(Uri.parse(cover.uri))
-                                                    .size(240, 160)
-                                                    .crossfade(false)
-                                                    .diskCacheKey("${cover.uri}_album_collection_cover")
-                                                    .diskCachePolicy(CachePolicy.ENABLED)
-                                                    .memoryCacheKey("${cover.uri}_album_collection_cover")
-                                                    .build(),
-                                                contentDescription = "Preview of ${album.name}",
+                                            MediaThumbnail(
+                                                item = cover,
+                                                contentDescription = "Preview of " + album.name,
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop
                                             )
@@ -384,16 +376,9 @@ fun AlbumsScreen(
                                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                     ) {
                                         if (cover != null) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(Uri.parse(cover.uri))
-                                                    .size(240, 160)
-                                                    .crossfade(false)
-                                                    .diskCacheKey("${cover.uri}_folder_collection_cover")
-                                                    .diskCachePolicy(CachePolicy.ENABLED)
-                                                    .memoryCacheKey("${cover.uri}_folder_collection_cover")
-                                                    .build(),
-                                                contentDescription = "Preview of ${folder.key.substringAfterLast('/')}",
+                                            MediaThumbnail(
+                                                item = cover,
+                                                contentDescription = "Preview of " + folder.key.substringAfterLast('/'),
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop
                                             )
@@ -571,15 +556,8 @@ fun FolderCard(name: String, items: List<MediaItem>, onClick: () -> Unit, onMore
     Column(Modifier.width(142.dp)) {
         Box(Modifier.fillMaxWidth().height(126.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick)) {
             items.firstOrNull()?.let {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(Uri.parse(it.uri))
-                        .size(300, 300)
-                        .crossfade(false)
-                        .diskCacheKey("${it.uri}_thumb")
-                        .diskCachePolicy(CachePolicy.ENABLED)
-                        .memoryCacheKey("${it.uri}_thumb")
-                        .build(),
+                MediaThumbnail(
+                    item = it,
                     contentDescription = name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop

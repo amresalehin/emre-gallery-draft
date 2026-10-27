@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery.ui
 
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -31,10 +30,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import coil.size.Precision
-import coil.size.Size
 import com.amresalehin.emregallery.data.MediaItem
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -356,13 +351,8 @@ private fun BinItemCard(
                         onLongClick = onLongPress
                     )
             ) {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(Uri.parse(item.uri))
-                        .crossfade(true)
-                        .size(Size(640, 640))
-                        .precision(Precision.INEXACT)
-                        .build(),
+                MediaThumbnail(
+                    item = item,
                     contentDescription = item.name,
                     modifier = Modifier.fillMaxSize().alpha(if (isThumbnailActiveInViewer) 0f else 1f),
                     contentScale = ContentScale.Crop

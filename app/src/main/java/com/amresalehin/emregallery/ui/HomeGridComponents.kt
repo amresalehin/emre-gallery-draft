@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery.ui
 
-import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -9,11 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -32,29 +27,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import coil.request.CachePolicy
-import coil.request.ImageRequest
 import coil.size.Size
-import coil.size.Precision
 import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import kotlin.math.roundToInt
 
 @Composable
 fun HomeFastScrollbar(
@@ -322,15 +308,8 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
                         )
                 ) {
                     val isCoverActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == cover.uri
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(Uri.parse(cover.uri))
-                            .size(264, 368)
-                            .crossfade(false)
-                            .diskCacheKey("${cover.uri}_memory_story")
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .memoryCacheKey("${cover.uri}_memory_story")
-                            .build(),
+                    MediaThumbnail(
+                        item = cover,
                         contentDescription = title,
                         modifier = Modifier.fillMaxSize().graphicsLayer {
                             alpha = if (isCoverActiveInViewer) 0f else 1f
@@ -512,18 +491,6 @@ fun MosaicMediaItem(
     onToggleSelection: () -> Unit = {},
     onOpen: (MediaItem) -> Unit
 ) {
-    val context = LocalContext.current
-    val imageRequest = remember(item.uri) {
-        ImageRequest.Builder(context)
-            .data(Uri.parse(item.uri))
-            .size(480, 480)
-            .precision(Precision.INEXACT)
-            .crossfade(false)
-            .diskCacheKey("${item.uri}_thumb")
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .memoryCacheKey("${item.uri}_thumb")
-            .build()
-    }
 
     val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -555,8 +522,8 @@ fun MosaicMediaItem(
             )
     ) {
         val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
-        AsyncImage(
-            model = imageRequest,
+        MediaThumbnail(
+            item = item,
             contentDescription = item.name,
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 alpha = if (isThumbnailActiveInViewer) 0f else 1f
@@ -616,18 +583,6 @@ fun MediaGridItem(
         }
     }
 
-    val context = LocalContext.current
-    val imageRequest = remember(item.uri) {
-        ImageRequest.Builder(context)
-            .data(Uri.parse(item.uri))
-            .size(480, 480)
-            .precision(Precision.INEXACT)
-            .crossfade(false)
-            .diskCacheKey("${item.uri}_thumb")
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .memoryCacheKey("${item.uri}_thumb")
-            .build()
-    }
 
     val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -656,8 +611,8 @@ fun MediaGridItem(
             )
     ) {
         val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
-        AsyncImage(
-            model = imageRequest,
+        MediaThumbnail(
+            item = item,
             contentDescription = item.name,
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 alpha = if (isThumbnailActiveInViewer) 0f else 1f
