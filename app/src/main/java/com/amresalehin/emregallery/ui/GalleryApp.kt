@@ -106,7 +106,6 @@ fun GalleryApp() {
     val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
-    val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     val homeGridState = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState()
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
@@ -747,7 +746,6 @@ fun GalleryApp() {
             ) { currentDestination ->
                 when (currentDestination) {
                     Destination.HOME -> HomeScreen(
-                        listState = homeListState,
                         gridState = homeGridState,
                         media = visibleMedia,
                         loading = loading,
