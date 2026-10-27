@@ -5,6 +5,8 @@ import android.content.Context
 import android.graphics.RectF
 import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.face.*
+import com.amresalehin.emregallery.ui.isSuccessfulFaceIndexingCompletion
+import java.io.File
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -154,4 +156,70 @@ class FacePipelineReviewRegressionTest {
         store.readableDatabase.rawQuery("SELECT COUNT(*) FROM grouping_state", null).use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
         store.readableDatabase.rawQuery("SELECT COUNT(*) FROM face_metrics_v2", null).use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
     }
+
+    @Test
+    fun activeEngineSelectionIsSharedReactively() {
+        val activeEngine = FaceRecognitionSettings.activeEngineFlow(context)
+        FaceRecognitionSettings.setActiveEngine(context, EnteFaceConstants.ENGINE_ID)
+        assertEquals(EnteFaceConstants.ENGINE_ID, activeEngine.value)
+        FaceRecognitionSettings.setActiveEngine(context, BuffaloLFaceEngine.ENGINE_ID)
+        assertEquals(BuffaloLFaceEngine.ENGINE_ID, activeEngine.value)
+    }
+
+    @Test
+    fun completionStatusDoesNotTreatFailuresAsSuccess() {
+        val completed = StageProgress(StageState.COMPLETED, 10, 10, 100)
+        assertTrue(
+            isSuccessfulFaceIndexingCompletion(
+                true, false, false, 10, 10, 0, completed, "Grouping complete", null
+            )
+        )
+        assertFalse(
+            isSuccessfulFaceIndexingCompletion(
+                true, false, false, 10, 10, 1, completed, "Grouping complete", null
+            )
+        )
+        assertFalse(
+            isSuccessfulFaceIndexingCompletion(
+                true, false, false, 10, 10, 0, completed, "Grouping failed: ONNX error", null
+            )
+        )
+        assertFalse(
+            isSuccessfulFaceIndexingCompletion(
+                true, false, false, 10, 10, 0, completed, "Grouping complete", "Clustering error: disk full"
+            )
+        )
+    }
+
+    @Test
+    fun rescanDoesNotCarryIdentityWhenDetectorReusesIndexForDifferentFace() {
+        val uri = "content://media/reused-face-index"
+        val provenance = EmbeddingProvenance.BUFFALO_L
+        store.replaceMediaFacesAtomically(
+            uri, listOf(replacement(0, 0, 10f)), provenance, 0.6f, false
+        )
+        val oldFace = store.facesForMedia(uri).single()
+        assertNotNull(oldFace.personId)
+        assertFalse(oldFace.clusterId.isBlank())
+
+        // Same index, but spatially separate and with an unrelated embedding.
+        store.replaceMediaFacesAtomically(
+            uri, listOf(replacement(0, 1, 300f)), provenance, 0.6f, true
+        )
+        val rescanned = store.facesForMedia(uri).single()
+        assertNull(rescanned.personId)
+        assertTrue(rescanned.clusterId.isBlank())
+    }
+
+    @Test
+    fun buffaloInstallRejectsTruncatedModelFiles() {
+        val modelDir = File(context.filesDir, "face-models/buffalo_l")
+        modelDir.deleteRecursively()
+        assertTrue(modelDir.mkdirs())
+        File(modelDir, "det_10g.onnx").writeBytes(ByteArray(2 * 1024 * 1024))
+        File(modelDir, "w600k_r50.onnx").writeBytes(ByteArray(2 * 1024 * 1024))
+        assertFalse(BuffaloLFaceEngine.isModelInstalled(context))
+        modelDir.deleteRecursively()
+    }
+
 }

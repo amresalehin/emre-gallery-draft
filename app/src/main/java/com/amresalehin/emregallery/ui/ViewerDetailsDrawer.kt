@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.location.Geocoder
 import android.net.Uri
+import com.amresalehin.emregallery.IndexingForegroundService
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -30,6 +31,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import org.osmdroid.util.GeoPoint
 import java.util.Locale
 
@@ -125,7 +128,8 @@ fun ViewerDetailsDrawer(
     var selectedTab by remember { mutableStateOf(DetailDrawerTab.OVERVIEW) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     var faceReloadKey by remember { mutableIntStateOf(0) }
-    val activeEngineId = remember(context) { FaceRecognitionSettings.getActiveEngine(context) }
+    val activeEngineFlow = remember(context) { FaceRecognitionSettings.activeEngineFlow(context) }
+    val activeEngineId by activeEngineFlow.collectAsState(initial = FaceRecognitionSettings.getActiveEngine(context))
     val factory = remember(activeEngineId) {
         FaceEngineRegistry.getFactory(activeEngineId) ?: error("Unknown face engine: $activeEngineId")
     }
@@ -206,15 +210,59 @@ fun ViewerDetailsDrawer(
     val cancelScan: () -> Unit = { singleScanJob?.cancel(); singleScanJob = null; scanPhase = null }
     val installModel: () -> Unit = {
         if (!isInstallingModel) {
-            isInstallingModel = true; modelInstallProgress = "Starting download..."
-            coroutineScope.launch {
-                try {
-                    FaceIndexingRepository(context.applicationContext, factory).downloadModel(force = true,
-                        onDetailedProgress = { p -> modelInstallProgress = "${p.stage.replaceFirstChar { it.uppercase() }} (${p.percentage}%)" })
+            lastScanError = null
+            isInstallingModel = true
+            modelInstallProgress = "Starting download..."
+            // Use the same foreground-service job and progress state as Indexing Status.
+            IndexingForegroundService.downloadModel(context, force = true, engineId = activeEngineId)
+        }
+    }
+
+    LaunchedEffect(activeEngineId, isInstallingModel) {
+        if (!isInstallingModel) return@LaunchedEffect
+        val prefs = context.getSharedPreferences(IndexingForegroundService.STATE_PREFS, Context.MODE_PRIVATE)
+        var observedDownload = false
+        var waitingPolls = 0
+        while (isActive) {
+            val task = prefs.getString(IndexingForegroundService.KEY_TASK, "").orEmpty()
+            val taskEngine = prefs.getString(IndexingForegroundService.KEY_ENGINE_ID, BuffaloLFaceEngine.ENGINE_ID).orEmpty()
+            val running = prefs.getBoolean(IndexingForegroundService.KEY_RUNNING, false)
+            if (task == "model" && taskEngine == activeEngineId && running) {
+                observedDownload = true
+                waitingPolls = 0
+                val stage = prefs.getString(IndexingForegroundService.KEY_STAGE, "downloading").orEmpty()
+                val percent = prefs.getInt(IndexingForegroundService.KEY_PROCESSED, 0).coerceIn(0, 100)
+                modelInstallProgress = if (stage == "downloading") {
+                    "Downloading model ($percent%)"
+                } else {
+                    stage.replaceFirstChar { it.uppercase() } + if (percent > 0) " ($percent%)" else "..."
+                }
+            } else if (observedDownload) {
+                isInstallingModel = false
+                modelInstallProgress = null
+                val error = prefs.getString(IndexingForegroundService.KEY_ERROR, null)
+                isModelInstalled = withContext(Dispatchers.IO) { factory.isInstalled(context) }
+                if (error != null) lastScanError = "Failed to download model: $error"
+                else if (isModelInstalled) lastScanError = null
+                faceReloadKey++
+                return@LaunchedEffect
+            } else {
+                waitingPolls++
+                // Another foreground indexing task may have prevented this request from starting.
+                if (waitingPolls >= 20) {
+                    isInstallingModel = false
+                    modelInstallProgress = null
+                    isModelInstalled = withContext(Dispatchers.IO) { factory.isInstalled(context) }
+                    lastScanError = if (prefs.getBoolean(IndexingForegroundService.KEY_RUNNING, false)) {
+                        "Another indexing task is active. Finish or cancel it before downloading a model."
+                    } else {
+                        "The model download did not start. Please retry."
+                    }
                     faceReloadKey++
-                } catch (e: Exception) { lastScanError = "Failed to download model: ${e.localizedMessage ?: e.message}" }
-                finally { isInstallingModel = false; modelInstallProgress = null }
+                    return@LaunchedEffect
+                }
             }
+            delay(250)
         }
     }
 
@@ -224,9 +272,10 @@ fun ViewerDetailsDrawer(
         when {
             isScanning -> ViewerFaceUiState(state = ViewerFaceState.IN_PROGRESS, progressPhase = scanPhase ?: "Scanning photo...", engineName = factory.displayName, engineId = activeEngineId)
             isInstallingModel -> ViewerFaceUiState(state = ViewerFaceState.IN_PROGRESS, progressPhase = modelInstallProgress ?: "Installing model...", engineName = factory.displayName, engineId = activeEngineId)
+            lastScanError != null && (!isModelInstalled || (detectedFaces.isEmpty() && groupingError == null)) ->
+                ViewerFaceUiState(ViewerFaceState.FAILED, errorMessage = lastScanError, engineName = factory.displayName, engineId = activeEngineId)
             !isModelInstalled -> ViewerFaceUiState(ViewerFaceState.MODEL_MISSING, engineName = factory.displayName, engineId = activeEngineId)
             isLoadingIndexInfo -> ViewerFaceUiState(ViewerFaceState.NOT_INDEXED, engineName = factory.displayName, engineId = activeEngineId)
-            lastScanError != null && detectedFaces.isEmpty() && groupingError == null -> ViewerFaceUiState(ViewerFaceState.FAILED, errorMessage = lastScanError, engineName = factory.displayName, engineId = activeEngineId)
             mediaIndexInfo?.status == "failed" -> ViewerFaceUiState(ViewerFaceState.FAILED, errorMessage = mediaIndexInfo?.errorMessage ?: "Face scan failed for this photo", engineName = factory.displayName, engineId = activeEngineId)
             groupingError != null -> ViewerFaceUiState(ViewerFaceState.FAILED, errorMessage = "Grouping failed: $groupingError", engineName = factory.displayName, engineId = activeEngineId, groupingFailure = true)
             groupingRequired && detectedCount > 0 -> ViewerFaceUiState(state = ViewerFaceState.WAITING_FOR_GROUPING, progressPhase = "$detectedCount faces found · waiting to be grouped", engineName = factory.displayName, engineId = activeEngineId)

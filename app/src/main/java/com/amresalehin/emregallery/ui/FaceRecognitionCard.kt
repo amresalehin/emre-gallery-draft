@@ -90,17 +90,8 @@ fun FaceRecognitionCard(
 ) {
     val context = LocalContext.current
     val activeEngineInSettings = FaceRecognitionSettings.getActiveEngine(context)
-
-    var selectedEngineId by remember {
-        mutableStateOf(
-            when {
-                engineState.isBuffaloLInstalled -> BuffaloLFaceEngine.ENGINE_ID
-                engineState.isEnteInstalled -> EnteFaceConstants.ENGINE_ID
-                activeEngineInSettings.isNotBlank() -> activeEngineInSettings
-                else -> ""
-            }
-        )
-    }
+    val activeEngineFlow = remember(context) { FaceRecognitionSettings.activeEngineFlow(context) }
+    val selectedEngineId by activeEngineFlow.collectAsState(initial = activeEngineInSettings)
 
     val isEnte = selectedEngineId == EnteFaceConstants.ENGINE_ID
     val currentFindingState = if (isEnte) enteFaceFindingState else faceFindingState
@@ -144,7 +135,6 @@ fun FaceRecognitionCard(
                 Button(
                     onClick = {
                         onCancelDownload(selectedEngineId)
-                        selectedEngineId = targetEngine
                         FaceRecognitionSettings.setActiveEngine(context, targetEngine)
                         pendingEngineSwitch = null
                     }
@@ -250,9 +240,20 @@ fun FaceRecognitionCard(
 
                 // Top-Right Status Icon (Operational Lifecycle Indicator)
                 val isDownloading = currentDownloadState.isDownloading
+                val isDownloadFailed = !isDownloading && currentDownloadState.error != null
                 val isClusteringActive = currentClusteringState.isClusteringRunning || currentFindingState.clusteringStage.state == StageState.RUNNING
                 val isScanningActive = currentFindingState.isRunning && !currentFindingState.isPaused && !isClusteringActive
-                val isAllCompleted = isModelInstalled && !currentFindingState.isRunning && !isClusteringActive && totalPhotos > 0 && currentFindingState.processed >= totalPhotos
+                val isAllCompleted = isSuccessfulFaceIndexingCompletion(
+                    modelInstalled = isModelInstalled,
+                    isRunning = currentFindingState.isRunning,
+                    isClusteringActive = isClusteringActive,
+                    totalPhotos = totalPhotos,
+                    processed = currentFindingState.processed,
+                    failedCount = currentFindingState.failedCount,
+                    clusteringStage = currentFindingState.clusteringStage,
+                    groupingStatus = currentFindingState.groupingStatus,
+                    clusteringStatusMessage = currentClusteringState.statusMessage
+                )
 
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -283,6 +284,21 @@ fun FaceRecognitionCard(
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+
+                            // A failed model download must not look like successful indexing.
+                            isDownloadFailed -> {
+                                IconButton(
+                                    onClick = { onDownloadModel(true, selectedEngineId) },
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ErrorOutline,
+                                        contentDescription = "Model download failed; retry",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(26.dp)
                                     )
                                 }
                             }
@@ -485,7 +501,6 @@ fun FaceRecognitionCard(
                                             if (isEnte && currentDownloadState.isDownloading) {
                                                 pendingEngineSwitch = BuffaloLFaceEngine.ENGINE_ID
                                             } else {
-                                                selectedEngineId = BuffaloLFaceEngine.ENGINE_ID
                                                 FaceRecognitionSettings.setActiveEngine(context, BuffaloLFaceEngine.ENGINE_ID)
                                                 onDownloadModel(true, BuffaloLFaceEngine.ENGINE_ID)
                                             }
@@ -506,7 +521,6 @@ fun FaceRecognitionCard(
                                 if (isEnte && currentDownloadState.isDownloading) {
                                     pendingEngineSwitch = BuffaloLFaceEngine.ENGINE_ID
                                 } else {
-                                    selectedEngineId = BuffaloLFaceEngine.ENGINE_ID
                                     FaceRecognitionSettings.setActiveEngine(context, BuffaloLFaceEngine.ENGINE_ID)
                                 }
                             }
@@ -545,7 +559,6 @@ fun FaceRecognitionCard(
                                             if (!isEnte && currentDownloadState.isDownloading) {
                                                 pendingEngineSwitch = EnteFaceConstants.ENGINE_ID
                                             } else {
-                                                selectedEngineId = EnteFaceConstants.ENGINE_ID
                                                 FaceRecognitionSettings.setActiveEngine(context, EnteFaceConstants.ENGINE_ID)
                                                 onDownloadModel(true, EnteFaceConstants.ENGINE_ID)
                                             }
@@ -566,7 +579,6 @@ fun FaceRecognitionCard(
                                 if (!isEnte && currentDownloadState.isDownloading) {
                                     pendingEngineSwitch = EnteFaceConstants.ENGINE_ID
                                 } else {
-                                    selectedEngineId = EnteFaceConstants.ENGINE_ID
                                     FaceRecognitionSettings.setActiveEngine(context, EnteFaceConstants.ENGINE_ID)
                                 }
                             }

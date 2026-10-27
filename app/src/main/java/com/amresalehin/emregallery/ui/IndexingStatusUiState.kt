@@ -85,3 +85,31 @@ data class IndexingStatusUiState(
     val enteClustering: FaceClusteringState = FaceClusteringState(clusterDistance = EnteFaceConstants.DEFAULT_RECOGNITION_DISTANCE),
     val engine: EngineState = EngineState()
 )
+
+
+/**
+ * A scan is successful only when every requested photo was processed, none failed,
+ * and the grouping stage did not report a failure. "Processed" alone is not success.
+ */
+internal fun isSuccessfulFaceIndexingCompletion(
+    modelInstalled: Boolean,
+    isRunning: Boolean,
+    isClusteringActive: Boolean,
+    totalPhotos: Int,
+    processed: Int,
+    failedCount: Int,
+    clusteringStage: StageProgress,
+    groupingStatus: String,
+    clusteringStatusMessage: String?
+): Boolean {
+    if (!modelInstalled || isRunning || isClusteringActive || totalPhotos <= 0 || processed < totalPhotos) {
+        return false
+    }
+    if (failedCount > 0 || clusteringStage.state == StageState.FAILED) return false
+    if (groupingStatus.startsWith("Grouping failed", ignoreCase = true)) return false
+    val clusterMessage = clusteringStatusMessage.orEmpty()
+    if (clusterMessage.startsWith("Clustering error", ignoreCase = true) ||
+        clusterMessage.startsWith("Clustering failed", ignoreCase = true)
+    ) return false
+    return true
+}

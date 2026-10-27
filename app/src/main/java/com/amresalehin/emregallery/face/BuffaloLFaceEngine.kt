@@ -590,7 +590,12 @@ class BuffaloLFaceEngine private constructor(
         private const val MIN_FACE_SIZE = 28
         private const val NMS_THRESHOLD = 0.4f
         private const val MAX_FACES = 100
-        private const val MIN_FREE_SPACE_BYTES = 60L * 1024 * 1024
+        // The zip and extracted models must coexist during installation.
+        private const val MIN_FREE_SPACE_BYTES = 650L * 1024 * 1024
+        private const val MIN_BUNDLED_SPACE_BYTES = 320L * 1024 * 1024
+        private const val MIN_DETECTOR_BYTES = 10L * 1024 * 1024
+        private const val MIN_RECOGNIZER_BYTES = 100L * 1024 * 1024
+        private const val INSTALL_BACKUP_DIR = ".previous-install"
         private val STRIDES = intArrayOf(8, 16, 32)
         private const val MODEL_URL =
             "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
@@ -598,11 +603,41 @@ class BuffaloLFaceEngine private constructor(
             "det_10g.onnx", "w600k_r50.onnx"
         )
 
+        private fun minimumBytesForModel(name: String): Long = when (name) {
+            "det_10g.onnx" -> MIN_DETECTOR_BYTES
+            "w600k_r50.onnx" -> MIN_RECOGNIZER_BYTES
+            else -> Long.MAX_VALUE
+        }
+
+        private fun isValidModelFile(file: File, name: String): Boolean =
+            file.isFile && file.length() >= minimumBytesForModel(name)
+
+        /** Roll back a model-pair replacement interrupted by process death. */
+        private fun recoverInterruptedInstall(modelDir: File) {
+            val backupDir = modelDir.resolve(INSTALL_BACKUP_DIR)
+            if (!backupDir.isDirectory) return
+            val manifest = backupDir.resolve("manifest")
+            if (manifest.isFile) {
+                val previousFiles = manifest.readLines().filter { it in REQUIRED_MODELS }.toSet()
+                for (name in REQUIRED_MODELS) {
+                    val target = modelDir.resolve(name)
+                    val backup = backupDir.resolve(name)
+                    if (name in previousFiles) {
+                        if (isValidModelFile(backup, name)) {
+                            if (target.exists()) target.delete()
+                            backup.renameTo(target)
+                        }
+                    } else {
+                        target.delete()
+                    }
+                }
+            }
+            backupDir.deleteRecursively()
+        }
+
         fun isModelInstalled(context: Context): Boolean {
             val dir = File(context.filesDir, "face-models/buffalo_l")
-            return REQUIRED_MODELS.all { name ->
-                dir.resolve(name).let { it.isFile && it.length() > 1024 * 1024 }
-            }
+            return REQUIRED_MODELS.all { name -> isValidModelFile(dir.resolve(name), name) }
         }
 
         private fun openConnectionWithRedirects(initialUrl: String, existingBytes: Long = 0L): HttpURLConnection {
@@ -635,29 +670,33 @@ class BuffaloLFaceEngine private constructor(
 
         @Synchronized
         fun installBundledModel(context: Context) {
-            if (isModelInstalled(context)) return
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
+            recoverInterruptedInstall(modelDir)
+            if (isModelInstalled(context)) return
             if (!modelDir.exists() && !modelDir.mkdirs()) {
                 error("Cannot create face model directory.")
             }
             val availableBytes = StatFs(modelDir.absolutePath).availableBytes
-            check(availableBytes >= MIN_FREE_SPACE_BYTES) {
-                "At least 60 MB of free storage is required to install Buffalo_L model."
+            check(availableBytes >= MIN_BUNDLED_SPACE_BYTES) {
+                "At least 320 MiB of free storage is required to install bundled Buffalo_L model files safely."
             }
 
             REQUIRED_MODELS.forEach { name ->
                 val target = modelDir.resolve(name)
-                if (target.isFile && target.length() > 1024 * 1024) return@forEach
+                if (isValidModelFile(target, name)) return@forEach
                 val temporary = modelDir.resolve("$name.installing")
                 try {
                     context.assets.open("face-models/buffalo_l/$name").use { input ->
                         temporary.outputStream().buffered().use { output -> input.copyTo(output) }
                     }
-                    check(temporary.length() > 1024 * 1024) {
-                        "Bundled Buffalo_L model file is incomplete: $name"
+                    check(isValidModelFile(temporary, name)) {
+                        "Bundled Buffalo_L model file is incomplete or truncated: $name"
                     }
-                    if (target.exists()) target.delete()
+                    if (target.exists() && !target.delete()) error("Cannot replace invalid bundled model file: $name")
                     if (!temporary.renameTo(target)) temporary.copyTo(target, overwrite = true)
+                    check(isValidModelFile(target, name)) {
+                        "Bundled Buffalo_L model failed validation after installation: $name"
+                    }
                 } finally {
                     temporary.delete()
                 }
@@ -674,6 +713,7 @@ class BuffaloLFaceEngine private constructor(
         ) {
             val modelDir = File(context.filesDir, "face-models/buffalo_l")
             if (!modelDir.exists() && !modelDir.mkdirs()) error("Cannot create face model directory.")
+            recoverInterruptedInstall(modelDir)
             if (!force && isModelInstalled(context)) {
                 onStage("ready")
                 onDetailedProgress(DetailedDownloadProgress(288L * 1024 * 1024, 288L * 1024 * 1024, 0L, 0L, "ready"))
@@ -681,7 +721,7 @@ class BuffaloLFaceEngine private constructor(
             }
             val availableBytes = StatFs(modelDir.absolutePath).availableBytes
             check(availableBytes >= MIN_FREE_SPACE_BYTES) {
-                "At least 60 MB of free storage is required to install Buffalo_L."
+                "At least 650 MiB of free storage is required because the Buffalo_L archive and extracted models must coexist during installation."
             }
 
             val archive = File(modelDir, "buffalo_l.zip.part")
@@ -797,26 +837,55 @@ class BuffaloLFaceEngine private constructor(
                     }
                 }
                 val missing = REQUIRED_MODELS.filter { name ->
-                    staging.resolve(name).let { !it.isFile || it.length() < 1024 * 1024 }
+                    !isValidModelFile(staging.resolve(name), name)
                 }
-                if (missing.isNotEmpty()) error("Incomplete Buffalo_L archive; missing: " + missing.joinToString())
+                if (missing.isNotEmpty()) {
+                    error(
+                        "Incomplete Buffalo_L archive. Missing or truncated required model files: " +
+                            missing.joinToString(", ") { it + " (minimum " + (minimumBytesForModel(it) / (1024 * 1024)) + " MiB)" }
+                    )
+                }
 
                 onStage("installing")
                 onDetailedProgress(
                     DetailedDownloadProgress(responseTotal, responseTotal, 0L, 0L, "installing")
                 )
-                REQUIRED_MODELS.forEach { name ->
-                    awaitIfResumed()
-                    if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
-                    val source = staging.resolve(name)
-                    val target = modelDir.resolve(name)
-                    if (target.exists()) target.delete()
-                    if (!source.renameTo(target)) source.copyTo(target, overwrite = true)
+
+                // Back up the old pair by same-filesystem rename; roll back if any replacement fails.
+                val backupDir = modelDir.resolve(INSTALL_BACKUP_DIR)
+                backupDir.deleteRecursively()
+                check(backupDir.mkdirs()) { "Cannot create Buffalo_L model rollback directory." }
+                val previousFiles = REQUIRED_MODELS.filter { modelDir.resolve(it).exists() }.toSet()
+                backupDir.resolve("manifest").writeText(previousFiles.joinToString("\n"))
+                try {
+                    for (name in REQUIRED_MODELS) {
+                        awaitIfResumed()
+                        if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
+                        val target = modelDir.resolve(name)
+                        if (target.exists() && !target.renameTo(backupDir.resolve(name))) {
+                            error("Could not safely back up the existing Buffalo_L model: $name")
+                        }
+                    }
+                    for (name in REQUIRED_MODELS) {
+                        awaitIfResumed()
+                        if (Thread.currentThread().isInterrupted) throw CancellationException("Download cancelled.")
+                        val source = staging.resolve(name)
+                        val target = modelDir.resolve(name)
+                        if (!source.renameTo(target)) {
+                            source.copyTo(target, overwrite = true)
+                            if (!source.delete()) error("Could not finalize installed model file: $name")
+                        }
+                    }
+                    check(isModelInstalled(context)) { "Buffalo_L model installation failed validation." }
+                    staging.listFiles()?.filter { it.isFile && it.name.contains("LICENSE", true) }?.forEach {
+                        it.copyTo(modelDir.resolve(it.name), overwrite = true)
+                    }
+                } catch (failure: Throwable) {
+                    recoverInterruptedInstall(modelDir)
+                    throw failure
+                } finally {
+                    backupDir.deleteRecursively()
                 }
-                staging.listFiles()?.filter { it.isFile && it.name.contains("LICENSE", true) }?.forEach {
-                    it.copyTo(modelDir.resolve(it.name), overwrite = true)
-                }
-                check(isModelInstalled(context)) { "Buffalo_L model installation failed validation." }
                 if (responseTotal > 0L) onProgress(responseTotal, responseTotal)
                 onStage("ready")
                 onDetailedProgress(
@@ -832,13 +901,14 @@ class BuffaloLFaceEngine private constructor(
             context: Context,
             detectionThreshold: Float = FaceRecognitionSettings.DEFAULT_DETECTION_CONFIDENCE
         ): BuffaloLFaceEngine {
+            val modelDir = File(context.filesDir, "face-models/buffalo_l")
+            recoverInterruptedInstall(modelDir)
             if (!isModelInstalled(context)) {
                 runCatching { installBundledModel(context) }
             }
             check(isModelInstalled(context)) {
-                "Buffalo_L model is not installed. Please download it first."
+                "Buffalo_L model is not installed or failed artifact validation. Please retry the download."
             }
-            val modelDir = File(context.filesDir, "face-models/buffalo_l")
             val options = OrtSession.SessionOptions().apply {
                 setIntraOpNumThreads(2)
                 setInterOpNumThreads(1)

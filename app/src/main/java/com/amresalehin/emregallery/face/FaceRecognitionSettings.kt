@@ -1,6 +1,9 @@
 package com.amresalehin.emregallery.face
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /** Persistent tuning controls used by the Index Status screen and face indexer. */
 object FaceRecognitionSettings {
@@ -24,16 +27,32 @@ object FaceRecognitionSettings {
     const val KEY_ENTE_RECOGNITION_DISTANCE = "ente_recognition_distance"
     const val KEY_ENTE_MIN_GROUP_FACES = "ente_min_group_faces"
 
+    private val activeEngineIdState = MutableStateFlow(BuffaloLFaceEngine.ENGINE_ID)
+
+    /** Observable engine selection shared by the indexing card and viewer drawer. */
+    fun activeEngineFlow(context: Context): StateFlow<String> {
+        activeEngineIdState.value = getActiveEngine(context)
+        return activeEngineIdState.asStateFlow()
+    }
+
     fun preferences(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun getActiveEngine(context: Context): String {
-        return preferences(context).getString(KEY_ACTIVE_ENGINE, BuffaloLFaceEngine.ENGINE_ID)
-            ?: BuffaloLFaceEngine.ENGINE_ID
+        val selected = preferences(context).getString(KEY_ACTIVE_ENGINE, BuffaloLFaceEngine.ENGINE_ID)
+        val engineId = selected?.takeIf {
+            it == BuffaloLFaceEngine.ENGINE_ID || it == EnteFaceConstants.ENGINE_ID
+        } ?: BuffaloLFaceEngine.ENGINE_ID
+        activeEngineIdState.value = engineId
+        return engineId
     }
 
     fun setActiveEngine(context: Context, engineId: String) {
+        require(engineId == BuffaloLFaceEngine.ENGINE_ID || engineId == EnteFaceConstants.ENGINE_ID) {
+            "Unsupported face engine: $engineId"
+        }
         preferences(context).edit().putString(KEY_ACTIVE_ENGINE, engineId).apply()
+        activeEngineIdState.value = engineId
         FaceEngineRegistry.setActiveEngine(engineId)
     }
 
