@@ -195,6 +195,8 @@ class IndexingForegroundService : Service() {
             failed = store.failedMediaCount(engineId),
             engineId = engineId,
             currentItemName = "Initializing ${factory.displayName}…",
+            currentItemStatus = "",
+            groupingStatus = "",
             detectionState = "PENDING",
             detectionProcessed = 0,
             detectionTotal = relevantPhotos.size,
@@ -226,6 +228,7 @@ class IndexingForegroundService : Service() {
                     engineId = engineId,
                     currentItemName = p.currentItemName,
                     currentItemStatus = p.currentItemStatus,
+                    groupingStatus = p.groupingStatus,
                     detectionState = p.detectionStage.state.name,
                     detectionProcessed = p.detectionStage.processed,
                     detectionTotal = p.detectionStage.total,
@@ -238,7 +241,8 @@ class IndexingForegroundService : Service() {
                 )
                 val targetName = if (p.currentItemName.isNotBlank()) " · ${p.currentItemName}" else ""
                 val statusSnippet = if (p.currentItemStatus.isNotBlank()) " (${p.currentItemStatus})" else ""
-                postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · ${store.indexedFaceCount(engineId)} faces$targetName$statusSnippet", done, relevantPhotos.size)
+                val groupingSnippet = if (p.groupingStatus.isNotBlank()) " · ${p.groupingStatus}" else ""
+                postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · ${store.indexedFaceCount(engineId)} faces$targetName$statusSnippet$groupingSnippet", done, relevantPhotos.size)
             }
         )
     }
@@ -330,6 +334,7 @@ class IndexingForegroundService : Service() {
         engineId: String? = null,
         currentItemName: String? = null,
         currentItemStatus: String? = null,
+        groupingStatus: String? = null,
         detectionState: String? = null,
         detectionProcessed: Int? = null,
         detectionTotal: Int? = null,
@@ -357,6 +362,7 @@ class IndexingForegroundService : Service() {
             if (engineId != null) putString(KEY_ENGINE_ID, engineId)
             if (currentItemName != null) putString(KEY_CURRENT_ITEM_NAME, currentItemName)
             if (currentItemStatus != null) putString(KEY_CURRENT_ITEM_STATUS, currentItemStatus)
+            if (groupingStatus != null) putString(KEY_GROUPING_STATUS, groupingStatus)
             if (detectionState != null) putString(KEY_DETECTION_STATE, detectionState)
             if (detectionProcessed != null) putInt(KEY_DETECTION_PROCESSED, detectionProcessed)
             if (detectionTotal != null) putInt(KEY_DETECTION_TOTAL, detectionTotal)
@@ -460,6 +466,7 @@ class IndexingForegroundService : Service() {
         const val KEY_ETA = "eta"
         const val KEY_CURRENT_ITEM_NAME = "current_item_name"
         const val KEY_CURRENT_ITEM_STATUS = "current_item_status"
+        const val KEY_GROUPING_STATUS = "grouping_status"
         const val KEY_DETECTION_STATE = "detection_state"
         const val KEY_DETECTION_PROCESSED = "detection_processed"
         const val KEY_DETECTION_TOTAL = "detection_total"

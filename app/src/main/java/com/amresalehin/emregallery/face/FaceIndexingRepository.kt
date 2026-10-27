@@ -33,6 +33,7 @@ data class FaceIndexingProgress(
     val failed: Int = 0,
     val currentItemName: String = "",
     val currentItemStatus: String = "",
+    val groupingStatus: String = "",
     val currentItemFaces: Int? = null,
     val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
     val engineName: String = "",
@@ -94,6 +95,9 @@ class FaceIndexingRepository(
         val failedList = mutableListOf<Pair<String, String>>()
         var engine: FaceEngine? = null
         var groupingStatus: String? = null
+        var lastCompletedItemName = ""
+        var lastCompletedItemStatus = ""
+        var lastCompletedItemFaces: Int? = null
 
         val totalPending = pending.size
         var detectionStage = StageProgress(
@@ -281,6 +285,9 @@ class FaceIndexingRepository(
                     lastItemStatus = "Failed: $errorDetail"
                 } finally {
                     processed++
+                    lastCompletedItemName = itemName
+                    lastCompletedItemStatus = lastItemStatus
+                    lastCompletedItemFaces = currentItemFacesCount
                     val completedPct = if (totalPending > 0) (processed * 100 / totalPending) else 100
                     detectionStage = StageProgress(
                         state = if (processed >= totalPending) StageState.COMPLETED else StageState.RUNNING,
@@ -325,7 +332,8 @@ class FaceIndexingRepository(
                     groupingStatus = "Grouping people…"
                     onProgress(FaceIndexingProgress(
                         processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
-                        currentItemName="Grouping people…",currentItemStatus=groupingStatus.orEmpty(),
+                        currentItemName=lastCompletedItemName,currentItemStatus=lastCompletedItemStatus,
+                        groupingStatus=groupingStatus.orEmpty(),currentItemFaces=lastCompletedItemFaces,
                         engineId=engineId,engineName=engineFactory.displayName,
                         detectionStage=detectionStage,embeddingStage=embeddingStage,
                         clusteringStage=clusteringStage,failedItems=failedList.toList()
@@ -344,7 +352,8 @@ class FaceIndexingRepository(
                                 runBlocking {
                                     onProgress(FaceIndexingProgress(
                                         processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
-                                        currentItemName="Grouping people…",currentItemStatus=groupingStatus.orEmpty(),
+                                        currentItemName=lastCompletedItemName,currentItemStatus=lastCompletedItemStatus,
+                        groupingStatus=groupingStatus.orEmpty(),currentItemFaces=lastCompletedItemFaces,
                                         engineId=engineId,engineName=engineFactory.displayName,
                                         detectionStage=detectionStage,embeddingStage=embeddingStage,
                                         clusteringStage=clusteringStage,failedItems=failedList.toList()
@@ -355,7 +364,8 @@ class FaceIndexingRepository(
                         val finalCount=store.faceEmbeddingCount(engineId,engineFactory.modelVersion)
                         store.markGroupingCompleted(engineId,engineFactory.modelVersion,strategy.strategyVersion,groupedPeople,finalCount)
                         clusteringStage=StageProgress(StageState.COMPLETED,faceTotal,faceTotal,100)
-                        groupingStatus="Grouping complete · $groupedPeople people"
+                        val unassigned = store.unassignedFaceCount(engineId, engineFactory.modelVersion)
+                        groupingStatus="Grouping complete · $groupedPeople people · $unassigned unassigned"
                         FaceStoreEvents.notifyAllUpdated()
                     } catch (cancelled: CancellationException) {
                         runCatching { store.markGroupingPending(engineId,engineFactory.modelVersion,strategy.strategyVersion,
@@ -370,8 +380,9 @@ class FaceIndexingRepository(
                     }
                     onProgress(FaceIndexingProgress(
                         processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
-                        currentItemName=if(clusteringStage.state==StageState.FAILED) "Grouping failed" else "",
-                        currentItemStatus=groupingStatus.orEmpty(),engineId=engineId,engineName=engineFactory.displayName,
+                        currentItemName=lastCompletedItemName,currentItemStatus=lastCompletedItemStatus,
+                        groupingStatus=groupingStatus.orEmpty(),currentItemFaces=lastCompletedItemFaces,
+                        engineId=engineId,engineName=engineFactory.displayName,
                         detectionStage=detectionStage,embeddingStage=embeddingStage,
                         clusteringStage=clusteringStage,failedItems=failedList.toList()
                     ))
@@ -390,8 +401,10 @@ class FaceIndexingRepository(
             total = totalPending,
             facesFound = facesFound,
             failed = failed,
-            currentItemName = if (clusteringStage.state == StageState.FAILED) "Grouping failed" else "",
-            currentItemStatus = groupingStatus.orEmpty(),
+            currentItemName = lastCompletedItemName,
+            currentItemStatus = lastCompletedItemStatus,
+            groupingStatus = groupingStatus.orEmpty(),
+            currentItemFaces = lastCompletedItemFaces,
             engineId = engineId,
             engineName = engineFactory.displayName,
             detectionStage = detectionStage,

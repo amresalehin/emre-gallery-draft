@@ -240,6 +240,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val engineId = prefs.getString(IndexingForegroundService.KEY_ENGINE_ID, BuffaloLFaceEngine.ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
                 val currentItem = prefs.getString(IndexingForegroundService.KEY_CURRENT_ITEM_NAME, "") ?: ""
                 val currentStatus = prefs.getString(IndexingForegroundService.KEY_CURRENT_ITEM_STATUS, "") ?: ""
+                val groupingStatus = prefs.getString(IndexingForegroundService.KEY_GROUPING_STATUS, "") ?: ""
 
                 val detStateStr = prefs.getString(IndexingForegroundService.KEY_DETECTION_STATE, "PENDING") ?: "PENDING"
                 val detProcessed = prefs.getInt(IndexingForegroundService.KEY_DETECTION_PROCESSED, 0)
@@ -300,8 +301,9 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     totalDetected = if (faces >= 0) faces else newEnteFace.totalDetected,
                                     failedCount = effectiveFailed,
                                     itemsPerMinute = ipm,
-                                    currentItemName = if (running) currentItem else "",
-                                    currentItemStatus = if (running) currentStatus else "",
+                                    currentItemName = currentItem,
+                                    currentItemStatus = currentStatus,
+                                    groupingStatus = groupingStatus,
                                     activeEngineId = engineId,
                                     detectionStage = detStage,
                                     embeddingStage = embStage,
@@ -322,8 +324,9 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     totalDetected = if (faces >= 0) faces else newFace.totalDetected,
                                     failedCount = effectiveFailed,
                                     itemsPerMinute = ipm,
-                                    currentItemName = if (running) currentItem else "",
-                                    currentItemStatus = if (running) currentStatus else "",
+                                    currentItemName = currentItem,
+                                    currentItemStatus = currentStatus,
+                                    groupingStatus = groupingStatus,
                                     activeEngineId = engineId,
                                     detectionStage = detStage,
                                     embeddingStage = embStage,
@@ -562,7 +565,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     ),
                     enteFaceFinding = it.enteFaceFinding.copy(
                         clusteringStage = StageProgress(StageState.RUNNING, 0, it.enteFaceFinding.totalDetected, 0),
-                        currentItemStatus = "Grouping people…"
+                        groupingStatus = "Grouping people…"
                     )
                 )
             }
@@ -589,6 +592,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val (summaries, detectedCount) = withContext(Dispatchers.IO) {
                     Pair(faceStore.summaries(engineId), faceStore.indexedFaceCount(engineId))
                 }
+                val unassignedCount = withContext(Dispatchers.IO) {
+                    faceStore.unassignedFaceCount(
+                        engineId,
+                        if (engineId == EnteFaceConstants.ENGINE_ID) EnteFaceConstants.MODEL_VERSION else BuffaloLFaceEngine.MODEL_VERSION
+                    )
+                }
 
                 _uiState.update {
                     if (engineId == EnteFaceConstants.ENGINE_ID) {
@@ -601,7 +610,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                             enteFaceFinding = it.enteFaceFinding.copy(
                                 totalDetected = detectedCount,
                                 clusteringStage = StageProgress(StageState.COMPLETED, detectedCount, detectedCount, 100),
-                                currentItemStatus = ""
+                                groupingStatus = "Grouping complete · $resultCount people · $unassignedCount unassigned"
                             )
                         )
                     } else {
@@ -631,7 +640,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     it.enteFaceFinding.clusteringStage.total,
                                     it.enteFaceFinding.clusteringStage.percentage
                                 ),
-                                currentItemStatus = "Grouping failed: $errorMsg"
+                                groupingStatus = "Grouping failed: $errorMsg"
                             )
                         )
                     } else {

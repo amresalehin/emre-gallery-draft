@@ -1124,6 +1124,14 @@ class FaceClusterStore(context: Context) :
     }
 
 
+
+    @Synchronized
+    fun unassignedFaceCount(engineId: String, modelVersion: String): Int =
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM faces WHERE engine_id=? AND model_version=? AND person_id IS NULL",
+            arrayOf(engineId, modelVersion)
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+
     @Synchronized
     fun faceEmbeddingCount(engineId: String, modelVersion: String): Int =
         readableDatabase.rawQuery("SELECT COUNT(*) FROM faces WHERE engine_id=? AND model_version=?", arrayOf(engineId, modelVersion))

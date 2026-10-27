@@ -27,6 +27,7 @@ data class FaceFindingState(
     val detectionConfidence: Float = 0.60f,
     val currentItemName: String = "",
     val currentItemStatus: String = "",
+    val groupingStatus: String = "",
     val activeEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
     val detectionStage: StageProgress = StageProgress(),
     val embeddingStage: StageProgress = StageProgress(),

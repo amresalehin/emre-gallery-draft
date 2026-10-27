@@ -735,7 +735,7 @@ fun FaceRecognitionCard(
                         Column(modifier=Modifier.weight(1f)) {
                             Text("Grouping failed",style=MaterialTheme.typography.bodyMedium,
                                 fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.error)
-                            Text(currentFindingState.currentItemStatus.removePrefix("Grouping failed: ").ifBlank { "Grouping could not finish." },
+                            Text(currentFindingState.groupingStatus.removePrefix("Grouping failed: ").ifBlank { "Grouping could not finish." },
                                 style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         TextButton(onClick={onClusterFaces(currentClusteringState.clusterDistance,selectedEngineId)}) {
@@ -743,6 +743,10 @@ fun FaceRecognitionCard(
                         }
                     }
                 }
+                currentFindingState.clusteringStage.state == StageState.COMPLETED &&
+                    currentFindingState.groupingStatus.startsWith("Grouping complete") ->
+                    Text(currentFindingState.groupingStatus,style=MaterialTheme.typography.bodySmall,
+                        color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(vertical=6.dp))
                 currentFindingState.isRunning && currentFindingState.clusteringStage.state == StageState.PENDING ->
                     Text("Grouping — waiting for embeddings to finish",style=MaterialTheme.typography.bodySmall,
                         color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(vertical=6.dp))

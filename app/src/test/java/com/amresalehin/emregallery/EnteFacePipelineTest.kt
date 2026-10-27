@@ -173,7 +173,6 @@ class EnteFacePipelineTest {
     }
 
     @Test
-    @Test
     fun testFailedMediaLogMatchesCurrentLibraryScope() {
         val engineId = EnteFaceConstants.ENGINE_ID
         val inLibrary = "content://media/current_library_failure"
