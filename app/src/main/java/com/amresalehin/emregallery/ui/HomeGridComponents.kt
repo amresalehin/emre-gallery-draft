@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.staggeredgrid.LazyStaggeredGridState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -114,6 +115,82 @@ fun HomeFastScrollbar(
                     color = thumbColor.copy(alpha = if (inMotion) 0.95f else 0.55f),
                     topLeft = Offset(size.width - thumbWidth, top),
                     size = androidx.compose.ui.geometry.Size(thumbWidth, height),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(thumbWidth / 2f)
+                )
+            }
+        }
+    }
+}
+
+
+@Composable
+fun HomeFastScrollbar(
+    gridState: LazyStaggeredGridState,
+    topContentPadding: Dp,
+    bottomContentPadding: Dp,
+    thumbColor: Color
+) {
+    val scope = rememberCoroutineScope()
+    var dragging by remember { mutableStateOf(false) }
+    var dragRemainder by remember { mutableFloatStateOf(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val minThumbPx = remember(density) { with(density) { 36.dp.toPx() } }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = topContentPadding, bottom = bottomContentPadding)
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(28.dp)
+                .pointerInput(gridState) {
+                    detectDragGestures(
+                        onDragStart = { dragging = true; dragRemainder = 0f },
+                        onDragEnd = { dragging = false; dragRemainder = 0f },
+                        onDragCancel = { dragging = false; dragRemainder = 0f },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            val layout = gridState.layoutInfo
+                            val count = layout.totalItemsCount
+                            val height = size.height.toFloat()
+                            if (count > 0 && height > 0f) {
+                                dragRemainder += (dragAmount.y / height) * count
+                                val delta = dragRemainder.toInt()
+                                if (delta != 0) {
+                                    dragRemainder -= delta
+                                    val target = (gridState.firstVisibleItemIndex + delta)
+                                        .coerceIn(0, (count - 1).coerceAtLeast(0))
+                                    scope.launch { gridState.scrollToItem(target) }
+                                }
+                            }
+                        }
+                    )
+                },
+            contentAlignment = Alignment.TopEnd
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val layout = gridState.layoutInfo
+                val totalItems = layout.totalItemsCount
+                val visibleItems = layout.visibleItemsInfo
+                val viewportPx = size.height
+                if (totalItems <= 0 || visibleItems.isEmpty() || viewportPx <= 0f) return@Canvas
+                if (visibleItems.first().index == 0 && visibleItems.last().index == totalItems - 1) return@Canvas
+
+                val thumbHeight = (viewportPx * visibleItems.size / totalItems.toFloat())
+                    .coerceIn(minThumbPx, viewportPx)
+                val maxTravel = (viewportPx - thumbHeight).coerceAtLeast(1f)
+                val fraction = (gridState.firstVisibleItemIndex.toFloat() /
+                    (totalItems - visibleItems.size).coerceAtLeast(1)).coerceIn(0f, 1f)
+                val thumbTop = maxTravel * fraction
+                val inMotion = dragging || gridState.isScrollInProgress
+                val thumbWidth = if (inMotion) 6.dp.toPx() else 2.5.dp.toPx()
+                drawRoundRect(
+                    color = thumbColor.copy(alpha = if (inMotion) 0.95f else 0.55f),
+                    topLeft = Offset(size.width - thumbWidth, thumbTop.coerceIn(0f, size.height - thumbHeight)),
+                    size = androidx.compose.ui.geometry.Size(thumbWidth, thumbHeight),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(thumbWidth / 2f)
                 )
             }
