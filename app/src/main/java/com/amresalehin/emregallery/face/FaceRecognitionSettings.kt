@@ -5,6 +5,7 @@ import android.content.Context
 /** Persistent tuning controls used by the Index Status screen and face indexer. */
 object FaceRecognitionSettings {
     private const val PREFS = "face_recognition_settings"
+    private const val MANUAL_CLUSTERING_STRATEGY_VERSION = 1
     const val KEY_DETECTION_CONFIDENCE = "detection_confidence"
     const val KEY_RECOGNITION_DISTANCE = "recognition_distance"
     // Kept for one-time migration from older app versions.
@@ -71,8 +72,30 @@ object FaceRecognitionSettings {
 
     fun setRecognitionDistance(context: Context, engineId: String, value: Float) {
         val rounded = (value.coerceIn(0.25f, 0.75f) * 100f).let { kotlin.math.round(it) / 100f }
+        if (recognitionDistance(context, engineId) == rounded) return
         val key = if (engineId == EnteFaceConstants.ENGINE_ID) KEY_ENTE_RECOGNITION_DISTANCE else KEY_RECOGNITION_DISTANCE
         preferences(context).edit().putFloat(key, rounded).apply()
+
+        // Invalidate both the manual-clustering checkpoint and the repository's
+        // threshold-aware checkpoint. The next grouping run must not reuse old clusters.
+        val store = FaceClusterStore(context.applicationContext)
+        val modelVersion = if (engineId == EnteFaceConstants.ENGINE_ID) {
+            EnteFaceConstants.MODEL_VERSION
+        } else {
+            BuffaloLFaceEngine.MODEL_VERSION
+        }
+        store.markGroupingPending(engineId, modelVersion, MANUAL_CLUSTERING_STRATEGY_VERSION)
+        val strategyVersion = if (engineId == EnteFaceConstants.ENGINE_ID) {
+            EnteFaceClusteringStrategy.strategyVersion
+        } else {
+            MANUAL_CLUSTERING_STRATEGY_VERSION
+        }
+        store.markGroupingPending(
+            engineId,
+            modelVersion,
+            groupingRevision(strategyVersion, rounded)
+        )
+        FaceStoreEvents.notifyAllUpdated()
     }
 
     fun minGroupFaces(context: Context, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int {

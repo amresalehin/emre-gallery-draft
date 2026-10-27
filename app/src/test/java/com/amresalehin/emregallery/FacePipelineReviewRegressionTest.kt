@@ -58,6 +58,24 @@ class FacePipelineReviewRegressionTest {
     }
 
     @Test
+    fun changingRecognitionDistanceInvalidatesCompletedGrouping() {
+        val engine = EnteFaceConstants.ENGINE_ID
+        val model = EnteFaceConstants.MODEL_VERSION
+        val revision = groupingRevision(EnteFaceClusteringStrategy.strategyVersion, 0.60f)
+        FaceRecognitionSettings.setRecognitionDistance(context, engine, 0.60f)
+        store.markGroupingCompleted(engine, model, revision, 1, 1)
+        assertFalse(store.isGroupingRequired(engine, model, revision))
+
+        FaceRecognitionSettings.setRecognitionDistance(context, engine, 0.45f)
+
+        assertTrue(store.isGroupingRequired(
+            engine,
+            model,
+            groupingRevision(EnteFaceClusteringStrategy.strategyVersion, 0.45f)
+        ))
+    }
+
+    @Test
     fun atomicReplacementRetainsExplicitNonContiguousKeysAndRefreshesMetrics() {
         val uri = "content://media/non-contiguous"
         val provenance = EmbeddingProvenance.BUFFALO_L
