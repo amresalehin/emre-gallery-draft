@@ -409,4 +409,58 @@ class FaceFixesRegressionTest {
         assertEquals(112, aligned.width)
         assertEquals(112, aligned.height)
     }
+
+    @Test
+    fun testMediaWithFacesCountAccurateStatistics() {
+        val engineId = BuffaloLFaceEngine.ENGINE_ID
+        // Photo 1: Scanned with 0 faces
+        store.markMediaIndexed("content://media/photo1.jpg", 0, engineId)
+        // Photo 2: Scanned with 2 faces
+        store.markMediaIndexed("content://media/photo2.jpg", 2, engineId)
+        // Photo 3: Failed scan
+        store.markMediaFailed("content://media/photo3.jpg", engineId, "Error")
+
+        val allUris = listOf("content://media/photo1.jpg", "content://media/photo2.jpg", "content://media/photo3.jpg")
+        assertEquals(2, store.indexedMediaCount(allUris, engineId))
+        assertEquals(1, store.failedMediaCount(allUris, engineId))
+        // Critical: mediaWithFacesCount must ONLY count photos with face_count > 0, NOT photo1
+        assertEquals(1, store.mediaWithFacesCount(allUris, engineId))
+    }
+
+    @Test
+    fun testQueryEngineInfoDoesNotReturnPrematureErrorWhenNotInstalled() {
+        val (buffaloName, buffaloFailure) = FaceIndexingRepository.queryEngineInfo(context, BuffaloLFaceEngineFactory)
+        assertEquals(BuffaloLFaceEngineFactory.displayName, buffaloName)
+        assertNull("Uninstalled model must not report a premature error", buffaloFailure)
+
+        val (enteName, enteFailure) = FaceIndexingRepository.queryEngineInfo(context, EnteFaceEngineFactory)
+        assertEquals(EnteFaceEngineFactory.displayName, enteName)
+        assertNull("Uninstalled Ente model must not report a premature error", enteFailure)
+    }
+
+    @Test
+    fun testFaceImageDecoderFromFileUri() {
+        val testFile = java.io.File(context.cacheDir, "test_sample.png")
+        val bmp = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(Color.BLUE)
+        testFile.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+
+        val uri = android.net.Uri.fromFile(testFile)
+        val decoded = FaceImageDecoder.decodeOrientedImage(context, uri, maxDimension = 400)
+        assertNotNull("Image should be successfully decoded", decoded)
+        assertEquals("Original width must be preserved", 800, decoded!!.originalWidth)
+        assertEquals("Original height must be preserved", 600, decoded.originalHeight)
+        assertTrue("Decoded width must be scaled down", decoded.bitmap.width <= 400)
+        assertEquals(Bitmap.Config.ARGB_8888, decoded.bitmap.config)
+
+        testFile.delete()
+    }
+
+    @Test
+    fun testFaceImageDecoderNonExistentUriReturnsNull() {
+        val fakeUri = android.net.Uri.parse("content://media/external/images/media/999999999")
+        val decoded = FaceImageDecoder.decodeOrientedImage(context, fakeUri)
+        assertNull("Non-existent URI should return null safely without throwing", decoded)
+    }
 }
+

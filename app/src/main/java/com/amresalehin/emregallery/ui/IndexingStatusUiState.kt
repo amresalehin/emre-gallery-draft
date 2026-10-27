@@ -32,7 +32,8 @@ data class FaceFindingState(
     val detectionStage: StageProgress = StageProgress(),
     val embeddingStage: StageProgress = StageProgress(),
     val clusteringStage: StageProgress = StageProgress(),
-    val failedItems: List<Pair<String, String>> = emptyList()
+    val failedItems: List<Pair<String, String>> = emptyList(),
+    val error: String? = null
 )
 
 data class LocationIndexingState(

@@ -135,6 +135,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                 // Buffalo_L counts
                 val bCount = faceStore.indexedMediaCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
+                val bWithFaces = faceStore.mediaWithFacesCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
                 val bFaces = faceStore.indexedFaceCount(BuffaloLFaceEngine.ENGINE_ID)
                 val bFailures = faceStore.failedMediaCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
                 val bSummaries = faceStore.summaries(BuffaloLFaceEngine.ENGINE_ID)
@@ -142,6 +143,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                 // Ente-Style counts
                 val eCount = faceStore.indexedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
+                val eWithFaces = faceStore.mediaWithFacesCount(photoUris, EnteFaceConstants.ENGINE_ID)
                 val eFaces = faceStore.indexedFaceCount(EnteFaceConstants.ENGINE_ID)
                 val eFailures = faceStore.failedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
                 val eSummaries = faceStore.summaries(EnteFaceConstants.ENGINE_ID)
@@ -154,8 +156,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                 FullCountsResult(
                     oCount, oFiles,
-                    bCount, bFaces, bFailures, bSummaries, bFailedList,
-                    eCount, eFaces, eFailures, eSummaries, eFailedList,
+                    bCount, bWithFaces, bFaces, bFailures, bSummaries, bFailedList,
+                    eCount, eWithFaces, eFaces, eFailures, eSummaries, eFailedList,
                     lProcessed, lLocated
                 )
             }
@@ -171,7 +173,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     ),
                     faceFinding = state.faceFinding.copy(
                         processed = (result.buffaloProcessed + result.buffaloFailures).coerceIn(0, totalPhotos),
-                        successfulCount = result.buffaloProcessed.coerceIn(0, totalPhotos),
+                        successfulCount = result.buffaloWithFaces.coerceIn(0, totalPhotos),
                         totalDetected = result.buffaloDetected,
                         failedCount = result.buffaloFailures,
                         failedItems = result.buffaloFailedItems
@@ -181,7 +183,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     ),
                     enteFaceFinding = state.enteFaceFinding.copy(
                         processed = (result.enteProcessed + result.enteFailures).coerceIn(0, totalPhotos),
-                        successfulCount = result.enteProcessed.coerceIn(0, totalPhotos),
+                        successfulCount = result.enteWithFaces.coerceIn(0, totalPhotos),
                         totalDetected = result.enteDetected,
                         failedCount = result.enteFailures,
                         failedItems = result.enteFailedItems
@@ -202,11 +204,13 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         val ocrProcessed: Int,
         val ocrCached: Int,
         val buffaloProcessed: Int,
+        val buffaloWithFaces: Int,
         val buffaloDetected: Int,
         val buffaloFailures: Int,
         val buffaloSummaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>,
         val buffaloFailedItems: List<Pair<String, String>>,
         val enteProcessed: Int,
+        val enteWithFaces: Int,
         val enteDetected: Int,
         val enteFailures: Int,
         val enteSummaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>,
@@ -216,6 +220,11 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     )
 
     fun retryFailedFaces(engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
+        if (engineId == EnteFaceConstants.ENGINE_ID) {
+            _uiState.update { it.copy(enteFaceFinding = it.enteFaceFinding.copy(isRunning = true, isPaused = false, error = null)) }
+        } else {
+            _uiState.update { it.copy(faceFinding = it.faceFinding.copy(isRunning = true, isPaused = false, error = null)) }
+        }
         IndexingForegroundService.retryFailedFaces(context, engineId)
     }
 
@@ -235,6 +244,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val total = prefs.getInt(IndexingForegroundService.KEY_TOTAL, 0)
                 val faces = prefs.getInt(IndexingForegroundService.KEY_FACES, -1)
                 val failed = prefs.getInt(IndexingForegroundService.KEY_FAILED, -1)
+                val photosWithFaces = prefs.getInt(IndexingForegroundService.KEY_PHOTOS_WITH_FACES, -1)
                 val stage = prefs.getString(IndexingForegroundService.KEY_STAGE, "downloading") ?: "downloading"
                 val bytes = prefs.getLong(IndexingForegroundService.KEY_BYTES, 0L)
                 val bytesTotal = prefs.getLong(IndexingForegroundService.KEY_BYTES_TOTAL, 0L)
@@ -296,7 +306,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 } else 0
                                 val effectiveProc = if (total > 0) processed else newEnteFace.processed
                                 val effectiveFailed = if (failed >= 0) failed else newEnteFace.failedCount
-                                val effectiveSucc = (effectiveProc - effectiveFailed).coerceAtLeast(0)
+                                val effectiveSucc = if (photosWithFaces >= 0) photosWithFaces else newEnteFace.successfulCount
                                 newEnteFace = newEnteFace.copy(
                                     isRunning = running,
                                     isPaused = paused,
@@ -304,6 +314,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     successfulCount = effectiveSucc,
                                     totalDetected = if (faces >= 0) faces else newEnteFace.totalDetected,
                                     failedCount = effectiveFailed,
+                                    error = error,
                                     itemsPerMinute = ipm,
                                     currentItemName = currentItem,
                                     currentItemStatus = currentStatus,
@@ -319,7 +330,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 } else 0
                                 val effectiveProc = if (total > 0) processed else newFace.processed
                                 val effectiveFailed = if (failed >= 0) failed else newFace.failedCount
-                                val effectiveSucc = (effectiveProc - effectiveFailed).coerceAtLeast(0)
+                                val effectiveSucc = if (photosWithFaces >= 0) photosWithFaces else newFace.successfulCount
                                 newFace = newFace.copy(
                                     isRunning = running,
                                     isPaused = paused,
@@ -327,6 +338,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     successfulCount = effectiveSucc,
                                     totalDetected = if (faces >= 0) faces else newFace.totalDetected,
                                     failedCount = effectiveFailed,
+                                    error = error,
                                     itemsPerMinute = ipm,
                                     currentItemName = currentItem,
                                     currentItemStatus = currentStatus,
@@ -442,7 +454,17 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             state.faceFinding.isRunning || state.enteFaceFinding.isRunning
         ) return
 
-        if (targetState.processed >= currentPhotos.size) return
+        if (targetState.processed >= currentPhotos.size) {
+            val modelVersion = if (engineId == EnteFaceConstants.ENGINE_ID) EnteFaceConstants.MODEL_VERSION else BuffaloLFaceEngine.MODEL_VERSION
+            val strategyVersion = if (engineId == EnteFaceConstants.ENGINE_ID) EnteFaceClusteringStrategy.strategyVersion else MANUAL_CLUSTERING_STRATEGY_VERSION
+            if (faceStore.isGroupingRequired(engineId, modelVersion, strategyVersion)) {
+                val dist = if (engineId == EnteFaceConstants.ENGINE_ID) state.enteClustering.clusterDistance else state.clustering.clusterDistance
+                runFaceClustering(dist, engineId, force = true)
+            } else {
+                clearAndRescanFaces(onNeedsModelDownload = { onNeedsModelDownload(true) }, engineId = engineId)
+            }
+            return
+        }
 
         if (!isInstalled) {
             rescanAllRequested = false
@@ -554,7 +576,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
     fun runFaceClustering(
         threshold: Float,
-        engineId: String = BuffaloLFaceEngine.ENGINE_ID
+        engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+        force: Boolean = true
     ) {
         val state = _uiState.value
         val clusteringState = if (engineId == EnteFaceConstants.ENGINE_ID) state.enteClustering else state.clustering
@@ -616,7 +639,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 )
 
                 val result = withContext(Dispatchers.IO) {
-                    if (!faceStore.isGroupingRequired(engineId, modelVersion, strategyVersion)) {
+                    if (!force && !faceStore.isGroupingRequired(engineId, modelVersion, strategyVersion)) {
                         return@withContext ClusteringResult(
                             grouped = false,
                             peopleCount = faceStore.personCount(engineId = engineId),

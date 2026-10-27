@@ -198,62 +198,10 @@ class BuffaloLFaceEngine private constructor(
     }
 
     private fun decodeOrientedImage(uri: Uri, maxDimension: Int = 1600): DecodedImage? {
-        val orientation = runCatching {
-            context.contentResolver.openInputStream(uri)?.use {
-                ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-            } ?: ExifInterface.ORIENTATION_NORMAL
-        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
-
-        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, boundsOptions)
-        } ?: return null
-
-        val rawW = boundsOptions.outWidth
-        val rawH = boundsOptions.outHeight
-        if (rawW <= 0 || rawH <= 0) return null
-
-        val isTransposed = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
-                orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
-                orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
-                orientation == ExifInterface.ORIENTATION_TRANSVERSE
-        val origW = if (isTransposed) rawH else rawW
-        val origH = if (isTransposed) rawW else rawH
-
-        var inSampleSize = 1
-        while ((rawW / inSampleSize) > maxDimension || (rawH / inSampleSize) > maxDimension) {
-            inSampleSize *= 2
-        }
-
-        val decodeOptions = BitmapFactory.Options().apply {
-            this.inSampleSize = inSampleSize
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-        val decoded = context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, decodeOptions)
-        } ?: return null
-
-        val matrix = Matrix()
-        when (orientation) {
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
-            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.setRotate(90f); matrix.postScale(-1f, 1f) }
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
-            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.setRotate(-90f); matrix.postScale(-1f, 1f) }
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
-        }
-
-        val oriented = if (!matrix.isIdentity) {
-            val rotated = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-            if (rotated !== decoded) decoded.recycle()
-            rotated
-        } else {
-            decoded
-        }
-
-        return DecodedImage(oriented, origW, origH)
+        val result = FaceImageDecoder.decodeOrientedImage(context, uri, maxDimension) ?: return null
+        return DecodedImage(result.bitmap, result.originalWidth, result.originalHeight)
     }
+
 
     /** SCRFD-10GF: 640px input, BGR channel order with (pixel - 127.5) / 128 normalization. */
     private fun detect(bitmap: Bitmap): List<FaceDetection> {

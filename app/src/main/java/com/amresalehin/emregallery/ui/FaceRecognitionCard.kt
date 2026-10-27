@@ -125,6 +125,16 @@ fun FaceRecognitionCard(
     var showErrorLogDialog by remember { mutableStateOf(false) }
     var isAdvancedSettingsExpanded by remember { mutableStateOf(false) }
 
+    val isModelSwitchingDisabled = currentFindingState.isRunning ||
+        currentFindingState.isPaused ||
+        currentClusteringState.isClusteringRunning ||
+        currentDownloadState.isDownloading ||
+        currentFindingState.clusteringStage.state == StageState.RUNNING ||
+        modelDownloadState.isDownloading ||
+        enteModelDownloadState.isDownloading ||
+        faceFindingState.isRunning ||
+        enteFaceFindingState.isRunning
+
     // Mutex confirmation dialog when attempting to switch engines during active download
     if (pendingEngineSwitch != null) {
         val targetEngine = pendingEngineSwitch!!
@@ -417,11 +427,11 @@ fun FaceRecognitionCard(
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)),
+                        color = if (isModelSwitchingDisabled) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isModelSwitchingDisabled) 0.35f else 0.8f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { isDropdownExpanded = !isDropdownExpanded }
+                            .clickable(enabled = !isModelSwitchingDisabled) { isDropdownExpanded = !isDropdownExpanded }
                             .testTag("engine_dropdown_selector")
                     ) {
                         Row(
@@ -435,16 +445,25 @@ fun FaceRecognitionCard(
                                 text = currentLabel,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Normal,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = if (isModelSwitchingDisabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f) else MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Icon(
                                 imageVector = if (isDropdownExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                                 contentDescription = "Dropdown chevron",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = if (isModelSwitchingDisabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f) else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+
+                    if (isModelSwitchingDisabled) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "Model switching is disabled while face processing is in progress.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                        )
                     }
 
                     DropdownMenu(
@@ -722,7 +741,8 @@ fun FaceRecognitionCard(
             // Download Failure / Verification Error Banner with Retry
             val modelFailure = if (isEnte) engineState.enteModelFailure else engineState.primaryModelFailure
             val downloadError = currentDownloadState.error
-            val displayError = downloadError ?: (if (!isModelInstalled) modelFailure else null)
+            val hasActualModelError = !modelFailure.isNullOrBlank() && !modelFailure.contains("not installed", ignoreCase = true) && !modelFailure.contains("missing", ignoreCase = true)
+            val displayError = downloadError ?: if (hasActualModelError) modelFailure else null
 
             if (displayError != null && !currentDownloadState.isDownloading) {
                 Surface(
@@ -954,7 +974,13 @@ fun FaceRecognitionCard(
                 else -> {
                     val isDone = totalPhotos > 0 && currentFindingState.processed >= totalPhotos
                     Button(
-                        onClick = { onToggleFaceFinding(selectedEngineId) },
+                        onClick = {
+                            if (isDone) {
+                                onRescanRequested(selectedEngineId)
+                            } else {
+                                onToggleFaceFinding(selectedEngineId)
+                            }
+                        },
                         enabled = countsReady && totalPhotos > 0,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1067,6 +1093,31 @@ fun FaceRecognitionCard(
                                     valueRange = 0.30f..0.85f,
                                     steps = 10
                                 )
+                            }
+
+                            // Clustering Actions
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = { onClusterFaces(currentClusteringState.clusterDistance, selectedEngineId) },
+                                    enabled = !isPipelineRunning && isModelInstalled && currentFindingState.totalDetected > 0,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Re-cluster", style = MaterialTheme.typography.labelMedium)
+                                }
+                                OutlinedButton(
+                                    onClick = { onResetClusters(selectedEngineId) },
+                                    enabled = !isPipelineRunning && isModelInstalled,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Reset Clusters", style = MaterialTheme.typography.labelMedium)
+                                }
                             }
                         }
                     }

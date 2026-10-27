@@ -60,7 +60,7 @@ class IndexingForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action ?: ACTION_STATUS
-        if (action == ACTION_CANCEL && taskJob != null) {
+        if (action == ACTION_CANCEL) {
             taskJob?.cancel()
             taskJob = null
             pauseSignal.value = false
@@ -193,6 +193,7 @@ class IndexingForegroundService : Service() {
             total = relevantPhotos.size,
             faces = store.indexedFaceCount(engineId),
             failed = store.failedMediaCount(engineId),
+            photosWithFaces = store.mediaWithFacesCount(relevantPhotos.map { it.uri }, engineId),
             engineId = engineId,
             currentItemName = "Initializing ${factory.displayName}…",
             currentItemStatus = "",
@@ -225,6 +226,7 @@ class IndexingForegroundService : Service() {
                     total = relevantPhotos.size,
                     faces = store.indexedFaceCount(engineId),
                     failed = store.failedMediaCount(relevantPhotos.map { it.uri }, engineId),
+                    photosWithFaces = p.photosWithFaces,
                     engineId = engineId,
                     currentItemName = p.currentItemName,
                     currentItemStatus = p.currentItemStatus,
@@ -344,6 +346,7 @@ class IndexingForegroundService : Service() {
         clusteringState: String? = null,
         clusteringProcessed: Int? = null,
         clusteringTotal: Int? = null,
+        photosWithFaces: Int? = null,
         error: String? = null
     ) {
         prefs.edit().apply {
@@ -354,6 +357,7 @@ class IndexingForegroundService : Service() {
             if (total != null) putInt(KEY_TOTAL, total)
             if (faces != null) putInt(KEY_FACES, faces)
             if (failed != null) putInt(KEY_FAILED, failed)
+            if (photosWithFaces != null) putInt(KEY_PHOTOS_WITH_FACES, photosWithFaces)
             if (stage != null) putString(KEY_STAGE, stage)
             if (bytes != null) putLong(KEY_BYTES, bytes)
             if (bytesTotal != null) putLong(KEY_BYTES_TOTAL, bytesTotal)
@@ -478,6 +482,7 @@ class IndexingForegroundService : Service() {
         const val KEY_CLUSTERING_TOTAL = "clustering_total"
         const val KEY_ERROR = "error"
         const val KEY_ENGINE_ID = "engine_id"
+        const val KEY_PHOTOS_WITH_FACES = "photos_with_faces"
 
         const val TASK_LOCATION = "location"
         private const val TASK_OCR = "ocr"

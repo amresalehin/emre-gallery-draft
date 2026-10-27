@@ -260,18 +260,33 @@ class EnteFaceDetector(
         return when (value) {
             is FloatArray -> value
             is Array<*> -> {
-                val list = ArrayList<Float>()
-                fun recurse(arr: Array<*>) {
+                var total = 0
+                fun count(arr: Array<*>) {
                     for (item in arr) {
                         when (item) {
-                            is Float -> list.add(item)
-                            is FloatArray -> item.forEach { list.add(it) }
-                            is Array<*> -> recurse(item)
+                            is Float -> total++
+                            is FloatArray -> total += item.size
+                            is Array<*> -> count(item)
                         }
                     }
                 }
-                recurse(value)
-                list.toFloatArray()
+                count(value)
+                val out = FloatArray(total)
+                var idx = 0
+                fun copy(arr: Array<*>) {
+                    for (item in arr) {
+                        when (item) {
+                            is Float -> out[idx++] = item
+                            is FloatArray -> {
+                                System.arraycopy(item, 0, out, idx, item.size)
+                                idx += item.size
+                            }
+                            is Array<*> -> copy(item)
+                        }
+                    }
+                }
+                copy(value)
+                out
             }
             else -> FloatArray(0)
         }

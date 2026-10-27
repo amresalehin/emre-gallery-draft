@@ -30,6 +30,7 @@ data class FaceIndexingProgress(
     val processed: Int = 0,
     val total: Int = 0,
     val facesFound: Int = 0,
+    val photosWithFaces: Int = 0,
     val failed: Int = 0,
     val currentItemName: String = "",
     val currentItemStatus: String = "",
@@ -60,15 +61,8 @@ class FaceIndexingRepository(
         private val lastEngineFailures = ConcurrentHashMap<String, String>()
 
         fun queryEngineInfo(context: Context, factory: FaceEngineFactory = BuffaloLFaceEngineFactory): Pair<String, String?> {
-            val installed = factory.isInstalled(context)
             val failure = lastEngineFailures[factory.engineId]
-            return if (!installed) {
-                factory.displayName to "${factory.displayName} model pack not installed. Please download the model to index faces."
-            } else if (failure != null) {
-                factory.displayName to failure
-            } else {
-                factory.displayName to null
-            }
+            return factory.displayName to failure
         }
     }
 
@@ -91,6 +85,7 @@ class FaceIndexingRepository(
         val pending = candidates.filter { it.uri in forceRescanUris || !store.isMediaIndexed(it.uri, engineId) }
         var processed = 0
         var facesFound = 0
+        var photosWithFaces = 0
         var failed = 0
         val failedList = mutableListOf<Pair<String, String>>()
         var engine: FaceEngine? = null
@@ -141,10 +136,11 @@ class FaceIndexingRepository(
                 }
             }
 
+            val actualDimension = engine?.embeddingDimension ?: engineFactory.embeddingDimension
             val provenance = EmbeddingProvenance(
                 engineId = engineFactory.engineId,
                 modelVersion = engineFactory.modelVersion,
-                dimension = engineFactory.embeddingDimension
+                dimension = actualDimension
             )
 
             for ((index, item) in pending.withIndex()) {
@@ -164,6 +160,7 @@ class FaceIndexingRepository(
                         processed = processed,
                         total = totalPending,
                         facesFound = facesFound,
+                        photosWithFaces = photosWithFaces,
                         failed = failed,
                         currentItemName = itemName,
                         currentItemStatus = lastItemStatus,
@@ -209,6 +206,7 @@ class FaceIndexingRepository(
                                 processed = processed,
                                 total = totalPending,
                                 facesFound = facesFound,
+                                photosWithFaces = photosWithFaces,
                                 failed = failed,
                                 currentItemName = itemName,
                                 currentItemStatus = lastItemStatus,
@@ -230,6 +228,7 @@ class FaceIndexingRepository(
                                 processed = processed,
                                 total = totalPending,
                                 facesFound = facesFound,
+                                photosWithFaces = photosWithFaces,
                                 failed = failed,
                                 currentItemName = itemName,
                                 currentItemStatus = lastItemStatus,
@@ -273,6 +272,7 @@ class FaceIndexingRepository(
                         store.markMediaIndexed(item.uri, detections.size, engineId)
                         store.pruneStaleFacesForMedia(item.uri, engineId, detections.map { it.faceIndex })
                         facesFound += detections.size
+                        photosWithFaces++
                         lastItemStatus = "Indexed ${detections.size} face${if (detections.size > 1) "s" else ""}"
                     }
                 } catch (cancelled: CancellationException) {
@@ -307,6 +307,7 @@ class FaceIndexingRepository(
                             processed = processed,
                             total = totalPending,
                             facesFound = facesFound,
+                            photosWithFaces = photosWithFaces,
                             failed = failed,
                             currentItemName = itemName,
                             currentItemStatus = lastItemStatus,
@@ -331,7 +332,7 @@ class FaceIndexingRepository(
                     clusteringStage = StageProgress(StageState.RUNNING, 0, faceTotal, 0)
                     groupingStatus = "Grouping people…"
                     onProgress(FaceIndexingProgress(
-                        processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
+                        processed=processed,total=totalPending,facesFound=facesFound,photosWithFaces=photosWithFaces,failed=failed,
                         currentItemName=lastCompletedItemName,currentItemStatus=lastCompletedItemStatus,
                         groupingStatus=groupingStatus.orEmpty(),currentItemFaces=lastCompletedItemFaces,
                         engineId=engineId,engineName=engineFactory.displayName,
@@ -341,7 +342,7 @@ class FaceIndexingRepository(
                     try {
                         val groupedPeople = strategy.clusterFaces(
                             store=store,mediaUris=pending.map { it.uri },engineId=engineId,
-                            modelVersion=engineFactory.modelVersion,embeddingDimension=engineFactory.embeddingDimension,
+                            modelVersion=engineFactory.modelVersion,embeddingDimension=actualDimension,
                             maxDistance=recognitionDistance,
                             onProgress={ done,total ->
                                 val safeTotal=total.coerceAtLeast(0)
@@ -351,7 +352,7 @@ class FaceIndexingRepository(
                                 groupingStatus=if(safeTotal>0) "Grouping people… $safeDone/$safeTotal faces" else "Grouping people…"
                                 runBlocking {
                                     onProgress(FaceIndexingProgress(
-                                        processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
+                                        processed=processed,total=totalPending,facesFound=facesFound,photosWithFaces=photosWithFaces,failed=failed,
                                         currentItemName=lastCompletedItemName,currentItemStatus=lastCompletedItemStatus,
                         groupingStatus=groupingStatus.orEmpty(),currentItemFaces=lastCompletedItemFaces,
                                         engineId=engineId,engineName=engineFactory.displayName,
@@ -382,7 +383,7 @@ class FaceIndexingRepository(
                         groupingStatus="Grouping failed: $detail"
                     }
                     onProgress(FaceIndexingProgress(
-                        processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
+                        processed=processed,total=totalPending,facesFound=facesFound,photosWithFaces=photosWithFaces,failed=failed,
                         currentItemName=lastCompletedItemName,currentItemStatus=lastCompletedItemStatus,
                         groupingStatus=groupingStatus.orEmpty(),currentItemFaces=lastCompletedItemFaces,
                         engineId=engineId,engineName=engineFactory.displayName,
@@ -397,12 +398,14 @@ class FaceIndexingRepository(
             }
         } finally {
             engine?.close()
+            FaceStoreEvents.notifyAllUpdated()
         }
 
         val finalProgress = FaceIndexingProgress(
             processed = processed,
             total = totalPending,
             facesFound = facesFound,
+            photosWithFaces = photosWithFaces,
             failed = failed,
             currentItemName = lastCompletedItemName,
             currentItemStatus = lastCompletedItemStatus,
@@ -416,6 +419,7 @@ class FaceIndexingRepository(
             failedItems = failedList.toList()
         )
         onProgress(finalProgress)
+        FaceStoreEvents.notifyAllUpdated()
         finalProgress
     }
 

@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.MediaItem
@@ -115,7 +116,10 @@ fun PeopleScreen(
 
     LaunchedEffect(selectedEngineId, photoByUri) {
         reload()
-        FaceStoreEvents.peopleUpdates.collect { reload() }
+        kotlinx.coroutines.coroutineScope {
+            launch { FaceStoreEvents.peopleUpdates.collect { reload() } }
+            launch { FaceStoreEvents.mediaUpdates.collect { reload() } }
+        }
     }
 
     val minimumGroupFaces = FaceRecognitionSettings.minGroupFaces(context, selectedEngineId)
@@ -842,7 +846,10 @@ private fun PersonAvatar(
         if (targetUri != null) {
             val crop = withContext(Dispatchers.IO) {
                 val parsed = runCatching { Uri.parse(targetUri) }.getOrNull() ?: return@withContext null
-                val fIdx = person.portraitFaceIndex ?: 0
+                val fIdx = person.portraitFaceIndex ?: run {
+                    val st = FaceClusterStore(context.applicationContext)
+                    st.facesForCluster(person.id, person.engineId).firstOrNull()?.faceIndex ?: 0
+                }
                 FaceThumbnailHelper.getFaceCrop(context, parsed, fIdx, person.engineId)
             }
             faceBitmap = crop
@@ -858,31 +865,28 @@ private fun PersonAvatar(
                 .clip(CircleShape),
             contentScale = ContentScale.Crop
         )
-    } else if (person.sampleUri != null) {
-        AsyncImage(
-            model = ImageRequest.Builder(context)
-                .data(Uri.parse(person.sampleUri))
-                .crossfade(false)
-                .build(),
-            contentDescription = if (person.isNamed) person.displayName else "Person",
-            modifier = modifier
-                .size(size)
-                .clip(CircleShape),
-            contentScale = ContentScale.Crop
-        )
     } else {
         Surface(
             modifier = modifier.size(size),
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHighest
+            color = MaterialTheme.colorScheme.primaryContainer
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.Face,
-                    contentDescription = null,
-                    modifier = Modifier.size(size * 0.45f),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (person.isNamed && person.displayName.isNotBlank()) {
+                    Text(
+                        text = person.displayName.trim().take(1).uppercase(),
+                        style = MaterialTheme.typography.titleMedium.copy(fontSize = (size.value * 0.38f).sp),
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Face,
+                        contentDescription = null,
+                        modifier = Modifier.size(size * 0.45f),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
             }
         }
     }

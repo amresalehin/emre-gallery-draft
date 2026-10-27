@@ -37,6 +37,7 @@ import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.face.FaceStoreEvents
 import com.amresalehin.emregallery.face.PersonSummary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
@@ -65,12 +66,16 @@ fun AlbumsScreen(
     val activeEngineId = FaceRecognitionSettings.getActiveEngine(context)
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     var detectedPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
-    LaunchedEffect(activeEngineId) {
+    LaunchedEffect(Unit) {
         suspend fun refreshPeople() {
-            detectedPeople=withContext(Dispatchers.IO) { faceStore.personSummaries(engineId=activeEngineId) }
+            val engine = FaceRecognitionSettings.getActiveEngine(context)
+            detectedPeople = withContext(Dispatchers.IO) { faceStore.personSummaries(engineId = engine) }
         }
         refreshPeople()
-        FaceStoreEvents.peopleUpdates.collect { refreshPeople() }
+        kotlinx.coroutines.coroutineScope {
+            launch { FaceStoreEvents.peopleUpdates.collect { refreshPeople() } }
+            launch { FaceStoreEvents.mediaUpdates.collect { refreshPeople() } }
+        }
     }
     val normalMedia = remember(media, hidden, inBin, archive) {
         media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive }

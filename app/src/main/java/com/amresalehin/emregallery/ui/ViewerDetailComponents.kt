@@ -1116,12 +1116,14 @@ fun FaceCropThumbnail(
     faceIndex: Int?,
     engineId: String,
     contentDescription: String?,
+    bounds: RectF? = null,
+    fallbackText: String? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var faceCrop by remember(engineId, mediaUri, faceIndex) { mutableStateOf<Bitmap?>(null) }
+    var faceCrop by remember(engineId, mediaUri, faceIndex, bounds) { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(engineId, mediaUri, faceIndex) {
+    LaunchedEffect(engineId, mediaUri, faceIndex, bounds) {
         faceCrop = if (mediaUri.isNullOrBlank() || faceIndex == null) {
             null
         } else {
@@ -1130,19 +1132,44 @@ fun FaceCropThumbnail(
                     context = context,
                     uri = Uri.parse(mediaUri),
                     faceIndex = faceIndex,
-                    engineId = engineId
+                    engineId = engineId,
+                    providedBounds = bounds
                 )
             }
         }
     }
 
-    faceCrop?.let { bitmap ->
+    if (faceCrop != null) {
         Image(
-            bitmap = bitmap.asImageBitmap(),
+            bitmap = faceCrop!!.asImageBitmap(),
             contentDescription = contentDescription,
             modifier = modifier,
             contentScale = ContentScale.Crop
         )
+    } else {
+        Surface(
+            modifier = modifier,
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                if (!fallbackText.isNullOrBlank()) {
+                    Text(
+                        text = fallbackText.take(1).uppercase(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = contentDescription,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1164,6 +1191,10 @@ fun OverviewFacePortrait(
     val height = kotlin.math.max(0, (face.boxBottom - face.boxTop).toInt())
     val boxText = if (width > 0 && height > 0) "${width}×${height}" else null
 
+    val faceBounds = if (face.boxRight > face.boxLeft && face.boxBottom > face.boxTop) {
+        RectF(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
+    } else null
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
@@ -1181,6 +1212,8 @@ fun OverviewFacePortrait(
                 mediaUri = portraitUri,
                 faceIndex = portraitIndex,
                 engineId = face.engineId,
+                bounds = if (portraitUri == face.mediaUri && portraitIndex == face.faceIndex) faceBounds else null,
+                fallbackText = if (isNamed) displayName else null,
                 contentDescription = if (isNamed) displayName else "Unnamed face",
                 modifier = Modifier.fillMaxSize().clip(CircleShape)
             )

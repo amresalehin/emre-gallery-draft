@@ -529,6 +529,27 @@ class FaceClusterStore(context: Context) :
     }
 
     @Synchronized
+    fun mediaWithFacesCount(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int =
+        readableDatabase.rawQuery(
+            "SELECT COUNT(*) FROM indexed_media WHERE engine_id=? AND status='done' AND face_count > 0",
+            arrayOf(engineId)
+        ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    @Synchronized
+    fun mediaWithFacesCount(mediaUris: List<String>, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int {
+        val uniqueUris = mediaUris.distinct()
+        if (uniqueUris.isEmpty()) return 0
+        return uniqueUris.chunked(800).sumOf { batch ->
+            val placeholders = batch.joinToString(",") { "?" }
+            val args = arrayOf(engineId, *batch.toTypedArray())
+            readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM indexed_media WHERE engine_id=? AND status='done' AND face_count > 0 AND media_uri IN ($placeholders)",
+                args
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+        }
+    }
+
+    @Synchronized
     fun indexedFaceCount(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int =
         readableDatabase.rawQuery("SELECT COUNT(*) FROM faces WHERE engine_id=?", arrayOf(engineId))
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }

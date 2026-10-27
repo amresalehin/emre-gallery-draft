@@ -189,11 +189,7 @@ fun ViewerDetailsDrawer(
                 val error = strategy?.let {
                     faceStore.groupingFailure(activeEngineId, factory.modelVersion, it.strategyVersion)
                 }
-                val visibleFaces = if (needsGrouping || error != null) {
-                    emptyList()
-                } else {
-                    allFaces.filter { !it.personId.isNullOrBlank() && it.clusterId.isNotBlank() }
-                }
+                val visibleFaces = allFaces
                 FaceStateSnapshot(allFaces, visibleFaces, info, needsGrouping, error)
             }
             allDetectedFaces = snapshot.allFaces
@@ -233,11 +229,6 @@ fun ViewerDetailsDrawer(
             singleScanJob = coroutineScope.launch {
                 try {
                     val retryGroupingOnly = groupingError != null || groupingRequired
-                    if (!retryGroupingOnly) {
-                        withContext(Dispatchers.IO) {
-                            faceStore.clearMediaFaces(item.uri, activeEngineId)
-                        }
-                    }
                     val threshold = if (lowThreshold) FaceRecognitionSettings.LOW_DETECTION_CONFIDENCE_THRESHOLD else FaceRecognitionSettings.detectionConfidence(context, activeEngineId)
                     val repo = FaceIndexingRepository(context.applicationContext, factory)
                     repo.indexNewMedia(
@@ -362,15 +353,16 @@ fun ViewerDetailsDrawer(
                 engineId = activeEngineId,
                 groupingFailure = true
             )
-            groupingRequired && detectedCount > 0 -> ViewerFaceUiState(
-                state = ViewerFaceState.WAITING_FOR_GROUPING,
-                progressPhase = "$detectedCount faces found · waiting to be grouped",
-                engineName = factory.displayName,
-                engineId = activeEngineId
-            )
             detectedFaces.isNotEmpty() -> ViewerFaceUiState(
                 state = ViewerFaceState.COMPLETED_FACES_FOUND,
                 faces = detectedFaces,
+                progressPhase = if (groupingRequired) "$detectedCount faces found · waiting to be grouped" else null,
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            groupingRequired && detectedCount > 0 -> ViewerFaceUiState(
+                state = ViewerFaceState.WAITING_FOR_GROUPING,
+                progressPhase = "$detectedCount faces found · waiting to be grouped",
                 engineName = factory.displayName,
                 engineId = activeEngineId
             )

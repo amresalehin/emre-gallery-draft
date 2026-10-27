@@ -345,64 +345,9 @@ object TesseractOcr {
     }
 
     private fun decodeBitmap(context: Context, uri: Uri): Bitmap {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        val boundsStream = openStream(context, uri)
-            ?: error("Cannot open this media item. Check that Emre Gallery has permission to access it.")
-        boundsStream.use { stream ->
-            // Bounds-only decoding intentionally returns null; dimensions are set on bounds.
-            BitmapFactory.decodeStream(stream, null, bounds)
-        }
-
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-            error("This file is not a readable image. Try another image format.")
-        }
-
-        var sample = 1
-        while (bounds.outWidth / sample > 2200 || bounds.outHeight / sample > 2200) sample *= 2
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-
-        val decoded = openStream(context, uri)?.use { stream ->
-            BitmapFactory.decodeStream(stream, null, options)
-        } ?: error("Could not decode this image. Check the file permissions and format.")
-
-        // Read EXIF orientation to ensure upright text recognition
-        val orientation = runCatching {
-            openStream(context, uri)?.use { stream ->
-                ExifInterface(stream).getAttributeInt(
-                    ExifInterface.TAG_ORIENTATION,
-                    ExifInterface.ORIENTATION_NORMAL
-                )
-            }
-        }.getOrNull() ?: ExifInterface.ORIENTATION_NORMAL
-
-        val matrix = Matrix()
-        when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-            // EXIF 5 (transpose) and 7 (transverse) combine rotation and reflection.
-            ExifInterface.ORIENTATION_TRANSPOSE -> {
-                matrix.postRotate(90f)
-                matrix.postScale(-1f, 1f)
-            }
-            ExifInterface.ORIENTATION_TRANSVERSE -> {
-                matrix.postRotate(270f)
-                matrix.postScale(-1f, 1f)
-            }
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-        }
-
-        val orientedBitmap = if (!matrix.isIdentity) {
-            val rotated = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-            if (rotated != decoded) decoded.recycle()
-            rotated
-        } else {
-            decoded
-        }
+        val decoded = com.amresalehin.emregallery.face.FaceImageDecoder.decodeOrientedImage(context, uri, maxDimension = 2200)
+            ?: error("Could not decode image at URI: $uri. Check the file permissions and format.")
+        val orientedBitmap = decoded.bitmap
 
         // Tesseract requires a software ARGB_8888 bitmap
         return if (orientedBitmap.config != Bitmap.Config.ARGB_8888) {
@@ -418,15 +363,4 @@ object TesseractOcr {
         }
     }
 
-    private fun openStream(context: Context, uri: Uri): InputStream? {
-        return runCatching {
-            if (uri.scheme == null || uri.scheme == "file") {
-                val path = uri.path ?: uri.toString()
-                val file = File(path)
-                if (file.exists()) file.inputStream() else context.contentResolver.openInputStream(uri)
-            } else {
-                context.contentResolver.openInputStream(uri)
-            }
-        }.getOrNull()
-    }
 }
