@@ -47,6 +47,7 @@ import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.LockedVaultManager
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
+import com.amresalehin.emregallery.data.ThumbnailWarmupManager
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
@@ -79,6 +80,7 @@ fun GalleryApp() {
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var lockedVaultItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
+    var hasRequestedInitialMediaLoad by remember { mutableStateOf(false) }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
     var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
@@ -121,12 +123,17 @@ fun GalleryApp() {
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
 
     fun refreshMedia() {
+        if (hasMediaPermission(context)) hasRequestedInitialMediaLoad = true
         scope.launch {
             lockedVaultItems = withContext(Dispatchers.IO) { runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList()) }
             if (hasMediaPermission(context)) {
                 loading = true
-                media = withContext(Dispatchers.IO) { runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList()) }
+                val loadedMedia = withContext(Dispatchers.IO) {
+                    runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())
+                }
+                media = loadedMedia
                 loading = false
+
             }
         }
     }
@@ -134,7 +141,7 @@ fun GalleryApp() {
         scope.launch(Dispatchers.IO) {
             lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
         }
-        if (hasMediaPermission(context)) refreshMedia()
+        if (hasMediaPermission(context) && !hasRequestedInitialMediaLoad) refreshMedia()
     }
     LaunchedEffect(media, hidden, inBin) {
         if (media.isNotEmpty()) {
@@ -144,6 +151,26 @@ fun GalleryApp() {
                     val safeMedia = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin }
                     locationCache.scanMediaBatch(context, safeMedia)
                 }
+            }
+        }
+    }
+
+    // This effect runs before the welcome-screen early return, so thumbnail preparation starts
+    // as soon as the permission-triggered media query completes, not after Home is opened.
+    // Filter and schedule from IO to avoid walking a large MediaStore library on the UI thread.
+    LaunchedEffect(media, hidden, inBin, archive, gridColumnsPref, gridStylePref, sortOrderPref) {
+        if (media.isNotEmpty() && hasMediaPermission(context)) {
+            withContext(Dispatchers.IO) {
+                val galleryMedia = media.filter {
+                    it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive
+                }
+                ThumbnailWarmupManager.start(
+                    context = context.applicationContext,
+                    media = galleryMedia,
+                    gridColumns = gridColumnsPref,
+                    gridStyle = gridStylePref,
+                    sortOrder = sortOrderPref
+                )
             }
         }
     }
@@ -607,10 +634,11 @@ fun GalleryApp() {
     if (!hasCompletedWelcome || !allRequiredPermissions) {
         WelcomeScreen(
             initialStep = if (hasCompletedWelcome) 1 else 0,
+            onMediaPermissionGranted = { refreshMedia() },
             onComplete = {
                 scope.launch {
                     prefs.setCompletedWelcome(true)
-                    refreshMedia()
+                    if (!hasRequestedInitialMediaLoad) refreshMedia()
                 }
             }
         )

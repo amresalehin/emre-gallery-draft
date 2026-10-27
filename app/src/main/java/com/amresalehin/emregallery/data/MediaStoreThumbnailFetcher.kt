@@ -95,10 +95,13 @@ class MediaStoreThumbnailFetcher(
 }
 
 private class StillThumbnailDiskCache(context: Context) {
-    private val directory = File(context.applicationContext.cacheDir, "media_thumbnails")
+    private val appContext = context.applicationContext
+    private val directory = File(appContext.noBackupFilesDir, "thumbnail_cache/stills")
+    private val legacyDirectory = File(appContext.cacheDir, "media_thumbnails")
 
     fun loadOrCreate(key: String, loadFromMediaStore: () -> Bitmap?): Bitmap? {
         val file = fileFor(key)
+        if (!isUsable(file) && migrateLegacyFile(file)) trimCache()
         if (isUsable(file)) {
             val cached = runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
             if (cached != null && cached.width > 0 && cached.height > 0) {
@@ -143,12 +146,29 @@ private class StillThumbnailDiskCache(context: Context) {
         }
     }
 
+    private fun migrateLegacyFile(target: File): Boolean {
+        if (isUsable(target)) return false
+        val legacy = File(legacyDirectory, target.name)
+        if (!isUsable(legacy)) return false
+        if (!directory.exists() && !directory.mkdirs() && !directory.isDirectory) return false
+        return try {
+            Os.rename(legacy.absolutePath, target.absolutePath)
+            true
+        } catch (_: Throwable) {
+            runCatching {
+                legacy.copyTo(target, overwrite = true)
+                legacy.delete()
+                true
+            }.getOrDefault(false)
+        }
+    }
+
     private fun trimCache() {
         synchronized(EVICTION_LOCK) {
             val entries = directory.listFiles { file -> file.isFile && file.extension == "webp" } ?: return
             var total = entries.sumOf { it.length() }
             for (file in entries.sortedBy { it.lastModified() }) {
-                if (total <= MAX_CACHE_BYTES) break
+                if (total <= ThumbnailCacheBudget.stillMaxBytes) break
                 val bytes = file.length()
                 if (file.delete()) total -= bytes
             }
@@ -168,7 +188,6 @@ private class StillThumbnailDiskCache(context: Context) {
     }
 
     private companion object {
-        const val MAX_CACHE_BYTES = 128L * 1024L * 1024L
         val EVICTION_LOCK = Any()
     }
 }

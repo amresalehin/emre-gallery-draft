@@ -50,19 +50,8 @@ import kotlin.math.roundToInt
 
 private fun mediaTileKey(item: MediaItem): String = "media_${item.uri}"
 
-private fun mediaTileAspect(item: MediaItem, gridStyle: String): Float {
-    if (gridStyle == "square") return 1f
-    return if (item.width > 0 && item.height > 0) {
-        (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
-    } else {
-        when (item.id.hashCode().mod(4)) {
-            0 -> 0.72f
-            1 -> 0.9f
-            2 -> 1.0f
-            else -> 1.35f
-        }
-    }
-}
+private fun mediaTileAspect(item: MediaItem, gridStyle: String): Float =
+    ThumbnailRequestFactory.tileAspect(item, gridStyle)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable

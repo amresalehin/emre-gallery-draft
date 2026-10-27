@@ -113,11 +113,15 @@ private object VideoPosterWork {
 
 private class VideoPosterCache(context: Context) {
     private val appContext = context.applicationContext
-    private val directory = File(appContext.cacheDir, "video_posters")
+    private val directory = File(appContext.noBackupFilesDir, "thumbnail_cache/videos")
+    private val legacyDirectory = File(appContext.cacheDir, "video_posters")
 
     fun getOrCreate(uri: Uri, target: ThumbnailSize, key: String): File? {
         val frameZero = fileFor(key, "frame0")
         val fallback = fileFor(key, "fallback")
+        val migratedFrame = !isUsable(frameZero) && migrateLegacyFile(frameZero)
+        val migratedFallback = !isUsable(fallback) && migrateLegacyFile(fallback)
+        if (migratedFrame || migratedFallback) trimCache()
         if (isUsable(frameZero)) {
             frameZero.setLastModified(System.currentTimeMillis())
             return frameZero
@@ -269,6 +273,23 @@ private class VideoPosterCache(context: Context) {
         }
     }
 
+    private fun migrateLegacyFile(target: File): Boolean {
+        if (isUsable(target)) return false
+        val legacy = File(legacyDirectory, target.name)
+        if (!isUsable(legacy)) return false
+        if (!directory.exists() && !directory.mkdirs() && !directory.isDirectory) return false
+        return try {
+            Os.rename(legacy.absolutePath, target.absolutePath)
+            true
+        } catch (_: Throwable) {
+            runCatching {
+                legacy.copyTo(target, overwrite = true)
+                legacy.delete()
+                true
+            }.getOrDefault(false)
+        }
+    }
+
     private fun isUsable(file: File): Boolean = file.isFile && file.length() > 0L
     private fun fileFor(key: String, kind: String): File = File(directory, sha256("$key:$kind") + ".jpg")
 
@@ -277,7 +298,7 @@ private class VideoPosterCache(context: Context) {
             val entries = directory.listFiles { file -> file.isFile && file.extension == "jpg" } ?: return
             var total = entries.sumOf { it.length() }
             for (file in entries.sortedBy { it.lastModified() }) {
-                if (total <= MAX_CACHE_BYTES) break
+                if (total <= ThumbnailCacheBudget.videoMaxBytes) break
                 val bytes = file.length()
                 if (file.delete()) total -= bytes
             }
@@ -292,7 +313,6 @@ private class VideoPosterCache(context: Context) {
     }
 
     private companion object {
-        const val MAX_CACHE_BYTES = 64L * 1024L * 1024L
         val EVICTION_LOCK = Any()
     }
 }

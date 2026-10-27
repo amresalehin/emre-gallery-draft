@@ -48,6 +48,7 @@ import com.amresalehin.emregallery.R
 @Composable
 fun WelcomeScreen(
     initialStep: Int = 0,
+    onMediaPermissionGranted: () -> Unit = {},
     onComplete: () -> Unit
 ) {
     val context = LocalContext.current
@@ -57,12 +58,21 @@ fun WelcomeScreen(
     var mediaGranted by remember { mutableStateOf(hasMediaPermission(context)) }
     var notificationGranted by remember { mutableStateOf(hasNotificationPermission(context)) }
     var allFilesGranted by remember { mutableStateOf(hasAllFilesAccess()) }
+    val latestOnMediaPermissionGranted by rememberUpdatedState(onMediaPermissionGranted)
 
-    // Re-check permissions when coming back to the app (e.g. from system settings)
+    fun updateMediaPermissionState() {
+        val nowGranted = hasMediaPermission(context)
+        val wasGranted = mediaGranted
+        mediaGranted = nowGranted
+        if (nowGranted && !wasGranted) latestOnMediaPermissionGranted()
+    }
+
+    // Re-check permissions when coming back to the app (e.g. from system settings).
+    // Newly granted media access starts loading and thumbnail preparation immediately.
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                mediaGranted = hasMediaPermission(context)
+                updateMediaPermissionState()
                 notificationGranted = hasNotificationPermission(context)
                 allFilesGranted = hasAllFilesAccess()
             }
@@ -74,7 +84,7 @@ fun WelcomeScreen(
     val mediaPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        mediaGranted = hasMediaPermission(context)
+        updateMediaPermissionState()
     }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
