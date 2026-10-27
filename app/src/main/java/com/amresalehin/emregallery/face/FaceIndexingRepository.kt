@@ -128,7 +128,7 @@ class FaceIndexingRepository(
             for ((index, item) in pending.withIndex()) {
                 awaitIfResumed()
                 currentCoroutineContext().ensureActive()
-                val itemName = item.name.ifBlank { it.uri.substringAfterLast('/') }
+                val itemName = item.name.ifBlank { item.uri.substringAfterLast('/') }
                 val currentPct = if (totalPending > 0) index * 100 / totalPending else 0
                 detectionStage = StageProgress(StageState.RUNNING, index, totalPending, currentPct)
                 embeddingStage = StageProgress(StageState.PENDING, index, totalPending, currentPct)

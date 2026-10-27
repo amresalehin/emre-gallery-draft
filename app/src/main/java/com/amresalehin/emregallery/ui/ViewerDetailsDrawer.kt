@@ -222,16 +222,16 @@ fun ViewerDetailsDrawer(
     val faceUiState = remember(isModelInstalled, isInstallingModel, modelInstallProgress, isScanning, scanPhase, detectedFaces, mediaIndexInfo, lastScanError, isLoadingIndexInfo, groupingRequired, groupingError, allDetectedFaces) {
         val detectedCount = maxOf(mediaIndexInfo?.faceCount ?: 0, allDetectedFaces.size)
         when {
-            isScanning -> ViewerFaceUiState(ViewerFaceState.IN_PROGRESS, scanPhase ?: "Scanning photo...", engineName = factory.displayName, engineId = activeEngineId)
-            isInstallingModel -> ViewerFaceUiState(ViewerFaceState.IN_PROGRESS, modelInstallProgress ?: "Installing model...", engineName = factory.displayName, engineId = activeEngineId)
+            isScanning -> ViewerFaceUiState(state = ViewerFaceState.IN_PROGRESS, progressPhase = scanPhase ?: "Scanning photo...", engineName = factory.displayName, engineId = activeEngineId)
+            isInstallingModel -> ViewerFaceUiState(state = ViewerFaceState.IN_PROGRESS, progressPhase = modelInstallProgress ?: "Installing model...", engineName = factory.displayName, engineId = activeEngineId)
             !isModelInstalled -> ViewerFaceUiState(ViewerFaceState.MODEL_MISSING, engineName = factory.displayName, engineId = activeEngineId)
             isLoadingIndexInfo -> ViewerFaceUiState(ViewerFaceState.NOT_INDEXED, engineName = factory.displayName, engineId = activeEngineId)
             lastScanError != null && detectedFaces.isEmpty() && groupingError == null -> ViewerFaceUiState(ViewerFaceState.FAILED, errorMessage = lastScanError, engineName = factory.displayName, engineId = activeEngineId)
             mediaIndexInfo?.status == "failed" -> ViewerFaceUiState(ViewerFaceState.FAILED, errorMessage = mediaIndexInfo?.errorMessage ?: "Face scan failed for this photo", engineName = factory.displayName, engineId = activeEngineId)
             groupingError != null -> ViewerFaceUiState(ViewerFaceState.FAILED, errorMessage = "Grouping failed: $groupingError", engineName = factory.displayName, engineId = activeEngineId, groupingFailure = true)
-            groupingRequired && detectedCount > 0 -> ViewerFaceUiState(ViewerFaceState.WAITING_FOR_GROUPING, "$detectedCount faces found · waiting to be grouped", engineName = factory.displayName, engineId = activeEngineId)
+            groupingRequired && detectedCount > 0 -> ViewerFaceUiState(state = ViewerFaceState.WAITING_FOR_GROUPING, progressPhase = "$detectedCount faces found · waiting to be grouped", engineName = factory.displayName, engineId = activeEngineId)
             detectedFaces.isNotEmpty() -> ViewerFaceUiState(ViewerFaceState.COMPLETED_FACES_FOUND, faces = detectedFaces, engineName = factory.displayName, engineId = activeEngineId)
-            detectedCount > 0 -> ViewerFaceUiState(ViewerFaceState.GROUPING_INCOMPLETE, "$detectedCount faces found · waiting for a person group", engineName = factory.displayName, engineId = activeEngineId)
+            detectedCount > 0 -> ViewerFaceUiState(state = ViewerFaceState.GROUPING_INCOMPLETE, progressPhase = "$detectedCount faces found · waiting for a person group", engineName = factory.displayName, engineId = activeEngineId)
             mediaIndexInfo?.status == "done" -> ViewerFaceUiState(ViewerFaceState.COMPLETED_NO_FACES, engineName = factory.displayName, engineId = activeEngineId)
             else -> ViewerFaceUiState(ViewerFaceState.NOT_INDEXED, engineName = factory.displayName, engineId = activeEngineId)
         }
@@ -262,7 +262,7 @@ fun ViewerDetailsDrawer(
                             if (detectedFaces.size == 1) renamingFace = detectedFaces.first()
                             else if (detectedFaces.size > 1) showFaceChooserDialog = true else showAddTagDialog = true
                         }, onFaceClick = { if (!it.personId.isNullOrBlank()) renamingFace = it })
-                    DetailDrawerTab.ACTIONS -> ActionsTabContent(item = item, customAlbums = customAlbums, customTags = customTags,
+                    DetailDrawerTab.ACTIONS -> ActionsTabContent(item = item, customTags = customTags,
                         detectedFaces = detectedFaces, metadata = detailsState.metadata, detailsState = detailsState,
                         onRenameFaceClick = { renamingFace = it }, onRescanPhoto = { startScan(false) }, listState = actionsListState)
                 }

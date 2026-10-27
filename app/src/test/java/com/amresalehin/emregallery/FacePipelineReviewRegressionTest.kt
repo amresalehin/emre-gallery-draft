@@ -61,6 +61,14 @@ class FacePipelineReviewRegressionTest {
     fun changingRecognitionDistanceInvalidatesCompletedGrouping() {
         val engine = EnteFaceConstants.ENGINE_ID
         val model = EnteFaceConstants.MODEL_VERSION
+        // isGroupingRequired intentionally returns false when no embeddings exist, so
+        // seed one real observation before testing checkpoint invalidation.
+        store.addRawFaceObservation(
+            "content://media/threshold-change",
+            0,
+            embedding(0),
+            provenance = EnteFaceConstants.PROVENANCE
+        )
         val revision = groupingRevision(EnteFaceClusteringStrategy.strategyVersion, 0.60f)
         FaceRecognitionSettings.setRecognitionDistance(context, engine, 0.60f)
         store.markGroupingCompleted(engine, model, revision, 1, 1)
