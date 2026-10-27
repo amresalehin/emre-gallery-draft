@@ -123,7 +123,7 @@ fun HomeScreen(
         }
     }
 
-    BoxWithConstraints(
+    Box(
         modifier = Modifier.fillMaxSize()
     ) {
         LazyVerticalStaggeredGrid(
