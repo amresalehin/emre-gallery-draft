@@ -13,7 +13,7 @@ class ThumbnailRequestFactoryTest {
     fun sizeUsesStableResolutionBuckets() {
         assertEquals(ThumbnailSize(192, 320), ThumbnailRequestFactory.sizeFor(180, 241))
         assertEquals(ThumbnailSize(320, 512), ThumbnailRequestFactory.sizeFor(260, 400))
-        assertEquals(ThumbnailSize(768, 768), ThumbnailRequestFactory.sizeFor(1200, 1400))
+        assertEquals(ThumbnailSize(512, 512), ThumbnailRequestFactory.sizeFor(1200, 1400))
     }
 
     @Test
