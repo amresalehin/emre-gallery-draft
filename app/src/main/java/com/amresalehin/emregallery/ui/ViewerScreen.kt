@@ -679,6 +679,16 @@ private fun ZoomableMediaItem(
             .crossfade(100)
             .build()
     }
+    // Videos use the exact same normalized request/cache key as their grid poster rather than
+    // depending on an optional placeholder attached to the original-size video request.
+    val videoPosterSize = remember(item.uri) {
+        ThumbnailBoundsTracker.getBounds(item.uri)?.let { bounds ->
+            ThumbnailRequestFactory.sizeFor(bounds.width.roundToInt(), bounds.height.roundToInt())
+        } ?: ThumbnailRequestFactory.sizeFor(320, 320)
+    }
+    val videoPosterRequest = remember(item.uri, item.sizeBytes, context, videoPosterSize.width, videoPosterSize.height) {
+        ThumbnailRequestFactory.create(context, item, videoPosterSize.width, videoPosterSize.height)
+    }
 
     // Reset zoom when navigating away from this page
     LaunchedEffect(isCurrentPage) {
@@ -883,10 +893,9 @@ private fun ZoomableMediaItem(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Keep the cached frame-zero thumbnail underneath the player during preparation.
-            // The player surface stays transparent until its first decoded frame, preventing a black still.
+            // Keep the shared frame-zero poster visible while ExoPlayer prepares its surface.
             AsyncImage(
-                model = imageRequest,
+                model = if (isVideo) videoPosterRequest else imageRequest,
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = if (hasTargetBounds) {
