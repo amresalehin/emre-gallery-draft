@@ -23,11 +23,12 @@ object FaceRecognitionSettings {
     const val LOW_DETECTION_CONFIDENCE_THRESHOLD = 0.35f
 
     const val KEY_ACTIVE_ENGINE = "active_face_engine"
+    private const val KEY_ACTIVE_ENGINE_SELECTION_INITIALIZED = "active_face_engine_selection_initialized"
     const val KEY_ENTE_DETECTION_CONFIDENCE = "ente_detection_confidence"
     const val KEY_ENTE_RECOGNITION_DISTANCE = "ente_recognition_distance"
     const val KEY_ENTE_MIN_GROUP_FACES = "ente_min_group_faces"
 
-    private val activeEngineIdState = MutableStateFlow(BuffaloLFaceEngine.ENGINE_ID)
+    private val activeEngineIdState = MutableStateFlow("")
 
     /** Observable engine selection shared by the indexing card and viewer drawer. */
     fun activeEngineFlow(context: Context): StateFlow<String> {
@@ -38,11 +39,28 @@ object FaceRecognitionSettings {
     fun preferences(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    @Synchronized
     fun getActiveEngine(context: Context): String {
-        val selected = preferences(context).getString(KEY_ACTIVE_ENGINE, BuffaloLFaceEngine.ENGINE_ID)
+        val prefs = preferences(context)
+        val selected = prefs.getString(KEY_ACTIVE_ENGINE, null)
         val engineId = selected?.takeIf {
             it == BuffaloLFaceEngine.ENGINE_ID || it == EnteFaceConstants.ENGINE_ID
-        } ?: BuffaloLFaceEngine.ENGINE_ID
+        } ?: if (!prefs.getBoolean(KEY_ACTIVE_ENGINE_SELECTION_INITIALIZED, false)) {
+            // Upgrade old installs smoothly when exactly one engine is already installed.
+            // On a fresh install (or when both engines exist), require an explicit choice.
+            val buffaloInstalled = BuffaloLFaceEngine.isModelInstalled(context)
+            val enteInstalled = EnteFaceModelManager.isInstalled(context)
+            val inferred = when {
+                buffaloInstalled && !enteInstalled -> BuffaloLFaceEngine.ENGINE_ID
+                enteInstalled && !buffaloInstalled -> EnteFaceConstants.ENGINE_ID
+                else -> ""
+            }
+            prefs.edit().putBoolean(KEY_ACTIVE_ENGINE_SELECTION_INITIALIZED, true).apply()
+            if (inferred.isNotBlank()) prefs.edit().putString(KEY_ACTIVE_ENGINE, inferred).apply()
+            inferred
+        } else {
+            ""
+        }
         activeEngineIdState.value = engineId
         return engineId
     }
@@ -51,7 +69,10 @@ object FaceRecognitionSettings {
         require(engineId == BuffaloLFaceEngine.ENGINE_ID || engineId == EnteFaceConstants.ENGINE_ID) {
             "Unsupported face engine: $engineId"
         }
-        preferences(context).edit().putString(KEY_ACTIVE_ENGINE, engineId).apply()
+        preferences(context).edit()
+            .putString(KEY_ACTIVE_ENGINE, engineId)
+            .putBoolean(KEY_ACTIVE_ENGINE_SELECTION_INITIALIZED, true)
+            .apply()
         activeEngineIdState.value = engineId
         FaceEngineRegistry.setActiveEngine(engineId)
     }

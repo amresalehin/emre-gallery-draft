@@ -131,7 +131,8 @@ fun ViewerDetailsDrawer(
     val activeEngineFlow = remember(context) { FaceRecognitionSettings.activeEngineFlow(context) }
     val activeEngineId by activeEngineFlow.collectAsState(initial = FaceRecognitionSettings.getActiveEngine(context))
     val factory = remember(activeEngineId) {
-        FaceEngineRegistry.getFactory(activeEngineId) ?: error("Unknown face engine: $activeEngineId")
+        FaceEngineRegistry.getFactory(activeEngineId.ifBlank { BuffaloLFaceEngine.ENGINE_ID })
+            ?: BuffaloLFaceEngineFactory
     }
     var detectedFaces by remember(item.uri, activeEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
     var allDetectedFaces by remember(item.uri, activeEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
@@ -146,6 +147,16 @@ fun ViewerDetailsDrawer(
     var showFaceChooserDialog by remember { mutableStateOf(false) }
     var isInstallingModel by remember { mutableStateOf(false) }
     var modelInstallProgress by remember { mutableStateOf<String?>(null) }
+    var showFaceEngineChooser by remember { mutableStateOf(false) }
+
+    fun requestModelInstall(engineId: String) {
+        if (!isInstallingModel) {
+            lastScanError = null
+            isInstallingModel = true
+            modelInstallProgress = "Starting download..."
+            IndexingForegroundService.downloadModel(context, force = true, engineId = engineId)
+        }
+    }
 
     LaunchedEffect(item.uri, faceReloadKey, activeEngineId, factory) {
         suspend fun refreshFaceState() {
@@ -175,7 +186,9 @@ fun ViewerDetailsDrawer(
     }
 
     val startScan: (Boolean) -> Unit = { lowThreshold ->
-        if (singleScanJob?.isActive != true && !item.isVideo && isModelInstalled) {
+        if (activeEngineId.isBlank()) {
+            showFaceEngineChooser = true
+        } else if (singleScanJob?.isActive != true && !item.isVideo && isModelInstalled) {
             lastScanError = null; scanPhase = "Initializing..."
             singleScanJob = coroutineScope.launch {
                 try {
@@ -209,12 +222,10 @@ fun ViewerDetailsDrawer(
     }
     val cancelScan: () -> Unit = { singleScanJob?.cancel(); singleScanJob = null; scanPhase = null }
     val installModel: () -> Unit = {
-        if (!isInstallingModel) {
-            lastScanError = null
-            isInstallingModel = true
-            modelInstallProgress = "Starting download..."
-            // Use the same foreground-service job and progress state as Indexing Status.
-            IndexingForegroundService.downloadModel(context, force = true, engineId = activeEngineId)
+        if (activeEngineId.isBlank()) {
+            showFaceEngineChooser = true
+        } else {
+            requestModelInstall(activeEngineId)
         }
     }
 
@@ -272,6 +283,11 @@ fun ViewerDetailsDrawer(
         when {
             isScanning -> ViewerFaceUiState(state = ViewerFaceState.IN_PROGRESS, progressPhase = scanPhase ?: "Scanning photo...", engineName = factory.displayName, engineId = activeEngineId)
             isInstallingModel -> ViewerFaceUiState(state = ViewerFaceState.IN_PROGRESS, progressPhase = modelInstallProgress ?: "Installing model...", engineName = factory.displayName, engineId = activeEngineId)
+            activeEngineId.isBlank() -> ViewerFaceUiState(
+                state = ViewerFaceState.MODEL_MISSING,
+                engineName = "",
+                engineId = ""
+            )
             lastScanError != null && (!isModelInstalled || (detectedFaces.isEmpty() && groupingError == null)) ->
                 ViewerFaceUiState(ViewerFaceState.FAILED, errorMessage = lastScanError, engineName = factory.displayName, engineId = activeEngineId)
             !isModelInstalled -> ViewerFaceUiState(ViewerFaceState.MODEL_MISSING, engineName = factory.displayName, engineId = activeEngineId)
@@ -284,6 +300,47 @@ fun ViewerDetailsDrawer(
             mediaIndexInfo?.status == "done" -> ViewerFaceUiState(ViewerFaceState.COMPLETED_NO_FACES, engineName = factory.displayName, engineId = activeEngineId)
             else -> ViewerFaceUiState(ViewerFaceState.NOT_INDEXED, engineName = factory.displayName, engineId = activeEngineId)
         }
+    }
+
+    if (showFaceEngineChooser) {
+        AlertDialog(
+            onDismissRequest = { showFaceEngineChooser = false },
+            title = { Text("Choose face recognition engine") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Choose which on-device model to install for this photo.")
+                    OutlinedButton(
+                        onClick = {
+                            FaceRecognitionSettings.setActiveEngine(context, BuffaloLFaceEngine.ENGINE_ID)
+                            showFaceEngineChooser = false
+                            requestModelInstall(BuffaloLFaceEngine.ENGINE_ID)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Buffalo_L")
+                            Text("InsightFace · approximately 300 MB", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            FaceRecognitionSettings.setActiveEngine(context, EnteFaceConstants.ENGINE_ID)
+                            showFaceEngineChooser = false
+                            requestModelInstall(EnteFaceConstants.ENGINE_ID)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("YOLO5Face + MobileFaceNet")
+                            Text("Approximately 25 MB", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFaceEngineChooser = false }) { Text("Cancel") }
+            }
+        )
     }
 
     val overviewListState = rememberLazyListState()

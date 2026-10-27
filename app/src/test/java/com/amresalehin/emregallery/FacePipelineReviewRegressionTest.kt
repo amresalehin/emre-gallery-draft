@@ -222,4 +222,15 @@ class FacePipelineReviewRegressionTest {
         modelDir.deleteRecursively()
     }
 
+
+    @Test
+    fun freshInstallDoesNotAssumeBuffaloWhenNoModelIsInstalled() {
+        FaceRecognitionSettings.preferences(context).edit().clear().commit()
+        File(context.filesDir, "face-models/buffalo_l").deleteRecursively()
+        EnteFaceModelManager.getModelDir(context).deleteRecursively()
+        assertFalse(BuffaloLFaceEngine.isModelInstalled(context))
+        assertFalse(EnteFaceModelManager.isInstalled(context))
+        assertEquals("", FaceRecognitionSettings.getActiveEngine(context))
+    }
+
 }

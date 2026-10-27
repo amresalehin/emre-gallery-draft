@@ -531,7 +531,11 @@ fun ViewerFaceContainer(
                             tint = MaterialTheme.colorScheme.error
                         )
                         Text(
-                            text = "Face model files missing for ${faceUiState.engineName.ifBlank { "active engine" }}.",
+                            text = if (faceUiState.engineId.isBlank()) {
+                                "Choose a face recognition engine to continue."
+                            } else {
+                                "Face model files missing for ${faceUiState.engineName.ifBlank { "active engine" }}."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
@@ -544,7 +548,7 @@ fun ViewerFaceContainer(
                     ) {
                         Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Install Model")
+                        Text(if (faceUiState.engineId.isBlank()) "Choose Engine" else "Install Model")
                     }
                 }
             }

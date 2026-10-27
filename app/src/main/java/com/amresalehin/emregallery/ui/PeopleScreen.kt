@@ -62,7 +62,8 @@ fun PeopleScreen(
     val store = remember { FaceClusterStore(context.applicationContext) }
     val photoByUri = remember(media) { media.filterNot { it.isVideo }.associateBy { it.uri } }
 
-    var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
+    val activeEngineFlow = remember(context) { FaceRecognitionSettings.activeEngineFlow(context) }
+    val selectedEngineId by activeEngineFlow.collectAsState(initial = FaceRecognitionSettings.getActiveEngine(context))
     var allPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
     var hiddenPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
     var pendingSuggestions by remember { mutableStateOf(emptyList<ReviewSuggestion>()) }
@@ -76,9 +77,7 @@ fun PeopleScreen(
     var showAllPeople by remember { mutableStateOf(false) }
 
     fun setEngine(target: String) {
-        selectedEngineId = target
         FaceRecognitionSettings.setActiveEngine(context, target)
-        FaceEngineRegistry.setActiveEngine(target)
     }
 
     var renamePersonId by remember { mutableStateOf<String?>(null) }

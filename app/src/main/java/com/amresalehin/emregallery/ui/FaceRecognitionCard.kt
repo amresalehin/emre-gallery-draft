@@ -239,10 +239,11 @@ fun FaceRecognitionCard(
                 )
 
                 // Top-Right Status Icon (Operational Lifecycle Indicator)
-                val isDownloading = currentDownloadState.isDownloading
-                val isDownloadFailed = !isDownloading && currentDownloadState.error != null
-                val isClusteringActive = currentClusteringState.isClusteringRunning || currentFindingState.clusteringStage.state == StageState.RUNNING
-                val isScanningActive = currentFindingState.isRunning && !currentFindingState.isPaused && !isClusteringActive
+                val hasSelectedEngine = selectedEngineId.isNotBlank()
+                val isDownloading = hasSelectedEngine && currentDownloadState.isDownloading
+                val isDownloadFailed = hasSelectedEngine && !isDownloading && currentDownloadState.error != null
+                val isClusteringActive = hasSelectedEngine && (currentClusteringState.isClusteringRunning || currentFindingState.clusteringStage.state == StageState.RUNNING)
+                val isScanningActive = hasSelectedEngine && currentFindingState.isRunning && !currentFindingState.isPaused && !isClusteringActive
                 val isAllCompleted = isSuccessfulFaceIndexingCompletion(
                     modelInstalled = isModelInstalled,
                     isRunning = currentFindingState.isRunning,
