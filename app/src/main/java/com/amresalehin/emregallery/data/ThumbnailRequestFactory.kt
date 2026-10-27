@@ -19,8 +19,8 @@ data class ThumbnailSize(val width: Int, val height: Int)
  * version change or a stronger repository revision token in a future change.
  */
 object ThumbnailRequestFactory {
-    private const val POLICY_VERSION = 3
-    private val buckets = intArrayOf(192, 320, 512, 768)
+    private const val POLICY_VERSION = 4
+    private val buckets = intArrayOf(192, 320, 512)
 
     // MediaStore size is already present on MediaItem. Keep a small LRU so video poster
     // fetches don't issue a ContentResolver query for every newly visible thumbnail.
