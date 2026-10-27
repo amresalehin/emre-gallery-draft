@@ -25,7 +25,17 @@ object ThumbnailBoundsTracker {
     var activeViewerUri by mutableStateOf<String?>(null)
 
     fun updateBounds(uri: String, bounds: Rect) {
-        if (bounds.width > 5f && bounds.height > 5f) {
+        if (bounds.width <= 5f || bounds.height <= 5f) return
+
+        // onGloballyPositioned may run for every positioned tile during scroll. Shared-element
+        // transitions do not benefit from sub-pixel updates, so skip writes for negligible motion.
+        val previous = boundsMap[uri]
+        if (previous == null ||
+            kotlin.math.abs(previous.left - bounds.left) >= 1f ||
+            kotlin.math.abs(previous.top - bounds.top) >= 1f ||
+            kotlin.math.abs(previous.right - bounds.right) >= 1f ||
+            kotlin.math.abs(previous.bottom - bounds.bottom) >= 1f
+        ) {
             boundsMap[uri] = bounds
         }
     }

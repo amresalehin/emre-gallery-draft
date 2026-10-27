@@ -136,9 +136,8 @@ fun HomeScreen(
                         awaitFirstDown(requireUnconsumed = false)
                         do {
                             val event = awaitPointerEvent()
-                            // Pinch-to-zoom requires 2 or more touches. Single-finger vertical scrolls
-                            // are NEVER consumed or intercepted, preserving native Android system scroll physics,
-                            // fling decay, touch slop, and overscroll on LazyColumn.
+                            // Keep the one-finger scroll path to a pointer-count check only.
+                            // Zoom calculations and event consumption are reserved for multi-touch.
                             if (event.changes.size >= 2) {
                                 val zoomChange = event.calculateZoom()
                                 if (zoomChange != 1f) {
