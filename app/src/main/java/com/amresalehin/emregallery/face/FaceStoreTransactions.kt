@@ -84,18 +84,29 @@ fun FaceClusterStore.replaceMediaFacesAtomically(
         val now = System.currentTimeMillis()
         for (observation in observations) {
             val embedding = normalize(observation.embedding)
-            val exact = previous.firstOrNull { it.faceIndex == observation.faceIndex }
-            val reconciled = if (exact != null) {
-                exact
-            } else {
-                previous.filter { it.faceIndex !in consumedPrevious }
-                    .mapNotNull { old ->
-                        val overlap = faceIoU(observation.bounds, old.bounds)
-                        val distance = cosineDistance(embedding, normalize(old.embedding))
-                        if (overlap >= 0.40f && distance <= 0.35f) old to (overlap - distance) else null
-                    }
-                    .maxByOrNull { it.second }?.first
+            // An index is an output position, not a stable identity. Reuse the old identity
+            // only when the embedding and geometry still support a one-to-one correspondence.
+            // A very strong embedding match may survive larger box movement; weak matches need
+            // meaningful overlap. Never consume the same prior face twice.
+            val exact = previous.firstOrNull {
+                it.faceIndex == observation.faceIndex && it.faceIndex !in consumedPrevious
             }
+            val exactMatch = exact?.takeIf { old ->
+                if (old.embedding.size != embedding.size) {
+                    false
+                } else {
+                    val overlap = faceIoU(observation.bounds, old.bounds)
+                    val distance = cosineDistance(embedding, normalize(old.embedding))
+                    distance.isFinite() && distance <= 0.35f && (overlap >= 0.20f || distance <= 0.20f)
+                }
+            }
+            val reconciled = exactMatch ?: previous.filter {
+                it.faceIndex !in consumedPrevious && it.embedding.size == embedding.size
+            }.mapNotNull { old ->
+                val overlap = faceIoU(observation.bounds, old.bounds)
+                val distance = cosineDistance(embedding, normalize(old.embedding))
+                if (overlap >= 0.40f && distance.isFinite() && distance <= 0.35f) old to (overlap - distance) else null
+            }.maxByOrNull { it.second }?.first
             reconciled?.let { consumedPrevious += it.faceIndex }
 
             var clusterId = if (deferClustering) reconciled?.clusterId else null
