@@ -18,6 +18,7 @@ data class OcrState(
 
 data class FaceFindingState(
     val processed: Int = 0,
+    val successfulCount: Int = 0,
     val totalDetected: Int = 0,
     val failedCount: Int = 0,
     val isRunning: Boolean = false,
@@ -25,6 +26,7 @@ data class FaceFindingState(
     val itemsPerMinute: Int = 0,
     val detectionConfidence: Float = 0.60f,
     val currentItemName: String = "",
+    val currentItemStatus: String = "",
     val activeEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
     val detectionStage: StageProgress = StageProgress(),
     val embeddingStage: StageProgress = StageProgress(),

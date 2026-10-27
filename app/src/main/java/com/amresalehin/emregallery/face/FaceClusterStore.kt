@@ -10,6 +10,24 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
 import kotlin.math.sqrt
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+
+/**
+ * Event bus for notifying UI observers when media face records or clusters change.
+ */
+object FaceStoreEvents {
+    private val _mediaUpdates = MutableSharedFlow<String>(extraBufferCapacity = 128)
+    val mediaUpdates = _mediaUpdates.asSharedFlow()
+
+    fun notifyMediaUpdated(uri: String) {
+        _mediaUpdates.tryEmit(uri)
+    }
+
+    fun notifyAllUpdated() {
+        _mediaUpdates.tryEmit("")
+    }
+}
 
 data class EmbeddingProvenance(
     val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
@@ -366,6 +384,7 @@ class FaceClusterStore(context: Context) :
         } finally {
             db.endTransaction()
         }
+        FaceStoreEvents.notifyMediaUpdated(mediaUri)
     }
 
     @Synchronized
@@ -398,6 +417,7 @@ class FaceClusterStore(context: Context) :
             }
         }
         writableDatabase.insertWithOnConflict("indexed_media", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        FaceStoreEvents.notifyMediaUpdated(uri)
     }
 
     @Synchronized
@@ -411,6 +431,7 @@ class FaceClusterStore(context: Context) :
             putNull("error_message")
         }
         writableDatabase.insertWithOnConflict("indexed_media", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        FaceStoreEvents.notifyMediaUpdated(uri)
     }
 
     @Synchronized
@@ -445,6 +466,20 @@ class FaceClusterStore(context: Context) :
             "SELECT COUNT(*) FROM indexed_media WHERE engine_id=? AND status='failed'",
             arrayOf(engineId)
         ).use { if (it.moveToFirst()) it.getInt(0) else 0 }
+
+    @Synchronized
+    fun failedMediaCount(mediaUris: List<String>, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int {
+        val uniqueUris = mediaUris.distinct()
+        if (uniqueUris.isEmpty()) return 0
+        return uniqueUris.chunked(800).sumOf { batch ->
+            val placeholders = batch.joinToString(",") { "?" }
+            val args = arrayOf(engineId, *batch.toTypedArray())
+            readableDatabase.rawQuery(
+                "SELECT COUNT(*) FROM indexed_media WHERE engine_id=? AND status='failed' AND media_uri IN ($placeholders)",
+                args
+            ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+        }
+    }
 
     @Synchronized
     fun clusterCount(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int =

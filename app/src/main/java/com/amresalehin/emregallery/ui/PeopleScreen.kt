@@ -30,6 +30,7 @@ import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.face.FaceStoreEvents
 import com.amresalehin.emregallery.face.PersonSummary
 import com.amresalehin.emregallery.face.ReviewSuggestion
 import java.util.Locale
@@ -46,7 +47,7 @@ fun PeopleScreen(
     val store = remember { FaceClusterStore(context.applicationContext) }
     val photoByUri = remember(media) { media.filterNot { it.isVideo }.associateBy { it.uri } }
 
-    var selectedEngineId by remember { mutableStateOf(BuffaloLFaceEngine.ENGINE_ID) }
+    var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
     var allPeople by remember { mutableStateOf(store.personSummaries(includeHidden = false, engineId = selectedEngineId)) }
     var hiddenPeople by remember { mutableStateOf(store.personSummaries(includeHidden = true, engineId = selectedEngineId).filter { it.isHidden }) }
     var pendingSuggestions by remember { mutableStateOf(store.getPendingSuggestions(engineId = selectedEngineId)) }
@@ -72,9 +73,12 @@ fun PeopleScreen(
     LaunchedEffect(selectedEngineId) {
         selectedPersonId = null
         reload()
+        FaceStoreEvents.mediaUpdates.collect {
+            reload()
+        }
     }
 
-    val minimumGroupFaces = FaceRecognitionSettings.minGroupFaces(context)
+    val minimumGroupFaces = FaceRecognitionSettings.minGroupFaces(context, selectedEngineId)
     val visiblePeople = remember(allPeople, photoByUri, minimumGroupFaces, selectedEngineId) {
         allPeople.mapNotNull { person ->
             val visibleFaces = store.facesForCluster(person.id, engineId = selectedEngineId).filter { it.mediaUri in photoByUri }

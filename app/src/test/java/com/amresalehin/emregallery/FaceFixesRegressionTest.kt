@@ -4,6 +4,9 @@ import android.content.Context
 import android.graphics.RectF
 import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.face.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -252,13 +255,47 @@ class FaceFixesRegressionTest {
     fun testFindCommonIndexedMediaUri() {
         val photoOnlyBuffalo = "content://media/photo_buffalo_only"
         val photoBoth = "content://media/photo_both_engines"
-        val photoNone = "content://media/photo_none"
 
-        store.markMediaIndexed(photoOnlyBuffalo, 1, "buffalo_l")
-        store.markMediaIndexed(photoBoth, 2, "buffalo_l")
-        store.markMediaIndexed(photoBoth, 2, "ente")
+        store.markMediaIndexed(photoOnlyBuffalo, 1, BuffaloLFaceEngine.ENGINE_ID)
+        store.markMediaIndexed(photoBoth, 2, BuffaloLFaceEngine.ENGINE_ID)
+        store.markMediaIndexed(photoBoth, 2, EnteFaceConstants.ENGINE_ID)
 
-        val commonUri = store.findCommonIndexedMediaUri("buffalo_l", "ente")
+        val commonUri = store.findCommonIndexedMediaUri(BuffaloLFaceEngine.ENGINE_ID, EnteFaceConstants.ENGINE_ID)
         assertEquals("Common indexed photo should be returned for comparison", photoBoth, commonUri)
+    }
+
+    @Test
+    fun testFaceStoreEventsNotification() {
+        var notifiedUri: String? = null
+        val job = kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+            FaceStoreEvents.mediaUpdates.collect { uri ->
+                notifiedUri = uri
+            }
+        }
+
+        store.markMediaIndexed("content://media/test_event_photo", 2, BuffaloLFaceEngine.ENGINE_ID)
+        assertEquals("content://media/test_event_photo", notifiedUri)
+
+        store.markMediaFailed("content://media/test_event_photo_fail", BuffaloLFaceEngine.ENGINE_ID, "Some error")
+        assertEquals("content://media/test_event_photo_fail", notifiedUri)
+
+        job.cancel()
+    }
+
+    @Test
+    fun testScopedFailedMediaCount() {
+        val uri1 = "content://media/failed_1"
+        val uri2 = "content://media/failed_2"
+        val uri3 = "content://media/indexed_3"
+
+        store.markMediaFailed(uri1, BuffaloLFaceEngine.ENGINE_ID, "Error 1")
+        store.markMediaFailed(uri2, EnteFaceConstants.ENGINE_ID, "Error 2")
+        store.markMediaIndexed(uri3, 1, BuffaloLFaceEngine.ENGINE_ID)
+
+        val buffaloFailed = store.failedMediaCount(listOf(uri1, uri2, uri3), BuffaloLFaceEngine.ENGINE_ID)
+        val enteFailed = store.failedMediaCount(listOf(uri1, uri2, uri3), EnteFaceConstants.ENGINE_ID)
+
+        assertEquals("Buffalo_L failed count should only count its own failures", 1, buffaloFailed)
+        assertEquals("Ente failed count should only count its own failures", 1, enteFailed)
     }
 }

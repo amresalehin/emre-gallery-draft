@@ -31,6 +31,8 @@ data class FaceIndexingProgress(
     val facesFound: Int = 0,
     val failed: Int = 0,
     val currentItemName: String = "",
+    val currentItemStatus: String = "",
+    val currentItemFaces: Int? = null,
     val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
     val engineName: String = "",
     val detectionStage: StageProgress = StageProgress(),
@@ -147,7 +149,9 @@ class FaceIndexingRepository(
                 val currentPct = if (totalPending > 0) (index * 100 / totalPending) else 0
 
                 detectionStage = StageProgress(StageState.RUNNING, index, totalPending, currentPct)
-                embeddingStage = StageProgress(StageState.RUNNING, index, totalPending, currentPct)
+                embeddingStage = StageProgress(StageState.PENDING, index, totalPending, currentPct)
+                var lastItemStatus = "Scanning for faces…"
+                var currentItemFacesCount: Int? = null
 
                 onProgress(
                     FaceIndexingProgress(
@@ -156,6 +160,8 @@ class FaceIndexingRepository(
                         facesFound = facesFound,
                         failed = failed,
                         currentItemName = itemName,
+                        currentItemStatus = lastItemStatus,
+                        currentItemFaces = null,
                         engineId = engineId,
                         engineName = engineFactory.displayName,
                         detectionStage = detectionStage,
@@ -167,36 +173,102 @@ class FaceIndexingRepository(
 
                 try {
                     val activeEngine = engine ?: error("Face recognition engine is not ready.")
-                    val detections = activeEngine.embed(Uri.parse(item.uri))
-                    detections.forEach { face ->
-                        if (engineFactory.clusteringStrategy != null) {
-                            store.addRawFaceObservation(
-                                mediaUri = item.uri,
-                                faceIndex = face.faceIndex,
-                                rawEmbedding = face.embedding,
-                                bounds = face.bounds,
-                                confidence = face.score,
-                                quality = face.quality,
-                                provenance = provenance,
-                                qualityMetrics = face.qualityMetrics
+                    val uri = Uri.parse(item.uri)
+
+                    // Phase 1: Face Detection
+                    val rawDetections = activeEngine.detectFaces(uri)
+                    val detectedCount = rawDetections.size
+                    currentItemFacesCount = detectedCount
+
+                    detectionStage = StageProgress(
+                        state = if (index + 1 >= totalPending) StageState.COMPLETED else StageState.RUNNING,
+                        processed = index + 1,
+                        total = totalPending,
+                        percentage = if (totalPending > 0) ((index + 1) * 100 / totalPending) else 100
+                    )
+
+                    if (detectedCount == 0) {
+                        // 0 faces found - completed for this item
+                        store.markMediaIndexed(item.uri, 0, engineId)
+                        store.pruneStaleFacesForMedia(item.uri, engineId, 0)
+                        lastItemStatus = "0 faces found"
+                        embeddingStage = StageProgress(
+                            state = if (index + 1 >= totalPending) StageState.COMPLETED else StageState.RUNNING,
+                            processed = index + 1,
+                            total = totalPending,
+                            percentage = if (totalPending > 0) ((index + 1) * 100 / totalPending) else 100
+                        )
+                        onProgress(
+                            FaceIndexingProgress(
+                                processed = processed,
+                                total = totalPending,
+                                facesFound = facesFound,
+                                failed = failed,
+                                currentItemName = itemName,
+                                currentItemStatus = lastItemStatus,
+                                currentItemFaces = 0,
+                                engineId = engineId,
+                                engineName = engineFactory.displayName,
+                                detectionStage = detectionStage,
+                                embeddingStage = embeddingStage,
+                                clusteringStage = clusteringStage,
+                                failedItems = failedList.toList()
                             )
-                        } else {
-                            store.addFace(
-                                mediaUri = item.uri,
-                                faceIndex = face.faceIndex,
-                                rawEmbedding = face.embedding,
-                                maxDistance = recognitionDistance,
-                                bounds = face.bounds,
-                                confidence = face.score,
-                                quality = face.quality,
-                                provenance = provenance,
-                                qualityMetrics = face.qualityMetrics
+                        )
+                    } else {
+                        // Phase 2: Embedding Generation
+                        embeddingStage = StageProgress(StageState.RUNNING, index, totalPending, currentPct)
+                        lastItemStatus = "$detectedCount face${if (detectedCount > 1) "s" else ""} found, generating embeddings…"
+                        onProgress(
+                            FaceIndexingProgress(
+                                processed = processed,
+                                total = totalPending,
+                                facesFound = facesFound,
+                                failed = failed,
+                                currentItemName = itemName,
+                                currentItemStatus = lastItemStatus,
+                                currentItemFaces = detectedCount,
+                                engineId = engineId,
+                                engineName = engineFactory.displayName,
+                                detectionStage = detectionStage,
+                                embeddingStage = embeddingStage,
+                                clusteringStage = clusteringStage,
+                                failedItems = failedList.toList()
                             )
+                        )
+
+                        val detections = activeEngine.embedFaces(uri, rawDetections)
+                        detections.forEach { face ->
+                            if (engineFactory.clusteringStrategy != null) {
+                                store.addRawFaceObservation(
+                                    mediaUri = item.uri,
+                                    faceIndex = face.faceIndex,
+                                    rawEmbedding = face.embedding,
+                                    bounds = face.bounds,
+                                    confidence = face.score,
+                                    quality = face.quality,
+                                    provenance = provenance,
+                                    qualityMetrics = face.qualityMetrics
+                                )
+                            } else {
+                                store.addFace(
+                                    mediaUri = item.uri,
+                                    faceIndex = face.faceIndex,
+                                    rawEmbedding = face.embedding,
+                                    maxDistance = recognitionDistance,
+                                    bounds = face.bounds,
+                                    confidence = face.score,
+                                    quality = face.quality,
+                                    provenance = provenance,
+                                    qualityMetrics = face.qualityMetrics
+                                )
+                            }
                         }
+                        store.markMediaIndexed(item.uri, detections.size, engineId)
+                        store.pruneStaleFacesForMedia(item.uri, engineId, detections.size)
+                        facesFound += detections.size
+                        lastItemStatus = "Indexed ${detections.size} face${if (detections.size > 1) "s" else ""}"
                     }
-                    store.markMediaIndexed(item.uri, detections.size, engineId)
-                    store.pruneStaleFacesForMedia(item.uri, engineId, detections.size)
-                    facesFound += detections.size
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (err: Exception) {
@@ -204,6 +276,7 @@ class FaceIndexingRepository(
                     store.markMediaFailed(item.uri, engineId, errorDetail)
                     failedList.add(item.uri to errorDetail)
                     failed++
+                    lastItemStatus = "Failed: $errorDetail"
                 } finally {
                     processed++
                     val completedPct = if (totalPending > 0) (processed * 100 / totalPending) else 100
@@ -227,6 +300,8 @@ class FaceIndexingRepository(
                             facesFound = facesFound,
                             failed = failed,
                             currentItemName = itemName,
+                            currentItemStatus = lastItemStatus,
+                            currentItemFaces = currentItemFacesCount,
                             engineId = engineId,
                             engineName = engineFactory.displayName,
                             detectionStage = detectionStage,

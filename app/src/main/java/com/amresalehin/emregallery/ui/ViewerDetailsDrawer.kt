@@ -164,7 +164,7 @@ fun ViewerDetailsDrawer(
     var isInstallingModel by remember { mutableStateOf(false) }
     var modelInstallProgress by remember { mutableStateOf<String?>(null) }
 
-    // Strict Engine Scoping: Query exclusively for activeEngineId, no fallback!
+    // Strict Engine Scoping: Query exclusively for activeEngineId, and subscribe to live store updates!
     LaunchedEffect(item.uri, faceReloadKey, activeEngineId) {
         withContext(Dispatchers.IO) {
             val faces = faceStore.facesForMedia(item.uri, activeEngineId)
@@ -173,6 +173,19 @@ fun ViewerDetailsDrawer(
                 detectedFaces = faces
                 mediaIndexInfo = info
                 isLoadingIndexInfo = false
+            }
+        }
+        FaceStoreEvents.mediaUpdates.collect { updatedUri ->
+            if (updatedUri == item.uri) {
+                withContext(Dispatchers.IO) {
+                    val faces = faceStore.facesForMedia(item.uri, activeEngineId)
+                    val info = faceStore.getMediaIndexedInfo(item.uri, activeEngineId)
+                    withContext(Dispatchers.Main) {
+                        detectedFaces = faces
+                        mediaIndexInfo = info
+                        isLoadingIndexInfo = false
+                    }
+                }
             }
         }
     }
@@ -205,6 +218,7 @@ fun ViewerDetailsDrawer(
                         onProgress = { progress ->
                             scanPhase = when {
                                 progress.clusteringStage.state == StageState.RUNNING -> "Clustering..."
+                                progress.currentItemStatus.isNotBlank() -> progress.currentItemStatus
                                 progress.embeddingStage.state == StageState.RUNNING -> "Generating embeddings..."
                                 progress.detectionStage.state == StageState.RUNNING -> "Detecting faces..."
                                 else -> "Processing..."
@@ -294,9 +308,15 @@ fun ViewerDetailsDrawer(
                 engineName = factory.displayName,
                 engineId = activeEngineId
             )
-            lastScanError != null -> ViewerFaceUiState(
+            lastScanError != null && detectedFaces.isEmpty() -> ViewerFaceUiState(
                 state = ViewerFaceState.FAILED,
                 errorMessage = lastScanError,
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            detectedFaces.isNotEmpty() -> ViewerFaceUiState(
+                state = ViewerFaceState.COMPLETED_FACES_FOUND,
+                faces = detectedFaces,
                 engineName = factory.displayName,
                 engineId = activeEngineId
             )
@@ -306,22 +326,11 @@ fun ViewerDetailsDrawer(
                 engineName = factory.displayName,
                 engineId = activeEngineId
             )
-            mediaIndexInfo?.status == "indexed" -> {
-                if (detectedFaces.isNotEmpty()) {
-                    ViewerFaceUiState(
-                        state = ViewerFaceState.COMPLETED_FACES_FOUND,
-                        faces = detectedFaces,
-                        engineName = factory.displayName,
-                        engineId = activeEngineId
-                    )
-                } else {
-                    ViewerFaceUiState(
-                        state = ViewerFaceState.COMPLETED_NO_FACES,
-                        engineName = factory.displayName,
-                        engineId = activeEngineId
-                    )
-                }
-            }
+            mediaIndexInfo?.status == "indexed" -> ViewerFaceUiState(
+                state = ViewerFaceState.COMPLETED_NO_FACES,
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
             else -> ViewerFaceUiState(
                 state = ViewerFaceState.NOT_INDEXED,
                 engineName = factory.displayName,

@@ -36,6 +36,33 @@ data class DetectedFaceEmbedding(
     }
 }
 
+data class RawFaceDetection(
+    val faceIndex: Int,
+    val bounds: RectF,
+    val landmarks: FloatArray? = null,
+    val score: Float = 1.0f
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is RawFaceDetection) return false
+        if (faceIndex != other.faceIndex) return false
+        if (bounds != other.bounds) return false
+        if (landmarks != null) {
+            if (other.landmarks == null || !landmarks.contentEquals(other.landmarks)) return false
+        } else if (other.landmarks != null) return false
+        if (score != other.score) return false
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = faceIndex
+        result = 31 * result + bounds.hashCode()
+        result = 31 * result + (landmarks?.contentHashCode() ?: 0)
+        result = 31 * result + score.hashCode()
+        return result
+    }
+}
+
 /**
  * Standard interface for face detection and recognition engines.
  * Each engine declares its identity, model version, and embedding dimension.
@@ -47,9 +74,23 @@ interface FaceEngine : AutoCloseable {
     val formatVersion: Int get() = 1
 
     /**
+     * Phase 1: Detects raw faces and landmarks in the given media URI.
+     */
+    fun detectFaces(uri: Uri): List<RawFaceDetection> = emptyList()
+
+    /**
+     * Phase 2: Generates embeddings for previously detected faces.
+     */
+    fun embedFaces(uri: Uri, detections: List<RawFaceDetection>): List<DetectedFaceEmbedding> = emptyList()
+
+    /**
      * Detects faces in the given media URI and produces normalized embeddings.
      */
-    fun embed(uri: Uri): List<DetectedFaceEmbedding>
+    fun embed(uri: Uri): List<DetectedFaceEmbedding> {
+        val detections = detectFaces(uri)
+        if (detections.isEmpty()) return emptyList()
+        return embedFaces(uri, detections)
+    }
 
     /**
      * Direct bitmap embedding for in-memory operations and evaluation benchmarks.

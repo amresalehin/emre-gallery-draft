@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.net.Uri
 import android.os.StatFs
+import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
@@ -46,14 +47,62 @@ class BuffaloLFaceEngine private constructor(
 
     private data class FaceDetection(val bounds: RectF, val landmarks: FloatArray, val score: Float)
 
-    override fun embed(uri: Uri): List<DetectedFaceEmbedding> {
+    override fun detectFaces(uri: Uri): List<RawFaceDetection> {
         val bitmap = decodeOrientedBitmap(uri)
             ?: error("Could not decode image at URI: $uri")
         return try {
-            embedBitmap(bitmap)
+            val detections = detect(bitmap)
+            detections.mapIndexedNotNull { index, face ->
+                if (face.bounds.width() < MIN_FACE_SIZE || face.bounds.height() < MIN_FACE_SIZE) {
+                    null
+                } else {
+                    RawFaceDetection(index, RectF(face.bounds), face.landmarks, face.score)
+                }
+            }
         } finally {
             bitmap.recycle()
         }
+    }
+
+    override fun embedFaces(uri: Uri, detections: List<RawFaceDetection>): List<DetectedFaceEmbedding> {
+        if (detections.isEmpty()) return emptyList()
+        val bitmap = decodeOrientedBitmap(uri)
+            ?: error("Could not decode image at URI: $uri")
+        return try {
+            detections.mapIndexedNotNull { _, raw ->
+                if (raw.bounds.width() < MIN_FACE_SIZE || raw.bounds.height() < MIN_FACE_SIZE) {
+                    return@mapIndexedNotNull null
+                }
+                val landmarks = raw.landmarks ?: floatArrayOf(
+                    raw.bounds.left + raw.bounds.width() * 0.32f, raw.bounds.top + raw.bounds.height() * 0.38f,
+                    raw.bounds.left + raw.bounds.width() * 0.68f, raw.bounds.top + raw.bounds.height() * 0.38f,
+                    raw.bounds.centerX(), raw.bounds.top + raw.bounds.height() * 0.56f,
+                    raw.bounds.left + raw.bounds.width() * 0.38f, raw.bounds.top + raw.bounds.height() * 0.73f,
+                    raw.bounds.left + raw.bounds.width() * 0.62f, raw.bounds.top + raw.bounds.height() * 0.73f
+                )
+                val aligned = alignFace(bitmap, landmarks)
+                try {
+                    val embedding = inferEmbedding(aligned)
+                    val faceArea = (raw.bounds.width() * raw.bounds.height()).coerceAtLeast(1f)
+                    val imageArea = (bitmap.width * bitmap.height).coerceAtLeast(1).toFloat()
+                    val sizeRatio = (faceArea / imageArea).coerceIn(0.001f, 1.0f)
+                    val aspect = raw.bounds.width() / raw.bounds.height().coerceAtLeast(1f)
+                    val aspectScore = (1f - kotlin.math.abs(aspect - 0.85f)).coerceIn(0.2f, 1.0f)
+                    val quality = (raw.score * 0.5f + kotlin.math.min(sizeRatio * 10f, 0.3f) + aspectScore * 0.2f).coerceIn(0f, 1f)
+                    DetectedFaceEmbedding(raw.faceIndex, RectF(raw.bounds), embedding, raw.score, quality)
+                } finally {
+                    aligned.recycle()
+                }
+            }
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    override fun embed(uri: Uri): List<DetectedFaceEmbedding> {
+        val detections = detectFaces(uri)
+        if (detections.isEmpty()) return emptyList()
+        return embedFaces(uri, detections)
     }
 
     override fun embedBitmap(bitmap: Bitmap): List<DetectedFaceEmbedding> {
@@ -161,6 +210,104 @@ class BuffaloLFaceEngine private constructor(
         }
     }
 
+    private data class StrideOutputs(
+        val scoreOutput: Output,
+        val boxOutput: Output,
+        val keypointOutput: Output?,
+        val numAnchors: Int
+    )
+
+    private fun resolveStrideOutputs(stride: Int, outputs: List<Output>): StrideOutputs {
+        val grid = DETECT_SIZE / stride
+        val gridCells = grid * grid
+        val anchorCount2A = gridCells * 2
+        val anchorCount1A = gridCells * 1
+        val strideIndex = STRIDES.indexOf(stride)
+
+        // 1. Explicit semantic name matching
+        val scoreByName = outputs.firstOrNull {
+            it.name.contains("score_$stride", ignoreCase = true) ||
+            it.name.contains("scores_$stride", ignoreCase = true)
+        }
+        val boxByName = outputs.firstOrNull {
+            it.name.contains("bbox_$stride", ignoreCase = true) ||
+            it.name.contains("box_$stride", ignoreCase = true)
+        }
+        val kpsByName = outputs.firstOrNull {
+            it.name.contains("kps_$stride", ignoreCase = true) ||
+            it.name.contains("landmark_$stride", ignoreCase = true)
+        }
+        if (scoreByName != null && boxByName != null) {
+            val numAnchors = if (scoreByName.values.size == anchorCount2A) 2 else 1
+            return StrideOutputs(scoreByName, boxByName, kpsByName, numAnchors)
+        }
+
+        // 2. InsightFace SCRFD standard Feature Map Context (FMC) layout:
+        // Stride 8: score index 0, bbox index fmc, kps index 2*fmc
+        // Stride 16: score index 1, bbox index 1+fmc, kps index 1+2*fmc
+        // Stride 32: score index 2, bbox index 2+fmc, kps index 2+2*fmc
+        if (outputs.size >= 9 && strideIndex in 0..2) {
+            val fmc = if (outputs.size >= 15) 5 else 3
+            val scoreCandidate = outputs.getOrNull(strideIndex)
+            val boxCandidate = outputs.getOrNull(strideIndex + fmc)
+            val kpsCandidate = outputs.getOrNull(strideIndex + fmc * 2)
+            if (scoreCandidate != null && boxCandidate != null) {
+                val scoreLen = scoreCandidate.values.size
+                val boxLen = boxCandidate.values.size
+                if ((scoreLen == anchorCount2A || scoreLen == anchorCount1A) && boxLen == scoreLen * 4) {
+                    val numAnchors = if (scoreLen == anchorCount2A) 2 else 1
+                    return StrideOutputs(scoreCandidate, boxCandidate, kpsCandidate, numAnchors)
+                }
+            }
+        }
+
+        // 3. Sequential grouping by stride: [score_8, box_8, kps_8, score_16, box_16, kps_16, ...]
+        if (outputs.size >= 9 && strideIndex in 0..2) {
+            val scoreCandidate = outputs.getOrNull(strideIndex * 3)
+            val boxCandidate = outputs.getOrNull(strideIndex * 3 + 1)
+            val kpsCandidate = outputs.getOrNull(strideIndex * 3 + 2)
+            if (scoreCandidate != null && boxCandidate != null) {
+                val scoreLen = scoreCandidate.values.size
+                val boxLen = boxCandidate.values.size
+                if ((scoreLen == anchorCount2A || scoreLen == anchorCount1A) && boxLen == scoreLen * 4) {
+                    val numAnchors = if (scoreLen == anchorCount2A) 2 else 1
+                    return StrideOutputs(scoreCandidate, boxCandidate, kpsCandidate, numAnchors)
+                }
+            }
+        }
+
+        // 4. Exact element count matching:
+        // Try 2 anchors per cell first (standard SCRFD-10G)
+        var scoreOut = outputs.firstOrNull { it.values.size == anchorCount2A && isScoreTensor(it) }
+            ?: outputs.firstOrNull { it.values.size == anchorCount2A }
+        var boxOut = outputs.firstOrNull { it.values.size == anchorCount2A * 4 }
+        var kpsOut = outputs.firstOrNull { it.values.size == anchorCount2A * 10 }
+        var numAnchors = 2
+
+        // If not found, try 1 anchor per cell
+        if (scoreOut == null || boxOut == null) {
+            scoreOut = outputs.firstOrNull { it.values.size == anchorCount1A && isScoreTensor(it) }
+                ?: outputs.firstOrNull { it.values.size == anchorCount1A }
+            boxOut = outputs.firstOrNull { it.values.size == anchorCount1A * 4 }
+            kpsOut = outputs.firstOrNull { it.values.size == anchorCount1A * 10 }
+            numAnchors = 1
+        }
+
+        check(scoreOut != null && boxOut != null) {
+            val summary = outputs.joinToString(prefix = "[", postfix = "]") {
+                "${it.name}: shape=${it.shape.contentToString()}, len=${it.values.size}"
+            }
+            "Unsupported SCRFD output layout for stride $stride (expected anchor counts: 2A=$anchorCount2A, 1A=$anchorCount1A). Available outputs (${outputs.size}): $summary"
+        }
+
+        return StrideOutputs(scoreOut, boxOut, kpsOut, numAnchors)
+    }
+
+    private fun isScoreTensor(output: Output): Boolean {
+        val last = output.shape.lastOrNull() ?: -1L
+        return last == 1L || output.shape.size == 2
+    }
+
     private fun decodeScrfd(
         outputs: List<Output>,
         originalWidth: Int,
@@ -169,29 +316,21 @@ class BuffaloLFaceEngine private constructor(
     ): List<FaceDetection> {
         val candidates = mutableListOf<FaceDetection>()
         for (stride in STRIDES) {
-            val anchorCount = (DETECT_SIZE / stride) * (DETECT_SIZE / stride) * 2
-            val scoreOutput = outputs.firstOrNull {
-                it.name.contains("score_$stride", true) || it.name.contains("scores_$stride", true)
-            } ?: outputs.firstOrNull { lastDim(it.shape) == 1L && rowCount(it.shape) == anchorCount.toLong() }
-            val boxOutput = outputs.firstOrNull {
-                it.name.contains("bbox_$stride", true) || it.name.contains("box_$stride", true)
-            } ?: outputs.firstOrNull { lastDim(it.shape) == 4L && rowCount(it.shape) == anchorCount.toLong() }
-            val keypointOutput = outputs.firstOrNull {
-                it.name.contains("kps_$stride", true) || it.name.contains("landmark_$stride", true)
-            } ?: outputs.firstOrNull { lastDim(it.shape) == 10L && rowCount(it.shape) == anchorCount.toLong() }
+            val resolved = resolveStrideOutputs(stride, outputs)
+            val scoreOutput = resolved.scoreOutput
+            val boxOutput = resolved.boxOutput
+            val keypointOutput = resolved.keypointOutput
+            val numAnchors = resolved.numAnchors
 
-            check(scoreOutput != null && boxOutput != null) {
-                "Unsupported SCRFD output layout for stride $stride."
-            }
             val scores = scoreOutput.values
             val boxes = boxOutput.values
             val keypoints = keypointOutput?.values
-            val count = min(anchorCount, min(scores.size, boxes.size / 4))
+            val count = min(scores.size, boxes.size / 4)
             val grid = DETECT_SIZE / stride
             for (i in 0 until count) {
                 val score = scores[i]
                 if (!score.isFinite() || score < detectionThreshold) continue
-                val cell = i / 2
+                val cell = i / numAnchors
                 val cx = (cell % grid) * stride.toFloat()
                 val cy = (cell / grid) * stride.toFloat()
                 val bo = i * 4
@@ -317,9 +456,13 @@ class BuffaloLFaceEngine private constructor(
 
     private fun lastDim(shape: LongArray): Long = shape.lastOrNull() ?: -1L
     private fun rowCount(shape: LongArray): Long {
-        if (shape.size < 2) return -1L
+        if (shape.isEmpty()) return -1L
+        if (shape.size == 1) return shape[0]
+        val start = if (shape[0] <= 1L && shape.size > 1) 1 else 0
+        val end = if (shape.last() == 1L && shape.size > 1) shape.lastIndex else shape.size
+        if (start >= end) return 1L
         var count = 1L
-        for (i in 1 until shape.lastIndex) {
+        for (i in start until end) {
             if (shape[i] <= 0L) return -1L
             count *= shape[i]
         }

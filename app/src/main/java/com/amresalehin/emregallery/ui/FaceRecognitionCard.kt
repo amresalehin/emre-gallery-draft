@@ -622,38 +622,54 @@ fun FaceRecognitionCard(
 
             // --- 3. FACE INDEXING OVERALL PIPELINE TELEMETRY ---
 
-            // Active processing target filename
-            if (currentFindingState.isRunning && currentFindingState.currentItemName.isNotBlank()) {
+            // Active processing target filename & status
+            if (currentFindingState.isRunning && (currentFindingState.currentItemName.isNotBlank() || currentFindingState.currentItemStatus.isNotBlank())) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        Icon(
-                            Icons.Default.Image,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Analyzing: ${currentFindingState.currentItemName}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        if (currentFindingState.currentItemName.isNotBlank()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Image,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Analyzing: ${currentFindingState.currentItemName}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        if (currentFindingState.currentItemStatus.isNotBlank()) {
+                            Text(
+                                currentFindingState.currentItemStatus,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 24.dp)
+                            )
+                        }
                     }
                 }
             }
 
             // Aggregate metrics & linear progress bar
-            val successfulCount = (currentFindingState.processed - currentFindingState.failedCount).coerceAtLeast(0)
+            val successfulCount = if (currentFindingState.successfulCount > 0) {
+                currentFindingState.successfulCount
+            } else {
+                (currentFindingState.processed - currentFindingState.failedCount).coerceAtLeast(0)
+            }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -840,16 +856,20 @@ fun FaceRecognitionCard(
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Min faces per person",
+                        "Min faces to show person (People tab filter)",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        "Unnamed people with fewer faces are hidden in the People tab.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Slider(
                         value = currentClusteringState.minGroupFaces.toFloat(),
                         onValueChange = { onMinGroupFacesChange(it.roundToInt().coerceIn(1, 30), selectedEngineId) },
                         valueRange = 1f..30f,
-                        steps = 28,
                         modifier = Modifier.fillMaxWidth().height(26.dp)
                     )
                 }

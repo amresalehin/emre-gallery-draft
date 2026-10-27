@@ -189,7 +189,7 @@ fun IndexingStatusScreen(
                 onRetryFailedFaces = { eng -> viewModel.retryFailedFaces(eng) },
                 onComparePipelines = {
                     scope.launch(Dispatchers.IO) {
-                        val commonUri = faceStore.findCommonIndexedMediaUri("buffalo_l", "ente")
+                        val commonUri = faceStore.findCommonIndexedMediaUri(BuffaloLFaceEngine.ENGINE_ID, com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID)
                             ?: media.firstOrNull { !it.isVideo }?.uri
                         if (commonUri != null) {
                             val result = faceStore.compareEnginesOnMedia(mediaUri = commonUri, context = context)

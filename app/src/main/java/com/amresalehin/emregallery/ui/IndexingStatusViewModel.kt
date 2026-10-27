@@ -129,14 +129,14 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 // Buffalo_L counts
                 val bCount = faceStore.indexedMediaCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
                 val bFaces = faceStore.indexedFaceCount(BuffaloLFaceEngine.ENGINE_ID)
-                val bFailures = faceStore.failedMediaCount(BuffaloLFaceEngine.ENGINE_ID)
+                val bFailures = faceStore.failedMediaCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
                 val bSummaries = faceStore.summaries(BuffaloLFaceEngine.ENGINE_ID)
                 val bFailedList = faceStore.getFailedMedia(BuffaloLFaceEngine.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
 
                 // Ente-Style counts
                 val eCount = faceStore.indexedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
                 val eFaces = faceStore.indexedFaceCount(EnteFaceConstants.ENGINE_ID)
-                val eFailures = faceStore.failedMediaCount(EnteFaceConstants.ENGINE_ID)
+                val eFailures = faceStore.failedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
                 val eSummaries = faceStore.summaries(EnteFaceConstants.ENGINE_ID)
                 val eFailedList = faceStore.getFailedMedia(EnteFaceConstants.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
 
@@ -163,7 +163,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         cachedCount = result.ocrCached
                     ),
                     faceFinding = state.faceFinding.copy(
-                        processed = result.buffaloProcessed.coerceIn(0, totalPhotos),
+                        processed = (result.buffaloProcessed + result.buffaloFailures).coerceIn(0, totalPhotos),
+                        successfulCount = result.buffaloProcessed.coerceIn(0, totalPhotos),
                         totalDetected = result.buffaloDetected,
                         failedCount = result.buffaloFailures,
                         failedItems = result.buffaloFailedItems
@@ -172,7 +173,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         summaries = result.buffaloSummaries
                     ),
                     enteFaceFinding = state.enteFaceFinding.copy(
-                        processed = result.enteProcessed.coerceIn(0, totalPhotos),
+                        processed = (result.enteProcessed + result.enteFailures).coerceIn(0, totalPhotos),
+                        successfulCount = result.enteProcessed.coerceIn(0, totalPhotos),
                         totalDetected = result.enteDetected,
                         failedCount = result.enteFailures,
                         failedItems = result.enteFailedItems
@@ -234,6 +236,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val error = prefs.getString(IndexingForegroundService.KEY_ERROR, null)
                 val engineId = prefs.getString(IndexingForegroundService.KEY_ENGINE_ID, BuffaloLFaceEngine.ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
                 val currentItem = prefs.getString(IndexingForegroundService.KEY_CURRENT_ITEM_NAME, "") ?: ""
+                val currentStatus = prefs.getString(IndexingForegroundService.KEY_CURRENT_ITEM_STATUS, "") ?: ""
 
                 val detStateStr = prefs.getString(IndexingForegroundService.KEY_DETECTION_STATE, "PENDING") ?: "PENDING"
                 val detProcessed = prefs.getInt(IndexingForegroundService.KEY_DETECTION_PROCESSED, 0)
@@ -283,14 +286,19 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 val ipm = if (running && !paused) {
                                     calculateRate(processed - enteFaceStartProcessed, enteFaceStartTimeMillis)
                                 } else 0
+                                val effectiveProc = if (total > 0) processed else newEnteFace.processed
+                                val effectiveFailed = if (failed >= 0) failed else newEnteFace.failedCount
+                                val effectiveSucc = (effectiveProc - effectiveFailed).coerceAtLeast(0)
                                 newEnteFace = newEnteFace.copy(
                                     isRunning = running,
                                     isPaused = paused,
-                                    processed = if (total > 0) processed else newEnteFace.processed,
+                                    processed = effectiveProc,
+                                    successfulCount = effectiveSucc,
                                     totalDetected = if (faces >= 0) faces else newEnteFace.totalDetected,
-                                    failedCount = if (failed >= 0) failed else newEnteFace.failedCount,
+                                    failedCount = effectiveFailed,
                                     itemsPerMinute = ipm,
                                     currentItemName = if (running) currentItem else "",
+                                    currentItemStatus = if (running) currentStatus else "",
                                     activeEngineId = engineId,
                                     detectionStage = detStage,
                                     embeddingStage = embStage,
@@ -300,14 +308,19 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 val ipm = if (running && !paused) {
                                     calculateRate(processed - faceStartProcessed, faceStartTimeMillis)
                                 } else 0
+                                val effectiveProc = if (total > 0) processed else newFace.processed
+                                val effectiveFailed = if (failed >= 0) failed else newFace.failedCount
+                                val effectiveSucc = (effectiveProc - effectiveFailed).coerceAtLeast(0)
                                 newFace = newFace.copy(
                                     isRunning = running,
                                     isPaused = paused,
-                                    processed = if (total > 0) processed else newFace.processed,
+                                    processed = effectiveProc,
+                                    successfulCount = effectiveSucc,
                                     totalDetected = if (faces >= 0) faces else newFace.totalDetected,
-                                    failedCount = if (failed >= 0) failed else newFace.failedCount,
+                                    failedCount = effectiveFailed,
                                     itemsPerMinute = ipm,
                                     currentItemName = if (running) currentItem else "",
+                                    currentItemStatus = if (running) currentStatus else "",
                                     activeEngineId = engineId,
                                     detectionStage = detStage,
                                     embeddingStage = embStage,
@@ -558,36 +571,65 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         }
 
         viewModelScope.launch {
-            val resultCount = withContext(Dispatchers.IO) {
-                if (engineId == EnteFaceConstants.ENGINE_ID) {
-                    EnteFaceClusteringStrategy.reclusterChronologically(faceStore, threshold)
-                } else {
-                    faceStore.reclusterAll(threshold)
+            try {
+                val resultCount = withContext(Dispatchers.IO) {
+                    if (engineId == EnteFaceConstants.ENGINE_ID) {
+                        EnteFaceClusteringStrategy.reclusterChronologically(faceStore, threshold)
+                    } else {
+                        faceStore.reclusterAll(threshold)
+                    }
                 }
-            }
-            val (summaries, detectedCount) = withContext(Dispatchers.IO) {
-                Pair(faceStore.summaries(engineId), faceStore.indexedFaceCount(engineId))
-            }
+                val (summaries, detectedCount) = withContext(Dispatchers.IO) {
+                    Pair(faceStore.summaries(engineId), faceStore.indexedFaceCount(engineId))
+                }
 
-            _uiState.update {
-                if (engineId == EnteFaceConstants.ENGINE_ID) {
-                    it.copy(
-                        enteClustering = it.enteClustering.copy(
-                            summaries = summaries,
-                            isClusteringRunning = false,
-                            statusMessage = "Successfully grouped into $resultCount people profiles."
-                        ),
-                        enteFaceFinding = it.enteFaceFinding.copy(totalDetected = detectedCount)
-                    )
-                } else {
-                    it.copy(
-                        clustering = it.clustering.copy(
-                            summaries = summaries,
-                            isClusteringRunning = false,
-                            statusMessage = "Successfully grouped into $resultCount people profiles."
-                        ),
-                        faceFinding = it.faceFinding.copy(totalDetected = detectedCount)
-                    )
+                _uiState.update {
+                    if (engineId == EnteFaceConstants.ENGINE_ID) {
+                        it.copy(
+                            enteClustering = it.enteClustering.copy(
+                                summaries = summaries,
+                                isClusteringRunning = false,
+                                statusMessage = "Successfully grouped into $resultCount people profiles."
+                            ),
+                            enteFaceFinding = it.enteFaceFinding.copy(totalDetected = detectedCount)
+                        )
+                    } else {
+                        it.copy(
+                            clustering = it.clustering.copy(
+                                summaries = summaries,
+                                isClusteringRunning = false,
+                                statusMessage = "Successfully grouped into $resultCount people profiles."
+                            ),
+                            faceFinding = it.faceFinding.copy(totalDetected = detectedCount)
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                val errorMsg = e.localizedMessage ?: "Clustering failed"
+                _uiState.update {
+                    if (engineId == EnteFaceConstants.ENGINE_ID) {
+                        it.copy(
+                            enteClustering = it.enteClustering.copy(
+                                isClusteringRunning = false,
+                                statusMessage = "Clustering error: $errorMsg"
+                            )
+                        )
+                    } else {
+                        it.copy(
+                            clustering = it.clustering.copy(
+                                isClusteringRunning = false,
+                                statusMessage = "Clustering error: $errorMsg"
+                            )
+                        )
+                    }
+                }
+            } finally {
+                _uiState.update {
+                    if (engineId == EnteFaceConstants.ENGINE_ID) {
+                        it.copy(enteClustering = it.enteClustering.copy(isClusteringRunning = false))
+                    } else {
+                        it.copy(clustering = it.clustering.copy(isClusteringRunning = false))
+                    }
                 }
             }
         }
@@ -599,24 +641,55 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         if (clusteringState.isClusteringRunning) return
 
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                faceStore.resetClustersOnly(engineId)
-            }
-            _uiState.update {
-                if (engineId == EnteFaceConstants.ENGINE_ID) {
-                    it.copy(
-                        enteClustering = it.enteClustering.copy(
-                            summaries = emptyList(),
-                            statusMessage = "Ente clusters reset. Stored facial embeddings preserved."
+            try {
+                withContext(Dispatchers.IO) {
+                    faceStore.resetClustersOnly(engineId)
+                }
+                _uiState.update {
+                    if (engineId == EnteFaceConstants.ENGINE_ID) {
+                        it.copy(
+                            enteClustering = it.enteClustering.copy(
+                                summaries = emptyList(),
+                                isClusteringRunning = false,
+                                statusMessage = "Ente clusters reset. Stored facial embeddings preserved."
+                            )
                         )
-                    )
-                } else {
-                    it.copy(
-                        clustering = it.clustering.copy(
-                            summaries = emptyList(),
-                            statusMessage = "Clusters reset. Stored facial embeddings preserved."
+                    } else {
+                        it.copy(
+                            clustering = it.clustering.copy(
+                                summaries = emptyList(),
+                                isClusteringRunning = false,
+                                statusMessage = "Clusters reset. Stored facial embeddings preserved."
+                            )
                         )
-                    )
+                    }
+                }
+            } catch (e: Exception) {
+                val errorMsg = e.localizedMessage ?: "Failed to reset clusters"
+                _uiState.update {
+                    if (engineId == EnteFaceConstants.ENGINE_ID) {
+                        it.copy(
+                            enteClustering = it.enteClustering.copy(
+                                isClusteringRunning = false,
+                                statusMessage = "Reset error: $errorMsg"
+                            )
+                        )
+                    } else {
+                        it.copy(
+                            clustering = it.clustering.copy(
+                                isClusteringRunning = false,
+                                statusMessage = "Reset error: $errorMsg"
+                            )
+                        )
+                    }
+                }
+            } finally {
+                _uiState.update {
+                    if (engineId == EnteFaceConstants.ENGINE_ID) {
+                        it.copy(enteClustering = it.enteClustering.copy(isClusteringRunning = false))
+                    } else {
+                        it.copy(clustering = it.clustering.copy(isClusteringRunning = false))
+                    }
                 }
             }
         }
