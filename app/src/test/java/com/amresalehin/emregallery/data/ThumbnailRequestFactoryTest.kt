@@ -17,6 +17,27 @@ class ThumbnailRequestFactoryTest {
     }
 
     @Test
+    fun mediaItemAndUriUseTheSameCacheIdentity() {
+        val item = MediaItem(
+            id = 42L,
+            uri = "content://media/external/images/media/42",
+            name = "photo.jpg",
+            mimeType = "image/jpeg",
+            dateAddedSeconds = 1L,
+            dateTakenMillis = 1L,
+            sizeBytes = 123L,
+            width = 1200,
+            height = 800,
+            relativePath = "DCIM/Camera",
+            isVideo = false
+        )
+        assertEquals(
+            ThumbnailRequestFactory.cacheKey(Uri.parse(item.uri), false, 320, 512, item.sizeBytes),
+            ThumbnailRequestFactory.cacheKey(item, 320, 512)
+        )
+    }
+
+    @Test
     fun cacheIdentitySeparatesOutputVariantsAndRevision() {
         val uri = Uri.parse("content://media/external/video/media/42")
         val first = ThumbnailRequestFactory.cacheKey(uri, true, 192, 320, 100L)

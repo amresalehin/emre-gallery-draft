@@ -28,7 +28,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import coil.Coil
 import com.amresalehin.emregallery.data.ThumbnailRequestFactory
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.delay
 import java.util.LinkedHashMap
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,6 +37,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -44,6 +46,23 @@ import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.roundToInt
+
+private fun mediaTileKey(item: MediaItem): String = "media_${item.uri}"
+
+private fun mediaTileAspect(item: MediaItem, gridStyle: String): Float {
+    if (gridStyle == "square") return 1f
+    return if (item.width > 0 && item.height > 0) {
+        (item.width.toFloat() / item.height.toFloat()).coerceIn(0.55f, 1.8f)
+    } else {
+        when (item.id.hashCode().mod(4)) {
+            0 -> 0.72f
+            1 -> 0.9f
+            2 -> 1.0f
+            else -> 1.35f
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -73,6 +92,15 @@ fun HomeScreen(
     val homeScope = rememberCoroutineScope()
     var pinchGridColumns by remember(gridColumns) { mutableIntStateOf(gridColumns.coerceIn(1, 6)) }
     var pinchZoomRemainder by remember { mutableFloatStateOf(1f) }
+    var gridViewportWidthPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    val effectiveColumns = pinchGridColumns.coerceIn(1, 6)
+    val horizontalContentPaddingPx = with(density) { 12.dp.roundToPx() * 2 }
+    val horizontalSpacingPx = with(density) { 4.dp.roundToPx() }
+    val prefetchTileWidthPx = if (gridViewportWidthPx > 0) {
+        ((gridViewportWidthPx - horizontalContentPaddingPx -
+            horizontalSpacingPx * (effectiveColumns - 1)) / effectiveColumns).coerceAtLeast(1)
+    } else 0
     val selectionMode = selectedUris.isNotEmpty()
 
     BackHandler(enabled = selectionMode) {
@@ -130,85 +158,69 @@ fun HomeScreen(
     }
 
 
-    // Keep a small window of low-resolution previews warm while the grid is idle.
-    // Visible tiles still use their measured-size request; this only helps the next items
-    // paint immediately from memory when they enter the viewport.
+    // Stable URI-based keys tie each LazyGrid slot, outline and thumbnail to one media item.
+    // Prefetch the exact resolution variant that the corresponding visible tile will request.
     val gridMedia = remember(groups) { groups.flatMap { it.items } }
     val gridPositionByKey = remember(groups) {
         buildMap<String, Int> {
             var position = 0
             groups.forEach { group ->
                 group.items.forEach { mediaItem ->
-                    put("media_${group.dayKey}_${mediaItem.id}", position++)
+                    put(mediaTileKey(mediaItem), position++)
                 }
             }
         }
     }
     val thumbnailImageLoader = remember(context) { Coil.imageLoader(context) }
 
-    LaunchedEffect(gridState, gridMedia, gridPositionByKey, thumbnailImageLoader) {
+    LaunchedEffect(
+        gridState, gridMedia, gridPositionByKey, thumbnailImageLoader,
+        prefetchTileWidthPx, effectiveColumns, gridStyle
+    ) {
         val recentlyPrefetched = LinkedHashSet<String>()
         val recentFailures = LinkedHashMap<String, Long>()
         snapshotFlow {
-            if (gridState.isScrollInProgress) {
-                null
-            } else {
-                gridState.layoutInfo.visibleItemsInfo
-                    .mapNotNull { itemInfo -> gridPositionByKey[itemInfo.key.toString()] }
-                    .maxOrNull()
-            }
-        }.distinctUntilChanged().collectLatest { lastVisibleIndex ->
-            if (lastVisibleIndex == null || lastVisibleIndex < 0 || gridMedia.isEmpty()) {
-                return@collectLatest
-            }
+            gridState.layoutInfo.visibleItemsInfo
+                .mapNotNull { itemInfo -> gridPositionByKey[itemInfo.key.toString()] }
+                .maxOrNull()
+        }.distinctUntilChanged().collect { lastVisibleIndex ->
+            if (lastVisibleIndex == null || lastVisibleIndex < 0 ||
+                gridMedia.isEmpty() || prefetchTileWidthPx <= 0
+            ) return@collect
 
-            // Debounce short pauses and flings; resumed scrolling cancels this block.
-            delay(300)
-
+            // Keep only a small lead so decoded previews do not compete heavily with visible tiles.
             val firstIndex = lastVisibleIndex + 1
-            val endExclusive = minOf(firstIndex + 8, gridMedia.size)
+            val endExclusive = minOf(firstIndex + 6, gridMedia.size)
             var attemptedPrefetches = 0
-            var attemptedVideo = false
             for (index in firstIndex until endExclusive) {
-                // Bound work by attempts, not successful decodes: broken files must not
-                // make the idle prefetch loop do more work than intended.
-                if (attemptedPrefetches >= 4) break
-
+                if (attemptedPrefetches >= 2) break
                 val item = gridMedia[index]
-                // Frame extraction is more expensive than still-image thumbnailing. Attempt
-                // at most one video poster per idle window, even if that request fails.
-                if (item.isVideo && attemptedVideo) continue
-
-                val prefetchKey = "${item.uri}|${item.sizeBytes}|${item.isVideo}"
+                val aspect = mediaTileAspect(item, gridStyle)
+                val targetHeightPx = (prefetchTileWidthPx / aspect).roundToInt().coerceAtLeast(1)
+                val targetSize = ThumbnailRequestFactory.sizeFor(prefetchTileWidthPx, targetHeightPx)
+                val prefetchKey = ThumbnailRequestFactory.cacheKey(item, targetSize.width, targetSize.height)
                 if (prefetchKey in recentlyPrefetched) continue
                 val failedAt = recentFailures[prefetchKey]
                 if (failedAt != null && System.currentTimeMillis() - failedAt < 15_000L) continue
 
                 attemptedPrefetches += 1
-                if (item.isVideo) attemptedVideo = true
-
-                // Execute one request at a time. collectLatest cancels waiting requests when
-                // scrolling resumes, instead of enqueueing a large background batch.
+                // One ordered request stream. snapshotFlow conflates position updates while an
+                // item is being prepared, so processing resumes from the latest visible position.
                 val result = thumbnailImageLoader.execute(
                     ThumbnailRequestFactory.create(
                         context = context,
                         item = item,
-                        targetWidthPx = 192,
-                        targetHeightPx = 192
+                        targetWidthPx = prefetchTileWidthPx,
+                        targetHeightPx = targetHeightPx
                     )
                 )
                 if (result is coil.request.SuccessResult) {
                     recentlyPrefetched.add(prefetchKey)
                     recentFailures.remove(prefetchKey)
-                    if (recentlyPrefetched.size > 96) {
-                        recentlyPrefetched.remove(recentlyPrefetched.first())
-                    }
+                    if (recentlyPrefetched.size > 96) recentlyPrefetched.remove(recentlyPrefetched.first())
                 } else {
-                    // Retry transient failures later, not on every tiny pause in scrolling.
                     recentFailures[prefetchKey] = System.currentTimeMillis()
-                    if (recentFailures.size > 96) {
-                        recentFailures.remove(recentFailures.keys.first())
-                    }
+                    if (recentFailures.size > 96) recentFailures.remove(recentFailures.keys.first())
                 }
             }
         }
@@ -222,6 +234,9 @@ fun HomeScreen(
             state = gridState,
             modifier = Modifier
                 .fillMaxSize()
+                .onSizeChanged { size ->
+                    if (gridViewportWidthPx != size.width) gridViewportWidthPx = size.width
+                }
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
@@ -385,21 +400,10 @@ fun HomeScreen(
 
                     staggeredItems(
                         items = group.items,
-                        key = { mediaItem -> "media_${group.dayKey}_${mediaItem.id}" },
+                        key = { mediaItem -> mediaTileKey(mediaItem) },
                         contentType = { "media_thumbnail" }
                     ) { mediaItem ->
-                        val tileAspect = if (gridStyle == "square") {
-                            1f
-                        } else if (mediaItem.width > 0 && mediaItem.height > 0) {
-                            (mediaItem.width.toFloat() / mediaItem.height.toFloat()).coerceIn(0.55f, 1.8f)
-                        } else {
-                            when (mediaItem.id.hashCode().mod(4)) {
-                                0 -> 0.72f
-                                1 -> 0.9f
-                                2 -> 1.0f
-                                else -> 1.35f
-                            }
-                        }
+                        val tileAspect = mediaTileAspect(mediaItem, gridStyle)
                         MosaicMediaItem(
                             item = mediaItem,
                             modifier = Modifier.fillMaxWidth().aspectRatio(tileAspect),

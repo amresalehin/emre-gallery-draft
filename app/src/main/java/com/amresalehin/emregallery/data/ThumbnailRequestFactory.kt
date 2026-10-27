@@ -59,6 +59,9 @@ object ThumbnailRequestFactory {
             mediaSizeBytes.coerceAtLeast(0L) + ":" + outputSize.width + "x" + outputSize.height
     }
 
+    fun cacheKey(item: MediaItem, widthPx: Int, heightPx: Int): String =
+        cacheKey(Uri.parse(item.uri), item.isVideo, widthPx, heightPx, item.sizeBytes)
+
     fun create(
         context: Context,
         item: MediaItem,
