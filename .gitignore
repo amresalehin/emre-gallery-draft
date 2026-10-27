@@ -12,6 +12,11 @@ app/build/
 *.iml
 .navigation/
 
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
 # OS specific
 .DS_Store
 Thumbs.db
