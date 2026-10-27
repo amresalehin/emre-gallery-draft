@@ -6,6 +6,7 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.size.Precision
 import java.security.MessageDigest
+import java.util.LinkedHashMap
 
 /** A normalized thumbnail output size in physical pixels. */
 data class ThumbnailSize(val width: Int, val height: Int)
@@ -20,6 +21,21 @@ data class ThumbnailSize(val width: Int, val height: Int)
 object ThumbnailRequestFactory {
     private const val POLICY_VERSION = 3
     private val buckets = intArrayOf(192, 320, 512, 768)
+
+    // MediaStore size is already present on MediaItem. Keep a small LRU so video poster
+    // fetches don't issue a ContentResolver query for every newly visible thumbnail.
+    private val mediaSizes = object : LinkedHashMap<String, Long>(128, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean =
+            size > 2048
+    }
+
+    @Synchronized
+    fun rememberMediaSize(uri: Uri, sizeBytes: Long) {
+        mediaSizes[uri.toString()] = sizeBytes.coerceAtLeast(0L)
+    }
+
+    @Synchronized
+    fun rememberedMediaSize(uri: Uri): Long? = mediaSizes[uri.toString()]
 
     fun sizeFor(widthPx: Int, heightPx: Int): ThumbnailSize =
         ThumbnailSize(bucket(widthPx), bucket(heightPx))
@@ -51,6 +67,7 @@ object ThumbnailRequestFactory {
     ): ImageRequest {
         val size = sizeFor(targetWidthPx, targetHeightPx)
         val uri = Uri.parse(item.uri)
+        rememberMediaSize(uri, item.sizeBytes)
         val key = cacheKey(uri, item.isVideo, size.width, size.height, item.sizeBytes)
         val request = ImageRequest.Builder(context)
             .data(uri)
