@@ -24,8 +24,14 @@ object FaceStoreEvents {
         _mediaUpdates.tryEmit(uri)
     }
 
+    private val _peopleUpdates = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val peopleUpdates = _peopleUpdates.asSharedFlow()
+
+    fun notifyPeopleUpdated() { _peopleUpdates.tryEmit(Unit) }
+
     fun notifyAllUpdated() {
         _mediaUpdates.tryEmit("")
+        notifyPeopleUpdated()
     }
 }
 
@@ -63,6 +69,11 @@ data class PersonSummary(
     val clusterCount: Int = 1,
     val updatedAt: Long = 0L,
     val engineId: String = BuffaloLFaceEngine.ENGINE_ID
+)
+
+data class PersonMediaIndex(
+    val faceCount: Int,
+    val mediaUris: Set<String>
 )
 
 data class FaceClusterSummary(
@@ -286,6 +297,17 @@ class FaceClusterStore(context: Context) :
             )""".trimIndent()
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_face_metrics_engine ON face_metrics_v2(engine_id)")
+
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS grouping_state (
+                engine_id TEXT NOT NULL, model_version TEXT NOT NULL,
+                strategy_version INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                grouped_people INTEGER NOT NULL DEFAULT 0, face_count INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT, updated_at INTEGER NOT NULL,
+                PRIMARY KEY(engine_id, model_version)
+            )""".trimIndent()
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -311,6 +333,18 @@ class FaceClusterStore(context: Context) :
             runCatching {
                 db.execSQL("ALTER TABLE indexed_media ADD COLUMN error_message TEXT")
             }
+        }
+        if (oldVersion < 4) {
+            db.execSQL(
+                """CREATE TABLE IF NOT EXISTS grouping_state (
+                    engine_id TEXT NOT NULL, model_version TEXT NOT NULL,
+                    strategy_version INTEGER NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    grouped_people INTEGER NOT NULL DEFAULT 0, face_count INTEGER NOT NULL DEFAULT 0,
+                    error_message TEXT, updated_at INTEGER NOT NULL,
+                    PRIMARY KEY(engine_id, model_version)
+                )""".trimIndent()
+            )
         }
     }
 
@@ -748,6 +782,17 @@ class FaceClusterStore(context: Context) :
                 overallQuality = quality
             )
             saveFaceMetrics(db, mediaUri, faceIndex, provenance.engineId, metrics)
+            val groupingPending = ContentValues().apply {
+                put("engine_id", provenance.engineId)
+                put("model_version", provenance.modelVersion)
+                put("strategy_version", -1)
+                put("status", "pending")
+                put("grouped_people", 0)
+                put("face_count", -1)
+                putNull("error_message")
+                put("updated_at", System.currentTimeMillis())
+            }
+            db.insertWithOnConflict("grouping_state", null, groupingPending, SQLiteDatabase.CONFLICT_REPLACE)
 
             db.setTransactionSuccessful()
         } finally {
@@ -1043,6 +1088,63 @@ class FaceClusterStore(context: Context) :
         writableDatabase.update("people", vals, "id=?", arrayOf(personId))
     }
 
+
+    @Synchronized
+    fun faceEmbeddingCount(engineId: String, modelVersion: String): Int =
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM faces WHERE engine_id=? AND model_version=?", arrayOf(engineId, modelVersion))
+            .use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
+
+    @Synchronized
+    fun isGroupingRequired(engineId: String, modelVersion: String, strategyVersion: Int): Boolean {
+        val count = faceEmbeddingCount(engineId, modelVersion)
+        if (count == 0) return false
+        return readableDatabase.rawQuery(
+            "SELECT status, strategy_version, face_count FROM grouping_state WHERE engine_id=? AND model_version=? LIMIT 1",
+            arrayOf(engineId, modelVersion)
+        ).use { cursor ->
+            !cursor.moveToFirst() || cursor.getString(0) != "completed" ||
+                cursor.getInt(1) != strategyVersion || cursor.getInt(2) != count
+        }
+    }
+
+    @Synchronized
+    fun markGroupingPending(engineId: String, modelVersion: String, strategyVersion: Int,
+        faceCount: Int = faceEmbeddingCount(engineId, modelVersion)
+    ) = saveGroupingState(engineId, modelVersion, strategyVersion, "pending", 0, faceCount, null)
+
+    @Synchronized
+    fun markGroupingCompleted(engineId: String, modelVersion: String, strategyVersion: Int, groupedPeople: Int,
+        faceCount: Int = faceEmbeddingCount(engineId, modelVersion)
+    ) = saveGroupingState(engineId, modelVersion, strategyVersion, "completed", groupedPeople, faceCount, null)
+
+    @Synchronized
+    fun markGroupingFailed(engineId: String, modelVersion: String, strategyVersion: Int, errorMessage: String,
+        faceCount: Int = faceEmbeddingCount(engineId, modelVersion)
+    ) = saveGroupingState(engineId, modelVersion, strategyVersion, "failed", 0, faceCount, errorMessage)
+
+    private fun saveGroupingState(engineId: String, modelVersion: String, strategyVersion: Int, status: String,
+        groupedPeople: Int, faceCount: Int, errorMessage: String?
+    ) {
+        val values = ContentValues().apply {
+            put("engine_id", engineId); put("model_version", modelVersion)
+            put("strategy_version", strategyVersion); put("status", status)
+            put("grouped_people", groupedPeople); put("face_count", faceCount)
+            if (errorMessage == null) putNull("error_message") else put("error_message", errorMessage)
+            put("updated_at", System.currentTimeMillis())
+        }
+        writableDatabase.insertWithOnConflict("grouping_state", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+    }
+
+    /** Remove only empty unnamed people without a cluster, face, or manual-feedback reference. */
+    internal fun pruneEmptyAutoPeople(db: SQLiteDatabase, engineId: String): Int =
+        db.delete("people",
+            """engine_id=? AND COALESCE(TRIM(name), '')='' AND is_hidden=0
+               AND NOT EXISTS (SELECT 1 FROM faces f WHERE f.engine_id=people.engine_id AND f.person_id=people.id)
+               AND NOT EXISTS (SELECT 1 FROM clusters c WHERE c.engine_id=people.engine_id AND c.person_id=people.id)
+               AND NOT EXISTS (SELECT 1 FROM face_feedback fb WHERE fb.engine_id=people.engine_id
+                   AND (fb.source_id=people.id OR fb.target_id=people.id))""".trimIndent(),
+            arrayOf(engineId))
+
     // --- Query APIs ---
 
     @Synchronized
@@ -1054,7 +1156,7 @@ class FaceClusterStore(context: Context) :
         val hiddenClause = if (includeHidden) "WHERE p.engine_id = ?" else "WHERE p.engine_id = ? AND p.is_hidden = 0"
         readableDatabase.rawQuery(
             """SELECT p.id, p.name,
-                      COUNT(DISTINCT f.face_id) AS face_count,
+                      COUNT(DISTINCT f.media_uri || '#' || f.face_index) AS face_count,
                       COALESCE(p.cover_media_uri, (SELECT f2.media_uri FROM faces f2 WHERE f2.person_id=p.id AND f2.engine_id=p.engine_id LIMIT 1)) AS sample_uri,
                       p.is_hidden,
                       COUNT(DISTINCT c.id) AS cluster_count,
@@ -1065,6 +1167,7 @@ class FaceClusterStore(context: Context) :
                LEFT JOIN faces f ON f.person_id = p.id AND f.engine_id = p.engine_id
                $hiddenClause
                GROUP BY p.id
+               HAVING COUNT(DISTINCT f.media_uri || '#' || f.face_index) > 0
                ORDER BY face_count DESC, p.updated_at DESC""".trimIndent(),
             arrayOf(engineId)
         ).use { cursor ->
@@ -1106,6 +1209,32 @@ class FaceClusterStore(context: Context) :
                 sampleUri = p.sampleUri
             )
         }
+    }
+
+
+    /** Lightweight per-person photo counts/URIs; never reads embedding BLOBs. */
+    @Synchronized
+    fun personMediaIndex(engineId: String, mediaUris: Collection<String>): Map<String, PersonMediaIndex> {
+        if (mediaUris.isEmpty()) return emptyMap()
+        val counts = linkedMapOf<String, Int>()
+        val uris = linkedMapOf<String, MutableSet<String>>()
+        for (chunk in mediaUris.toSet().toList().chunked(800)) {
+            val marks = List(chunk.size) { "?" }.joinToString(",")
+            readableDatabase.rawQuery(
+                """SELECT person_id, media_uri, COUNT(*) FROM faces
+                   WHERE engine_id=? AND person_id IS NOT NULL AND media_uri IN ($marks)
+                   GROUP BY person_id, media_uri""".trimIndent(),
+                arrayOf(engineId, *chunk.toTypedArray())
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    val personId = cursor.getString(0) ?: continue
+                    val uri = cursor.getString(1) ?: continue
+                    counts[personId] = (counts[personId] ?: 0) + cursor.getInt(2)
+                    uris.getOrPut(personId) { linkedSetOf() }.add(uri)
+                }
+            }
+        }
+        return counts.mapValues { (id, count) -> PersonMediaIndex(count, uris[id].orEmpty().toSet()) }
     }
 
     @Synchronized
@@ -1168,7 +1297,8 @@ class FaceClusterStore(context: Context) :
                 }
                 val rawName = cursor.getString(3).orEmpty().trim()
                 val faceIndex = cursor.getInt(1)
-                val displayName = if (rawName.isNotEmpty()) rawName else "Person ${faceIndex + 1}"
+                // A face index is local to a photo and is not a persistent person identity.
+                val displayName = rawName
                 result += DetectedMediaFace(
                     mediaUri = cursor.getString(0),
                     faceIndex = faceIndex,
@@ -1430,6 +1560,7 @@ class FaceClusterStore(context: Context) :
                 val faceIndex: Int,
                 val faceId: String,
                 val personId: String?,
+                val clusterId: String?,
                 val embedding: FloatArray,
                 val bounds: RectF,
                 val confidence: Float,
@@ -1438,7 +1569,7 @@ class FaceClusterStore(context: Context) :
 
             val engineFaces = mutableListOf<FaceEntry>()
             db.rawQuery(
-                """SELECT media_uri, face_index, face_id, person_id, embedding,
+                """SELECT media_uri, face_index, face_id, person_id, cluster_id, embedding,
                           box_left, box_top, box_right, box_bottom, detection_confidence, quality_score
                    FROM faces
                    WHERE engine_id=? AND model_version=?""",
@@ -1449,15 +1580,17 @@ class FaceClusterStore(context: Context) :
                     val faceIndex = cursor.getInt(1)
                     val faceId = cursor.getString(2) ?: "${engineId}#${mediaUri}#${faceIndex}"
                     val personId = if (cursor.isNull(3)) null else cursor.getString(3)
-                    val emb = bytesToFloats(cursor.getBlob(4))
-                    val bounds = RectF(cursor.getFloat(5), cursor.getFloat(6), cursor.getFloat(7), cursor.getFloat(8))
-                    val conf = cursor.getFloat(9)
-                    val qual = cursor.getFloat(10)
-                    engineFaces += FaceEntry(mediaUri, faceIndex, faceId, personId, emb, bounds, conf, qual)
+                    val clusterId = if (cursor.isNull(4)) null else cursor.getString(4)
+                    val emb = bytesToFloats(cursor.getBlob(5))
+                    val bounds = RectF(cursor.getFloat(6), cursor.getFloat(7), cursor.getFloat(8), cursor.getFloat(9))
+                    val conf = cursor.getFloat(10)
+                    val qual = cursor.getFloat(11)
+                    engineFaces += FaceEntry(mediaUri, faceIndex, faceId, personId, clusterId, emb, bounds, conf, qual)
                 }
             }
 
             if (engineFaces.isEmpty()) {
+                pruneEmptyAutoPeople(db, engineId)
                 db.setTransactionSuccessful()
                 return 0
             }
@@ -1512,7 +1645,7 @@ class FaceClusterStore(context: Context) :
             }
 
             class TempCluster(
-                val id: String,
+                var id: String,
                 var personId: String,
                 var centroid: FloatArray,
                 val faces: MutableList<FaceEntry>
@@ -1566,6 +1699,30 @@ class FaceClusterStore(context: Context) :
                 }
             }
 
+            // Keep prior IDs for unchanged unnamed groups, but don't recycle a locked identity.
+            val usedPersonIds = mutableSetOf<String>()
+            val usedClusterIds = mutableSetOf<String>()
+            for (cluster in tempClusters) {
+                if (cluster.personId !in lockedPersonIds) {
+                    val priorId = cluster.faces.mapNotNull { it.personId }.groupingBy { it }.eachCount().entries
+                        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                        .firstOrNull { it.key !in lockedPersonIds && it.key !in usedPersonIds }?.key
+                    if (priorId != null) cluster.personId = priorId
+                }
+                if (!usedPersonIds.add(cluster.personId)) {
+                    cluster.personId = UUID.randomUUID().toString()
+                    usedPersonIds.add(cluster.personId)
+                }
+                val priorCluster = cluster.faces.mapNotNull { it.clusterId }.groupingBy { it }.eachCount().entries
+                    .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                    .firstOrNull { it.key !in usedClusterIds }?.key
+                if (priorCluster != null) cluster.id = priorCluster
+                if (!usedClusterIds.add(cluster.id)) {
+                    cluster.id = UUID.randomUUID().toString()
+                    usedClusterIds.add(cluster.id)
+                }
+            }
+
             // Only delete clusters belonging to this specific engine
             db.delete("clusters", "engine_id=? AND model_version=?", arrayOf(engineId, modelVersion))
 
@@ -1614,6 +1771,7 @@ class FaceClusterStore(context: Context) :
                     )
                 }
             }
+            pruneEmptyAutoPeople(db, engineId)
 
             db.setTransactionSuccessful()
             return tempClusters.size
@@ -1638,10 +1796,12 @@ class FaceClusterStore(context: Context) :
             db.update("faces", faceReset, "engine_id=?", arrayOf(engineId))
             db.delete("people", "engine_id=?", arrayOf(engineId))
             db.delete("review_suggestions", "engine_id=?", arrayOf(engineId))
+            db.delete("grouping_state", "engine_id=?", arrayOf(engineId))
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
+        FaceStoreEvents.notifyAllUpdated()
     }
 
     @Synchronized
@@ -1735,7 +1895,7 @@ class FaceClusterStore(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "face_index.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
 
         fun normalize(values: FloatArray): FloatArray {
             val norm = sqrt(values.sumOf { it.toDouble() * it.toDouble() }).toFloat()

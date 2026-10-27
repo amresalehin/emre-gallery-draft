@@ -16,6 +16,9 @@ import com.amresalehin.emregallery.face.EnteFaceModelManager
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceIndexingRepository
+import com.amresalehin.emregallery.face.FaceStoreEvents
+import com.amresalehin.emregallery.face.StageProgress
+import com.amresalehin.emregallery.face.StageState
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
@@ -556,6 +559,10 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     enteClustering = it.enteClustering.copy(
                         isClusteringRunning = true,
                         statusMessage = "Executing Ente linear incremental clustering..."
+                    ),
+                    enteFaceFinding = it.enteFaceFinding.copy(
+                        clusteringStage = StageProgress(StageState.RUNNING, 0, it.enteFaceFinding.totalDetected, 0),
+                        currentItemStatus = "Grouping people…"
                     )
                 )
             }
@@ -591,7 +598,11 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                 isClusteringRunning = false,
                                 statusMessage = "Successfully grouped into $resultCount people profiles."
                             ),
-                            enteFaceFinding = it.enteFaceFinding.copy(totalDetected = detectedCount)
+                            enteFaceFinding = it.enteFaceFinding.copy(
+                                totalDetected = detectedCount,
+                                clusteringStage = StageProgress(StageState.COMPLETED, detectedCount, detectedCount, 100),
+                                currentItemStatus = ""
+                            )
                         )
                     } else {
                         it.copy(
@@ -612,6 +623,15 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                             enteClustering = it.enteClustering.copy(
                                 isClusteringRunning = false,
                                 statusMessage = "Clustering error: $errorMsg"
+                            ),
+                            enteFaceFinding = it.enteFaceFinding.copy(
+                                clusteringStage = StageProgress(
+                                    StageState.FAILED,
+                                    it.enteFaceFinding.clusteringStage.processed,
+                                    it.enteFaceFinding.clusteringStage.total,
+                                    it.enteFaceFinding.clusteringStage.percentage
+                                ),
+                                currentItemStatus = "Grouping failed: $errorMsg"
                             )
                         )
                     } else {

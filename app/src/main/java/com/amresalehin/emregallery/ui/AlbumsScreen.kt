@@ -32,6 +32,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
 import coil.request.ImageRequest
+import com.amresalehin.emregallery.face.FaceClusterStore
+import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.face.FaceStoreEvents
+import com.amresalehin.emregallery.face.PersonSummary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import org.osmdroid.config.Configuration
@@ -56,6 +62,16 @@ fun AlbumsScreen(
     onRenameAlbum: (String, String) -> Unit
 ) {
     val context = LocalContext.current
+    val activeEngineId = remember(context) { FaceRecognitionSettings.getActiveEngine(context) }
+    val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
+    var detectedPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
+    LaunchedEffect(activeEngineId) {
+        suspend fun refreshPeople() {
+            detectedPeople=withContext(Dispatchers.IO) { faceStore.personSummaries(engineId=activeEngineId) }
+        }
+        refreshPeople()
+        FaceStoreEvents.peopleUpdates.collect { refreshPeople() }
+    }
     val normalMedia = remember(media, hidden, inBin, archive) {
         media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive }
     }
@@ -126,13 +142,7 @@ fun AlbumsScreen(
                     .fillMaxWidth()
                     .testTag("albums_people_card")
             ) {
-                val detectedPeople = remember(media, context) {
-                    runCatching {
-                        val store = com.amresalehin.emregallery.face.FaceClusterStore(context.applicationContext)
-                        store.personSummaries()
-                    }.getOrDefault(emptyList())
-                }
-                val avatarSlots = remember(detectedPeople) {
+                                val avatarSlots = remember(detectedPeople) {
                     val peopleUris = detectedPeople.mapNotNull { it.sampleUri }
                     (peopleUris + List((14 - peopleUris.size).coerceAtLeast(0)) { null }).take(14)
                 }

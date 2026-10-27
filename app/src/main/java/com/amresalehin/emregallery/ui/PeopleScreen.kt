@@ -31,9 +31,19 @@ import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.face.FaceStoreEvents
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.amresalehin.emregallery.face.PersonSummary
 import com.amresalehin.emregallery.face.ReviewSuggestion
 import java.util.Locale
+
+private data class PeopleScreenSnapshot(
+    val people: List<PersonSummary>,
+    val hiddenPeople: List<PersonSummary>,
+    val suggestions: List<ReviewSuggestion>,
+    val mediaIndex: Map<String, com.amresalehin.emregallery.face.PersonMediaIndex>
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,9 +58,12 @@ fun PeopleScreen(
     val photoByUri = remember(media) { media.filterNot { it.isVideo }.associateBy { it.uri } }
 
     var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
-    var allPeople by remember { mutableStateOf(store.personSummaries(includeHidden = false, engineId = selectedEngineId)) }
-    var hiddenPeople by remember { mutableStateOf(store.personSummaries(includeHidden = true, engineId = selectedEngineId).filter { it.isHidden }) }
-    var pendingSuggestions by remember { mutableStateOf(store.getPendingSuggestions(engineId = selectedEngineId)) }
+    var allPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
+    var hiddenPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
+    var pendingSuggestions by remember { mutableStateOf(emptyList<ReviewSuggestion>()) }
+    var personMediaIndex by remember { mutableStateOf<Map<String, com.amresalehin.emregallery.face.PersonMediaIndex>>(emptyMap()) }
+    val reloadScope = rememberCoroutineScope()
+    var reloadGeneration by remember { mutableIntStateOf(0) }
 
     var selectedPersonId by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) } // 0: People, 1: Review & Hidden, 2: Pets
@@ -65,31 +78,43 @@ fun PeopleScreen(
     var selectedMediaForAction by remember { mutableStateOf<MediaItem?>(null) }
 
     fun reload() {
-        allPeople = store.personSummaries(includeHidden = false, engineId = selectedEngineId)
-        hiddenPeople = store.personSummaries(includeHidden = true, engineId = selectedEngineId).filter { it.isHidden }
-        pendingSuggestions = store.getPendingSuggestions(engineId = selectedEngineId)
-    }
-
-    LaunchedEffect(selectedEngineId) {
-        selectedPersonId = null
-        reload()
-        FaceStoreEvents.mediaUpdates.collect {
-            reload()
+        reloadGeneration += 1
+        val request = reloadGeneration
+        val engineId = selectedEngineId
+        val availableUris = photoByUri.keys.toList()
+        reloadScope.launch {
+            val snapshot = withContext(Dispatchers.IO) {
+                PeopleScreenSnapshot(
+                    people=store.personSummaries(includeHidden=false,engineId=engineId),
+                    hiddenPeople=store.personSummaries(includeHidden=true,engineId=engineId).filter { it.isHidden },
+                    suggestions=store.getPendingSuggestions(engineId=engineId),
+                    mediaIndex=store.personMediaIndex(engineId,availableUris)
+                )
+            }
+            if(request==reloadGeneration && engineId==selectedEngineId) {
+                allPeople=snapshot.people
+                hiddenPeople=snapshot.hiddenPeople
+                pendingSuggestions=snapshot.suggestions
+                personMediaIndex=snapshot.mediaIndex
+            }
         }
     }
 
+    LaunchedEffect(selectedEngineId) { selectedPersonId = null }
+
+    LaunchedEffect(selectedEngineId, photoByUri) {
+        reload()
+        FaceStoreEvents.peopleUpdates.collect { reload() }
+    }
+
     val minimumGroupFaces = FaceRecognitionSettings.minGroupFaces(context, selectedEngineId)
-    val visiblePeople = remember(allPeople, photoByUri, minimumGroupFaces, selectedEngineId) {
+    val visiblePeople = remember(allPeople,personMediaIndex,photoByUri,minimumGroupFaces,selectedEngineId) {
         allPeople.mapNotNull { person ->
-            val visibleFaces = store.facesForCluster(person.id, engineId = selectedEngineId).filter { it.mediaUri in photoByUri }
-            if (visibleFaces.size < minimumGroupFaces && !person.isNamed) {
-                null
-            } else {
-                person.copy(
-                    faceCount = visibleFaces.size,
-                    sampleUri = person.sampleUri ?: visibleFaces.firstOrNull()?.mediaUri
-                )
-            }
+            val index=personMediaIndex[person.id]
+            val count=index?.faceCount ?: 0
+            if(count<minimumGroupFaces && !person.isNamed) null
+            else person.copy(faceCount=count,
+                sampleUri=person.sampleUri?.takeIf { it in photoByUri } ?: index?.mediaUris?.firstOrNull())
         }.sortedWith(compareByDescending<PersonSummary> { it.faceCount }
             .thenBy { it.displayName.lowercase(Locale.getDefault()) })
     }
@@ -105,10 +130,9 @@ fun PeopleScreen(
         else visiblePeople.filter { it.displayName.contains(searchQuery.trim(), ignoreCase = true) }
     }
 
-    val detailMedia = remember(selectedPersonId, photoByUri, selectedEngineId) {
+    val detailMedia = remember(selectedPersonId, photoByUri, personMediaIndex, selectedEngineId) {
         selectedPersonId?.let { id ->
-            store.facesForCluster(id, engineId = selectedEngineId)
-                .mapNotNull { photoByUri[it.mediaUri] }
+            personMediaIndex[id]?.mediaUris.orEmpty().mapNotNull { photoByUri[it] }
                 .distinctBy { it.uri }
                 .sortedByDescending { it.dateTakenMillis.takeIf { d -> d > 0 } ?: it.dateAddedSeconds * 1000L }
         }.orEmpty()

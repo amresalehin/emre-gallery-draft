@@ -8,6 +8,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.ConcurrentHashMap
 
 enum class StageState {
@@ -92,6 +93,7 @@ class FaceIndexingRepository(
         var failed = 0
         val failedList = mutableListOf<Pair<String, String>>()
         var engine: FaceEngine? = null
+        var groupingStatus: String? = null
 
         val totalPending = pending.size
         var detectionStage = StageProgress(
@@ -313,37 +315,71 @@ class FaceIndexingRepository(
                 }
             }
 
-            // Dedicated clustering strategy execution
-            if (pending.isNotEmpty() && engineFactory.clusteringStrategy != null) {
-                clusteringStage = StageProgress(StageState.RUNNING, 0, totalPending, 0)
-                onProgress(
-                    FaceIndexingProgress(
-                        processed = processed,
-                        total = totalPending,
-                        facesFound = facesFound,
-                        failed = failed,
-                        currentItemName = "Clustering facial embeddings…",
-                        engineId = engineId,
-                        engineName = engineFactory.displayName,
-                        detectionStage = detectionStage,
-                        embeddingStage = embeddingStage,
-                        clusteringStage = clusteringStage,
-                        failedItems = failedList.toList()
-                    )
-                )
-
-                engineFactory.clusteringStrategy?.clusterFaces(
-                    store = store,
-                    mediaUris = pending.map { it.uri },
-                    engineId = engineFactory.engineId,
-                    modelVersion = engineFactory.modelVersion,
-                    embeddingDimension = engineFactory.embeddingDimension,
-                    maxDistance = recognitionDistance
-                )
-
-                clusteringStage = StageProgress(StageState.COMPLETED, totalPending, totalPending, 100)
-            } else if (totalPending > 0) {
-                clusteringStage = StageProgress(StageState.COMPLETED, totalPending, totalPending, 100)
+            // Group only after photo embeddings finish, but retry when all photos are already indexed.
+            val strategy = engineFactory.clusteringStrategy
+            if (strategy != null) {
+                val faceTotal = store.faceEmbeddingCount(engineId, engineFactory.modelVersion)
+                if (store.isGroupingRequired(engineId, engineFactory.modelVersion, strategy.strategyVersion)) {
+                    store.markGroupingPending(engineId, engineFactory.modelVersion, strategy.strategyVersion, faceTotal)
+                    clusteringStage = StageProgress(StageState.RUNNING, 0, faceTotal, 0)
+                    groupingStatus = "Grouping people…"
+                    onProgress(FaceIndexingProgress(
+                        processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
+                        currentItemName="Grouping people…",currentItemStatus=groupingStatus.orEmpty(),
+                        engineId=engineId,engineName=engineFactory.displayName,
+                        detectionStage=detectionStage,embeddingStage=embeddingStage,
+                        clusteringStage=clusteringStage,failedItems=failedList.toList()
+                    ))
+                    try {
+                        val groupedPeople = strategy.clusterFaces(
+                            store=store,mediaUris=pending.map { it.uri },engineId=engineId,
+                            modelVersion=engineFactory.modelVersion,embeddingDimension=engineFactory.embeddingDimension,
+                            maxDistance=recognitionDistance,
+                            onProgress={ done,total ->
+                                val safeTotal=total.coerceAtLeast(0)
+                                val safeDone=done.coerceIn(0,safeTotal)
+                                val percentage=if(safeTotal>0) safeDone*100/safeTotal else 100
+                                clusteringStage=StageProgress(StageState.RUNNING,safeDone,safeTotal,percentage.coerceIn(0,99))
+                                groupingStatus=if(safeTotal>0) "Grouping people… $safeDone/$safeTotal faces" else "Grouping people…"
+                                runBlocking {
+                                    onProgress(FaceIndexingProgress(
+                                        processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
+                                        currentItemName="Grouping people…",currentItemStatus=groupingStatus.orEmpty(),
+                                        engineId=engineId,engineName=engineFactory.displayName,
+                                        detectionStage=detectionStage,embeddingStage=embeddingStage,
+                                        clusteringStage=clusteringStage,failedItems=failedList.toList()
+                                    ))
+                                }
+                            }
+                        )
+                        val finalCount=store.faceEmbeddingCount(engineId,engineFactory.modelVersion)
+                        store.markGroupingCompleted(engineId,engineFactory.modelVersion,strategy.strategyVersion,groupedPeople,finalCount)
+                        clusteringStage=StageProgress(StageState.COMPLETED,faceTotal,faceTotal,100)
+                        groupingStatus="Grouping complete · $groupedPeople people"
+                        FaceStoreEvents.notifyAllUpdated()
+                    } catch (cancelled: CancellationException) {
+                        runCatching { store.markGroupingPending(engineId,engineFactory.modelVersion,strategy.strategyVersion,
+                            store.faceEmbeddingCount(engineId,engineFactory.modelVersion)) }
+                        throw cancelled
+                    } catch (err: Exception) {
+                        val detail=err.localizedMessage ?: err.message ?: "Unknown grouping error"
+                        runCatching { store.markGroupingFailed(engineId,engineFactory.modelVersion,strategy.strategyVersion,detail,
+                            store.faceEmbeddingCount(engineId,engineFactory.modelVersion)) }
+                        clusteringStage=StageProgress(StageState.FAILED,clusteringStage.processed,faceTotal,clusteringStage.percentage)
+                        groupingStatus="Grouping failed: $detail"
+                    }
+                    onProgress(FaceIndexingProgress(
+                        processed=processed,total=totalPending,facesFound=facesFound,failed=failed,
+                        currentItemName=if(clusteringStage.state==StageState.FAILED) "Grouping failed" else "",
+                        currentItemStatus=groupingStatus.orEmpty(),engineId=engineId,engineName=engineFactory.displayName,
+                        detectionStage=detectionStage,embeddingStage=embeddingStage,
+                        clusteringStage=clusteringStage,failedItems=failedList.toList()
+                    ))
+                } else {
+                    clusteringStage=StageProgress(StageState.COMPLETED,faceTotal,faceTotal,100)
+                }
+            } else if(totalPending>0) {
+                clusteringStage=StageProgress(StageState.COMPLETED,totalPending,totalPending,100)
             }
         } finally {
             engine?.close()
@@ -354,7 +390,8 @@ class FaceIndexingRepository(
             total = totalPending,
             facesFound = facesFound,
             failed = failed,
-            currentItemName = "",
+            currentItemName = if (clusteringStage.state == StageState.FAILED) "Grouping failed" else "",
+            currentItemStatus = groupingStatus.orEmpty(),
             engineId = engineId,
             engineName = engineFactory.displayName,
             detectionStage = detectionStage,

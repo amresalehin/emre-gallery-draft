@@ -35,12 +35,13 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
         engineId: String,
         modelVersion: String,
         embeddingDimension: Int,
-        maxDistance: Float
-    ) {
+        maxDistance: Float,
+        onProgress: (processedFaces: Int, totalFaces: Int) -> Unit
+    ): Int {
         check(engineId == EnteFaceConstants.ENGINE_ID) {
             "EnteFaceClusteringStrategy must only be run with engine ${EnteFaceConstants.ENGINE_ID}"
         }
-        reclusterChronologically(store, maxDistance, engineId, modelVersion)
+        return reclusterChronologically(store, maxDistance, engineId, modelVersion, onProgress)
     }
 
     data class FaceObservation(
@@ -57,7 +58,7 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
     )
 
     private data class WorkingCluster(
-        val clusterId: String,
+        var clusterId: String,
         var personId: String,
         var representativeEmbedding: FloatArray,
         var centroid: FloatArray,
@@ -70,7 +71,8 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
         store: FaceClusterStore,
         maxDistance: Float = DEFAULT_THRESHOLD,
         engineId: String = EnteFaceConstants.ENGINE_ID,
-        modelVersion: String = EnteFaceConstants.MODEL_VERSION
+        modelVersion: String = EnteFaceConstants.MODEL_VERSION,
+        onProgress: (processedFaces: Int, totalFaces: Int) -> Unit = { _, _ -> }
     ): Int {
         val db = store.writableDatabase
         db.beginTransaction()
@@ -106,7 +108,9 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
             }
 
             if (observations.isEmpty()) {
+                store.pruneEmptyAutoPeople(db, engineId)
                 db.setTransactionSuccessful()
+                onProgress(0, 0)
                 return 0
             }
 
@@ -212,7 +216,8 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
             // 5. Linear Incremental Pass on remaining faces in chronological order
             val suggestionsToInsert = mutableListOf<ContentValues>()
 
-            for (face in fluidObs) {
+            onProgress(lockedObs.size, observations.size)
+            for ((facePosition, face) in fluidObs.withIndex()) {
                 val normEmb = FaceClusterStore.normalize(face.embedding)
                 val excludedForFace = exclusions[face.faceId] ?: emptySet()
 
@@ -284,6 +289,35 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
                         suggestionsToInsert.add(suggestion)
                     }
                 }
+                val processedFaces = lockedObs.size + facePosition + 1
+                val interval = maxOf(1, observations.size / 100)
+                if (processedFaces % interval == 0 || processedFaces == observations.size) {
+                    onProgress(processedFaces, observations.size)
+                }
+            }
+
+            // Preserve identities for unchanged unnamed groups; locked identity records always win.
+            val usedPersonIds = mutableSetOf<String>()
+            val usedClusterIds = mutableSetOf<String>()
+            for (cluster in workingClusters) {
+                if (cluster.personId !in lockedPeople) {
+                    val priorId = cluster.faces.mapNotNull { it.personId }.groupingBy { it }.eachCount().entries
+                        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                        .firstOrNull { it.key !in lockedPeople && it.key !in usedPersonIds }?.key
+                    if (priorId != null) cluster.personId = priorId
+                }
+                if (!usedPersonIds.add(cluster.personId)) {
+                    cluster.personId = UUID.randomUUID().toString()
+                    usedPersonIds.add(cluster.personId)
+                }
+                val priorCluster = cluster.faces.mapNotNull { it.clusterId }.groupingBy { it }.eachCount().entries
+                    .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+                    .firstOrNull { it.key !in usedClusterIds }?.key
+                if (priorCluster != null) cluster.clusterId = priorCluster
+                if (!usedClusterIds.add(cluster.clusterId)) {
+                    cluster.clusterId = UUID.randomUUID().toString()
+                    usedClusterIds.add(cluster.clusterId)
+                }
             }
 
             // 6. Persist Updated Clusters and Faces for this engine
@@ -343,6 +377,7 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
             for (s in suggestionsToInsert) {
                 db.insertWithOnConflict("review_suggestions", null, s, SQLiteDatabase.CONFLICT_REPLACE)
             }
+            store.pruneEmptyAutoPeople(db, engineId)
 
             db.setTransactionSuccessful()
             return workingClusters.size

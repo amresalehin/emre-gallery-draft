@@ -555,7 +555,7 @@ fun ViewerDetailsDrawer(
         val face = renamingFace!!
         val personId = face.personId ?: face.clusterId
         var nameInput by remember(face) {
-            val initial = if (face.displayName.equals("Unknown", ignoreCase = true)) "" else face.displayName
+            val initial = if (face.displayName.isBlank() || face.displayName.equals("Unknown", ignoreCase = true)) "" else face.displayName
             mutableStateOf(initial)
         }
         AlertDialog(

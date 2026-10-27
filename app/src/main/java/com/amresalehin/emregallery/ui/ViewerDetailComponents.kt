@@ -1119,7 +1119,7 @@ fun OverviewFacePortrait(
             if (crop != null) {
                 Image(
                     bitmap = crop.asImageBitmap(),
-                    contentDescription = if (isNamed) displayName else "Face #${face.faceIndex + 1}",
+                    contentDescription = if (isNamed) displayName else "Unnamed face",
                     modifier = Modifier.fillMaxSize().clip(CircleShape),
                     contentScale = ContentScale.Crop
                 )
@@ -1129,7 +1129,7 @@ fun OverviewFacePortrait(
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            text = if (isNamed) displayName else "Face #${face.faceIndex + 1}",
+            text = if (isNamed) displayName else "Name this person",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = if (isNamed) FontWeight.SemiBold else FontWeight.Medium,
             color = if (isNamed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,

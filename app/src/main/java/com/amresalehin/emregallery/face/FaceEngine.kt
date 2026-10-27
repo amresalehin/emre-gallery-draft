@@ -117,8 +117,9 @@ interface FaceClusteringStrategy {
         engineId: String,
         modelVersion: String,
         embeddingDimension: Int,
-        maxDistance: Float
-    )
+        maxDistance: Float,
+        onProgress: (processedFaces: Int, totalFaces: Int) -> Unit = { _, _ -> }
+    ): Int
 }
 
 /**

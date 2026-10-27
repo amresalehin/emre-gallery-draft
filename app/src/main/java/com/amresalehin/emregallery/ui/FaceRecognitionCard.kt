@@ -99,7 +99,7 @@ fun FaceRecognitionCard(
     var isTelemetryExpanded by remember { mutableStateOf(false) }
     var pendingEngineSwitch by remember { mutableStateOf<String?>(null) }
     var showErrorLogDialog by remember { mutableStateOf(false) }
-    var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var isAdvancedSettingsExpanded by remember { mutableStateOf(false) }
 
     // Mutex confirmation dialog when attempting to switch engines during active download
     if (pendingEngineSwitch != null) {
@@ -131,49 +131,6 @@ fun FaceRecognitionCard(
             dismissButton = {
                 TextButton(onClick = { pendingEngineSwitch = null }) {
                     Text("Keep Downloading")
-                }
-            }
-        )
-    }
-
-    // Reset clusters confirmation dialog
-    if (showResetConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirmDialog = false },
-            icon = {
-                Icon(
-                    Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error
-                )
-            },
-            title = {
-                Text(
-                    "Reset Clusters?",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            text = {
-                Text(
-                    "This will delete all person profiles, custom names, and manual groupings for ${if (isEnte) "Ente" else "Buffalo_L"}. Stored facial embeddings are preserved so you can re-cluster at any time.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showResetConfirmDialog = false
-                        onResetClusters(selectedEngineId)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Reset")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetConfirmDialog = false }) {
-                    Text("Cancel")
                 }
             }
         )
@@ -759,6 +716,38 @@ fun FaceRecognitionCard(
                 }
             }
 
+            when {
+                currentClusteringState.isClusteringRunning || currentFindingState.clusteringStage.state == StageState.RUNNING -> {
+                    Row(Modifier.fillMaxWidth().padding(vertical=6.dp), verticalAlignment=Alignment.CenterVertically,
+                        horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator(modifier=Modifier.size(20.dp),strokeWidth=2.dp)
+                        Column(modifier=Modifier.weight(1f)) {
+                            Text("Grouping people…",style=MaterialTheme.typography.bodyMedium,fontWeight=FontWeight.Medium)
+                            val stage=currentFindingState.clusteringStage
+                            if(stage.total>0) Text("${stage.processed} of ${stage.total} face embeddings",
+                                style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                currentFindingState.clusteringStage.state == StageState.FAILED -> {
+                    Row(Modifier.fillMaxWidth().padding(vertical=6.dp),verticalAlignment=Alignment.CenterVertically,
+                        horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        Column(modifier=Modifier.weight(1f)) {
+                            Text("Grouping failed",style=MaterialTheme.typography.bodyMedium,
+                                fontWeight=FontWeight.SemiBold,color=MaterialTheme.colorScheme.error)
+                            Text(currentFindingState.currentItemStatus.removePrefix("Grouping failed: ").ifBlank { "Grouping could not finish." },
+                                style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton(onClick={onClusterFaces(currentClusteringState.clusterDistance,selectedEngineId)}) {
+                            Text("Retry grouping")
+                        }
+                    }
+                }
+                currentFindingState.isRunning && currentFindingState.clusteringStage.state == StageState.PENDING ->
+                    Text("Grouping — waiting for embeddings to finish",style=MaterialTheme.typography.bodySmall,
+                        color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.fillMaxWidth().padding(vertical=6.dp))
+            }
+
             // --- 3.2 GRANULAR STAGE BREAKDOWN (EXPANDED PROGRESS CARD) ---
             AnimatedVisibility(
                 visible = isTelemetryExpanded,
@@ -798,194 +787,143 @@ fun FaceRecognitionCard(
                     StageRow(
                         stageName = if (isEnte) "Linear Incremental Clustering" else "Centroid Group Clustering",
                         stage = currentFindingState.clusteringStage,
-                        totalItems = totalPhotos
+                        totalItems = currentFindingState.clusteringStage.total.takeIf { it > 0 } ?: currentFindingState.totalDetected
                     )
                 }
             }
 
-            // --- TUNING SLIDERS ---
-
-            // Slider 1: Detection confidence
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.TrackChanges,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Detection confidence",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Slider(
-                        value = currentFindingState.detectionConfidence,
-                        onValueChange = { onConfidenceChange(it, selectedEngineId) },
-                        valueRange = 0.30f..0.90f,
-                        enabled = !currentFindingState.isRunning,
-                        modifier = Modifier.fillMaxWidth().height(26.dp)
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    String.format(Locale.US, "%.2f", currentFindingState.detectionConfidence),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.width(36.dp)
-                )
+            TextButton(onClick={isAdvancedSettingsExpanded=!isAdvancedSettingsExpanded},modifier=Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Tune,contentDescription=null,modifier=Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if(isAdvancedSettingsExpanded) "Hide advanced settings" else "Advanced settings")
             }
-
-            // Slider 2: Min faces per person
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.Group,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Min faces to show person (People tab filter)",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        "Unnamed people with fewer faces are hidden in the People tab.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Slider(
-                        value = currentClusteringState.minGroupFaces.toFloat(),
-                        onValueChange = { onMinGroupFacesChange(it.roundToInt().coerceIn(1, 30), selectedEngineId) },
-                        valueRange = 1f..30f,
-                        modifier = Modifier.fillMaxWidth().height(26.dp)
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    "${currentClusteringState.minGroupFaces}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.width(36.dp)
-                )
-            }
-
-            // Slider 3: Clustering distance
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.Link,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        if (isEnte) "Clustering distance (Quality-adaptive)" else "Clustering distance",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Slider(
-                        value = currentClusteringState.clusterDistance,
-                        onValueChange = { onClusterDistanceChange(it, selectedEngineId) },
-                        valueRange = 0.25f..0.75f,
-                        modifier = Modifier.fillMaxWidth().height(26.dp)
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    String.format(Locale.US, "%.2f", currentClusteringState.clusterDistance),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.width(36.dp)
-                )
-            }
-
-            // Bottom Actions: Clustering & Rescan
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Button(
-                    onClick = { onClusterFaces(currentClusteringState.clusterDistance, selectedEngineId) },
-                    enabled = !currentClusteringState.isClusteringRunning && currentFindingState.totalDetected > 0,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (currentClusteringState.isClusteringRunning) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text("Clustering…")
-                    } else {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (currentClusteringState.summaries.isEmpty()) "Cluster Faces"
-                            else "Cluster (${currentClusteringState.summaries.size})"
-                        )
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = { onRescanRequested(selectedEngineId) },
-                    enabled = countsReady && totalPhotos > 0 && !currentFindingState.isRunning && isModelInstalled,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Re-scan")
-                }
-
-                if (currentClusteringState.summaries.isNotEmpty()) {
-                    IconButton(
-                        onClick = { showResetConfirmDialog = true },
-                        enabled = !currentClusteringState.isClusteringRunning,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.DeleteOutline,
-                            contentDescription = "Reset clusters",
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-                }
-            }
-
-            // Pipeline Comparison Trigger Button
-            if (onComparePipelines != null) {
-                OutlinedButton(
-                    onClick = onComparePipelines,
+            if(isAdvancedSettingsExpanded) {
+                Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+    // Slider 1: Detection confidence
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.CompareArrows, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Compare Buffalo_L vs Ente Pipeline")
+                    Icon(
+                        Icons.Default.TrackChanges,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Detection confidence",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Slider(
+                            value = currentFindingState.detectionConfidence,
+                            onValueChange = { onConfidenceChange(it, selectedEngineId) },
+                            valueRange = 0.30f..0.90f,
+                            enabled = !currentFindingState.isRunning,
+                            modifier = Modifier.fillMaxWidth().height(26.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        String.format(Locale.US, "%.2f", currentFindingState.detectionConfidence),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.width(36.dp)
+                    )
+                }
+    
+                // Slider 2: Min faces per person
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Group,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Min faces to show person (People tab filter)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            "Unnamed people with fewer faces are hidden in the People tab.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Slider(
+                            value = currentClusteringState.minGroupFaces.toFloat(),
+                            onValueChange = { onMinGroupFacesChange(it.roundToInt().coerceIn(1, 30), selectedEngineId) },
+                            valueRange = 1f..30f,
+                            modifier = Modifier.fillMaxWidth().height(26.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "${currentClusteringState.minGroupFaces}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.width(36.dp)
+                    )
+                }
+    
+                // Slider 3: Clustering distance
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Link,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (isEnte) "Clustering distance (Quality-adaptive)" else "Clustering distance",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Slider(
+                            value = currentClusteringState.clusterDistance,
+                            onValueChange = { onClusterDistanceChange(it, selectedEngineId) },
+                            valueRange = 0.25f..0.75f,
+                            modifier = Modifier.fillMaxWidth().height(26.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        String.format(Locale.US, "%.2f", currentClusteringState.clusterDistance),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.width(36.dp)
+                    )
+                }
                 }
             }
+            OutlinedButton(
+                onClick={onRescanRequested(selectedEngineId)},
+                enabled=countsReady && totalPhotos>0 && !currentFindingState.isRunning && isModelInstalled,
+                shape=RoundedCornerShape(12.dp),modifier=Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Refresh,contentDescription=null,modifier=Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Re-scan")
+            }
+
         }
     }
 }

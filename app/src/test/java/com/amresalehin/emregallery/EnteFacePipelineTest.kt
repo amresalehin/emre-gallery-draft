@@ -131,6 +131,49 @@ class EnteFacePipelineTest {
     }
 
     @Test
+    fun testEnteGroupingIsIdempotentAndCleansOnlyOrphanPeople() {
+        val engineId=EnteFaceConstants.ENGINE_ID
+        val provenance=EnteFaceConstants.PROVENANCE
+        val uris=listOf("content://media/idempotent_alice_1","content://media/idempotent_alice_2","content://media/idempotent_bob")
+        store.addRawFaceObservation(uris[0],0,createSyntheticEmbedding(0),RectF(0f,0f,50f,50f),provenance=provenance)
+        store.addRawFaceObservation(uris[1],0,createSyntheticEmbedding(0,0.02f),RectF(0f,0f,50f,50f),provenance=provenance)
+        store.addRawFaceObservation(uris[2],0,createSyntheticEmbedding(1),RectF(0f,0f,50f,50f),provenance=provenance)
+        val progress=mutableListOf<Pair<Int,Int>>()
+        EnteFaceClusteringStrategy.reclusterChronologically(store,maxDistance=0.40f,onProgress={d,t->progress.add(d to t)})
+        val before=uris.associateWith { uri -> store.facesForMedia(uri,engineId).single().let { it.personId to it.clusterId } }
+        assertEquals(2,store.personSummaries(includeHidden=true,engineId=engineId).size)
+        val now=System.currentTimeMillis()
+        store.writableDatabase.execSQL(
+            "INSERT INTO people (id,name,is_hidden,engine_id,created_at,updated_at) VALUES (?,'',0,?,?,?)",
+            arrayOf("legacy-empty-person",engineId,now,now)
+        )
+        progress.clear()
+        EnteFaceClusteringStrategy.reclusterChronologically(store,maxDistance=0.40f,onProgress={d,t->progress.add(d to t)})
+        val after=uris.associateWith { uri -> store.facesForMedia(uri,engineId).single().let { it.personId to it.clusterId } }
+        assertEquals("Unchanged groups must keep person/cluster IDs",before,after)
+        assertEquals(2,store.personSummaries(includeHidden=true,engineId=engineId).size)
+        val orphanCount=store.readableDatabase.rawQuery("SELECT COUNT(*) FROM people WHERE id='legacy-empty-person'",null)
+            .use { c -> if(c.moveToFirst()) c.getInt(0) else -1 }
+        assertEquals(0,orphanCount)
+        assertEquals(3,progress.last().first)
+        assertEquals(3,progress.last().second)
+    }
+
+    @Test
+    fun testGroupingFailureCanBeRetriedWithoutNewPhotoIndexing() {
+        val engineId=EnteFaceConstants.ENGINE_ID
+        val version=EnteFaceConstants.MODEL_VERSION
+        store.addRawFaceObservation("content://media/grouping_retry",0,createSyntheticEmbedding(0),
+            RectF(0f,0f,50f,50f),provenance=EnteFaceConstants.PROVENANCE)
+        assertTrue(store.isGroupingRequired(engineId,version,EnteFaceClusteringStrategy.strategyVersion))
+        store.markGroupingCompleted(engineId,version,EnteFaceClusteringStrategy.strategyVersion,1,1)
+        assertFalse(store.isGroupingRequired(engineId,version,EnteFaceClusteringStrategy.strategyVersion))
+        store.markGroupingFailed(engineId,version,EnteFaceClusteringStrategy.strategyVersion,"test failure",1)
+        assertTrue(store.isGroupingRequired(engineId,version,EnteFaceClusteringStrategy.strategyVersion))
+    }
+
+    @Test
+    fun testEnteLinearIncrementalClustering()    @Test
     fun testEnteLinearIncrementalClustering() {
         val prov = EnteFaceConstants.PROVENANCE
         val aliceEmb1 = createSyntheticEmbedding(0, 0f)
