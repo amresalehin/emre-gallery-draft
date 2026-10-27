@@ -158,9 +158,26 @@ fun PhotoMapViewContainer(
                         setTileSource(if (mapLayer == "Satellite") PhotoMapTiles.satelliteTileSource() else TileSourceFactory.MAPNIK)
                         setMultiTouchControls(true)
                         setBuiltInZoomControls(false)
-                        minZoomLevel = 0.0
-                        controller.setZoom(1.0)
-                        controller.setCenter(GeoPoint(12.5, 90.0))
+                        setVerticalMapRepetitionEnabled(false)
+                        setHorizontalMapRepetitionEnabled(false)
+                        setScrollableAreaLimitDouble(BoundingBox(85.0511, 180.0, -85.0511, -180.0))
+                        val initialFitZoom = calculateWorldFitZoom(this)
+                        minZoomLevel = initialFitZoom
+                        controller.setZoom(initialFitZoom)
+                        controller.setCenter(GeoPoint(0.0, 0.0))
+                        addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                            val newW = right - left
+                            val newH = bottom - top
+                            val oldW = oldRight - oldLeft
+                            val oldH = oldBottom - oldTop
+                            if (newW > 0 && newH > 0 && (newW != oldW || newH != oldH)) {
+                                val fitZoom = calculateWorldFitZoom(this)
+                                minZoomLevel = fitZoom
+                                if (zoomLevelDouble < fitZoom) {
+                                    controller.setZoom(fitZoom)
+                                }
+                            }
+                        }
                         setOnTouchListener { _, event ->
                             if (event.actionMasked == MotionEvent.ACTION_MOVE ||
                                 event.actionMasked == MotionEvent.ACTION_POINTER_DOWN
@@ -173,13 +190,14 @@ fun PhotoMapViewContainer(
                         onMapReady(this)
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
-                                // MapListener events also fire for programmatic framing.
-                                // They update the visible media list but must not count as
-                                // evidence that the user manually moved the map.
                                 onBoundsChanged(calculateMapBounds(this@apply, ctx))
                                 return true
                             }
                             override fun onZoom(event: ZoomEvent?): Boolean {
+                                val fitZoom = calculateWorldFitZoom(this@apply)
+                                if (this@apply.zoomLevelDouble < fitZoom) {
+                                    this@apply.controller.setZoom(fitZoom)
+                                }
                                 onBoundsChanged(calculateMapBounds(this@apply, ctx))
                                 return true
                             }
@@ -188,6 +206,8 @@ fun PhotoMapViewContainer(
                 },
                 update = { map ->
                     onMapReady(map)
+                    val fitZoom = calculateWorldFitZoom(map)
+                    map.minZoomLevel = fitZoom
                     heatmapOverlay.updatePoints(heatmapPoints)
                     if (!map.overlays.contains(heatmapOverlay)) {
                         map.overlays.add(heatmapOverlay)
@@ -268,7 +288,11 @@ fun calculateMapBounds(map: MapView, context: Context): BoundingBox? {
     val bottomPx = (map.height - 8f * density).toInt().coerceIn(topPx + 1, map.height)
     val northWest = map.projection.fromPixels(0, topPx)
     val southEast = map.projection.fromPixels(map.width, bottomPx)
-    return BoundingBox(northWest.latitude, southEast.longitude, southEast.latitude, northWest.longitude)
+    val latNorth = maxOf(northWest.latitude, southEast.latitude).coerceIn(-85.0511, 85.0511)
+    val latSouth = minOf(northWest.latitude, southEast.latitude).coerceIn(-85.0511, 85.0511)
+    val lonWest = northWest.longitude.coerceIn(-180.0, 180.0)
+    val lonEast = southEast.longitude.coerceIn(-180.0, 180.0)
+    return BoundingBox(latNorth, lonEast, latSouth, lonWest)
 }
 
 /**
