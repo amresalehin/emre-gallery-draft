@@ -107,6 +107,7 @@ fun GalleryApp() {
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val homeGridState = androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState()
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
     var showSidePanel by remember { mutableStateOf(false) }
@@ -747,6 +748,7 @@ fun GalleryApp() {
                 when (currentDestination) {
                     Destination.HOME -> HomeScreen(
                         listState = homeListState,
+                        gridState = homeGridState,
                         media = visibleMedia,
                         loading = loading,
                         onPermissionGranted = { refreshMedia() },
@@ -1273,7 +1275,7 @@ fun GalleryApp() {
                                 if (dest == destination) {
                                     if (dest == Destination.HOME) {
                                         scope.launch {
-                                            homeListState.animateScrollToItem(0)
+                                            homeGridState.animateScrollToItem(0)
                                         }
                                     }
                                 } else {
