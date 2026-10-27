@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.face.BuffaloLFaceEngine
+import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.face.PersonSummary
@@ -44,9 +46,10 @@ fun PeopleScreen(
     val store = remember { FaceClusterStore(context.applicationContext) }
     val photoByUri = remember(media) { media.filterNot { it.isVideo }.associateBy { it.uri } }
 
-    var allPeople by remember { mutableStateOf(store.personSummaries(includeHidden = false)) }
-    var hiddenPeople by remember { mutableStateOf(store.personSummaries(includeHidden = true).filter { it.isHidden }) }
-    var pendingSuggestions by remember { mutableStateOf(store.getPendingSuggestions()) }
+    var selectedEngineId by remember { mutableStateOf(BuffaloLFaceEngine.ENGINE_ID) }
+    var allPeople by remember { mutableStateOf(store.personSummaries(includeHidden = false, engineId = selectedEngineId)) }
+    var hiddenPeople by remember { mutableStateOf(store.personSummaries(includeHidden = true, engineId = selectedEngineId).filter { it.isHidden }) }
+    var pendingSuggestions by remember { mutableStateOf(store.getPendingSuggestions(engineId = selectedEngineId)) }
 
     var selectedPersonId by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) } // 0: People, 1: Review & Hidden, 2: Pets
@@ -61,15 +64,20 @@ fun PeopleScreen(
     var selectedMediaForAction by remember { mutableStateOf<MediaItem?>(null) }
 
     fun reload() {
-        allPeople = store.personSummaries(includeHidden = false)
-        hiddenPeople = store.personSummaries(includeHidden = true).filter { it.isHidden }
-        pendingSuggestions = store.getPendingSuggestions()
+        allPeople = store.personSummaries(includeHidden = false, engineId = selectedEngineId)
+        hiddenPeople = store.personSummaries(includeHidden = true, engineId = selectedEngineId).filter { it.isHidden }
+        pendingSuggestions = store.getPendingSuggestions(engineId = selectedEngineId)
+    }
+
+    LaunchedEffect(selectedEngineId) {
+        selectedPersonId = null
+        reload()
     }
 
     val minimumGroupFaces = FaceRecognitionSettings.minGroupFaces(context)
-    val visiblePeople = remember(allPeople, photoByUri, minimumGroupFaces) {
+    val visiblePeople = remember(allPeople, photoByUri, minimumGroupFaces, selectedEngineId) {
         allPeople.mapNotNull { person ->
-            val visibleFaces = store.facesForCluster(person.id).filter { it.mediaUri in photoByUri }
+            val visibleFaces = store.facesForCluster(person.id, engineId = selectedEngineId).filter { it.mediaUri in photoByUri }
             if (visibleFaces.size < minimumGroupFaces && !person.isNamed) {
                 null
             } else {
@@ -93,9 +101,9 @@ fun PeopleScreen(
         else visiblePeople.filter { it.displayName.contains(searchQuery.trim(), ignoreCase = true) }
     }
 
-    val detailMedia = remember(selectedPersonId, photoByUri) {
+    val detailMedia = remember(selectedPersonId, photoByUri, selectedEngineId) {
         selectedPersonId?.let { id ->
-            store.facesForCluster(id)
+            store.facesForCluster(id, engineId = selectedEngineId)
                 .mapNotNull { photoByUri[it.mediaUri] }
                 .distinctBy { it.uri }
                 .sortedByDescending { it.dateTakenMillis.takeIf { d -> d > 0 } ?: it.dateAddedSeconds * 1000L }
@@ -214,6 +222,31 @@ fun PeopleScreen(
                     }
                 }
             )
+
+            // Engine Selector Chips
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = selectedEngineId == BuffaloLFaceEngine.ENGINE_ID,
+                    onClick = { selectedEngineId = BuffaloLFaceEngine.ENGINE_ID },
+                    label = { Text("Buffalo_L (Default)") },
+                    leadingIcon = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) {
+                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                    } else null
+                )
+                FilterChip(
+                    selected = selectedEngineId == EnteFaceConstants.ENGINE_ID,
+                    onClick = { selectedEngineId = EnteFaceConstants.ENGINE_ID },
+                    label = { Text("Ente (YOLO5Face)") },
+                    leadingIcon = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) {
+                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                    } else null
+                )
+            }
 
             // Tabs: People, Review & Hidden, Pets
             TabRow(
@@ -726,9 +759,9 @@ fun PeopleScreen(
                     }
                     TextButton(
                         onClick = {
-                            val faces = store.facesForMedia(activeMedia.uri)
-                            faces.forEach { face ->
-                                store.removeFaceFromPerson(face.mediaUri, face.faceIndex)
+                            val faces = store.facesForMedia(activeMedia.uri, engineId = selectedEngineId)
+                            faces.filter { it.personId == activePersonId }.forEach { face ->
+                                store.removeFaceFromPerson(face.mediaUri, face.faceIndex, engineId = selectedEngineId)
                             }
                             selectedMediaForAction = null
                             reload()

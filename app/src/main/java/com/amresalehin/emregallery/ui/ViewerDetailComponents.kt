@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.RectF
 import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -270,10 +271,11 @@ fun OverviewTabContent(
     onAddToAlbum: () -> Unit,
     onAddTag: () -> Unit,
     onEditLocation: () -> Unit,
-    modifier: Modifier = Modifier,
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
     onScanPeople: () -> Unit = {},
-    isScanningPeople: Boolean = false
+    isScanningPeople: Boolean = false,
+    faceScanError: String? = null,
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var metadataExpanded by remember { mutableStateOf(true) }
@@ -481,6 +483,24 @@ fun OverviewTabContent(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    if (hasPeople) {
+                        IconButton(
+                            onClick = onScanPeople,
+                            enabled = !isScanningPeople,
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            if (isScanningPeople) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Re-scan faces",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
                 }
                 if (hasPeople) {
                     Row(
@@ -533,6 +553,32 @@ fun OverviewTabContent(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                             }
+                        }
+                    }
+                }
+                if (faceScanError != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = faceScanError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = onScanPeople,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Retry")
                         }
                     }
                 }
@@ -712,11 +758,20 @@ fun OverviewFacePortrait(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var faceCrop by remember(face.mediaUri, face.faceIndex) { mutableStateOf<Bitmap?>(null) }
+    var faceCrop by remember(face.engineId, face.mediaUri, face.faceIndex) { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(face.mediaUri, face.faceIndex) {
+    LaunchedEffect(face.engineId, face.mediaUri, face.faceIndex) {
         withContext(Dispatchers.IO) {
-            faceCrop = FaceThumbnailHelper.getFaceCrop(context, Uri.parse(face.mediaUri), face.faceIndex)
+            val bounds = if (face.boxRight > face.boxLeft && face.boxBottom > face.boxTop) {
+                RectF(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
+            } else null
+            faceCrop = FaceThumbnailHelper.getFaceCrop(
+                context = context,
+                uri = Uri.parse(face.mediaUri),
+                faceIndex = face.faceIndex,
+                engineId = face.engineId,
+                providedBounds = bounds
+            )
         }
     }
 
@@ -1117,11 +1172,20 @@ fun ActionFacePortrait(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var faceCrop by remember(face.mediaUri, face.faceIndex) { mutableStateOf<Bitmap?>(null) }
+    var faceCrop by remember(face.engineId, face.mediaUri, face.faceIndex) { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(face.mediaUri, face.faceIndex) {
+    LaunchedEffect(face.engineId, face.mediaUri, face.faceIndex) {
         withContext(Dispatchers.IO) {
-            faceCrop = FaceThumbnailHelper.getFaceCrop(context, Uri.parse(face.mediaUri), face.faceIndex)
+            val bounds = if (face.boxRight > face.boxLeft && face.boxBottom > face.boxTop) {
+                RectF(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom)
+            } else null
+            faceCrop = FaceThumbnailHelper.getFaceCrop(
+                context = context,
+                uri = Uri.parse(face.mediaUri),
+                faceIndex = face.faceIndex,
+                engineId = face.engineId,
+                providedBounds = bounds
+            )
         }
     }
 

@@ -59,5 +59,9 @@ class GalleryApplication : Application() {
             .allowHardware(true)
             .build()
         Coil.setImageLoader(imageLoader)
+
+        // Deterministic registration of both face recognition engines
+        com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory)
+        com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
     }
 }

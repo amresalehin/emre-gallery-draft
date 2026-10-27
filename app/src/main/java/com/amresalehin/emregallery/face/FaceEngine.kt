@@ -10,7 +10,8 @@ data class DetectedFaceEmbedding(
     val bounds: RectF,
     val embedding: FloatArray,
     val score: Float = 1.0f,
-    val quality: Float = 1.0f
+    val quality: Float = 1.0f,
+    val qualityMetrics: FaceQualityMetrics? = null
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -20,6 +21,7 @@ data class DetectedFaceEmbedding(
         if (!embedding.contentEquals(other.embedding)) return false
         if (score != other.score) return false
         if (quality != other.quality) return false
+        if (qualityMetrics != other.qualityMetrics) return false
         return true
     }
 
@@ -29,6 +31,7 @@ data class DetectedFaceEmbedding(
         result = 31 * result + embedding.contentHashCode()
         result = 31 * result + score.hashCode()
         result = 31 * result + quality.hashCode()
+        result = 31 * result + (qualityMetrics?.hashCode() ?: 0)
         return result
     }
 }
@@ -57,6 +60,27 @@ interface FaceEngine : AutoCloseable {
 }
 
 /**
+ * Strategy contract for face clustering algorithms.
+ * Allows decoupling inference from engine-specific clustering workflows.
+ */
+interface FaceClusteringStrategy {
+    val strategyId: String
+    val strategyVersion: Int
+
+    /**
+     * Executes or updates clusters for the given media and face store.
+     */
+    fun clusterFaces(
+        store: FaceClusterStore,
+        mediaUris: List<String>,
+        engineId: String,
+        modelVersion: String,
+        embeddingDimension: Int,
+        maxDistance: Float
+    )
+}
+
+/**
  * Factory for creating and managing models of a specific face recognition engine.
  */
 interface FaceEngineFactory {
@@ -65,6 +89,7 @@ interface FaceEngineFactory {
     val modelVersion: String
     val embeddingDimension: Int
     val isExperimental: Boolean get() = false
+    val clusteringStrategy: FaceClusteringStrategy? get() = null
 
     fun isInstalled(context: Context): Boolean
     fun create(context: Context, detectionThreshold: Float): FaceEngine
@@ -83,10 +108,10 @@ interface FaceEngineFactory {
  * engines and experimental engines running side-by-side without interference.
  */
 object FaceEngineRegistry {
-    private val factories = mutableMapOf<String, FaceEngineFactory>()
+    private val factories = LinkedHashMap<String, FaceEngineFactory>()
 
     @Volatile
-    private var activeEngineId: String = "buffalo_l"
+    private var activeEngineId: String = BuffaloLFaceEngine.ENGINE_ID
 
     fun register(factory: FaceEngineFactory) {
         synchronized(factories) {
@@ -116,5 +141,13 @@ object FaceEngineRegistry {
 
     fun listEngines(): List<FaceEngineFactory> {
         return synchronized(factories) { factories.values.toList() }
+    }
+
+    fun clearNonDefault() {
+        synchronized(factories) {
+            factories.clear()
+            factories[BuffaloLFaceEngineFactory.engineId] = BuffaloLFaceEngineFactory
+            activeEngineId = BuffaloLFaceEngineFactory.engineId
+        }
     }
 }

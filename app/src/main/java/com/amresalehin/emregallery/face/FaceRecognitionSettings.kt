@@ -15,14 +15,46 @@ object FaceRecognitionSettings {
     const val DEFAULT_RECOGNITION_DISTANCE = 0.60f
     const val DEFAULT_MIN_GROUP_FACES = 7
 
+    const val KEY_ACTIVE_ENGINE = "active_face_engine"
+    const val KEY_ENTE_DETECTION_CONFIDENCE = "ente_detection_confidence"
+    const val KEY_ENTE_RECOGNITION_DISTANCE = "ente_recognition_distance"
+    const val KEY_ENTE_MIN_GROUP_FACES = "ente_min_group_faces"
+
     fun preferences(context: Context) =
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun detectionConfidence(context: Context) =
-        preferences(context).getFloat(KEY_DETECTION_CONFIDENCE, DEFAULT_DETECTION_CONFIDENCE).coerceIn(0.30f, 0.90f)
+    fun getActiveEngine(context: Context): String {
+        return preferences(context).getString(KEY_ACTIVE_ENGINE, BuffaloLFaceEngine.ENGINE_ID)
+            ?: BuffaloLFaceEngine.ENGINE_ID
+    }
 
-    fun recognitionDistance(context: Context): Float {
+    fun setActiveEngine(context: Context, engineId: String) {
+        preferences(context).edit().putString(KEY_ACTIVE_ENGINE, engineId).apply()
+        FaceEngineRegistry.setActiveEngine(engineId)
+    }
+
+    fun detectionConfidence(context: Context, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Float {
         val prefs = preferences(context)
+        return if (engineId == EnteFaceConstants.ENGINE_ID) {
+            prefs.getFloat(KEY_ENTE_DETECTION_CONFIDENCE, EnteFaceConstants.DEFAULT_DETECTION_CONFIDENCE)
+                .coerceIn(0.30f, 0.90f)
+        } else {
+            prefs.getFloat(KEY_DETECTION_CONFIDENCE, DEFAULT_DETECTION_CONFIDENCE).coerceIn(0.30f, 0.90f)
+        }
+    }
+
+    fun setDetectionConfidence(context: Context, engineId: String, value: Float) {
+        val rounded = (value.coerceIn(0.30f, 0.90f) * 100f).let { kotlin.math.round(it) / 100f }
+        val key = if (engineId == EnteFaceConstants.ENGINE_ID) KEY_ENTE_DETECTION_CONFIDENCE else KEY_DETECTION_CONFIDENCE
+        preferences(context).edit().putFloat(key, rounded).apply()
+    }
+
+    fun recognitionDistance(context: Context, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Float {
+        val prefs = preferences(context)
+        if (engineId == EnteFaceConstants.ENGINE_ID) {
+            return prefs.getFloat(KEY_ENTE_RECOGNITION_DISTANCE, EnteFaceConstants.DEFAULT_RECOGNITION_DISTANCE)
+                .coerceIn(0.25f, 0.75f)
+        }
         if (prefs.contains(KEY_RECOGNITION_DISTANCE)) {
             return prefs.getFloat(KEY_RECOGNITION_DISTANCE, DEFAULT_RECOGNITION_DISTANCE).coerceIn(0.25f, 0.75f)
         }
@@ -34,6 +66,24 @@ object FaceRecognitionSettings {
         return migrated
     }
 
-    fun minGroupFaces(context: Context) =
-        preferences(context).getInt(KEY_MIN_GROUP_FACES, DEFAULT_MIN_GROUP_FACES).coerceIn(1, 30)
+    fun setRecognitionDistance(context: Context, engineId: String, value: Float) {
+        val rounded = (value.coerceIn(0.25f, 0.75f) * 100f).let { kotlin.math.round(it) / 100f }
+        val key = if (engineId == EnteFaceConstants.ENGINE_ID) KEY_ENTE_RECOGNITION_DISTANCE else KEY_RECOGNITION_DISTANCE
+        preferences(context).edit().putFloat(key, rounded).apply()
+    }
+
+    fun minGroupFaces(context: Context, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int {
+        val prefs = preferences(context)
+        return if (engineId == EnteFaceConstants.ENGINE_ID) {
+            prefs.getInt(KEY_ENTE_MIN_GROUP_FACES, DEFAULT_MIN_GROUP_FACES).coerceIn(1, 30)
+        } else {
+            prefs.getInt(KEY_MIN_GROUP_FACES, DEFAULT_MIN_GROUP_FACES).coerceIn(1, 30)
+        }
+    }
+
+    fun setMinGroupFaces(context: Context, engineId: String, value: Int) {
+        val coerced = value.coerceIn(1, 30)
+        val key = if (engineId == EnteFaceConstants.ENGINE_ID) KEY_ENTE_MIN_GROUP_FACES else KEY_MIN_GROUP_FACES
+        preferences(context).edit().putInt(key, coerced).apply()
+    }
 }

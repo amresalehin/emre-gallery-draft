@@ -27,6 +27,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material3.*
+import androidx.compose.ui.text.font.FontWeight
+import com.amresalehin.emregallery.face.BuffaloLFaceEngine
+import com.amresalehin.emregallery.face.EngineComparisonResult
+import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
@@ -49,9 +54,13 @@ fun IndexingStatusScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val faceStore = remember { FaceClusterStore(context.applicationContext) }
 
+    var activeTargetEngineId by remember { mutableStateOf(BuffaloLFaceEngine.ENGINE_ID) }
     var showFaceScanOptions by remember { mutableStateOf(false) }
     var showModelRequiredDialog by remember { mutableStateOf(false) }
+    var showComparisonDialog by remember { mutableStateOf(false) }
+    var comparisonResult by remember { mutableStateOf<EngineComparisonResult?>(null) }
 
     // Request notification permission on Android 13+ (POST_NOTIFICATIONS)
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -148,6 +157,9 @@ fun IndexingStatusScreen(
                 engineState = uiState.engine,
                 modelDownloadState = uiState.modelDownload,
                 clusteringState = uiState.clustering,
+                enteFaceFindingState = uiState.enteFaceFinding,
+                enteModelDownloadState = uiState.enteModelDownload,
+                enteClusteringState = uiState.enteClustering,
                 countsReady = uiState.countsReady,
                 cardBackground = cardBackground,
                 cardBorder = cardBorder,
@@ -155,15 +167,38 @@ fun IndexingStatusScreen(
                 onConfidenceChange = viewModel::updateDetectionConfidence,
                 onMinGroupFacesChange = viewModel::updateMinGroupFaces,
                 onClusterDistanceChange = viewModel::updateClusterDistance,
-                onToggleFaceFinding = {
-                    viewModel.toggleFaceFinding { showModelRequiredDialog = true }
+                onToggleFaceFinding = { eng ->
+                    activeTargetEngineId = eng
+                    viewModel.toggleFaceFinding(
+                        onNeedsModelDownload = { showModelRequiredDialog = true },
+                        engineId = eng
+                    )
                 },
-                onStopFaceFinding = viewModel::stopFaceFinding,
-                onRescanRequested = { showFaceScanOptions = true },
-                onDownloadModel = viewModel::startModelDownload,
-                onCancelDownload = viewModel::cancelModelDownload,
-                onClusterFaces = viewModel::runFaceClustering,
-                onResetClusters = viewModel::resetFaceClusters
+                onStopFaceFinding = { eng -> viewModel.stopFaceFinding(eng) },
+                onRescanRequested = { eng ->
+                    activeTargetEngineId = eng
+                    showFaceScanOptions = true
+                },
+                onDownloadModel = { force, eng ->
+                    activeTargetEngineId = eng
+                    viewModel.startModelDownload(force, eng)
+                },
+                onCancelDownload = { eng -> viewModel.cancelModelDownload(eng) },
+                onClusterFaces = { threshold, eng -> viewModel.runFaceClustering(threshold, eng) },
+                onResetClusters = { eng -> viewModel.resetFaceClusters(eng) },
+                onComparePipelines = {
+                    scope.launch(Dispatchers.IO) {
+                        val commonUri = faceStore.findCommonIndexedMediaUri("buffalo_l", "ente")
+                            ?: media.firstOrNull { !it.isVideo }?.uri
+                        if (commonUri != null) {
+                            val result = faceStore.compareEnginesOnMedia(mediaUri = commonUri, context = context)
+                            withContext(Dispatchers.Main) {
+                                comparisonResult = result
+                                showComparisonDialog = true
+                            }
+                        }
+                    }
+                }
             )
 
             Spacer(Modifier.navigationBarsPadding())
@@ -225,11 +260,17 @@ fun IndexingStatusScreen(
             onDismiss = { showFaceScanOptions = false },
             onRescanAll = {
                 showFaceScanOptions = false
-                viewModel.clearAndRescanFaces { showModelRequiredDialog = true }
+                viewModel.clearAndRescanFaces(
+                    onNeedsModelDownload = { showModelRequiredDialog = true },
+                    engineId = activeTargetEngineId
+                )
             },
             onRemainingOnly = {
                 showFaceScanOptions = false
-                viewModel.toggleFaceFinding { showModelRequiredDialog = true }
+                viewModel.toggleFaceFinding(
+                    onNeedsModelDownload = { showModelRequiredDialog = true },
+                    engineId = activeTargetEngineId
+                )
             }
         )
     }
@@ -239,7 +280,73 @@ fun IndexingStatusScreen(
             onDismiss = { showModelRequiredDialog = false },
             onDownloadModel = {
                 showModelRequiredDialog = false
-                viewModel.startModelDownload()
+                viewModel.startModelDownload(engineId = activeTargetEngineId)
+            }
+        )
+    }
+
+    if (showComparisonDialog && comparisonResult != null) {
+        val comp = comparisonResult!!
+        AlertDialog(
+            onDismissRequest = { showComparisonDialog = false },
+            title = {
+                Text(
+                    "Pipeline Comparison",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Sample: ${comp.mediaUri.substringAfterLast('/')}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "Buffalo_L (InsightFace SCRFD-10GF)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "Detected faces: ${comp.facesA.size}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "Ente (YOLO5Face-small)",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "Detected faces: ${comp.facesB.size}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                    Text(
+                        "Spatial Overlap (IoU >= 0.40): ${comp.matchingFaceCount} face(s)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showComparisonDialog = false }) {
+                    Text("Done")
+                }
             }
         )
     }

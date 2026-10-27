@@ -16,6 +16,8 @@ import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
+import com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory
+import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
@@ -107,12 +109,16 @@ class IndexingForegroundService : Service() {
                         intent?.getStringExtra(EXTRA_MODEL) ?: "fast"
                     )
                     ACTION_START_FACE -> runFace(
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
+                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
+                        intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
                     )
                     ACTION_START_LOCATION -> runLocation(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
                     )
-                    ACTION_DOWNLOAD_MODEL -> downloadModel(intent?.getBooleanExtra(EXTRA_FORCE, false) == true)
+                    ACTION_DOWNLOAD_MODEL -> downloadModel(
+                        intent?.getBooleanExtra(EXTRA_FORCE, false) == true,
+                        intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
+                    )
                 }
                 updateState(running = false, paused = false, error = null)
             } catch (cancelled: CancellationException) {
@@ -155,19 +161,31 @@ class IndexingForegroundService : Service() {
         }
     }
 
-    private suspend fun runFace(rescanAll: Boolean) {
+    private suspend fun runFace(rescanAll: Boolean, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
         val photos = loadPhotos()
         val store = FaceClusterStore(applicationContext)
+        val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
+
         if (rescanAll) {
             withContext(Dispatchers.IO) {
-                // Reset indexed status for active engine to reprocess photos without wiping identities
-                store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(BuffaloLFaceEngine.ENGINE_ID))
+                // Reset indexed status for selected engine to reprocess photos without wiping identities
+                store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId))
             }
         }
-        val alreadyDone = store.indexedMediaCount(photos.map { it.uri })
-        updateState(task = TASK_FACE, running = true, paused = false, processed = alreadyDone, total = photos.size, faces = store.indexedFaceCount(), failed = store.failedMediaCount(), error = null)
-        postProgress("Face indexing", "Preparing face detector", alreadyDone, photos.size)
-        FaceIndexingRepository(applicationContext).indexNewMedia(
+        val alreadyDone = store.indexedMediaCount(photos.map { it.uri }, engineId = engineId)
+        updateState(
+            task = TASK_FACE,
+            running = true,
+            paused = false,
+            processed = alreadyDone,
+            total = photos.size,
+            faces = store.indexedFaceCount(engineId),
+            failed = store.failedMediaCount(engineId),
+            engineId = engineId,
+            error = null
+        )
+        postProgress("Face indexing", "Preparing ${factory.displayName}", alreadyDone, photos.size)
+        FaceIndexingRepository(applicationContext, factory).indexNewMedia(
             media = photos,
             store = store,
             detectionThreshold = FaceRecognitionSettings.detectionConfidence(applicationContext),
@@ -175,27 +193,51 @@ class IndexingForegroundService : Service() {
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
             onProgress = { p ->
                 val done = (alreadyDone + p.processed).coerceAtMost(photos.size)
-                updateState(processed = done, total = photos.size, faces = store.indexedFaceCount(), failed = store.failedMediaCount())
-                postProgress("Face indexing", "Processed $done of ${photos.size} images · ${store.indexedFaceCount()} faces found", done, photos.size)
+                updateState(
+                    processed = done,
+                    total = photos.size,
+                    faces = store.indexedFaceCount(engineId),
+                    failed = store.failedMediaCount(engineId),
+                    engineId = engineId
+                )
+                postProgress("Face indexing", "Processed $done of ${photos.size} images · ${store.indexedFaceCount(engineId)} faces found", done, photos.size)
             }
         )
     }
 
-    private suspend fun downloadModel(force: Boolean) {
-        updateState(task = TASK_MODEL, running = true, paused = false, processed = 0, total = 100, bytes = 0L, bytesTotal = 0L, error = null)
-        postProgress("Downloading face model", "Starting download", 0, 100)
-        FaceIndexingRepository(applicationContext).downloadModel(
+    private suspend fun downloadModel(force: Boolean, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
+        val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
+
+        updateState(
+            task = TASK_MODEL,
+            running = true,
+            paused = false,
+            processed = 0,
+            total = 100,
+            bytes = 0L,
+            bytesTotal = 0L,
+            engineId = engineId,
+            error = null
+        )
+        postProgress("Downloading face model", "Starting download for ${factory.displayName}", 0, 100)
+        FaceIndexingRepository(applicationContext, factory).downloadModel(
             force = force,
             onProgress = { received, total ->
-                updateState(bytes = received, bytesTotal = total, processed = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0, total = 100)
+                updateState(
+                    bytes = received,
+                    bytesTotal = total,
+                    processed = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0,
+                    total = 100,
+                    engineId = engineId
+                )
                 postProgress("Downloading face model", "${received / (1024 * 1024)} MB of ${(total / (1024 * 1024)).coerceAtLeast(1)} MB", if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0, 100)
             },
             onStage = { stage ->
-                updateState(stage = stage)
+                updateState(stage = stage, engineId = engineId)
                 postProgress("Preparing face model", when (stage) {
                     "extracting" -> "Extracting model archive…"
                     "installing" -> "Installing model files…"
-                    "ready" -> "Face model ready"
+                    "ready" -> "${factory.displayName} ready"
                     else -> "Preparing model…"
                 }, -1, 0)
             },
@@ -228,6 +270,7 @@ class IndexingForegroundService : Service() {
         stage: String? = null,
         bytes: Long? = null,
         bytesTotal: Long? = null,
+        engineId: String? = null,
         error: String? = null
     ) {
         prefs.edit().apply {
@@ -241,6 +284,7 @@ class IndexingForegroundService : Service() {
             if (stage != null) putString(KEY_STAGE, stage)
             if (bytes != null) putLong(KEY_BYTES, bytes)
             if (bytesTotal != null) putLong(KEY_BYTES_TOTAL, bytesTotal)
+            if (engineId != null) putString(KEY_ENGINE_ID, engineId)
             putString(KEY_ERROR, error)
             apply()
         }
@@ -332,6 +376,7 @@ class IndexingForegroundService : Service() {
         const val KEY_BYTES = "bytes"
         const val KEY_BYTES_TOTAL = "bytes_total"
         const val KEY_ERROR = "error"
+        const val KEY_ENGINE_ID = "engine_id"
 
         const val TASK_LOCATION = "location"
         private const val TASK_OCR = "ocr"
@@ -351,6 +396,7 @@ class IndexingForegroundService : Service() {
         private const val EXTRA_RESCAN_ALL = "rescan_all"
         private const val EXTRA_MODEL = "ocr_model"
         private const val EXTRA_FORCE = "force"
+        const val EXTRA_ENGINE_ID = "engine_id"
 
         private fun command(context: Context, action: String, configure: Intent.() -> Unit = {}) {
             val intent = Intent(context, IndexingForegroundService::class.java).setAction(action).apply(configure)
@@ -373,9 +419,14 @@ class IndexingForegroundService : Service() {
                 putExtra(EXTRA_MODEL, modelId)
             }
 
-        fun startFace(context: Context, rescanAll: Boolean = false) =
+        fun startFace(
+            context: Context,
+            rescanAll: Boolean = false,
+            engineId: String = BuffaloLFaceEngine.ENGINE_ID
+        ) =
             command(context, ACTION_START_FACE) {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
+                putExtra(EXTRA_ENGINE_ID, engineId)
             }
 
         fun startLocation(context: Context, rescanAll: Boolean = false) =
@@ -383,8 +434,15 @@ class IndexingForegroundService : Service() {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
             }
 
-        fun downloadModel(context: Context, force: Boolean = false) =
-            command(context, ACTION_DOWNLOAD_MODEL) { putExtra(EXTRA_FORCE, force) }
+        fun downloadModel(
+            context: Context,
+            force: Boolean = false,
+            engineId: String = BuffaloLFaceEngine.ENGINE_ID
+        ) =
+            command(context, ACTION_DOWNLOAD_MODEL) {
+                putExtra(EXTRA_FORCE, force)
+                putExtra(EXTRA_ENGINE_ID, engineId)
+            }
 
         fun pause(context: Context) = command(context, ACTION_PAUSE)
         fun resume(context: Context) = command(context, ACTION_RESUME)

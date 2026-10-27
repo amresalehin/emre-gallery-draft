@@ -1,5 +1,7 @@
 package com.amresalehin.emregallery.ui
 
+import com.amresalehin.emregallery.face.BuffaloLFaceEngine
+import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterSummary
 
 data class OcrState(
@@ -48,8 +50,11 @@ data class FaceClusteringState(
 
 data class EngineState(
     val isBuffaloLInstalled: Boolean = false,
+    val isEnteInstalled: Boolean = false,
     val activeEngineName: String = "Detecting...",
-    val primaryModelFailure: String? = null
+    val activeEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
+    val primaryModelFailure: String? = null,
+    val enteModelFailure: String? = null
 )
 
 data class IndexingStatusUiState(
@@ -60,5 +65,8 @@ data class IndexingStatusUiState(
     val location: LocationIndexingState = LocationIndexingState(),
     val modelDownload: ModelDownloadState = ModelDownloadState(),
     val clustering: FaceClusteringState = FaceClusteringState(),
+    val enteFaceFinding: FaceFindingState = FaceFindingState(detectionConfidence = EnteFaceConstants.DEFAULT_DETECTION_CONFIDENCE),
+    val enteModelDownload: ModelDownloadState = ModelDownloadState(),
+    val enteClustering: FaceClusteringState = FaceClusteringState(clusterDistance = EnteFaceConstants.DEFAULT_RECOGNITION_DISTANCE),
     val engine: EngineState = EngineState()
 )
