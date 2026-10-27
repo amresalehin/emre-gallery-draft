@@ -883,18 +883,11 @@ private fun ZoomableMediaItem(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Keep this poster in place throughout video preparation and the first-frame handoff.
+            // Video viewing intentionally starts on black while ExoPlayer prepares its
+            // output surface. The grid poster remains a grid-only thumbnail; don't leave a
+            // stale poster behind the player during buffering or the first-frame handoff.
             if (isVideo) {
-                MediaThumbnail(
-                    item = item,
-                    contentDescription = item.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = if (hasTargetBounds) {
-                        transitionContentScale(transitionProgress)
-                    } else {
-                        ContentScale.Fit
-                    }
-                )
+                Box(Modifier.fillMaxSize().background(Color.Black))
             } else {
                 AsyncImage(
                     model = imageRequest,
