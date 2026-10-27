@@ -211,8 +211,8 @@ fun VideoPlayerSurface(
                 player = videoState.player
                 useController = false
                 setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                setShutterBackgroundColor(android.graphics.Color.BLACK)
+                setBackgroundColor(android.graphics.Color.BLACK)
                 isClickable = false
                 isFocusable = false
             }
@@ -226,7 +226,8 @@ fun VideoPlayerSurface(
             }
             pv.useController = false
             pv.setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
-            pv.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+            pv.setShutterBackgroundColor(android.graphics.Color.BLACK)
+            pv.setBackgroundColor(android.graphics.Color.BLACK)
         }
     )
 }
