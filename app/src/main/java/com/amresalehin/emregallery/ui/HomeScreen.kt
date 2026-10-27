@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
-import androidx.compose.foundation.lazy.staggeredgrid.item as staggeredItem
 import androidx.compose.foundation.lazy.staggeredgrid.items as staggeredItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -179,7 +178,7 @@ fun HomeScreen(
                     "Archive" -> Icons.Default.Archive
                     else -> Icons.Default.Folder
                 }
-                staggeredItem(span = StaggeredGridItemSpan.FullLine) {
+                item(span = StaggeredGridItemSpan.FullLine) {
                     val returnProgress = LocalViewerCoordinatedProgress.current
                     Surface(
                         modifier = Modifier
@@ -220,7 +219,7 @@ fun HomeScreen(
             }
 
             if (loading && sortedMedia.isEmpty()) {
-                staggeredItem(span = StaggeredGridItemSpan.FullLine) {
+                item(span = StaggeredGridItemSpan.FullLine) {
                     HomeScreenSkeleton(
                         gridColumns = pinchGridColumns,
                         gridStyle = gridStyle,
@@ -228,7 +227,7 @@ fun HomeScreen(
                     )
                 }
             } else if (sortedMedia.isEmpty()) {
-                staggeredItem(span = StaggeredGridItemSpan.FullLine) {
+                item(span = StaggeredGridItemSpan.FullLine) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -258,11 +257,11 @@ fun HomeScreen(
                 }
             } else {
                 if (loading) {
-                    staggeredItem(span = StaggeredGridItemSpan.FullLine) { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
+                    item(span = StaggeredGridItemSpan.FullLine) { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
                 }
                 if (albumTitle == null) {
-                    staggeredItem(span = StaggeredGridItemSpan.FullLine) { MemoriesStrip(sortedMedia, onOpen) }
-                    staggeredItem(span = StaggeredGridItemSpan.FullLine) {
+                    item(span = StaggeredGridItemSpan.FullLine) { MemoriesStrip(sortedMedia, onOpen) }
+                    item(span = StaggeredGridItemSpan.FullLine) {
                         HorizontalDivider(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
@@ -273,7 +272,7 @@ fun HomeScreen(
 
                 groups.forEach { group ->
                     if (group.dayLabel.isNotBlank()) {
-                        staggeredItem(key = "header_${group.dayKey}", span = StaggeredGridItemSpan.FullLine, contentType = "header") {
+                        item(key = "header_${group.dayKey}", span = StaggeredGridItemSpan.FullLine, contentType = "header") {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
