@@ -174,6 +174,7 @@ fun HomeFastScrollbar(
             contentAlignment = Alignment.TopEnd
         ) {
             Canvas(Modifier.fillMaxSize()) {
+                // Snapshot reads in draw scope invalidate only this canvas, not composition.
                 val layout = gridState.layoutInfo
                 val totalItems = layout.totalItemsCount
                 val visibleItems = layout.visibleItemsInfo
