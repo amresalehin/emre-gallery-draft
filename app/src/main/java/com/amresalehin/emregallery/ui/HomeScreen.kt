@@ -26,6 +26,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import coil.Coil
+import coil.request.Priority
+import com.amresalehin.emregallery.data.ThumbnailRequestFactory
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -120,6 +124,61 @@ fun HomeScreen(
             "initial" -> groupMediaByInitial(sortedMedia)
             "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
             else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+        }
+    }
+
+
+    // Keep a small window of low-resolution previews warm while the grid is idle.
+    // Visible tiles still use their measured-size request; this only helps the next items
+    // paint immediately from memory when they enter the viewport.
+    val gridMedia = remember(groups) { groups.flatMap { it.items } }
+    val gridPositionByKey = remember(groups) {
+        buildMap<String, Int> {
+            var position = 0
+            groups.forEach { group ->
+                group.items.forEach { mediaItem ->
+                    put("media_${group.dayKey}_${mediaItem.id}", position++)
+                }
+            }
+        }
+    }
+    val thumbnailImageLoader = remember(context) { Coil.imageLoader(context) }
+
+    LaunchedEffect(gridState, gridMedia, gridPositionByKey, thumbnailImageLoader) {
+        val recentlyPrefetched = LinkedHashSet<String>()
+        snapshotFlow {
+            if (gridState.isScrollInProgress) {
+                null
+            } else {
+                gridState.layoutInfo.visibleItemsInfo
+                    .mapNotNull { itemInfo -> gridPositionByKey[itemInfo.key.toString()] }
+                    .maxOrNull()
+            }
+        }.distinctUntilChanged().collect { lastVisibleIndex ->
+            if (lastVisibleIndex == null || lastVisibleIndex < 0 || gridMedia.isEmpty()) {
+                return@collect
+            }
+
+            val firstIndex = lastVisibleIndex + 1
+            val endExclusive = minOf(firstIndex + 12, gridMedia.size)
+            for (index in firstIndex until endExclusive) {
+                val item = gridMedia[index]
+                val prefetchKey = "${item.uri}|${item.sizeBytes}|${item.isVideo}"
+                if (!recentlyPrefetched.add(prefetchKey)) continue
+                if (recentlyPrefetched.size > 96) {
+                    recentlyPrefetched.remove(recentlyPrefetched.first())
+                }
+
+                thumbnailImageLoader.enqueue(
+                    ThumbnailRequestFactory.create(
+                        context = context,
+                        item = item,
+                        targetWidthPx = 192,
+                        targetHeightPx = 192,
+                        priority = Priority.LOW
+                    )
+                )
+            }
         }
     }
 
