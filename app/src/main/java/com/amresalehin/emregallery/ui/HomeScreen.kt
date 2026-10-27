@@ -29,6 +29,7 @@ import androidx.compose.runtime.*
 import coil.Coil
 import com.amresalehin.emregallery.data.ThumbnailRequestFactory
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -156,18 +157,29 @@ fun HomeScreen(
             }
         }.distinctUntilChanged().collectLatest { lastVisibleIndex ->
             if (lastVisibleIndex == null || lastVisibleIndex < 0 || gridMedia.isEmpty()) {
-                return@collect
+                return@collectLatest
             }
 
+            // Debounce short pauses and flings; resumed scrolling cancels this block.
+            delay(300)
+
             val firstIndex = lastVisibleIndex + 1
-            val endExclusive = minOf(firstIndex + 12, gridMedia.size)
+            val endExclusive = minOf(firstIndex + 8, gridMedia.size)
+            var successfulPrefetches = 0
+            var prefetchedVideo = false
             for (index in firstIndex until endExclusive) {
+                if (successfulPrefetches >= 4) break
+
                 val item = gridMedia[index]
+                // Frame extraction is more expensive than still-image thumbnailing. Warm
+                // at most one video poster per idle window to keep CPU/IO work bounded.
+                if (item.isVideo && prefetchedVideo) continue
+
                 val prefetchKey = "${item.uri}|${item.sizeBytes}|${item.isVideo}"
                 if (prefetchKey in recentlyPrefetched) continue
 
-                // Execute one preview at a time. collectLatest cancels warm-up as soon as
-                // scrolling resumes, so prefetch work does not build an unbounded queue.
+                // Execute one request at a time. collectLatest cancels waiting requests when
+                // scrolling resumes, instead of enqueueing a large background batch.
                 val result = thumbnailImageLoader.execute(
                     ThumbnailRequestFactory.create(
                         context = context,
@@ -178,6 +190,8 @@ fun HomeScreen(
                 )
                 if (result is coil.request.SuccessResult) {
                     recentlyPrefetched.add(prefetchKey)
+                    successfulPrefetches += 1
+                    if (item.isVideo) prefetchedVideo = true
                     if (recentlyPrefetched.size > 96) {
                         recentlyPrefetched.remove(recentlyPrefetched.first())
                     }
