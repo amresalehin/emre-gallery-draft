@@ -131,12 +131,14 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val bFaces = faceStore.indexedFaceCount(BuffaloLFaceEngine.ENGINE_ID)
                 val bFailures = faceStore.failedMediaCount(BuffaloLFaceEngine.ENGINE_ID)
                 val bSummaries = faceStore.summaries(BuffaloLFaceEngine.ENGINE_ID)
+                val bFailedList = faceStore.getFailedMedia(BuffaloLFaceEngine.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
 
                 // Ente-Style counts
                 val eCount = faceStore.indexedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
                 val eFaces = faceStore.indexedFaceCount(EnteFaceConstants.ENGINE_ID)
                 val eFailures = faceStore.failedMediaCount(EnteFaceConstants.ENGINE_ID)
                 val eSummaries = faceStore.summaries(EnteFaceConstants.ENGINE_ID)
+                val eFailedList = faceStore.getFailedMedia(EnteFaceConstants.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
 
                 val locCache = com.amresalehin.emregallery.data.PhotoMapLocationCache(context.applicationContext)
                 val locMap = locCache.loadAll()
@@ -145,8 +147,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                 FullCountsResult(
                     oCount, oFiles,
-                    bCount, bFaces, bFailures, bSummaries,
-                    eCount, eFaces, eFailures, eSummaries,
+                    bCount, bFaces, bFailures, bSummaries, bFailedList,
+                    eCount, eFaces, eFailures, eSummaries, eFailedList,
                     lProcessed, lLocated
                 )
             }
@@ -163,7 +165,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     faceFinding = state.faceFinding.copy(
                         processed = result.buffaloProcessed.coerceIn(0, totalPhotos),
                         totalDetected = result.buffaloDetected,
-                        failedCount = result.buffaloFailures
+                        failedCount = result.buffaloFailures,
+                        failedItems = result.buffaloFailedItems
                     ),
                     clustering = state.clustering.copy(
                         summaries = result.buffaloSummaries
@@ -171,7 +174,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     enteFaceFinding = state.enteFaceFinding.copy(
                         processed = result.enteProcessed.coerceIn(0, totalPhotos),
                         totalDetected = result.enteDetected,
-                        failedCount = result.enteFailures
+                        failedCount = result.enteFailures,
+                        failedItems = result.enteFailedItems
                     ),
                     enteClustering = state.enteClustering.copy(
                         summaries = result.enteSummaries
@@ -192,13 +196,19 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         val buffaloDetected: Int,
         val buffaloFailures: Int,
         val buffaloSummaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>,
+        val buffaloFailedItems: List<Pair<String, String>>,
         val enteProcessed: Int,
         val enteDetected: Int,
         val enteFailures: Int,
         val enteSummaries: List<com.amresalehin.emregallery.face.FaceClusterSummary>,
+        val enteFailedItems: List<Pair<String, String>>,
         val locProcessed: Int,
         val locLocated: Int
     )
+
+    fun retryFailedFaces(engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
+        IndexingForegroundService.retryFailedFaces(context, engineId)
+    }
 
     private fun startServiceMonitoring() {
         viewModelScope.launch {
@@ -219,8 +229,34 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 val stage = prefs.getString(IndexingForegroundService.KEY_STAGE, "downloading") ?: "downloading"
                 val bytes = prefs.getLong(IndexingForegroundService.KEY_BYTES, 0L)
                 val bytesTotal = prefs.getLong(IndexingForegroundService.KEY_BYTES_TOTAL, 0L)
+                val speed = prefs.getLong(IndexingForegroundService.KEY_SPEED, 0L)
+                val eta = prefs.getLong(IndexingForegroundService.KEY_ETA, 0L)
                 val error = prefs.getString(IndexingForegroundService.KEY_ERROR, null)
                 val engineId = prefs.getString(IndexingForegroundService.KEY_ENGINE_ID, BuffaloLFaceEngine.ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
+                val currentItem = prefs.getString(IndexingForegroundService.KEY_CURRENT_ITEM_NAME, "") ?: ""
+
+                val detStateStr = prefs.getString(IndexingForegroundService.KEY_DETECTION_STATE, "PENDING") ?: "PENDING"
+                val detProcessed = prefs.getInt(IndexingForegroundService.KEY_DETECTION_PROCESSED, 0)
+                val detTotal = prefs.getInt(IndexingForegroundService.KEY_DETECTION_TOTAL, 0)
+
+                val embStateStr = prefs.getString(IndexingForegroundService.KEY_EMBEDDING_STATE, "PENDING") ?: "PENDING"
+                val embProcessed = prefs.getInt(IndexingForegroundService.KEY_EMBEDDING_PROCESSED, 0)
+                val embTotal = prefs.getInt(IndexingForegroundService.KEY_EMBEDDING_TOTAL, 0)
+
+                val cluStateStr = prefs.getString(IndexingForegroundService.KEY_CLUSTERING_STATE, "PENDING") ?: "PENDING"
+                val cluProcessed = prefs.getInt(IndexingForegroundService.KEY_CLUSTERING_PROCESSED, 0)
+                val cluTotal = prefs.getInt(IndexingForegroundService.KEY_CLUSTERING_TOTAL, 0)
+
+                fun parseStage(stateStr: String, proc: Int, tot: Int): com.amresalehin.emregallery.face.StageProgress {
+                    val s = runCatching { com.amresalehin.emregallery.face.StageState.valueOf(stateStr) }
+                        .getOrDefault(com.amresalehin.emregallery.face.StageState.PENDING)
+                    val pct = if (tot > 0) (proc * 100 / tot).coerceIn(0, 100) else if (s == com.amresalehin.emregallery.face.StageState.COMPLETED) 100 else 0
+                    return com.amresalehin.emregallery.face.StageProgress(s, proc, tot, pct)
+                }
+
+                val detStage = parseStage(detStateStr, detProcessed, detTotal)
+                val embStage = parseStage(embStateStr, embProcessed, embTotal)
+                val cluStage = parseStage(cluStateStr, cluProcessed, cluTotal)
 
                 _uiState.update { state ->
                     var newOcr = state.ocr
@@ -253,7 +289,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     processed = if (total > 0) processed else newEnteFace.processed,
                                     totalDetected = if (faces >= 0) faces else newEnteFace.totalDetected,
                                     failedCount = if (failed >= 0) failed else newEnteFace.failedCount,
-                                    itemsPerMinute = ipm
+                                    itemsPerMinute = ipm,
+                                    currentItemName = if (running) currentItem else "",
+                                    activeEngineId = engineId,
+                                    detectionStage = detStage,
+                                    embeddingStage = embStage,
+                                    clusteringStage = cluStage
                                 )
                             } else {
                                 val ipm = if (running && !paused) {
@@ -265,7 +306,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     processed = if (total > 0) processed else newFace.processed,
                                     totalDetected = if (faces >= 0) faces else newFace.totalDetected,
                                     failedCount = if (failed >= 0) failed else newFace.failedCount,
-                                    itemsPerMinute = ipm
+                                    itemsPerMinute = ipm,
+                                    currentItemName = if (running) currentItem else "",
+                                    activeEngineId = engineId,
+                                    detectionStage = detStage,
+                                    embeddingStage = embStage,
+                                    clusteringStage = cluStage
                                 )
                             }
                         }
@@ -277,6 +323,9 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     stage = stage,
                                     bytesReceived = bytes,
                                     totalBytes = bytesTotal,
+                                    speedBytesPerSec = speed,
+                                    etaSeconds = eta,
+                                    engineId = engineId,
                                     error = error
                                 )
                             } else {
@@ -286,6 +335,9 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                                     stage = stage,
                                     bytesReceived = bytes,
                                     totalBytes = bytesTotal,
+                                    speedBytesPerSec = speed,
+                                    etaSeconds = eta,
+                                    engineId = engineId,
                                     error = error
                                 )
                             }
@@ -306,8 +358,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
                     if (!running) {
                         newOcr = newOcr.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
-                        newFace = newFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
-                        newEnteFace = newEnteFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
+                        newFace = newFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
+                        newEnteFace = newEnteFace.copy(isRunning = false, isPaused = false, itemsPerMinute = 0, currentItemName = "")
                         newLocation = newLocation.copy(isRunning = false, isPaused = false, itemsPerMinute = 0)
                         newDownload = newDownload.copy(isDownloading = false, isPaused = false)
                         newEnteDownload = newEnteDownload.copy(isDownloading = false, isPaused = false)

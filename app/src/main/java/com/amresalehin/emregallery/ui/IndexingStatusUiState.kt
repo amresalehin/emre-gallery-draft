@@ -4,6 +4,9 @@ import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterSummary
 
+import com.amresalehin.emregallery.face.StageProgress
+import com.amresalehin.emregallery.face.StageState
+
 data class OcrState(
     val processed: Int = 0,
     val cachedCount: Int = 0,
@@ -20,7 +23,13 @@ data class FaceFindingState(
     val isRunning: Boolean = false,
     val isPaused: Boolean = false,
     val itemsPerMinute: Int = 0,
-    val detectionConfidence: Float = 0.60f
+    val detectionConfidence: Float = 0.60f,
+    val currentItemName: String = "",
+    val activeEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
+    val detectionStage: StageProgress = StageProgress(),
+    val embeddingStage: StageProgress = StageProgress(),
+    val clusteringStage: StageProgress = StageProgress(),
+    val failedItems: List<Pair<String, String>> = emptyList()
 )
 
 data class LocationIndexingState(
@@ -37,6 +46,9 @@ data class ModelDownloadState(
     val stage: String = "downloading",
     val bytesReceived: Long = 0L,
     val totalBytes: Long = 0L,
+    val speedBytesPerSec: Long = 0L,
+    val etaSeconds: Long = 0L,
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
     val error: String? = null
 )
 

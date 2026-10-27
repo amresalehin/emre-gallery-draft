@@ -99,8 +99,19 @@ interface FaceEngineFactory {
         force: Boolean = false,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
         onStage: (String) -> Unit = {},
-        awaitIfResumed: suspend () -> Unit = {}
+        awaitIfResumed: suspend () -> Unit = {},
+        onDetailedProgress: (DetailedDownloadProgress) -> Unit = {}
     )
+}
+
+data class DetailedDownloadProgress(
+    val bytesReceived: Long,
+    val totalBytes: Long,
+    val speedBytesPerSec: Long = 0L,
+    val etaSeconds: Long = 0L,
+    val stage: String = "downloading"
+) {
+    val percentage: Int get() = if (totalBytes > 0) ((bytesReceived * 100) / totalBytes).toInt().coerceIn(0, 100) else 0
 }
 
 /**

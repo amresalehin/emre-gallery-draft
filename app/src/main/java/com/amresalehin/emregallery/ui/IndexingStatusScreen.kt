@@ -186,6 +186,7 @@ fun IndexingStatusScreen(
                 onCancelDownload = { eng -> viewModel.cancelModelDownload(eng) },
                 onClusterFaces = { threshold, eng -> viewModel.runFaceClustering(threshold, eng) },
                 onResetClusters = { eng -> viewModel.resetFaceClusters(eng) },
+                onRetryFailedFaces = { eng -> viewModel.retryFailedFaces(eng) },
                 onComparePipelines = {
                     scope.launch(Dispatchers.IO) {
                         val commonUri = faceStore.findCommonIndexedMediaUri("buffalo_l", "ente")

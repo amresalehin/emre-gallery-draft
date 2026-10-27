@@ -109,8 +109,9 @@ class IndexingForegroundService : Service() {
                         intent?.getStringExtra(EXTRA_MODEL) ?: "fast"
                     )
                     ACTION_START_FACE -> runFace(
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
-                        intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
+                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
+                        engineId = intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID,
+                        retryFailedOnly = intent?.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false) == true
                     )
                     ACTION_START_LOCATION -> runLocation(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
@@ -161,7 +162,11 @@ class IndexingForegroundService : Service() {
         }
     }
 
-    private suspend fun runFace(rescanAll: Boolean, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
+    private suspend fun runFace(
+        rescanAll: Boolean,
+        engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+        retryFailedOnly: Boolean = false
+    ) {
         val photos = loadPhotos()
         val store = FaceClusterStore(applicationContext)
         val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
@@ -172,35 +177,66 @@ class IndexingForegroundService : Service() {
                 store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId))
             }
         }
-        val alreadyDone = store.indexedMediaCount(photos.map { it.uri }, engineId = engineId)
+
+        val targetUris = if (retryFailedOnly) {
+            store.getFailedMedia(engineId).map { it.first }.toSet()
+        } else null
+
+        val relevantPhotos = if (targetUris != null) photos.filter { it.uri in targetUris } else photos
+        val alreadyDone = if (retryFailedOnly) 0 else store.indexedMediaCount(relevantPhotos.map { it.uri }, engineId = engineId)
+
         updateState(
             task = TASK_FACE,
             running = true,
             paused = false,
             processed = alreadyDone,
-            total = photos.size,
+            total = relevantPhotos.size,
             faces = store.indexedFaceCount(engineId),
             failed = store.failedMediaCount(engineId),
             engineId = engineId,
+            currentItemName = "Initializing ${factory.displayName}…",
+            detectionState = "PENDING",
+            detectionProcessed = 0,
+            detectionTotal = relevantPhotos.size,
+            embeddingState = "PENDING",
+            embeddingProcessed = 0,
+            embeddingTotal = relevantPhotos.size,
+            clusteringState = "PENDING",
+            clusteringProcessed = 0,
+            clusteringTotal = relevantPhotos.size,
             error = null
         )
-        postProgress("Face indexing", "Preparing ${factory.displayName}", alreadyDone, photos.size)
+        postProgress("Face indexing", "Preparing ${factory.displayName}", alreadyDone, relevantPhotos.size)
+
         FaceIndexingRepository(applicationContext, factory).indexNewMedia(
-            media = photos,
+            media = relevantPhotos,
             store = store,
-            detectionThreshold = FaceRecognitionSettings.detectionConfidence(applicationContext),
-            recognitionDistance = FaceRecognitionSettings.recognitionDistance(applicationContext),
+            detectionThreshold = FaceRecognitionSettings.detectionConfidence(applicationContext, engineId),
+            recognitionDistance = FaceRecognitionSettings.recognitionDistance(applicationContext, engineId),
+            forceRescanUris = if (retryFailedOnly) targetUris ?: emptySet() else emptySet(),
+            targetUrisOnly = targetUris,
             awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
             onProgress = { p ->
-                val done = (alreadyDone + p.processed).coerceAtMost(photos.size)
+                val done = (alreadyDone + p.processed).coerceAtMost(relevantPhotos.size)
                 updateState(
                     processed = done,
-                    total = photos.size,
+                    total = relevantPhotos.size,
                     faces = store.indexedFaceCount(engineId),
                     failed = store.failedMediaCount(engineId),
-                    engineId = engineId
+                    engineId = engineId,
+                    currentItemName = p.currentItemName,
+                    detectionState = p.detectionStage.state.name,
+                    detectionProcessed = p.detectionStage.processed,
+                    detectionTotal = p.detectionStage.total,
+                    embeddingState = p.embeddingStage.state.name,
+                    embeddingProcessed = p.embeddingStage.processed,
+                    embeddingTotal = p.embeddingStage.total,
+                    clusteringState = p.clusteringStage.state.name,
+                    clusteringProcessed = p.clusteringStage.processed,
+                    clusteringTotal = p.clusteringStage.total
                 )
-                postProgress("Face indexing", "Processed $done of ${photos.size} images · ${store.indexedFaceCount(engineId)} faces found", done, photos.size)
+                val targetName = if (p.currentItemName.isNotBlank()) " · ${p.currentItemName}" else ""
+                postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · ${store.indexedFaceCount(engineId)} faces$targetName", done, relevantPhotos.size)
             }
         )
     }
@@ -216,10 +252,13 @@ class IndexingForegroundService : Service() {
             total = 100,
             bytes = 0L,
             bytesTotal = 0L,
+            speed = 0L,
+            eta = 0L,
             engineId = engineId,
             error = null
         )
         postProgress("Downloading face model", "Starting download for ${factory.displayName}", 0, 100)
+
         FaceIndexingRepository(applicationContext, factory).downloadModel(
             force = force,
             onProgress = { received, total ->
@@ -235,13 +274,27 @@ class IndexingForegroundService : Service() {
             onStage = { stage ->
                 updateState(stage = stage, engineId = engineId)
                 postProgress("Preparing face model", when (stage) {
+                    "connecting" -> "Connecting to model repository…"
+                    "verifying" -> "Verifying cryptographic checksums…"
                     "extracting" -> "Extracting model archive…"
                     "installing" -> "Installing model files…"
                     "ready" -> "${factory.displayName} ready"
                     else -> "Preparing model…"
                 }, -1, 0)
             },
-            awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() }
+            awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
+            onDetailedProgress = { detail ->
+                updateState(
+                    bytes = detail.bytesReceived,
+                    bytesTotal = detail.totalBytes,
+                    speed = detail.speedBytesPerSec,
+                    eta = detail.etaSeconds,
+                    stage = detail.stage,
+                    processed = if (detail.totalBytes > 0) (detail.bytesReceived * 100 / detail.totalBytes).toInt().coerceIn(0, 100) else 0,
+                    total = 100,
+                    engineId = engineId
+                )
+            }
         )
     }
 
@@ -270,7 +323,19 @@ class IndexingForegroundService : Service() {
         stage: String? = null,
         bytes: Long? = null,
         bytesTotal: Long? = null,
+        speed: Long? = null,
+        eta: Long? = null,
         engineId: String? = null,
+        currentItemName: String? = null,
+        detectionState: String? = null,
+        detectionProcessed: Int? = null,
+        detectionTotal: Int? = null,
+        embeddingState: String? = null,
+        embeddingProcessed: Int? = null,
+        embeddingTotal: Int? = null,
+        clusteringState: String? = null,
+        clusteringProcessed: Int? = null,
+        clusteringTotal: Int? = null,
         error: String? = null
     ) {
         prefs.edit().apply {
@@ -284,7 +349,19 @@ class IndexingForegroundService : Service() {
             if (stage != null) putString(KEY_STAGE, stage)
             if (bytes != null) putLong(KEY_BYTES, bytes)
             if (bytesTotal != null) putLong(KEY_BYTES_TOTAL, bytesTotal)
+            if (speed != null) putLong(KEY_SPEED, speed)
+            if (eta != null) putLong(KEY_ETA, eta)
             if (engineId != null) putString(KEY_ENGINE_ID, engineId)
+            if (currentItemName != null) putString(KEY_CURRENT_ITEM_NAME, currentItemName)
+            if (detectionState != null) putString(KEY_DETECTION_STATE, detectionState)
+            if (detectionProcessed != null) putInt(KEY_DETECTION_PROCESSED, detectionProcessed)
+            if (detectionTotal != null) putInt(KEY_DETECTION_TOTAL, detectionTotal)
+            if (embeddingState != null) putString(KEY_EMBEDDING_STATE, embeddingState)
+            if (embeddingProcessed != null) putInt(KEY_EMBEDDING_PROCESSED, embeddingProcessed)
+            if (embeddingTotal != null) putInt(KEY_EMBEDDING_TOTAL, embeddingTotal)
+            if (clusteringState != null) putString(KEY_CLUSTERING_STATE, clusteringState)
+            if (clusteringProcessed != null) putInt(KEY_CLUSTERING_PROCESSED, clusteringProcessed)
+            if (clusteringTotal != null) putInt(KEY_CLUSTERING_TOTAL, clusteringTotal)
             putString(KEY_ERROR, error)
             apply()
         }
@@ -375,6 +452,18 @@ class IndexingForegroundService : Service() {
         const val KEY_STAGE = "stage"
         const val KEY_BYTES = "bytes"
         const val KEY_BYTES_TOTAL = "bytes_total"
+        const val KEY_SPEED = "speed"
+        const val KEY_ETA = "eta"
+        const val KEY_CURRENT_ITEM_NAME = "current_item_name"
+        const val KEY_DETECTION_STATE = "detection_state"
+        const val KEY_DETECTION_PROCESSED = "detection_processed"
+        const val KEY_DETECTION_TOTAL = "detection_total"
+        const val KEY_EMBEDDING_STATE = "embedding_state"
+        const val KEY_EMBEDDING_PROCESSED = "embedding_processed"
+        const val KEY_EMBEDDING_TOTAL = "embedding_total"
+        const val KEY_CLUSTERING_STATE = "clustering_state"
+        const val KEY_CLUSTERING_PROCESSED = "clustering_processed"
+        const val KEY_CLUSTERING_TOTAL = "clustering_total"
         const val KEY_ERROR = "error"
         const val KEY_ENGINE_ID = "engine_id"
 
@@ -397,6 +486,7 @@ class IndexingForegroundService : Service() {
         private const val EXTRA_MODEL = "ocr_model"
         private const val EXTRA_FORCE = "force"
         const val EXTRA_ENGINE_ID = "engine_id"
+        const val EXTRA_RETRY_FAILED_ONLY = "retry_failed_only"
 
         private fun command(context: Context, action: String, configure: Intent.() -> Unit = {}) {
             val intent = Intent(context, IndexingForegroundService::class.java).setAction(action).apply(configure)
@@ -426,6 +516,15 @@ class IndexingForegroundService : Service() {
         ) =
             command(context, ACTION_START_FACE) {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
+                putExtra(EXTRA_ENGINE_ID, engineId)
+            }
+
+        fun retryFailedFaces(
+            context: Context,
+            engineId: String = BuffaloLFaceEngine.ENGINE_ID
+        ) =
+            command(context, ACTION_START_FACE) {
+                putExtra(EXTRA_RETRY_FAILED_ONLY, true)
                 putExtra(EXTRA_ENGINE_ID, engineId)
             }
 

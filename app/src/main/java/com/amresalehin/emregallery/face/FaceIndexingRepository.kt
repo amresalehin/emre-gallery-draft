@@ -10,11 +10,33 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
+enum class StageState {
+    PENDING,
+    RUNNING,
+    COMPLETED,
+    PAUSED,
+    FAILED
+}
+
+data class StageProgress(
+    val state: StageState = StageState.PENDING,
+    val processed: Int = 0,
+    val total: Int = 0,
+    val percentage: Int = 0
+)
+
 data class FaceIndexingProgress(
-    val processed: Int,
-    val total: Int,
-    val facesFound: Int,
-    val failed: Int
+    val processed: Int = 0,
+    val total: Int = 0,
+    val facesFound: Int = 0,
+    val failed: Int = 0,
+    val currentItemName: String = "",
+    val engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+    val engineName: String = "",
+    val detectionStage: StageProgress = StageProgress(),
+    val embeddingStage: StageProgress = StageProgress(),
+    val clusteringStage: StageProgress = StageProgress(),
+    val failedItems: List<Pair<String, String>> = emptyList()
 )
 
 /**
@@ -53,15 +75,41 @@ class FaceIndexingRepository(
         awaitIfResumed: suspend () -> Unit = {},
         detectionThreshold: Float = FaceRecognitionSettings.DEFAULT_DETECTION_CONFIDENCE,
         recognitionDistance: Float = FaceRecognitionSettings.DEFAULT_RECOGNITION_DISTANCE,
-        forceRescanUris: Set<String> = emptySet()
+        forceRescanUris: Set<String> = emptySet(),
+        targetUrisOnly: Set<String>? = null
     ): FaceIndexingProgress = withContext(Dispatchers.IO) {
         val photos = media.filterNot { it.isVideo }
         val engineId = engineFactory.engineId
-        val pending = photos.filter { it.uri in forceRescanUris || !store.isMediaIndexed(it.uri, engineId) }
+        val candidates = if (targetUrisOnly != null) {
+            photos.filter { it.uri in targetUrisOnly }
+        } else photos
+
+        val pending = candidates.filter { it.uri in forceRescanUris || !store.isMediaIndexed(it.uri, engineId) }
         var processed = 0
         var facesFound = 0
         var failed = 0
+        val failedList = mutableListOf<Pair<String, String>>()
         var engine: FaceEngine? = null
+
+        val totalPending = pending.size
+        var detectionStage = StageProgress(
+            state = if (totalPending > 0) StageState.RUNNING else StageState.COMPLETED,
+            processed = 0,
+            total = totalPending,
+            percentage = 0
+        )
+        var embeddingStage = StageProgress(
+            state = if (totalPending > 0) StageState.PENDING else StageState.COMPLETED,
+            processed = 0,
+            total = totalPending,
+            percentage = 0
+        )
+        var clusteringStage = StageProgress(
+            state = if (totalPending > 0) StageState.PENDING else StageState.COMPLETED,
+            processed = 0,
+            total = totalPending,
+            percentage = 0
+        )
 
         try {
             if (pending.isNotEmpty()) {
@@ -91,9 +139,32 @@ class FaceIndexingRepository(
                 dimension = engineFactory.embeddingDimension
             )
 
-            for (item in pending) {
+            for ((index, item) in pending.withIndex()) {
                 awaitIfResumed()
                 currentCoroutineContext().ensureActive()
+
+                val itemName = item.name.ifBlank { item.uri.substringAfterLast('/') }
+                val currentPct = if (totalPending > 0) (index * 100 / totalPending) else 0
+
+                detectionStage = StageProgress(StageState.RUNNING, index, totalPending, currentPct)
+                embeddingStage = StageProgress(StageState.RUNNING, index, totalPending, currentPct)
+
+                onProgress(
+                    FaceIndexingProgress(
+                        processed = processed,
+                        total = totalPending,
+                        facesFound = facesFound,
+                        failed = failed,
+                        currentItemName = itemName,
+                        engineId = engineId,
+                        engineName = engineFactory.displayName,
+                        detectionStage = detectionStage,
+                        embeddingStage = embeddingStage,
+                        clusteringStage = clusteringStage,
+                        failedItems = failedList.toList()
+                    )
+                )
+
                 try {
                     val activeEngine = engine ?: error("Face recognition engine is not ready.")
                     val detections = activeEngine.embed(Uri.parse(item.uri))
@@ -128,17 +199,64 @@ class FaceIndexingRepository(
                     facesFound += detections.size
                 } catch (cancelled: CancellationException) {
                     throw cancelled
-                } catch (_: Exception) {
-                    store.markMediaFailed(item.uri, engineId)
+                } catch (err: Exception) {
+                    val errorDetail = err.localizedMessage ?: "Detection/embedding failed"
+                    store.markMediaFailed(item.uri, engineId, errorDetail)
+                    failedList.add(item.uri to errorDetail)
                     failed++
                 } finally {
                     processed++
-                    onProgress(FaceIndexingProgress(processed, pending.size, facesFound, failed))
+                    val completedPct = if (totalPending > 0) (processed * 100 / totalPending) else 100
+                    detectionStage = StageProgress(
+                        state = if (processed >= totalPending) StageState.COMPLETED else StageState.RUNNING,
+                        processed = processed,
+                        total = totalPending,
+                        percentage = completedPct
+                    )
+                    embeddingStage = StageProgress(
+                        state = if (processed >= totalPending) StageState.COMPLETED else StageState.RUNNING,
+                        processed = processed,
+                        total = totalPending,
+                        percentage = completedPct
+                    )
+
+                    onProgress(
+                        FaceIndexingProgress(
+                            processed = processed,
+                            total = totalPending,
+                            facesFound = facesFound,
+                            failed = failed,
+                            currentItemName = itemName,
+                            engineId = engineId,
+                            engineName = engineFactory.displayName,
+                            detectionStage = detectionStage,
+                            embeddingStage = embeddingStage,
+                            clusteringStage = clusteringStage,
+                            failedItems = failedList.toList()
+                        )
+                    )
                 }
             }
 
-            // If engine uses a dedicated clustering strategy (e.g. Ente linear incremental), execute it now
+            // Dedicated clustering strategy execution
             if (pending.isNotEmpty() && engineFactory.clusteringStrategy != null) {
+                clusteringStage = StageProgress(StageState.RUNNING, 0, totalPending, 0)
+                onProgress(
+                    FaceIndexingProgress(
+                        processed = processed,
+                        total = totalPending,
+                        facesFound = facesFound,
+                        failed = failed,
+                        currentItemName = "Clustering facial embeddings…",
+                        engineId = engineId,
+                        engineName = engineFactory.displayName,
+                        detectionStage = detectionStage,
+                        embeddingStage = embeddingStage,
+                        clusteringStage = clusteringStage,
+                        failedItems = failedList.toList()
+                    )
+                )
+
                 engineFactory.clusteringStrategy?.clusterFaces(
                     store = store,
                     mediaUris = pending.map { it.uri },
@@ -147,22 +265,42 @@ class FaceIndexingRepository(
                     embeddingDimension = engineFactory.embeddingDimension,
                     maxDistance = recognitionDistance
                 )
+
+                clusteringStage = StageProgress(StageState.COMPLETED, totalPending, totalPending, 100)
+            } else if (totalPending > 0) {
+                clusteringStage = StageProgress(StageState.COMPLETED, totalPending, totalPending, 100)
             }
         } finally {
             engine?.close()
         }
-        FaceIndexingProgress(processed, pending.size, facesFound, failed)
+
+        val finalProgress = FaceIndexingProgress(
+            processed = processed,
+            total = totalPending,
+            facesFound = facesFound,
+            failed = failed,
+            currentItemName = "",
+            engineId = engineId,
+            engineName = engineFactory.displayName,
+            detectionStage = detectionStage,
+            embeddingStage = embeddingStage,
+            clusteringStage = clusteringStage,
+            failedItems = failedList.toList()
+        )
+        onProgress(finalProgress)
+        finalProgress
     }
 
     suspend fun downloadModel(
         force: Boolean = false,
         onProgress: (receivedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
         onStage: (String) -> Unit = {},
-        awaitIfResumed: suspend () -> Unit = {}
+        awaitIfResumed: suspend () -> Unit = {},
+        onDetailedProgress: (DetailedDownloadProgress) -> Unit = {}
     ) = withContext(Dispatchers.IO) {
         val engineId = engineFactory.engineId
         try {
-            engineFactory.downloadModel(context, force, onProgress, onStage, awaitIfResumed)
+            engineFactory.downloadModel(context, force, onProgress, onStage, awaitIfResumed, onDetailedProgress)
             lastEngineFailures.remove(engineId)
             activeEngineDescription = engineFactory.displayName
         } catch (e: Exception) {

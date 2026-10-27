@@ -214,6 +214,7 @@ class FaceClusterStore(context: Context) :
                 indexed_at INTEGER NOT NULL,
                 face_count INTEGER NOT NULL,
                 status TEXT NOT NULL,
+                error_message TEXT,
                 PRIMARY KEY(media_uri, engine_id)
             )""".trimIndent()
         )
@@ -288,6 +289,11 @@ class FaceClusterStore(context: Context) :
             )
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_face_metrics_engine ON face_metrics_v2(engine_id)")
         }
+        if (oldVersion < 3) {
+            runCatching {
+                db.execSQL("ALTER TABLE indexed_media ADD COLUMN error_message TEXT")
+            }
+        }
     }
 
     // --- Face Bounds Lookup ---
@@ -310,6 +316,15 @@ class FaceClusterStore(context: Context) :
 
     // --- Media Indexing Status Partitioned by Engine ---
 
+    data class MediaIndexedInfo(
+        val mediaUri: String,
+        val engineId: String,
+        val status: String,
+        val faceCount: Int,
+        val errorMessage: String?,
+        val indexedAt: Long
+    )
+
     @Synchronized
     fun isMediaIndexed(uri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Boolean =
         readableDatabase.rawQuery(
@@ -318,13 +333,69 @@ class FaceClusterStore(context: Context) :
         ).use { it.moveToFirst() }
 
     @Synchronized
-    fun markMediaFailed(uri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
+    fun getMediaIndexedInfo(uri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID): MediaIndexedInfo? {
+        return readableDatabase.rawQuery(
+            "SELECT media_uri, engine_id, status, face_count, error_message, indexed_at FROM indexed_media WHERE media_uri=? AND engine_id=? LIMIT 1",
+            arrayOf(uri, engineId)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                val errorCol = cursor.getColumnIndex("error_message")
+                val err = if (errorCol >= 0 && !cursor.isNull(errorCol)) cursor.getString(errorCol) else null
+                MediaIndexedInfo(
+                    mediaUri = cursor.getString(0),
+                    engineId = cursor.getString(1),
+                    status = cursor.getString(2),
+                    faceCount = cursor.getInt(3),
+                    errorMessage = err,
+                    indexedAt = cursor.getLong(5)
+                )
+            } else null
+        }
+    }
+
+    @Synchronized
+    fun clearMediaFaces(mediaUri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("faces", "media_uri=? AND engine_id=?", arrayOf(mediaUri, engineId))
+            db.delete("indexed_media", "media_uri=? AND engine_id=?", arrayOf(mediaUri, engineId))
+            db.delete("review_suggestions", "media_uri=? AND engine_id=?", arrayOf(mediaUri, engineId))
+            db.delete("face_metrics_v2", "media_uri=? AND engine_id=?", arrayOf(mediaUri, engineId))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    @Synchronized
+    fun getFailedMedia(engineId: String = BuffaloLFaceEngine.ENGINE_ID): List<Pair<String, String?>> {
+        val list = mutableListOf<Pair<String, String?>>()
+        readableDatabase.rawQuery(
+            "SELECT media_uri, error_message FROM indexed_media WHERE engine_id=? AND status='failed'",
+            arrayOf(engineId)
+        ).use { cursor ->
+            val errCol = cursor.getColumnIndex("error_message")
+            while (cursor.moveToNext()) {
+                val uri = cursor.getString(0)
+                val err = if (errCol >= 0 && !cursor.isNull(errCol)) cursor.getString(errCol) else null
+                list.add(uri to err)
+            }
+        }
+        return list
+    }
+
+    @Synchronized
+    fun markMediaFailed(uri: String, engineId: String = BuffaloLFaceEngine.ENGINE_ID, errorMessage: String? = null) {
         val values = ContentValues().apply {
             put("media_uri", uri)
             put("engine_id", engineId)
             put("indexed_at", System.currentTimeMillis())
             put("face_count", 0)
             put("status", "failed")
+            if (errorMessage != null) {
+                put("error_message", errorMessage)
+            }
         }
         writableDatabase.insertWithOnConflict("indexed_media", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -337,6 +408,7 @@ class FaceClusterStore(context: Context) :
             put("indexed_at", System.currentTimeMillis())
             put("face_count", detectedFaces)
             put("status", "done")
+            putNull("error_message")
         }
         writableDatabase.insertWithOnConflict("indexed_media", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -1051,16 +1123,27 @@ class FaceClusterStore(context: Context) :
             arrayOf(mediaUri, engineId)
         ).use { cursor ->
             while (cursor.moveToNext()) {
+                val boxLeft = cursor.getFloat(5)
+                val boxTop = cursor.getFloat(6)
+                val boxRight = cursor.getFloat(7)
+                val boxBottom = cursor.getFloat(8)
+                // Entity integrity: ignore invalid coordinates where width or height <= 0
+                if (boxRight <= boxLeft || boxBottom <= boxTop) {
+                    continue
+                }
+                val rawName = cursor.getString(3).orEmpty().trim()
+                val faceIndex = cursor.getInt(1)
+                val displayName = if (rawName.isNotEmpty()) rawName else "Person ${faceIndex + 1}"
                 result += DetectedMediaFace(
                     mediaUri = cursor.getString(0),
-                    faceIndex = cursor.getInt(1),
+                    faceIndex = faceIndex,
                     clusterId = cursor.getString(2).orEmpty(),
-                    displayName = cursor.getString(3).orEmpty(),
+                    displayName = displayName,
                     personId = if (cursor.isNull(4)) null else cursor.getString(4),
-                    boxLeft = cursor.getFloat(5),
-                    boxTop = cursor.getFloat(6),
-                    boxRight = cursor.getFloat(7),
-                    boxBottom = cursor.getFloat(8),
+                    boxLeft = boxLeft,
+                    boxTop = boxTop,
+                    boxRight = boxRight,
+                    boxBottom = boxBottom,
                     engineId = cursor.getString(9).orEmpty()
                 )
             }
@@ -1617,7 +1700,7 @@ class FaceClusterStore(context: Context) :
 
     companion object {
         const val DATABASE_NAME = "face_index.db"
-        const val DATABASE_VERSION = 2
+        const val DATABASE_VERSION = 3
 
         fun normalize(values: FloatArray): FloatArray {
             val norm = sqrt(values.sumOf { it.toDouble() * it.toDouble() }).toFloat()

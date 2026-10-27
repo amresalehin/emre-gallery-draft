@@ -25,14 +25,16 @@ object EnteFaceEngineFactory : FaceEngineFactory {
         force: Boolean,
         onProgress: (Long, Long) -> Unit,
         onStage: (String) -> Unit,
-        awaitIfResumed: suspend () -> Unit
+        awaitIfResumed: suspend () -> Unit,
+        onDetailedProgress: (DetailedDownloadProgress) -> Unit
     ) {
         EnteFaceModelManager.downloadOrInstallModel(
             context = context,
             force = force,
             onProgress = onProgress,
             onStage = onStage,
-            awaitIfResumed = awaitIfResumed
+            awaitIfResumed = awaitIfResumed,
+            onDetailedProgress = onDetailedProgress
         )
     }
 

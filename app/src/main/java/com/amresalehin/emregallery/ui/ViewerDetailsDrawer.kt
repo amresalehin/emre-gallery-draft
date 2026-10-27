@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.location.Geocoder
 import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,14 +16,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PhotoMapLocationCache
-import com.amresalehin.emregallery.face.DetectedMediaFace
-import com.amresalehin.emregallery.face.FaceClusterStore
+import com.amresalehin.emregallery.face.*
 import com.amresalehin.emregallery.ocr.TesseractOcr
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.osmdroid.util.GeoPoint
@@ -144,24 +147,186 @@ fun ViewerDetailsDrawer(
     var selectedTab by remember { mutableStateOf(DetailDrawerTab.OVERVIEW) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     var faceReloadKey by remember { mutableIntStateOf(0) }
-    val activeEngineId = remember(context) { com.amresalehin.emregallery.face.FaceRecognitionSettings.getActiveEngine(context) }
+    val activeEngineId = remember(context) { FaceRecognitionSettings.getActiveEngine(context) }
+    val factory = remember(activeEngineId) {
+        FaceEngineRegistry.getFactory(activeEngineId) ?: BuffaloLFaceEngineFactory
+    }
 
-    var detectedFaces by remember(item.uri) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
-    var faceScanError by remember(item.uri) { mutableStateOf<String?>(null) }
+    var detectedFaces by remember(item.uri, activeEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
+    var mediaIndexInfo by remember(item.uri, activeEngineId) { mutableStateOf<FaceClusterStore.MediaIndexedInfo?>(null) }
+    var isLoadingIndexInfo by remember(item.uri, activeEngineId) { mutableStateOf(true) }
 
+    var singleScanJob by remember(item.uri) { mutableStateOf<Job?>(null) }
+    var scanPhase by remember(item.uri) { mutableStateOf<String?>(null) }
+    var lastScanError by remember(item.uri) { mutableStateOf<String?>(null) }
+    var showErrorDetailsDialog by remember { mutableStateOf(false) }
+    var showFaceChooserDialog by remember { mutableStateOf(false) }
+    var isInstallingModel by remember { mutableStateOf(false) }
+    var modelInstallProgress by remember { mutableStateOf<String?>(null) }
+
+    // Strict Engine Scoping: Query exclusively for activeEngineId, no fallback!
     LaunchedEffect(item.uri, faceReloadKey, activeEngineId) {
         withContext(Dispatchers.IO) {
             val faces = faceStore.facesForMedia(item.uri, activeEngineId)
-            if (faces.isNotEmpty()) {
+            val info = faceStore.getMediaIndexedInfo(item.uri, activeEngineId)
+            withContext(Dispatchers.Main) {
                 detectedFaces = faces
-            } else {
-                val alternate = if (activeEngineId == com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID) {
-                    com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID
-                } else {
-                    com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID
-                }
-                detectedFaces = faceStore.facesForMedia(item.uri, alternate)
+                mediaIndexInfo = info
+                isLoadingIndexInfo = false
             }
+        }
+    }
+
+    val isModelInstalled = remember(activeEngineId, faceReloadKey) {
+        factory.isInstalled(context)
+    }
+
+    val startScan: (Boolean) -> Unit = { lowThreshold ->
+        if (singleScanJob?.isActive == true || item.isVideo) {
+            // mutex: active scan
+        } else if (!isModelInstalled) {
+            // missing dependencies
+        } else {
+            lastScanError = null
+            scanPhase = "Initializing..."
+            singleScanJob = coroutineScope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        faceStore.clearMediaFaces(item.uri, activeEngineId)
+                    }
+                    val threshold = if (lowThreshold) 0.35f else FaceRecognitionSettings.detectionConfidence(context, activeEngineId)
+                    val repo = FaceIndexingRepository(context.applicationContext, factory)
+                    repo.indexNewMedia(
+                        media = listOf(item),
+                        store = faceStore,
+                        forceRescanUris = setOf(item.uri),
+                        targetUrisOnly = setOf(item.uri),
+                        detectionThreshold = threshold,
+                        onProgress = { progress ->
+                            scanPhase = when {
+                                progress.clusteringStage.state == StageState.RUNNING -> "Clustering..."
+                                progress.embeddingStage.state == StageState.RUNNING -> "Generating embeddings..."
+                                progress.detectionStage.state == StageState.RUNNING -> "Detecting faces..."
+                                else -> "Processing..."
+                            }
+                        }
+                    )
+                    faceReloadKey++
+                } catch (e: CancellationException) {
+                    scanPhase = null
+                } catch (e: Exception) {
+                    val msg = e.localizedMessage ?: e.message ?: "Failed to scan photo"
+                    lastScanError = msg
+                    withContext(Dispatchers.IO) {
+                        faceStore.markMediaFailed(item.uri, activeEngineId, msg)
+                    }
+                    faceReloadKey++
+                } finally {
+                    singleScanJob = null
+                    scanPhase = null
+                }
+            }
+        }
+    }
+
+    val cancelScan: () -> Unit = {
+        singleScanJob?.cancel()
+        singleScanJob = null
+        scanPhase = null
+    }
+
+    val installModel: () -> Unit = {
+        if (!isInstallingModel) {
+            isInstallingModel = true
+            modelInstallProgress = "Starting download..."
+            coroutineScope.launch {
+                try {
+                    val repo = FaceIndexingRepository(context.applicationContext, factory)
+                    repo.downloadModel(
+                        force = true,
+                        onDetailedProgress = { p ->
+                            modelInstallProgress = "${p.stage.replaceFirstChar { it.uppercase() }} (${p.percentage}%)"
+                        }
+                    )
+                    faceReloadKey++
+                } catch (e: Exception) {
+                    lastScanError = "Failed to download model: ${e.localizedMessage ?: e.message}"
+                } finally {
+                    isInstallingModel = false
+                    modelInstallProgress = null
+                }
+            }
+        }
+    }
+
+    val isScanning = singleScanJob?.isActive == true
+    val faceUiState = remember(
+        isModelInstalled,
+        isInstallingModel,
+        modelInstallProgress,
+        isScanning,
+        scanPhase,
+        detectedFaces,
+        mediaIndexInfo,
+        lastScanError,
+        isLoadingIndexInfo
+    ) {
+        when {
+            isScanning -> ViewerFaceUiState(
+                state = ViewerFaceState.IN_PROGRESS,
+                progressPhase = scanPhase ?: "Scanning photo...",
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            isInstallingModel -> ViewerFaceUiState(
+                state = ViewerFaceState.IN_PROGRESS,
+                progressPhase = modelInstallProgress ?: "Installing model...",
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            !isModelInstalled -> ViewerFaceUiState(
+                state = ViewerFaceState.MODEL_MISSING,
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            isLoadingIndexInfo -> ViewerFaceUiState(
+                state = ViewerFaceState.NOT_INDEXED,
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            lastScanError != null -> ViewerFaceUiState(
+                state = ViewerFaceState.FAILED,
+                errorMessage = lastScanError,
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            mediaIndexInfo?.status == "failed" -> ViewerFaceUiState(
+                state = ViewerFaceState.FAILED,
+                errorMessage = mediaIndexInfo?.errorMessage ?: "Face scan failed for this photo",
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
+            mediaIndexInfo?.status == "indexed" -> {
+                if (detectedFaces.isNotEmpty()) {
+                    ViewerFaceUiState(
+                        state = ViewerFaceState.COMPLETED_FACES_FOUND,
+                        faces = detectedFaces,
+                        engineName = factory.displayName,
+                        engineId = activeEngineId
+                    )
+                } else {
+                    ViewerFaceUiState(
+                        state = ViewerFaceState.COMPLETED_NO_FACES,
+                        engineName = factory.displayName,
+                        engineId = activeEngineId
+                    )
+                }
+            }
+            else -> ViewerFaceUiState(
+                state = ViewerFaceState.NOT_INDEXED,
+                engineName = factory.displayName,
+                engineId = activeEngineId
+            )
         }
     }
 
@@ -171,37 +336,6 @@ fun ViewerDetailsDrawer(
     var showAddLocationDialog by remember { mutableStateOf(false) }
     var showAddTagDialog by remember { mutableStateOf(false) }
     var renamingFace by remember { mutableStateOf<DetectedMediaFace?>(null) }
-
-    var isScanningPeople by remember { mutableStateOf(false) }
-    val scanFacesForThisItem: () -> Unit = {
-        if (!isScanningPeople && !item.isVideo) {
-            isScanningPeople = true
-            faceScanError = null
-            coroutineScope.launch {
-                try {
-                    val factory = com.amresalehin.emregallery.face.FaceEngineRegistry.getFactory(activeEngineId)
-                        ?: com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory
-                    if (!factory.isInstalled(context)) {
-                        faceScanError = "${factory.displayName} is not installed. Please download model in Settings."
-                        return@launch
-                    }
-                    val repo = com.amresalehin.emregallery.face.FaceIndexingRepository(context.applicationContext, factory)
-                    withContext(Dispatchers.IO) {
-                        repo.indexNewMedia(
-                            media = listOf(item),
-                            store = faceStore,
-                            forceRescanUris = setOf(item.uri)
-                        )
-                    }
-                    faceReloadKey++
-                } catch (e: Exception) {
-                    faceScanError = e.localizedMessage ?: "Failed to scan faces."
-                } finally {
-                    isScanningPeople = false
-                }
-            }
-        }
-    }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
@@ -247,9 +381,24 @@ fun ViewerDetailsDrawer(
                             onAddTag = { showAddTagDialog = true },
                             onEditLocation = { showAddLocationDialog = true },
                             listState = overviewListState,
-                            onScanPeople = scanFacesForThisItem,
-                            isScanningPeople = isScanningPeople,
-                            faceScanError = faceScanError
+                            faceUiState = faceUiState,
+                            onScanThisPhoto = { startScan(false) },
+                            onCancelScan = cancelScan,
+                            onRescanPhoto = { startScan(false) },
+                            onRescanLowThreshold = { startScan(true) },
+                            onInstallModel = installModel,
+                            onRetryScan = { startScan(false) },
+                            onViewErrorDetails = { showErrorDetailsDialog = true },
+                            onEditTagOrPerson = {
+                                if (detectedFaces.size == 1) {
+                                    renamingFace = detectedFaces.first()
+                                } else if (detectedFaces.size > 1) {
+                                    showFaceChooserDialog = true
+                                } else {
+                                    showAddTagDialog = true
+                                }
+                            },
+                            onFaceClick = { face -> renamingFace = face }
                         )
                     }
                     DetailDrawerTab.ACTIONS -> {
@@ -260,6 +409,7 @@ fun ViewerDetailsDrawer(
                             metadata = detailsState.metadata,
                             detailsState = detailsState,
                             onRenameFaceClick = { renamingFace = it },
+                            onRescanPhoto = { startScan(false) },
                             listState = actionsListState
                         )
                     }
@@ -444,6 +594,68 @@ fun ViewerDetailsDrawer(
             },
             dismissButton = {
                 TextButton(onClick = { renamingFace = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showErrorDetailsDialog) {
+        val err = lastScanError ?: mediaIndexInfo?.errorMessage ?: "Unknown error"
+        FaceErrorDetailsDialog(
+            errorMessage = err,
+            engineName = factory.displayName,
+            onDismiss = { showErrorDetailsDialog = false }
+        )
+    }
+
+    if (showFaceChooserDialog && detectedFaces.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showFaceChooserDialog = false },
+            title = { Text("Select person to name") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    detectedFaces.forEach { face ->
+                        val isNamed = face.displayName.isNotBlank() && !face.displayName.equals("Unknown", ignoreCase = true)
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showFaceChooserDialog = false
+                                    renamingFace = face
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = if (isNamed) face.displayName else "Face #${face.faceIndex + 1}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    val w = (face.boxRight - face.boxLeft).toInt().coerceAtLeast(0)
+                                    val h = (face.boxBottom - face.boxTop).toInt().coerceAtLeast(0)
+                                    if (w > 0 && h > 0) {
+                                        Text(
+                                            text = "Bounds: ${w}×${h} px",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFaceChooserDialog = false }) {
                     Text("Cancel")
                 }
             }

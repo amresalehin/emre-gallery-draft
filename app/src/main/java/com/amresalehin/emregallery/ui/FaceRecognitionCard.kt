@@ -1,7 +1,16 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -10,16 +19,33 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.face.StageProgress
+import com.amresalehin.emregallery.face.StageState
 import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.roundToInt
+
+private fun formatSpeed(bytesPerSec: Long): String {
+    if (bytesPerSec <= 0L) return "-- KB/s"
+    val mbps = bytesPerSec.toDouble() / (1024 * 1024)
+    return if (mbps >= 1.0) String.format(Locale.US, "%.1f MB/s", mbps)
+    else String.format(Locale.US, "%.0f KB/s", bytesPerSec.toDouble() / 1024)
+}
+
+private fun formatEta(seconds: Long): String {
+    if (seconds <= 0L) return "--"
+    return if (seconds >= 60) "${seconds / 60}m ${seconds % 60}s" else "${seconds}s"
+}
 
 @Composable
 fun FaceRecognitionCard(
@@ -46,6 +72,7 @@ fun FaceRecognitionCard(
     onClusterFaces: (Float, String) -> Unit,
     onResetClusters: (String) -> Unit,
     onComparePipelines: (() -> Unit)? = null,
+    onRetryFailedFaces: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -69,10 +96,47 @@ fun FaceRecognitionCard(
         ((currentDownloadState.bytesReceived.toFloat() / estimatedTotal) * 100f).roundToInt().coerceIn(0, 99)
     } else 0
 
-    var modelMenuExpanded by remember { mutableStateOf(false) }
+    var isTelemetryExpanded by remember { mutableStateOf(false) }
+    var pendingEngineSwitch by remember { mutableStateOf<String?>(null) }
+    var showErrorLogDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
 
-    // Dangerous reset confirmation dialog
+    // Mutex confirmation dialog when attempting to switch engines during active download
+    if (pendingEngineSwitch != null) {
+        val targetEngine = pendingEngineSwitch!!
+        val targetEngineName = if (targetEngine == EnteFaceConstants.ENGINE_ID) "Ente" else "Buffalo_L"
+        val activeEngineName = if (isEnte) "Ente" else "Buffalo_L"
+        AlertDialog(
+            onDismissRequest = { pendingEngineSwitch = null },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("Cancel Active Download?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "A model download is currently active for $activeEngineName. Switching to $targetEngineName requires cancelling the current download. Do you want to cancel and switch?",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onCancelDownload(selectedEngineId)
+                        selectedEngineId = targetEngine
+                        FaceRecognitionSettings.setActiveEngine(context, targetEngine)
+                        pendingEngineSwitch = null
+                    }
+                ) {
+                    Text("Cancel Download & Switch")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingEngineSwitch = null }) {
+                    Text("Keep Downloading")
+                }
+            }
+        )
+    }
+
+    // Reset clusters confirmation dialog
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
@@ -115,6 +179,67 @@ fun FaceRecognitionCard(
         )
     }
 
+    // Error log dialog for viewing failed items
+    if (showErrorLogDialog) {
+        AlertDialog(
+            onDismissRequest = { showErrorLogDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Face Indexing Error Log", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 350.dp)
+                ) {
+                    val failures = currentFindingState.failedItems
+                    if (failures.isEmpty()) {
+                        Text(
+                            "${currentFindingState.failedCount} items encountered errors during indexing.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(failures) { (uri, reason) ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            text = uri.substringAfterLast('/'),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = reason,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.error
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showErrorLogDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
     Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = cardBackground),
@@ -127,7 +252,7 @@ fun FaceRecognitionCard(
                 .padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header: Icon, Face Recognition Title, Start/Pause Action
+            // Header: Icon, Face Recognition Title, Start/Pause Action, Expand/Collapse
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -162,12 +287,13 @@ fun FaceRecognitionCard(
                 }
 
                 // Action Start / Pause / Resume button
+                // Action Guarding: Guarded strictly when model is missing/downloading
+                val canStartIndexing = isModelInstalled && !currentDownloadState.isDownloading && countsReady && totalPhotos > 0
                 Button(
                     onClick = { onToggleFaceFinding(selectedEngineId) },
-                    enabled = countsReady && totalPhotos > 0 && !currentDownloadState.isDownloading &&
-                            (currentFindingState.isRunning || currentFindingState.processed < totalPhotos),
+                    enabled = canStartIndexing && (currentFindingState.isRunning || currentFindingState.processed < totalPhotos),
                     shape = RoundedCornerShape(12.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     Icon(
                         when {
@@ -183,7 +309,7 @@ fun FaceRecognitionCard(
                         when {
                             currentFindingState.isRunning && !currentFindingState.isPaused -> "Pause"
                             currentFindingState.isRunning && currentFindingState.isPaused -> "Resume"
-                            currentFindingState.processed >= totalPhotos && totalPhotos > 0 -> "Complete"
+                            currentFindingState.processed >= totalPhotos && totalPhotos > 0 -> "Done"
                             else -> "Start"
                         },
                         fontWeight = FontWeight.SemiBold
@@ -191,7 +317,7 @@ fun FaceRecognitionCard(
                 }
 
                 if (currentFindingState.isRunning) {
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(4.dp))
                     IconButton(
                         onClick = { onStopFaceFinding(selectedEngineId) },
                         modifier = Modifier.size(36.dp)
@@ -204,38 +330,329 @@ fun FaceRecognitionCard(
                         )
                     }
                 }
+
+                Spacer(Modifier.width(2.dp))
+                IconButton(
+                    onClick = { isTelemetryExpanded = !isTelemetryExpanded },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        if (isTelemetryExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isTelemetryExpanded) "Collapse telemetry" else "Expand telemetry",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
-            // Engine Selection Switcher Chips
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = !isEnte,
-                    onClick = {
-                        selectedEngineId = BuffaloLFaceEngine.ENGINE_ID
-                        FaceRecognitionSettings.setActiveEngine(context, BuffaloLFaceEngine.ENGINE_ID)
-                    },
-                    label = { Text("Buffalo_L (Default)") },
-                    leadingIcon = if (!isEnte) {
-                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    } else null
+            // Engine Selection Catalog Chips with Concurrency & Mutex
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Recognition Engine",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                FilterChip(
-                    selected = isEnte,
-                    onClick = {
-                        selectedEngineId = EnteFaceConstants.ENGINE_ID
-                        FaceRecognitionSettings.setActiveEngine(context, EnteFaceConstants.ENGINE_ID)
-                    },
-                    label = { Text("Ente (YOLO5Face)") },
-                    leadingIcon = if (isEnte) {
-                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    } else null
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val isDownloadingActive = currentDownloadState.isDownloading
+                    FilterChip(
+                        selected = !isEnte,
+                        onClick = {
+                            if (isEnte) {
+                                if (isDownloadingActive) {
+                                    pendingEngineSwitch = BuffaloLFaceEngine.ENGINE_ID
+                                } else {
+                                    selectedEngineId = BuffaloLFaceEngine.ENGINE_ID
+                                    FaceRecognitionSettings.setActiveEngine(context, BuffaloLFaceEngine.ENGINE_ID)
+                                }
+                            }
+                        },
+                        label = {
+                            Column {
+                                Text("Buffalo_L", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (engineState.isBuffaloLInstalled) "Installed · 288 MB" else "Not downloaded · 288 MB",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        },
+                        leadingIcon = if (!isEnte) {
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null,
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = isEnte,
+                        onClick = {
+                            if (!isEnte) {
+                                if (isDownloadingActive) {
+                                    pendingEngineSwitch = EnteFaceConstants.ENGINE_ID
+                                } else {
+                                    selectedEngineId = EnteFaceConstants.ENGINE_ID
+                                    FaceRecognitionSettings.setActiveEngine(context, EnteFaceConstants.ENGINE_ID)
+                                }
+                            }
+                        },
+                        label = {
+                            Column {
+                                Text("Ente", fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (engineState.isEnteInstalled) "Installed · ~25 MB" else "Not downloaded · ~25 MB",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        },
+                        leadingIcon = if (isEnte) {
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
-            // Progress stats & linear progress bar
+            // --- 2. ENGINE LIFECYCLE MANAGEMENT BANNERS ---
+
+            // State A: Pre-Download State (Model missing)
+            if (!isModelInstalled && !currentDownloadState.isDownloading) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.CloudDownload,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Model Download Required",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    if (isEnte) "Download YOLO5Face & MobileFaceNet weights (~25 MB) to enable scanning."
+                                    else "Download Buffalo_L ArcFace ONNX model pack (288 MB) to enable scanning.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = { onDownloadModel(true, selectedEngineId) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Download ${if (isEnte) "Ente Models (~25 MB)" else "Buffalo_L Model (288 MB)"}")
+                        }
+                    }
+                }
+            }
+
+            // State B: Download & Verification Lifecycle
+            if (currentDownloadState.isDownloading) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    when (currentDownloadState.stage.lowercase(Locale.ROOT)) {
+                                        "connecting" -> "Connecting…"
+                                        "verifying" -> "Verifying SHA-256 Checksum…"
+                                        "extracting" -> "Extracting Archive…"
+                                        "installing" -> "Installing Weights…"
+                                        "ready" -> "Installation Complete"
+                                        else -> "Downloading ${if (isEnte) "Ente" else "Buffalo_L"}…"
+                                    },
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Text(
+                                "$downloadPercent%",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        LinearProgressIndicator(
+                            progress = { (downloadPercent / 100f).coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val transferredStr = formatBytes(currentDownloadState.bytesReceived)
+                            val totalStr = formatBytes(currentDownloadState.totalBytes.takeIf { it > 0 } ?: if (isEnte) 25L * 1024 * 1024 else 288L * 1024 * 1024)
+                            val speedStr = formatSpeed(currentDownloadState.speedBytesPerSec)
+                            val etaStr = formatEta(currentDownloadState.etaSeconds)
+
+                            Text(
+                                "$transferredStr / $totalStr · $speedStr",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Text(
+                                "ETA: $etaStr",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(
+                                onClick = { onCancelDownload(selectedEngineId) },
+                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Cancel Download")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Download Failure / Verification Error Banner with Retry
+            val modelFailure = if (isEnte) engineState.enteModelFailure else engineState.primaryModelFailure
+            val downloadError = currentDownloadState.error
+            val displayError = downloadError ?: (if (!isModelInstalled) modelFailure else null)
+
+            if (displayError != null && !currentDownloadState.isDownloading) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = displayError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = { onDownloadModel(true, selectedEngineId) },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text("Retry")
+                        }
+                    }
+                }
+            }
+
+            // State C: Installed confirmation chip
+            if (isModelInstalled && !currentDownloadState.isDownloading && displayError == null) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Verified,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "${if (isEnte) "Ente" else "Buffalo_L"} model verified and ready",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // --- 3. FACE INDEXING OVERALL PIPELINE TELEMETRY ---
+
+            // Active processing target filename
+            if (currentFindingState.isRunning && currentFindingState.currentItemName.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Image,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Analyzing: ${currentFindingState.currentItemName}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            // Aggregate metrics & linear progress bar
             val successfulCount = (currentFindingState.processed - currentFindingState.failedCount).coerceAtLeast(0)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
@@ -277,16 +694,12 @@ fun FaceRecognitionCard(
                 )
             }
 
-            // Model failure / download error banner with retry option
-            val modelFailure = if (isEnte) engineState.enteModelFailure else engineState.primaryModelFailure
-            val downloadError = currentDownloadState.error
-            val displayError = downloadError ?: (if (!isModelInstalled) modelFailure else null)
-
-            if (displayError != null) {
+            // Post-execution error log banner with dedicated actions
+            if (currentFindingState.failedCount > 0 && !currentFindingState.isRunning) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f)),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -294,29 +707,87 @@ fun FaceRecognitionCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            Icons.Default.ErrorOutline,
+                            Icons.Default.Warning,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = displayError,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (!currentDownloadState.isDownloading) {
-                            TextButton(
-                                onClick = { onDownloadModel(true, selectedEngineId) },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "${currentFindingState.failedCount} items failed to scan",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+
+                        TextButton(
+                            onClick = { showErrorLogDialog = true },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("View Log", style = MaterialTheme.typography.labelMedium)
+                        }
+
+                        if (onRetryFailedFaces != null) {
+                            Spacer(Modifier.width(4.dp))
+                            FilledTonalButton(
+                                onClick = { onRetryFailedFaces(selectedEngineId) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                             ) {
-                                Text("Retry")
+                                Text("Retry Failed", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
                 }
             }
+
+            // --- 3.2 GRANULAR STAGE BREAKDOWN (EXPANDED PROGRESS CARD) ---
+            AnimatedVisibility(
+                visible = isTelemetryExpanded,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .surfaceBackground(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        "Sub-Stage Breakdown (${if (isEnte) "Ente Pipeline" else "Buffalo_L Pipeline"})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    // Sub-stage 1: Face Detection
+                    StageRow(
+                        stageName = if (isEnte) "Face Detection (YOLO5Face)" else "Face Detection (SCRFD-10GF)",
+                        stage = currentFindingState.detectionStage,
+                        totalItems = totalPhotos
+                    )
+
+                    // Sub-stage 2: Embedding Generation
+                    StageRow(
+                        stageName = if (isEnte) "Embedding Generation (MobileFaceNet)" else "Embedding Generation (ArcFace R50)",
+                        stage = currentFindingState.embeddingStage,
+                        totalItems = totalPhotos
+                    )
+
+                    // Sub-stage 3: Clustering (engine-conditional visibility)
+                    StageRow(
+                        stageName = if (isEnte) "Linear Incremental Clustering" else "Centroid Group Clustering",
+                        stage = currentFindingState.clusteringStage,
+                        totalItems = totalPhotos
+                    )
+                }
+            }
+
+            // --- TUNING SLIDERS ---
 
             // Slider 1: Detection confidence
             Row(
@@ -428,130 +899,6 @@ fun FaceRecognitionCard(
                 )
             }
 
-            // Row 4: Model Selector, Download State & Cancel Action
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Default.Psychology,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(Modifier.width(14.dp))
-                Text(
-                    "Model files",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-
-                if (currentDownloadState.isDownloading) {
-                    FilledTonalButton(
-                        onClick = { onCancelDownload(selectedEngineId) },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer
-                        ),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Cancel", style = MaterialTheme.typography.labelMedium)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                }
-
-                Box {
-                    Surface(
-                        onClick = { modelMenuExpanded = true },
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                when {
-                                    currentDownloadState.isDownloading -> "Downloading $downloadPercent%"
-                                    isModelInstalled -> if (isEnte) "Ente Installed (~25 MB)" else "Buffalo_L Installed"
-                                    else -> if (isEnte) "Download Ente (~25 MB)" else "Download Buffalo_L (288 MB)"
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Icon(
-                                Icons.Default.KeyboardArrowDown,
-                                contentDescription = "Select model",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = modelMenuExpanded,
-                        onDismissRequest = { modelMenuExpanded = false },
-                        modifier = Modifier.widthIn(min = 240.dp, max = 300.dp)
-                    ) {
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Text(
-                                        if (isEnte) "Ente YOLO5Face + MobileFaceNet" else "Buffalo_L (InsightFace)",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        if (isModelInstalled) "Installed on device"
-                                        else if (isEnte) "Download models (~25 MB)"
-                                        else "Download model (288 MB)",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            },
-                            trailingIcon = {
-                                if (currentDownloadState.isDownloading) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                                } else if (isModelInstalled) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                                } else {
-                                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                                }
-                            },
-                            onClick = {
-                                modelMenuExpanded = false
-                                if (!isModelInstalled && !currentDownloadState.isDownloading) {
-                                    onDownloadModel(true, selectedEngineId)
-                                }
-                            }
-                        )
-                        if (currentDownloadState.isDownloading) {
-                            DropdownMenuItem(
-                                text = { Text("Cancel Download", color = MaterialTheme.colorScheme.error) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                                },
-                                onClick = {
-                                    modelMenuExpanded = false
-                                    onCancelDownload(selectedEngineId)
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
             // Bottom Actions: Clustering & Rescan
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -584,7 +931,7 @@ fun FaceRecognitionCard(
 
                 OutlinedButton(
                     onClick = { onRescanRequested(selectedEngineId) },
-                    enabled = countsReady && totalPhotos > 0 && !currentFindingState.isRunning,
+                    enabled = countsReady && totalPhotos > 0 && !currentFindingState.isRunning && isModelInstalled,
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -622,3 +969,95 @@ fun FaceRecognitionCard(
         }
     }
 }
+
+@Composable
+private fun StageRow(
+    stageName: String,
+    stage: StageProgress,
+    totalItems: Int,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                when (stage.state) {
+                    StageState.RUNNING -> CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                    StageState.COMPLETED -> Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                    StageState.FAILED -> Icon(Icons.Default.Cancel, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                    StageState.PAUSED -> Icon(Icons.Default.PauseCircle, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(14.dp))
+                    StageState.PENDING -> Icon(Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f), modifier = Modifier.size(14.dp))
+                }
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    stageName,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = when (stage.state) {
+                    StageState.RUNNING -> MaterialTheme.colorScheme.primaryContainer
+                    StageState.COMPLETED -> MaterialTheme.colorScheme.secondaryContainer
+                    StageState.FAILED -> MaterialTheme.colorScheme.errorContainer
+                    StageState.PAUSED -> MaterialTheme.colorScheme.tertiaryContainer
+                    StageState.PENDING -> MaterialTheme.colorScheme.surfaceVariant
+                }
+            ) {
+                Text(
+                    text = stage.state.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        val total = if (stage.total > 0) stage.total else totalItems
+        val pct = if (total > 0) ((stage.processed.toFloat() / total) * 100f).roundToInt().coerceIn(0, 100)
+                  else if (stage.state == StageState.COMPLETED) 100 else 0
+
+        LinearProgressIndicator(
+            progress = { (pct / 100f).coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp)),
+            color = if (stage.state == StageState.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                "${stage.processed} / $total processed",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "$pct%",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+private fun Modifier.surfaceBackground(color: Color): Modifier = this.then(
+    Modifier.clip(RoundedCornerShape(14.dp)).then(
+        Modifier.drawSurface(color)
+    )
+)
+
+private fun Modifier.drawSurface(color: Color): Modifier = this.then(
+    Modifier.drawBehind { drawRect(color) }
+)

@@ -49,11 +49,30 @@ import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.testTag
 import kotlin.math.abs
 
 enum class DetailDrawerTab {
     OVERVIEW, ACTIONS
 }
+
+enum class ViewerFaceState {
+    NOT_INDEXED,
+    IN_PROGRESS,
+    COMPLETED_FACES_FOUND,
+    COMPLETED_NO_FACES,
+    MODEL_MISSING,
+    FAILED
+}
+
+data class ViewerFaceUiState(
+    val state: ViewerFaceState = ViewerFaceState.NOT_INDEXED,
+    val faces: List<DetectedMediaFace> = emptyList(),
+    val progressPhase: String? = null,
+    val errorMessage: String? = null,
+    val engineName: String = "",
+    val engineId: String = ""
+)
 
 @Composable
 fun ViewerButton(icon: ImageVector, label: String, onClick: () -> Unit) {
@@ -252,6 +271,361 @@ fun DetailDrawerHeader(
     }
 }
 
+@Composable
+fun ViewerFaceContainer(
+    faceUiState: ViewerFaceUiState,
+    onScanThisPhoto: () -> Unit,
+    onCancelScan: () -> Unit,
+    onRescanPhoto: () -> Unit,
+    onRescanLowThreshold: () -> Unit,
+    onInstallModel: () -> Unit,
+    onRetryScan: () -> Unit,
+    onViewErrorDetails: () -> Unit,
+    onEditTagOrPerson: () -> Unit,
+    onFaceClick: ((DetectedMediaFace) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    when (faceUiState.state) {
+        ViewerFaceState.NOT_INDEXED -> {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Info,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Face indexing has not been run for this item.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Button(
+                        onClick = onScanThisPhoto,
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("scan_this_photo_button")
+                    ) {
+                        Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Scan This Photo")
+                    }
+                }
+            }
+        }
+        ViewerFaceState.IN_PROGRESS -> {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.5.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = faceUiState.progressPhase ?: "Scanning photo...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onCancelScan,
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("cancel_scan_button")
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Cancel Scan")
+                    }
+                }
+            }
+        }
+        ViewerFaceState.COMPLETED_FACES_FOUND -> {
+            Column(
+                modifier = modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    faceUiState.faces.forEach { face ->
+                        OverviewFacePortrait(
+                            face = face,
+                            onClick = { onFaceClick?.invoke(face) }
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = onRescanPhoto,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("rescan_photo_button")
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Re-scan Photo", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    OutlinedButton(
+                        onClick = onEditTagOrPerson,
+                        modifier = Modifier
+                            .weight(1f)
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("edit_tag_add_person_button")
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Edit Tag / Add Person", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+        }
+        ViewerFaceState.COMPLETED_NO_FACES -> {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                modifier = modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.Face,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "No faces detected in this media item.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = onRescanLowThreshold,
+                            modifier = Modifier
+                                .weight(1f)
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("rescan_low_threshold_button")
+                        ) {
+                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Re-scan with Low Threshold", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        OutlinedButton(
+                            onClick = onRescanPhoto,
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("rescan_photo_button")
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Force Re-scan")
+                        }
+                    }
+                }
+            }
+        }
+        ViewerFaceState.MODEL_MISSING -> {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
+                modifier = modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = "Face model files missing for ${faceUiState.engineName.ifBlank { "active engine" }}.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Button(
+                        onClick = onInstallModel,
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("install_model_button")
+                    ) {
+                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Install Model")
+                    }
+                }
+            }
+        }
+        ViewerFaceState.FAILED -> {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                modifier = modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.ErrorOutline,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Text(
+                            text = faceUiState.errorMessage ?: "Face indexing failed for this photo.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilledTonalButton(
+                            onClick = onRetryScan,
+                            modifier = Modifier
+                                .weight(1f)
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("retry_scan_button")
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Retry Scan")
+                        }
+                        OutlinedButton(
+                            onClick = onViewErrorDetails,
+                            modifier = Modifier
+                                .weight(1f)
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("view_error_details_button")
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("View Error Details")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FaceErrorDetailsDialog(
+    errorMessage: String,
+    engineName: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Error Details")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Engine: $engineName",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+            ) {
+                Text("Dismiss")
+            }
+        }
+    )
+}
+
 /**
  * Overview Tab content:
  * 1. Albums (membership chips + add control in header, minimal empty state if none)
@@ -275,6 +649,23 @@ fun OverviewTabContent(
     onScanPeople: () -> Unit = {},
     isScanningPeople: Boolean = false,
     faceScanError: String? = null,
+    faceUiState: ViewerFaceUiState = ViewerFaceUiState(
+        state = if (isScanningPeople) ViewerFaceState.IN_PROGRESS
+        else if (faceScanError != null) ViewerFaceState.FAILED
+        else if (detectedFaces.isNotEmpty()) ViewerFaceState.COMPLETED_FACES_FOUND
+        else ViewerFaceState.NOT_INDEXED,
+        faces = detectedFaces,
+        errorMessage = faceScanError
+    ),
+    onScanThisPhoto: () -> Unit = onScanPeople,
+    onCancelScan: () -> Unit = {},
+    onRescanPhoto: () -> Unit = onScanPeople,
+    onRescanLowThreshold: () -> Unit = onScanPeople,
+    onInstallModel: () -> Unit = {},
+    onRetryScan: () -> Unit = onScanPeople,
+    onViewErrorDetails: () -> Unit = {},
+    onEditTagOrPerson: () -> Unit = {},
+    onFaceClick: ((DetectedMediaFace) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -469,7 +860,7 @@ fun OverviewTabContent(
             }
         }
 
-        // 3. People Section: shows detected faces, or clean "Scan for People" action when not scanned
+        // 3. People Section: 6 deterministic states with actionable controls
         item(key = "overview_people") {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
@@ -483,105 +874,34 @@ fun OverviewTabContent(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    if (hasPeople) {
-                        IconButton(
-                            onClick = onScanPeople,
-                            enabled = !isScanningPeople,
-                            modifier = Modifier.size(28.dp)
+                    if (faceUiState.engineName.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                         ) {
-                            if (isScanningPeople) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Re-scan faces",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+                            Text(
+                                text = faceUiState.engineName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
                         }
                     }
                 }
-                if (hasPeople) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        detectedFaces.forEach { face ->
-                            OverviewFacePortrait(face = face)
-                        }
-                    }
-                } else {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
-                        modifier = Modifier.clickable(enabled = !isScanningPeople) { onScanPeople() }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (isScanningPeople) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = "Scanning...",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Default.Face,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = "Scan for People",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
-                }
-                if (faceScanError != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.ErrorOutline,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = faceScanError,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(
-                            onClick = onScanPeople,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("Retry")
-                        }
-                    }
-                }
+
+                ViewerFaceContainer(
+                    faceUiState = faceUiState,
+                    onScanThisPhoto = onScanThisPhoto,
+                    onCancelScan = onCancelScan,
+                    onRescanPhoto = onRescanPhoto,
+                    onRescanLowThreshold = onRescanLowThreshold,
+                    onInstallModel = onInstallModel,
+                    onRetryScan = onRetryScan,
+                    onViewErrorDetails = onViewErrorDetails,
+                    onEditTagOrPerson = onEditTagOrPerson,
+                    onFaceClick = onFaceClick
+                )
             }
         }
 
@@ -755,6 +1075,7 @@ fun OverviewTabContent(
 @Composable
 fun OverviewFacePortrait(
     face: DetectedMediaFace,
+    onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -777,22 +1098,28 @@ fun OverviewFacePortrait(
 
     val displayName = face.displayName.trim()
     val isNamed = displayName.isNotBlank() && !displayName.equals("Unknown", ignoreCase = true)
+    val width = kotlin.math.max(0, (face.boxRight - face.boxLeft).toInt())
+    val height = kotlin.math.max(0, (face.boxBottom - face.boxTop).toInt())
+    val boxText = if (width > 0 && height > 0) "${width}×${height}" else null
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier.widthIn(min = 68.dp, max = 80.dp)
+        modifier = modifier
+            .widthIn(min = 68.dp, max = 84.dp)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 4.dp)
     ) {
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
             modifier = Modifier.size(64.dp)
         ) {
             val crop = faceCrop
             if (crop != null) {
                 Image(
                     bitmap = crop.asImageBitmap(),
-                    contentDescription = if (isNamed) displayName else null,
+                    contentDescription = if (isNamed) displayName else "Face #${face.faceIndex + 1}",
                     modifier = Modifier.fillMaxSize().clip(CircleShape),
                     contentScale = ContentScale.Crop
                 )
@@ -800,15 +1127,22 @@ fun OverviewFacePortrait(
                 FaceAvatarIllustration(modifier = Modifier.fillMaxSize())
             }
         }
-        if (isNamed) {
-            Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = if (isNamed) displayName else "Face #${face.faceIndex + 1}",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (isNamed) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (isNamed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+        if (boxText != null) {
             Text(
-                text = displayName,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface,
+                text = boxText,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
             )
         }
@@ -901,6 +1235,8 @@ fun ActionsTabContent(
     onAddTo: (() -> Unit)? = null,
     onAddLocationClick: (() -> Unit)? = null,
     onAddTagClick: (() -> Unit)? = null,
+    onRescanPhoto: (() -> Unit)? = null,
+    onAddPersonClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
 ) {
@@ -922,12 +1258,28 @@ fun ActionsTabContent(
         if (hasPeople) {
             item(key = "actions_people") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        text = "People",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "People",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        if (onRescanPhoto != null) {
+                            TextButton(
+                                onClick = onRescanPhoto,
+                                modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Re-scan")
+                            }
+                        }
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
