@@ -883,23 +883,18 @@ private fun ZoomableMediaItem(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Video viewing intentionally starts on black while ExoPlayer prepares its
-            // output surface. The grid poster remains a grid-only thumbnail; don't leave a
-            // stale poster behind the player during buffering or the first-frame handoff.
-            if (isVideo) {
-                Box(Modifier.fillMaxSize().background(Color.Black))
-            } else {
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = item.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = if (hasTargetBounds) {
-                        transitionContentScale(transitionProgress)
-                    } else {
-                        ContentScale.Fit
-                    }
-                )
-            }
+            // Keep the cached frame-zero thumbnail underneath the player during preparation.
+            // The player surface stays transparent until its first decoded frame, preventing a black still.
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = item.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = if (hasTargetBounds) {
+                    transitionContentScale(transitionProgress)
+                } else {
+                    ContentScale.Fit
+                }
+            )
 
             // Video Surface when current item is a video
             if (isVideo && videoState != null) {

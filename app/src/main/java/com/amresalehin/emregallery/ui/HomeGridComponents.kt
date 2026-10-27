@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.ui
 
 import androidx.compose.animation.core.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -136,6 +137,7 @@ fun HomeFastScrollbar(
     val density = androidx.compose.ui.platform.LocalDensity.current
     val minThumbPx = remember(density) { with(density) { 36.dp.toPx() } }
 
+    // Read frequently-changing state in the drawing phase rather than invalidating composition.
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -573,7 +575,7 @@ fun MosaicMediaItem(
     val isPressed by interactionSource.collectIsPressedAsState()
     val itemScale by animateFloatAsState(
         targetValue = if (isPressed) 0.94f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        animationSpec = tween(durationMillis = 90),
         label = "mosaic_press_scale"
     )
 
@@ -665,7 +667,7 @@ fun MediaGridItem(
     val isPressed by interactionSource.collectIsPressedAsState()
     val itemScale by animateFloatAsState(
         targetValue = if (isPressed) 0.94f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        animationSpec = tween(durationMillis = 90),
         label = "thumb_press_scale"
     )
 
