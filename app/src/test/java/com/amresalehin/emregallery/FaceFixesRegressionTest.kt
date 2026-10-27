@@ -1,6 +1,8 @@
 package com.amresalehin.emregallery
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.RectF
 import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.face.*
@@ -297,5 +299,114 @@ class FaceFixesRegressionTest {
 
         assertEquals("Buffalo_L failed count should only count its own failures", 1, buffaloFailed)
         assertEquals("Ente failed count should only count its own failures", 1, enteFailed)
+    }
+
+    @Test
+    fun testPruneStaleFacesWithGaps() {
+        val photoUri = "content://media/photo_with_gaps"
+        val engineId = BuffaloLFaceEngine.ENGINE_ID
+        val prov = EmbeddingProvenance(engineId, "w600k_r50", 512)
+        val emb = createSyntheticEmbedding(1)
+
+        store.addFace(photoUri, 0, emb, bounds = RectF(10f, 10f, 50f, 50f), provenance = prov)
+        store.addFace(photoUri, 1, emb, bounds = RectF(60f, 10f, 100f, 50f), provenance = prov)
+        store.addFace(photoUri, 2, emb, bounds = RectF(110f, 10f, 150f, 50f), provenance = prov)
+
+        assertEquals(3, store.facesForMedia(photoUri, engineId).size)
+
+        // Rescan kept only face 0 and face 2 (e.g., face 1 was filtered out as too small)
+        store.pruneStaleFacesForMedia(photoUri, engineId, keptIndices = listOf(0, 2))
+
+        val facesAfter = store.facesForMedia(photoUri, engineId)
+        assertEquals("Faces 0 and 2 must be preserved, while face 1 is deleted", 2, facesAfter.size)
+        val indices = facesAfter.map { it.faceIndex }.toSet()
+        assertTrue(indices.contains(0))
+        assertTrue(indices.contains(2))
+        assertFalse(indices.contains(1))
+    }
+
+    @Test
+    fun testCascadingDeletionForMedia() {
+        val photoUri = "content://media/photo_to_delete"
+        val engineId = BuffaloLFaceEngine.ENGINE_ID
+        val prov = EmbeddingProvenance(engineId, "w600k_r50", 512)
+        val emb = createSyntheticEmbedding(2)
+
+        store.addFace(photoUri, 0, emb, bounds = RectF(10f, 10f, 50f, 50f), provenance = prov)
+        store.markMediaIndexed(photoUri, 1, engineId)
+
+        assertEquals(1, store.facesForMedia(photoUri, engineId).size)
+        assertEquals(1, store.indexedMediaCount(listOf(photoUri), engineId))
+
+        // Cascade delete
+        store.deleteMediaCompletely(listOf(photoUri))
+
+        assertEquals(0, store.facesForMedia(photoUri, engineId).size)
+        assertEquals(0, store.indexedMediaCount(listOf(photoUri), engineId))
+    }
+
+    @Test
+    fun testBuffaloModelUpdatePreservesPersonAndCover() {
+        val photoUri = "content://media/photo_model_upgrade"
+        val engineId = BuffaloLFaceEngine.ENGINE_ID
+        val provV1 = EmbeddingProvenance(engineId, "w600k_r50_v1", 512)
+        val embV1 = createSyntheticEmbedding(3)
+
+        val clusterId = store.addFace(photoUri, 0, embV1, bounds = RectF(10f, 10f, 50f, 50f), provenance = provV1)
+        val people = store.personSummaries(engineId = engineId)
+        assertEquals(1, people.size)
+        val personId = people.first().id
+        store.renamePerson(personId, "Charlie")
+        store.setPersonCover(personId, photoUri)
+
+        // Upgrade model to v2 and re-ingest face
+        val provV2 = EmbeddingProvenance(engineId, "w600k_r50_v2", 512)
+        val embV2 = createSyntheticEmbedding(4) // updated vector
+        val updatedClusterId = store.addFace(photoUri, 0, embV2, bounds = RectF(12f, 12f, 52f, 52f), provenance = provV2)
+
+        val peopleAfter = store.personSummaries(engineId = engineId)
+        val charlie = peopleAfter.firstOrNull { it.id == personId }
+        assertNotNull("Person record Charlie must be preserved across model version updates", charlie)
+        assertEquals("Charlie", charlie!!.displayName)
+        assertEquals(photoUri, charlie.sampleUri)
+    }
+
+    @Test
+    fun testLaplacianVarianceCalculations() {
+        // Uniform bitmap: variance should be 0
+        val uniformBitmap = Bitmap.createBitmap(20, 20, Bitmap.Config.ARGB_8888)
+        uniformBitmap.eraseColor(Color.GRAY)
+        val uniformVar = FaceQualityMetrics.calculateLaplacianVariance(uniformBitmap)
+        assertEquals(0f, uniformVar, 0.001f)
+
+        // Checkerboard / high frequency pattern: variance should be > 0
+        val patternBitmap = Bitmap.createBitmap(20, 20, Bitmap.Config.ARGB_8888)
+        for (y in 0 until 20) {
+            for (x in 0 until 20) {
+                val color = if ((x + y) % 2 == 0) Color.BLACK else Color.WHITE
+                patternBitmap.setPixel(x, y, color)
+            }
+        }
+        val patternVar = FaceQualityMetrics.calculateLaplacianVariance(patternBitmap)
+        assertTrue("High contrast edge pattern must have substantial Laplacian variance", patternVar > 100f)
+    }
+
+    @Test
+    fun testEnteFaceAligner5PointSimilarity() {
+        val testBitmap = Bitmap.createBitmap(200, 200, Bitmap.Config.ARGB_8888)
+        testBitmap.eraseColor(Color.WHITE)
+        val landmarks = floatArrayOf(
+            70f, 80f,   // Left eye
+            130f, 80f,  // Right eye
+            100f, 110f, // Nose
+            75f, 140f,  // Mouth Left
+            125f, 140f  // Mouth Right
+        )
+        val bounds = RectF(50f, 50f, 150f, 160f)
+        val aligned = EnteFaceAligner.align(testBitmap, landmarks, bounds)
+
+        assertNotNull(aligned)
+        assertEquals(112, aligned.width)
+        assertEquals(112, aligned.height)
     }
 }

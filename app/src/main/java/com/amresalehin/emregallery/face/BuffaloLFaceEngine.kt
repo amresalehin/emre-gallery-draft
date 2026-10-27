@@ -47,95 +47,190 @@ class BuffaloLFaceEngine private constructor(
 
     private data class FaceDetection(val bounds: RectF, val landmarks: FloatArray, val score: Float)
 
-    override fun detectFaces(uri: Uri): List<RawFaceDetection> {
-        val bitmap = decodeOrientedBitmap(uri)
-            ?: error("Could not decode image at URI: $uri")
-        return try {
-            val detections = detect(bitmap)
-            detections.mapIndexedNotNull { index, face ->
-                if (face.bounds.width() < MIN_FACE_SIZE || face.bounds.height() < MIN_FACE_SIZE) {
-                    null
-                } else {
-                    RawFaceDetection(index, RectF(face.bounds), face.landmarks, face.score)
-                }
+    private data class DecodedImage(val bitmap: Bitmap, val origW: Int, val origH: Int)
+    @Volatile private var cachedDecoded: Pair<Uri, DecodedImage>? = null
+
+    private fun getOrDecode(uri: Uri): DecodedImage? {
+        synchronized(this) {
+            val cached = cachedDecoded
+            if (cached != null && cached.first == uri && !cached.second.bitmap.isRecycled) {
+                return cached.second
             }
-        } finally {
-            bitmap.recycle()
+        }
+        val img = decodeOrientedImage(uri) ?: return null
+        synchronized(this) {
+            cachedDecoded?.second?.bitmap?.let { if (!it.isRecycled) it.recycle() }
+            cachedDecoded = uri to img
+        }
+        return img
+    }
+
+    private fun releaseDecoded(uri: Uri) {
+        synchronized(this) {
+            val cached = cachedDecoded
+            if (cached != null && cached.first == uri) {
+                if (!cached.second.bitmap.isRecycled) cached.second.bitmap.recycle()
+                cachedDecoded = null
+            }
+        }
+    }
+
+    override fun detectFaces(uri: Uri): List<RawFaceDetection> {
+        val decoded = getOrDecode(uri)
+            ?: error("Could not decode image at URI: $uri")
+        val detections = detect(decoded.bitmap)
+        val scaleX = decoded.origW.toFloat() / decoded.bitmap.width.toFloat().coerceAtLeast(1f)
+        val scaleY = decoded.origH.toFloat() / decoded.bitmap.height.toFloat().coerceAtLeast(1f)
+
+        val filtered = detections.filter {
+            val w = it.bounds.width() * scaleX
+            val h = it.bounds.height() * scaleY
+            w >= MIN_FACE_SIZE && h >= MIN_FACE_SIZE
+        }
+
+        return filtered.mapIndexed { index, face ->
+            val origBounds = RectF(
+                face.bounds.left * scaleX,
+                face.bounds.top * scaleY,
+                face.bounds.right * scaleX,
+                face.bounds.bottom * scaleY
+            )
+            val origLandmarks = FloatArray(face.landmarks.size)
+            for (k in 0 until face.landmarks.size / 2) {
+                origLandmarks[k * 2] = face.landmarks[k * 2] * scaleX
+                origLandmarks[k * 2 + 1] = face.landmarks[k * 2 + 1] * scaleY
+            }
+            RawFaceDetection(index, origBounds, origLandmarks, face.score)
         }
     }
 
     override fun embedFaces(uri: Uri, detections: List<RawFaceDetection>): List<DetectedFaceEmbedding> {
-        if (detections.isEmpty()) return emptyList()
-        val bitmap = decodeOrientedBitmap(uri)
+        if (detections.isEmpty()) {
+            releaseDecoded(uri)
+            return emptyList()
+        }
+        val decoded = getOrDecode(uri)
             ?: error("Could not decode image at URI: $uri")
         return try {
+            val bitmap = decoded.bitmap
+            val scaleDownX = bitmap.width.toFloat() / decoded.origW.toFloat().coerceAtLeast(1f)
+            val scaleDownY = bitmap.height.toFloat() / decoded.origH.toFloat().coerceAtLeast(1f)
+
             detections.mapIndexedNotNull { _, raw ->
                 if (raw.bounds.width() < MIN_FACE_SIZE || raw.bounds.height() < MIN_FACE_SIZE) {
                     return@mapIndexedNotNull null
                 }
-                val landmarks = raw.landmarks ?: floatArrayOf(
-                    raw.bounds.left + raw.bounds.width() * 0.32f, raw.bounds.top + raw.bounds.height() * 0.38f,
-                    raw.bounds.left + raw.bounds.width() * 0.68f, raw.bounds.top + raw.bounds.height() * 0.38f,
-                    raw.bounds.centerX(), raw.bounds.top + raw.bounds.height() * 0.56f,
-                    raw.bounds.left + raw.bounds.width() * 0.38f, raw.bounds.top + raw.bounds.height() * 0.73f,
-                    raw.bounds.left + raw.bounds.width() * 0.62f, raw.bounds.top + raw.bounds.height() * 0.73f
+                val localBounds = RectF(
+                    raw.bounds.left * scaleDownX,
+                    raw.bounds.top * scaleDownY,
+                    raw.bounds.right * scaleDownX,
+                    raw.bounds.bottom * scaleDownY
                 )
-                val aligned = alignFace(bitmap, landmarks)
+                val rawLm = raw.landmarks
+                val localLandmarks = if (rawLm != null && rawLm.size >= 10) {
+                    FloatArray(rawLm.size) { i ->
+                        if (i % 2 == 0) rawLm[i] * scaleDownX else rawLm[i] * scaleDownY
+                    }
+                } else {
+                    floatArrayOf(
+                        localBounds.left + localBounds.width() * 0.32f, localBounds.top + localBounds.height() * 0.38f,
+                        localBounds.left + localBounds.width() * 0.68f, localBounds.top + localBounds.height() * 0.38f,
+                        localBounds.centerX(), localBounds.top + localBounds.height() * 0.56f,
+                        localBounds.left + localBounds.width() * 0.38f, localBounds.top + localBounds.height() * 0.73f,
+                        localBounds.left + localBounds.width() * 0.62f, localBounds.top + localBounds.height() * 0.73f
+                    )
+                }
+
+                val aligned = EnteFaceAligner.align(bitmap, localLandmarks, localBounds)
                 try {
                     val embedding = inferEmbedding(aligned)
-                    val faceArea = (raw.bounds.width() * raw.bounds.height()).coerceAtLeast(1f)
-                    val imageArea = (bitmap.width * bitmap.height).coerceAtLeast(1).toFloat()
-                    val sizeRatio = (faceArea / imageArea).coerceIn(0.001f, 1.0f)
-                    val aspect = raw.bounds.width() / raw.bounds.height().coerceAtLeast(1f)
-                    val aspectScore = (1f - kotlin.math.abs(aspect - 0.85f)).coerceIn(0.2f, 1.0f)
-                    val quality = (raw.score * 0.5f + kotlin.math.min(sizeRatio * 10f, 0.3f) + aspectScore * 0.2f).coerceIn(0f, 1f)
-                    DetectedFaceEmbedding(raw.faceIndex, RectF(raw.bounds), embedding, raw.score, quality)
+                    val laplacian = FaceQualityMetrics.calculateLaplacianVariance(aligned)
+                    val metrics = FaceQualityMetrics.compute(
+                        boundsWidth = raw.bounds.width(),
+                        boundsHeight = raw.bounds.height(),
+                        imageWidth = decoded.origW,
+                        imageHeight = decoded.origH,
+                        confidence = raw.score,
+                        landmarks = raw.landmarks,
+                        laplacianVariance = laplacian
+                    )
+                    DetectedFaceEmbedding(raw.faceIndex, RectF(raw.bounds), embedding, raw.score, metrics.overallQuality, metrics)
                 } finally {
                     aligned.recycle()
                 }
             }
         } finally {
-            bitmap.recycle()
+            releaseDecoded(uri)
         }
     }
 
     override fun embed(uri: Uri): List<DetectedFaceEmbedding> {
         val detections = detectFaces(uri)
-        if (detections.isEmpty()) return emptyList()
+        if (detections.isEmpty()) {
+            releaseDecoded(uri)
+            return emptyList()
+        }
         return embedFaces(uri, detections)
     }
 
     override fun embedBitmap(bitmap: Bitmap): List<DetectedFaceEmbedding> {
         val detections = detect(bitmap)
-        return detections.mapIndexedNotNull { index, face ->
-            if (face.bounds.width() < MIN_FACE_SIZE || face.bounds.height() < MIN_FACE_SIZE) {
-                return@mapIndexedNotNull null
-            }
-            val aligned = alignFace(bitmap, face.landmarks)
+        val valid = detections.filter { it.bounds.width() >= MIN_FACE_SIZE && it.bounds.height() >= MIN_FACE_SIZE }
+        return valid.mapIndexed { index, face ->
+            val aligned = EnteFaceAligner.align(bitmap, face.landmarks, face.bounds)
             try {
                 val embedding = inferEmbedding(aligned)
-                val faceArea = (face.bounds.width() * face.bounds.height()).coerceAtLeast(1f)
-                val imageArea = (bitmap.width * bitmap.height).coerceAtLeast(1).toFloat()
-                val sizeRatio = (faceArea / imageArea).coerceIn(0.001f, 1.0f)
-                val aspect = face.bounds.width() / face.bounds.height().coerceAtLeast(1f)
-                val aspectScore = (1f - kotlin.math.abs(aspect - 0.85f)).coerceIn(0.2f, 1.0f)
-                val quality = (face.score * 0.5f + kotlin.math.min(sizeRatio * 10f, 0.3f) + aspectScore * 0.2f).coerceIn(0f, 1f)
-                DetectedFaceEmbedding(index, RectF(face.bounds), embedding, face.score, quality)
+                val laplacian = FaceQualityMetrics.calculateLaplacianVariance(aligned)
+                val metrics = FaceQualityMetrics.compute(
+                    boundsWidth = face.bounds.width(),
+                    boundsHeight = face.bounds.height(),
+                    imageWidth = bitmap.width,
+                    imageHeight = bitmap.height,
+                    confidence = face.score,
+                    landmarks = face.landmarks,
+                    laplacianVariance = laplacian
+                )
+                DetectedFaceEmbedding(index, RectF(face.bounds), embedding, face.score, metrics.overallQuality, metrics)
             } finally {
                 aligned.recycle()
             }
         }
     }
 
-    private fun decodeOrientedBitmap(uri: Uri): Bitmap? {
+    private fun decodeOrientedImage(uri: Uri, maxDimension: Int = 1600): DecodedImage? {
         val orientation = runCatching {
             context.contentResolver.openInputStream(uri)?.use {
                 ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
             } ?: ExifInterface.ORIENTATION_NORMAL
         }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
 
+        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, boundsOptions)
+        } ?: return null
+
+        val rawW = boundsOptions.outWidth
+        val rawH = boundsOptions.outHeight
+        if (rawW <= 0 || rawH <= 0) return null
+
+        val isTransposed = orientation == ExifInterface.ORIENTATION_ROTATE_90 ||
+                orientation == ExifInterface.ORIENTATION_ROTATE_270 ||
+                orientation == ExifInterface.ORIENTATION_TRANSPOSE ||
+                orientation == ExifInterface.ORIENTATION_TRANSVERSE
+        val origW = if (isTransposed) rawH else rawW
+        val origH = if (isTransposed) rawW else rawH
+
+        var inSampleSize = 1
+        while ((rawW / inSampleSize) > maxDimension || (rawH / inSampleSize) > maxDimension) {
+            inSampleSize *= 2
+        }
+
+        val decodeOptions = BitmapFactory.Options().apply {
+            this.inSampleSize = inSampleSize
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
         val decoded = context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it)
+            BitmapFactory.decodeStream(it, null, decodeOptions)
         } ?: return null
 
         val matrix = Matrix()
@@ -147,13 +242,17 @@ class BuffaloLFaceEngine private constructor(
             ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
             ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.setRotate(-90f); matrix.postScale(-1f, 1f) }
             ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
-            else -> return decoded
         }
-        return runCatching {
-            Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true).also {
-                if (it !== decoded) decoded.recycle()
-            }
-        }.getOrElse { decoded }
+
+        val oriented = if (!matrix.isIdentity) {
+            val rotated = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+            if (rotated !== decoded) decoded.recycle()
+            rotated
+        } else {
+            decoded
+        }
+
+        return DecodedImage(oriented, origW, origH)
     }
 
     /** SCRFD-10GF: 640px input, BGR channel order with (pixel - 127.5) / 128 normalization. */
@@ -187,7 +286,7 @@ class BuffaloLFaceEngine private constructor(
                 tensor.close()
             }
         } finally {
-            resized.recycle()
+            if (resized !== bitmap) resized.recycle()
             padded.recycle()
         }
     }
@@ -391,31 +490,11 @@ class BuffaloLFaceEngine private constructor(
         }
     }
 
-    private fun alignFace(source: Bitmap, landmarks: FloatArray): Bitmap {
-        val output = Bitmap.createBitmap(RECOGNITION_SIZE, RECOGNITION_SIZE, Bitmap.Config.ARGB_8888)
-        val matrix = Matrix()
-        val src = floatArrayOf(landmarks[0], landmarks[1], landmarks[2], landmarks[3], landmarks[4], landmarks[5])
-        val dst = floatArrayOf(38.2946f, 51.6963f, 73.5318f, 51.5014f, 56.0252f, 71.7366f)
-        if (!matrix.setPolyToPoly(src, 0, dst, 0, 3)) {
-            val bounds = RectF(
-                min(landmarks[0], landmarks[2]), min(landmarks[1], landmarks[3]),
-                max(landmarks[0], landmarks[2]), max(landmarks[1], landmarks[3])
-            )
-            val side = max(bounds.width(), bounds.height()).coerceAtLeast(1f) * 2.2f
-            matrix.setScale(RECOGNITION_SIZE / side, RECOGNITION_SIZE / side)
-            matrix.postTranslate(
-                (RECOGNITION_SIZE / 2f) - bounds.centerX() * RECOGNITION_SIZE / side,
-                (RECOGNITION_SIZE / 2f) - bounds.centerY() * RECOGNITION_SIZE / side
-            )
-        }
-        Canvas(output).apply {
-            drawColor(Color.BLACK)
-            drawBitmap(source, matrix, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
-        }
-        return output
+    private fun alignFace(source: Bitmap, landmarks: FloatArray, bounds: RectF? = null): Bitmap {
+        return EnteFaceAligner.align(source, landmarks, bounds)
     }
 
-    /** Prepares CHW BGR float array tensor from bitmap pixels. */
+    /** Prepares CHW RGB float array tensor from bitmap pixels. */
     private fun imageTensorData(bitmap: Bitmap, size: Int, mean: Float, std: Float): FloatArray {
         val scaled = if (bitmap.width == size && bitmap.height == size) bitmap
             else Bitmap.createScaledBitmap(bitmap, size, size, true)
@@ -426,9 +505,9 @@ class BuffaloLFaceEngine private constructor(
             val input = FloatArray(3 * plane)
             for (i in pixels.indices) {
                 val pixel = pixels[i]
-                input[i] = (Color.blue(pixel) - mean) / std
+                input[i] = (Color.red(pixel) - mean) / std
                 input[plane + i] = (Color.green(pixel) - mean) / std
-                input[2 * plane + i] = (Color.red(pixel) - mean) / std
+                input[2 * plane + i] = (Color.blue(pixel) - mean) / std
             }
             return input
         } finally {
@@ -492,6 +571,10 @@ class BuffaloLFaceEngine private constructor(
     }
 
     override fun close() {
+        synchronized(this) {
+            cachedDecoded?.second?.bitmap?.let { if (!it.isRecycled) it.recycle() }
+            cachedDecoded = null
+        }
         runCatching { detectorSession.close() }
         runCatching { recognitionSession.close() }
     }

@@ -13,7 +13,10 @@ object FaceRecognitionSettings {
 
     const val DEFAULT_DETECTION_CONFIDENCE = 0.70f
     const val DEFAULT_RECOGNITION_DISTANCE = 0.60f
-    const val DEFAULT_MIN_GROUP_FACES = 7
+    const val DEFAULT_MIN_GROUP_FACES = 2
+
+    const val COMPARISON_IOU_THRESHOLD = 0.40f
+    const val LOW_DETECTION_CONFIDENCE_THRESHOLD = 0.35f
 
     const val KEY_ACTIVE_ENGINE = "active_face_engine"
     const val KEY_ENTE_DETECTION_CONFIDENCE = "ente_detection_confidence"

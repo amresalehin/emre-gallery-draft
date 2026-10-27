@@ -155,6 +155,9 @@ fun GalleryApp() {
         pendingPermanentDeleteUris = emptyList()
         if (result.resultCode == android.app.Activity.RESULT_OK && deletedUris.isNotEmpty()) {
             scope.launch {
+                withContext(Dispatchers.IO) {
+                    FaceClusterStore(context).deleteMediaCompletely(deletedUris)
+                }
                 prefs.removePermanently(deletedUris)
                 refreshMedia()
                 snackbarHostState.showSnackbar(
@@ -180,6 +183,9 @@ fun GalleryApp() {
                     }
                 }
                 if (deleted.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        FaceClusterStore(context).deleteMediaCompletely(deleted)
+                    }
                     prefs.removePermanently(deleted)
                     refreshMedia()
                     snackbarHostState.showSnackbar(
@@ -217,6 +223,9 @@ fun GalleryApp() {
                     }
                 }
                 if (deleted.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        FaceClusterStore(context).deleteMediaCompletely(deleted)
+                    }
                     prefs.removePermanently(deleted)
                     refreshMedia()
                     snackbarHostState.showSnackbar(

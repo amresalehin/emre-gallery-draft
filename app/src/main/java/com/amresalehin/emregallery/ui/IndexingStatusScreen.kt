@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -136,21 +137,7 @@ fun IndexingStatusScreen(
                 }
             )
 
-            // 2. Map & Location Indexing Card
-            LocationIndexingCard(
-                totalPhotos = uiState.totalPhotos,
-                locationState = uiState.location,
-                countsReady = uiState.countsReady,
-                cardBackground = cardBackground,
-                cardBorder = cardBorder,
-                numberFormat = numberFormat,
-                onToggleLocation = viewModel::toggleLocationIndexing,
-                onStopLocation = viewModel::stopLocationIndexing,
-                onReindexLocation = viewModel::clearAndReindexLocation,
-                onOpenMap = { onOpenMap?.invoke() }
-            )
-
-            // 3. Face Recognition (Finding & Clustering) Card
+            // 2. Face Recognition (Finding & Clustering) Card
             FaceRecognitionCard(
                 totalPhotos = uiState.totalPhotos,
                 faceFindingState = uiState.faceFinding,
@@ -337,7 +324,7 @@ fun IndexingStatusScreen(
                         }
                     }
                     Text(
-                        "Spatial Overlap (IoU >= 0.40): ${comp.matchingFaceCount} face(s)",
+                        "Spatial Overlap (IoU >= ${FaceRecognitionSettings.COMPARISON_IOU_THRESHOLD}): ${comp.matchingFaceCount} face(s)",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary

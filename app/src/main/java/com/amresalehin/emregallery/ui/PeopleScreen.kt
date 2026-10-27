@@ -1,6 +1,10 @@
 package com.amresalehin.emregallery.ui
 
+import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.ui.graphics.asImageBitmap
+import com.amresalehin.emregallery.face.FaceEngineRegistry
+import com.amresalehin.emregallery.face.FaceThumbnailHelper
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -68,6 +72,13 @@ fun PeopleScreen(
     var selectedPersonId by remember { mutableStateOf<String?>(null) }
     var selectedTab by remember { mutableIntStateOf(0) } // 0: People, 1: Review & Hidden, 2: Pets
     var searchQuery by remember { mutableStateOf("") }
+    var showAllPeople by remember { mutableStateOf(false) }
+
+    fun setEngine(target: String) {
+        selectedEngineId = target
+        FaceRecognitionSettings.setActiveEngine(context, target)
+        FaceEngineRegistry.setActiveEngine(target)
+    }
 
     // Dialog states
     var renamePersonId by remember { mutableStateOf<String?>(null) }
@@ -108,13 +119,15 @@ fun PeopleScreen(
     }
 
     val minimumGroupFaces = FaceRecognitionSettings.minGroupFaces(context, selectedEngineId)
-    val visiblePeople = remember(allPeople,personMediaIndex,photoByUri,minimumGroupFaces,selectedEngineId) {
+    val visiblePeople = remember(allPeople, personMediaIndex, photoByUri, minimumGroupFaces, selectedEngineId, showAllPeople) {
         allPeople.mapNotNull { person ->
-            val index=personMediaIndex[person.id]
-            val count=index?.faceCount ?: 0
-            if(count<minimumGroupFaces && !person.isNamed) null
-            else person.copy(faceCount=count,
-                sampleUri=person.sampleUri?.takeIf { it in photoByUri } ?: index?.mediaUris?.firstOrNull())
+            val index = personMediaIndex[person.id]
+            val count = index?.faceCount ?: 0
+            if (!showAllPeople && count < minimumGroupFaces && !person.isNamed) null
+            else person.copy(
+                faceCount = count,
+                sampleUri = person.sampleUri?.takeIf { it in photoByUri } ?: index?.mediaUris?.firstOrNull()
+            )
         }.sortedWith(compareByDescending<PersonSummary> { it.faceCount }
             .thenBy { it.displayName.lowercase(Locale.getDefault()) })
     }
@@ -216,8 +229,10 @@ fun PeopleScreen(
                             },
                             onClick = {
                                 personMenuExpanded = false
-                                store.setPersonHidden(selectedPerson.id, !selectedPerson.isHidden)
-                                reload()
+                                reloadScope.launch(Dispatchers.IO) {
+                                    store.setPersonHidden(selectedPerson.id, !selectedPerson.isHidden)
+                                    reload()
+                                }
                                 if (!selectedPerson.isHidden) selectedPersonId = null
                             }
                         )
@@ -260,7 +275,7 @@ fun PeopleScreen(
             ) {
                 FilterChip(
                     selected = selectedEngineId == BuffaloLFaceEngine.ENGINE_ID,
-                    onClick = { selectedEngineId = BuffaloLFaceEngine.ENGINE_ID },
+                    onClick = { setEngine(BuffaloLFaceEngine.ENGINE_ID) },
                     label = { Text("Buffalo_L (Default)") },
                     leadingIcon = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) {
                         { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
@@ -268,7 +283,7 @@ fun PeopleScreen(
                 )
                 FilterChip(
                     selected = selectedEngineId == EnteFaceConstants.ENGINE_ID,
-                    onClick = { selectedEngineId = EnteFaceConstants.ENGINE_ID },
+                    onClick = { setEngine(EnteFaceConstants.ENGINE_ID) },
                     label = { Text("Ente (YOLO5Face)") },
                     leadingIcon = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) {
                         { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
@@ -323,14 +338,23 @@ fun PeopleScreen(
                                     modifier = Modifier.size(46.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                val hasHiddenGroups = allPeople.isNotEmpty() && !showAllPeople && searchQuery.isBlank()
                                 Text(
-                                    if (searchQuery.isBlank()) "No face groups found yet" else "No matching people",
+                                    if (hasHiddenGroups) {
+                                        "${allPeople.size} unnamed people hidden"
+                                    } else if (searchQuery.isBlank()) {
+                                        "No face groups found yet"
+                                    } else {
+                                        "No matching people"
+                                    },
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Medium,
                                     textAlign = TextAlign.Center
                                 )
                                 Text(
-                                    if (searchQuery.isBlank()) {
+                                    if (hasHiddenGroups) {
+                                        "Groups with fewer than $minimumGroupFaces photos are filtered by default."
+                                    } else if (searchQuery.isBlank()) {
                                         "Scan photos in Index Status to identify people and group their faces."
                                     } else {
                                         "Try another name or clear your search."
@@ -339,7 +363,13 @@ fun PeopleScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center
                                 )
-                                if (searchQuery.isBlank()) {
+                                if (hasHiddenGroups) {
+                                    Button(onClick = { showAllPeople = true }) {
+                                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Show all ${allPeople.size} people")
+                                    }
+                                } else if (searchQuery.isBlank()) {
                                     Button(onClick = onOpenIndexStatus) {
                                         Text("Open Index Status")
                                     }
@@ -367,32 +397,7 @@ fun PeopleScreen(
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.BottomEnd) {
-                                        if (person.sampleUri != null) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(Uri.parse(person.sampleUri))
-                                                    .crossfade(false)
-                                                    .build(),
-                                                contentDescription = if (person.isNamed) person.displayName else "Person",
-                                                modifier = Modifier.size(88.dp).clip(CircleShape),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        } else {
-                                            Surface(
-                                                modifier = Modifier.size(88.dp),
-                                                shape = CircleShape,
-                                                color = MaterialTheme.colorScheme.surfaceContainerHighest
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Icon(
-                                                        Icons.Default.Face,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(34.dp),
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            }
-                                        }
+                                        PersonAvatar(person = person, size = 88.dp)
 
                                         // Subtle compact pencil action for instant naming/renaming
                                         Surface(
@@ -490,16 +495,20 @@ fun PeopleScreen(
                                         }
                                         IconButton(
                                             onClick = {
-                                                store.acceptSuggestion(suggestion.id)
-                                                reload()
+                                                reloadScope.launch(Dispatchers.IO) {
+                                                    store.acceptSuggestion(suggestion.id)
+                                                    reload()
+                                                }
                                             }
                                         ) {
                                             Icon(Icons.Default.Check, contentDescription = "Accept match", tint = MaterialTheme.colorScheme.primary)
                                         }
                                         IconButton(
                                             onClick = {
-                                                store.rejectSuggestion(suggestion.id)
-                                                reload()
+                                                reloadScope.launch(Dispatchers.IO) {
+                                                    store.rejectSuggestion(suggestion.id)
+                                                    reload()
+                                                }
                                             }
                                         ) {
                                             Icon(Icons.Default.Close, contentDescription = "Reject match", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -528,19 +537,7 @@ fun PeopleScreen(
                                         modifier = Modifier.padding(12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        if (hidden.sampleUri != null) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(Uri.parse(hidden.sampleUri))
-                                                    .crossfade(false)
-                                                    .build(),
-                                                contentDescription = null,
-                                                modifier = Modifier.size(48.dp).clip(CircleShape),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        } else {
-                                            Icon(Icons.Default.Face, contentDescription = null, modifier = Modifier.size(48.dp))
-                                        }
+                                        PersonAvatar(person = hidden, size = 48.dp)
                                         Spacer(Modifier.width(12.dp))
                                         Column(Modifier.weight(1f)) {
                                             Text(
@@ -556,8 +553,10 @@ fun PeopleScreen(
                                         }
                                         TextButton(
                                             onClick = {
-                                                store.setPersonHidden(hidden.id, false)
-                                                reload()
+                                                reloadScope.launch(Dispatchers.IO) {
+                                                    store.setPersonHidden(hidden.id, false)
+                                                    reload()
+                                                }
                                             }
                                         ) {
                                             Text("Restore")
@@ -678,11 +677,14 @@ fun PeopleScreen(
                 Button(
                     onClick = {
                         val cleanName = renameValue.trim()
-                        if (cleanName.isNotBlank()) {
-                            store.renamePerson(targetId, cleanName)
-                        }
+                        val target = targetId
                         renamePersonId = null
-                        reload()
+                        if (cleanName.isNotBlank()) {
+                            reloadScope.launch(Dispatchers.IO) {
+                                store.renamePerson(target, cleanName)
+                                reload()
+                            }
+                        }
                     },
                     enabled = renameValue.isNotBlank()
                 ) {
@@ -739,12 +741,16 @@ fun PeopleScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (selectedTargetMergeId != null) {
-                            store.mergePeople(sourcePerson.id, selectedTargetMergeId!!)
-                            selectedPersonId = selectedTargetMergeId
+                        val targetMerge = selectedTargetMergeId
+                        if (targetMerge != null) {
+                            val srcId = sourcePerson.id
+                            selectedPersonId = targetMerge
                             personToMerge = null
                             selectedTargetMergeId = null
-                            reload()
+                            reloadScope.launch(Dispatchers.IO) {
+                                store.mergePeople(srcId, targetMerge)
+                                reload()
+                            }
                         }
                     },
                     enabled = selectedTargetMergeId != null
@@ -775,9 +781,13 @@ fun PeopleScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
                         onClick = {
-                            store.setPersonCover(activePersonId, activeMedia.uri)
+                            val pId = activePersonId
+                            val mUri = activeMedia.uri
                             selectedMediaForAction = null
-                            reload()
+                            reloadScope.launch(Dispatchers.IO) {
+                                store.setPersonCover(pId, mUri)
+                                reload()
+                            }
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -787,12 +797,17 @@ fun PeopleScreen(
                     }
                     TextButton(
                         onClick = {
-                            val faces = store.facesForMedia(activeMedia.uri, engineId = selectedEngineId)
-                            faces.filter { it.personId == activePersonId }.forEach { face ->
-                                store.removeFaceFromPerson(face.mediaUri, face.faceIndex, engineId = selectedEngineId)
-                            }
+                            val pId = activePersonId
+                            val mUri = activeMedia.uri
+                            val engId = selectedEngineId
                             selectedMediaForAction = null
-                            reload()
+                            reloadScope.launch(Dispatchers.IO) {
+                                val faces = store.facesForMedia(mUri, engineId = engId)
+                                faces.filter { it.personId == pId }.forEach { face ->
+                                    store.removeFaceFromPerson(face.mediaUri, face.faceIndex, engineId = engId)
+                                }
+                                reload()
+                            }
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
@@ -810,3 +825,66 @@ fun PeopleScreen(
         )
     }
 }
+
+@Composable
+private fun PersonAvatar(
+    person: PersonSummary,
+    size: androidx.compose.ui.unit.Dp = 88.dp,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var faceBitmap by remember(person.id, person.portraitUri, person.portraitFaceIndex, person.sampleUri, person.engineId) {
+        mutableStateOf<Bitmap?>(null)
+    }
+
+    LaunchedEffect(person.id, person.portraitUri, person.portraitFaceIndex, person.sampleUri, person.engineId) {
+        val targetUri = person.portraitUri ?: person.sampleUri
+        if (targetUri != null) {
+            val crop = withContext(Dispatchers.IO) {
+                val parsed = runCatching { Uri.parse(targetUri) }.getOrNull() ?: return@withContext null
+                val fIdx = person.portraitFaceIndex ?: 0
+                FaceThumbnailHelper.getFaceCrop(context, parsed, fIdx, person.engineId)
+            }
+            faceBitmap = crop
+        }
+    }
+
+    if (faceBitmap != null) {
+        androidx.compose.foundation.Image(
+            bitmap = faceBitmap!!.asImageBitmap(),
+            contentDescription = if (person.isNamed) person.displayName else "Person",
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape),
+            contentScale = ContentScale.Crop
+        )
+    } else if (person.sampleUri != null) {
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(Uri.parse(person.sampleUri))
+                .crossfade(false)
+                .build(),
+            contentDescription = if (person.isNamed) person.displayName else "Person",
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Surface(
+            modifier = modifier.size(size),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.Face,
+                    contentDescription = null,
+                    modifier = Modifier.size(size * 0.45f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+

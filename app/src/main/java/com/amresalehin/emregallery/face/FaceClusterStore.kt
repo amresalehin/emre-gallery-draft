@@ -178,6 +178,12 @@ data class EngineComparisonResult(
 class FaceClusterStore(context: Context) :
     SQLiteOpenHelper(context.applicationContext, DATABASE_NAME, null, DATABASE_VERSION) {
 
+    override fun onConfigure(db: SQLiteDatabase) {
+        super.onConfigure(db)
+        db.enableWriteAheadLogging()
+        db.setForeignKeyConstraintsEnabled(true)
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE people (
@@ -582,14 +588,27 @@ class FaceClusterStore(context: Context) :
         val faceId = "${provenance.engineId}#${mediaUri}#${faceIndex}"
         val db = writableDatabase
 
-        // 1. Check if observation already processed for this engine
-        val existingCluster = db.rawQuery(
-            "SELECT cluster_id FROM faces WHERE media_uri=? AND face_index=? AND engine_id=?",
+        // 1. Check if observation already processed for this engine with current model version
+        var priorClusterId: String? = null
+        var priorPersonId: String? = null
+        val existingRow = db.rawQuery(
+            "SELECT cluster_id, person_id, model_version FROM faces WHERE media_uri=? AND face_index=? AND engine_id=?",
             arrayOf(mediaUri, faceIndex.toString(), provenance.engineId)
         ).use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0) else null
+            if (cursor.moveToFirst()) {
+                val cId = cursor.getString(0)
+                val pId = if (cursor.isNull(1)) null else cursor.getString(1)
+                val mVer = cursor.getString(2)
+                Triple(cId, pId, mVer)
+            } else null
         }
-        if (existingCluster != null) return existingCluster
+        if (existingRow != null) {
+            priorClusterId = existingRow.first
+            priorPersonId = existingRow.second
+            if (existingRow.third == provenance.modelVersion) {
+                return existingRow.first
+            }
+        }
 
         // 2. Check user feedback exclusions for this face in this engine
         val excludedPersonIds = mutableSetOf<String>()
@@ -643,7 +662,10 @@ class FaceClusterStore(context: Context) :
             val assignedClusterId: String
             val assignedPersonId: String
 
-            if (isConfidentMatch && !isAmbiguous) {
+            if (priorClusterId != null) {
+                assignedClusterId = priorClusterId
+                assignedPersonId = priorPersonId ?: priorClusterId
+            } else if (isConfidentMatch && !isAmbiguous) {
                 assignedClusterId = bestClusterId!!
                 assignedPersonId = bestPersonId ?: bestClusterId!!
             } else {
@@ -712,7 +734,7 @@ class FaceClusterStore(context: Context) :
                 put("quality_score", quality)
                 put("created_at", System.currentTimeMillis())
             }
-            db.insertOrThrow("faces", null, faceValues)
+            db.insertWithOnConflict("faces", null, faceValues, SQLiteDatabase.CONFLICT_REPLACE)
 
             val metrics = qualityMetrics ?: FaceQualityMetrics(
                 blurScore = quality,
@@ -723,7 +745,7 @@ class FaceClusterStore(context: Context) :
             )
             saveFaceMetrics(db, mediaUri, faceIndex, provenance.engineId, metrics)
 
-            recomputeCentroid(db, assignedClusterId, provenance.engineId, provenance.modelVersion)
+            updateCentroidIncremental(db, assignedClusterId, embedding, provenance.engineId, provenance.modelVersion)
             db.setTransactionSuccessful()
             return assignedClusterId
         } finally {
@@ -1488,6 +1510,37 @@ class FaceClusterStore(context: Context) :
     }
 
     @Synchronized
+    fun pruneStaleFacesForMedia(mediaUri: String, engineId: String, keptIndices: Collection<Int>) {
+        val db = writableDatabase
+        if (keptIndices.isEmpty()) {
+            db.delete("faces", "media_uri=? AND engine_id=?", arrayOf(mediaUri, engineId))
+        } else {
+            val placeholders = keptIndices.joinToString(",") { "?" }
+            val args = arrayOf(mediaUri, engineId) + keptIndices.map { it.toString() }.toTypedArray()
+            db.delete("faces", "media_uri=? AND engine_id=? AND face_index NOT IN ($placeholders)", args)
+        }
+    }
+
+    @Synchronized
+    fun deleteMediaCompletely(mediaUris: Collection<String>) {
+        if (mediaUris.isEmpty()) return
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (uri in mediaUris) {
+                db.delete("faces", "media_uri=?", arrayOf(uri))
+                db.delete("indexed_media", "media_uri=?", arrayOf(uri))
+                db.delete("review_suggestions", "media_uri=?", arrayOf(uri))
+                db.delete("face_metrics_v2", "media_uri=?", arrayOf(uri))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        FaceStoreEvents.notifyAllUpdated()
+    }
+
+    @Synchronized
     fun compareEnginesOnMedia(
         mediaUri: String,
         engineA: String = BuffaloLFaceEngine.ENGINE_ID,
@@ -1966,6 +2019,40 @@ class FaceClusterStore(context: Context) :
     }
 
     // --- Internal Helpers ---
+
+    private fun updateCentroidIncremental(
+        db: SQLiteDatabase,
+        clusterId: String,
+        newEmbedding: FloatArray,
+        engineId: String,
+        modelVersion: String
+    ) {
+        var updated = false
+        db.rawQuery("SELECT centroid, face_count FROM clusters WHERE id=?", arrayOf(clusterId)).use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) {
+                val oldCentroid = bytesToFloats(cursor.getBlob(0))
+                val oldCount = cursor.getInt(1)
+                if (oldCount > 0 && oldCentroid.size == newEmbedding.size) {
+                    val newCount = oldCount + 1
+                    val newCentroidRaw = FloatArray(newEmbedding.size)
+                    for (i in newCentroidRaw.indices) {
+                        newCentroidRaw[i] = oldCentroid[i] * oldCount + newEmbedding[i]
+                    }
+                    val updatedCentroid = normalize(newCentroidRaw)
+                    val vals = ContentValues().apply {
+                        put("centroid", floatsToBytes(updatedCentroid))
+                        put("face_count", newCount)
+                        put("updated_at", System.currentTimeMillis())
+                    }
+                    db.update("clusters", vals, "id=?", arrayOf(clusterId))
+                    updated = true
+                }
+            }
+        }
+        if (!updated) {
+            recomputeCentroid(db, clusterId, engineId, modelVersion)
+        }
+    }
 
     private fun recomputeCentroid(
         db: SQLiteDatabase,

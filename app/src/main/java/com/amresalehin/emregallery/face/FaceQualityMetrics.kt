@@ -1,5 +1,7 @@
 package com.amresalehin.emregallery.face
 
+import android.graphics.Bitmap
+
 /**
  * Typed, versioned quality signals for a detected face observation.
  *
@@ -102,6 +104,47 @@ data class FaceQualityMetrics(
                 overallQuality = overall,
                 version = VERSION
             )
+        }
+
+        /**
+         * Calculates the variance of the 3x3 Laplacian operator over the bitmap's luminance.
+         * Higher values indicate high frequency edges and sharpness, while lower values indicate blur.
+         */
+        fun calculateLaplacianVariance(bitmap: Bitmap): Float {
+            val width = bitmap.width
+            val height = bitmap.height
+            if (width < 3 || height < 3) return 0f
+
+            val pixels = IntArray(width * height)
+            bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+            val gray = FloatArray(width * height)
+            for (i in pixels.indices) {
+                val p = pixels[i]
+                val r = (p shr 16) and 0xFF
+                val g = (p shr 8) and 0xFF
+                val b = p and 0xFF
+                gray[i] = 0.299f * r + 0.587f * g + 0.114f * b
+            }
+
+            var sum = 0.0
+            var sumSq = 0.0
+            var count = 0
+            for (y in 1 until height - 1) {
+                val yOffset = y * width
+                for (x in 1 until width - 1) {
+                    val center = gray[yOffset + x]
+                    val lap = gray[yOffset + x + 1] + gray[yOffset + x - 1] +
+                              gray[yOffset + width + x] + gray[yOffset - width + x] - 4.0f * center
+                    sum += lap
+                    sumSq += lap * lap
+                    count++
+                }
+            }
+            if (count == 0) return 0f
+            val mean = sum / count
+            val variance = (sumSq / count) - (mean * mean)
+            return variance.toFloat().coerceAtLeast(0f)
         }
     }
 }

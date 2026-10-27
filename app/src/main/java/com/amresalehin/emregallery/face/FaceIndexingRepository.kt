@@ -271,7 +271,7 @@ class FaceIndexingRepository(
                             }
                         }
                         store.markMediaIndexed(item.uri, detections.size, engineId)
-                        store.pruneStaleFacesForMedia(item.uri, engineId, detections.size)
+                        store.pruneStaleFacesForMedia(item.uri, engineId, detections.map { it.faceIndex })
                         facesFound += detections.size
                         lastItemStatus = "Indexed ${detections.size} face${if (detections.size > 1) "s" else ""}"
                     }

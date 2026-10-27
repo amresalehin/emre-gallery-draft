@@ -238,7 +238,7 @@ fun ViewerDetailsDrawer(
                             faceStore.clearMediaFaces(item.uri, activeEngineId)
                         }
                     }
-                    val threshold = if (lowThreshold) 0.35f else FaceRecognitionSettings.detectionConfidence(context, activeEngineId)
+                    val threshold = if (lowThreshold) FaceRecognitionSettings.LOW_DETECTION_CONFIDENCE_THRESHOLD else FaceRecognitionSettings.detectionConfidence(context, activeEngineId)
                     val repo = FaceIndexingRepository(context.applicationContext, factory)
                     repo.indexNewMedia(
                         media = listOf(item),

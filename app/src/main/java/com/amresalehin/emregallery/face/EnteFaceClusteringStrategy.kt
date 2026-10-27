@@ -259,8 +259,25 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
                         cluster.representativeEmbedding = normEmb
                         cluster.maxFaceQuality = face.quality
                     }
+                } else if (face.quality < MIN_QUALITY_FOR_CLUSTER_ANCHOR) {
+                    // Quality is below anchor threshold; do not mint a brand-new identity.
+                    // Generate review suggestion if a candidate cluster exists.
+                    if (bestCluster != null && bestDistance <= (maxDistance * 1.5f)) {
+                        val suggestion = ContentValues().apply {
+                            put("id", UUID.randomUUID().toString())
+                            put("face_id", face.faceId)
+                            put("media_uri", face.mediaUri)
+                            put("face_index", face.faceIndex)
+                            put("engine_id", engineId)
+                            put("suggested_person_id", bestCluster.personId)
+                            put("distance", bestDistance)
+                            put("status", "pending")
+                            put("created_at", System.currentTimeMillis())
+                        }
+                        suggestionsToInsert.add(suggestion)
+                    }
                 } else {
-                    // Create a new cluster / person identity
+                    // Confident, high-quality face: create a new cluster / person identity
                     val newClusterId = UUID.randomUUID().toString()
                     val newPersonId = UUID.randomUUID().toString()
                     val newCluster = WorkingCluster(

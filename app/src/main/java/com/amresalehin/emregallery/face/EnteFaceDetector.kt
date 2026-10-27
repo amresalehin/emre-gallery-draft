@@ -121,7 +121,6 @@ class EnteFaceDetector(
                 }
 
                 candidates.add(EnteDetection(bounds, landmarks, score))
-                if (candidates.size >= MAX_CANDIDATES) break
             }
 
             return applyNms(candidates, nmsIoUThreshold)
@@ -190,7 +189,7 @@ class EnteFaceDetector(
 
         val scaled = Bitmap.createScaledBitmap(bitmap, newW, newH, true)
         canvas.drawBitmap(scaled, padX, padY, Paint(Paint.FILTER_BITMAP_FLAG))
-        scaled.recycle()
+        if (scaled !== bitmap) scaled.recycle()
 
         try {
             val inputBuffer = preprocessToRgbNormalized(letterboxed)
