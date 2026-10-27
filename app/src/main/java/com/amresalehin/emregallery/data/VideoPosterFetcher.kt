@@ -79,9 +79,15 @@ class VideoPosterFetcher(
     class Factory(private val context: Context) : Fetcher.Factory<Uri> {
         override fun create(data: Uri, options: Options, imageLoader: ImageLoader): Fetcher? {
             if (data.scheme != "content") return null
-            val hasVideoPath = data.pathSegments.any { it.equals("video", ignoreCase = true) }
-            val mimeType = runCatching { context.contentResolver.getType(data) }.getOrNull()
-            if (!hasVideoPath && mimeType?.startsWith("video/") != true) return null
+            val segments = data.pathSegments
+            // MediaStore image URIs are common during fast scrolling; reject them from the
+            // video fetcher without an extra ContentResolver MIME query.
+            if (segments.any { it.equals("images", ignoreCase = true) }) return null
+            val hasVideoPath = segments.any { it.equals("video", ignoreCase = true) }
+            if (!hasVideoPath) {
+                val mimeType = runCatching { context.contentResolver.getType(data) }.getOrNull()
+                if (mimeType?.startsWith("video/") != true) return null
+            }
             if (options.size.width !is Dimension.Pixels || options.size.height !is Dimension.Pixels) return null
             return VideoPosterFetcher(context.applicationContext, data, options)
         }
