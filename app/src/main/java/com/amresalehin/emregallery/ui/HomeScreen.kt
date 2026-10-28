@@ -174,8 +174,10 @@ fun HomeScreen(
                 } else {
                     (anchor - 1 downTo (anchor - predictedRows).coerceAtLeast(0)).toList()
                 }
+                // Keep the fling runway useful without letting one gesture queue a huge
+                // batch of CPU/disk compression work alongside visible thumbnail decoding.
                 ThumbnailPrewarmManager.prioritize(
-                    targetIndices.flatMap { predictivePrefetchRows[it].second }.take(120)
+                    targetIndices.flatMap { predictivePrefetchRows[it].second }.take(36)
                 )
                 return Velocity.Zero
             }
