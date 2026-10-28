@@ -36,19 +36,13 @@ object ThumbnailBoundsTracker {
     }
 
     /**
-     * Called when the source thumbnail leaves composition. Save its final bounds when still attached,
-     * but always release the strong LayoutCoordinates reference to avoid accumulating old list items.
+     * Called when the source thumbnail leaves composition. Do not calculate bounds here: lazy-list
+     * disposal happens during scroll, so doing coordinate transforms for every recycled row would
+     * put avoidable work back on the frame-critical path. Click handlers snapshot the selected item's
+     * bounds before navigation.
      */
     fun unregisterCoordinates(uri: String, coordinates: LayoutCoordinates) {
-        if (coordinatesMap[uri] !== coordinates) return
-
-        if (coordinates.isAttached) {
-            runCatching { coordinates.boundsInRoot() }
-                .getOrNull()
-                ?.takeIf { it.width > 5f && it.height > 5f }
-                ?.let { cacheBounds(uri, it) }
-        }
-        coordinatesMap.remove(uri)
+        if (coordinatesMap[uri] === coordinates) coordinatesMap.remove(uri)
     }
 
     fun updateBounds(uri: String, bounds: Rect) {
