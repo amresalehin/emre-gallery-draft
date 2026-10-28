@@ -36,6 +36,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
+private class HomeMediaIdentity(private val value: Any) {
+    override fun equals(other: Any?): Boolean =
+        other is HomeMediaIdentity && value === other.value
+
+    override fun hashCode(): Int = System.identityHashCode(value)
+}
+
 private data class PreparedHomeGrouping(
     val sourceMedia: List<MediaItem>,
     val sortOrder: String,
@@ -127,7 +134,7 @@ fun HomeScreen(
     }
 
     var preparedGrouping by remember { mutableStateOf<PreparedHomeGrouping?>(null) }
-    LaunchedEffect(media, sortOrder, groupBy) {
+    LaunchedEffect(HomeMediaIdentity(media), sortOrder, groupBy) {
         val sourceMedia = media
         val requestedSortOrder = sortOrder
         val requestedGroupBy = groupBy
