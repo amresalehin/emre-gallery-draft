@@ -20,8 +20,7 @@ class GalleryApplication : Application() {
         // Use one larger cache budget across devices; retain a bound to avoid OOM process kills.
         val cachePercent = 0.35
 
-        // Bounded CPU concurrency prevents thumbnail fetching/decoding from saturating all CPU cores
-        // during fast scrolling, keeping UI and RenderThread at 60/120Hz without processor throttling.
+        // Bounded image-worker concurrency leaves CPU capacity for the UI and RenderThread.
         val cpuCores = Runtime.getRuntime().availableProcessors()
         val workerParallelism = (cpuCores / 2).coerceIn(2, 4)
         val imageIoDispatcher = Dispatchers.IO.limitedParallelism(workerParallelism)
