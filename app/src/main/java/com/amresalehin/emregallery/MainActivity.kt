@@ -24,5 +24,19 @@ class MainActivity : FragmentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        requestGalleryRefreshRate()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun requestGalleryRefreshRate() {
+        val attributes = window.attributes
+        if (attributes.preferredRefreshRate != 60f) {
+            attributes.preferredRefreshRate = 60f
+            window.attributes = attributes
+        }
+    }
 }
 
