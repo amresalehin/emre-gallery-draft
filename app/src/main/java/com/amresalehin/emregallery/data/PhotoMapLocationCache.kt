@@ -106,7 +106,7 @@ class PhotoMapLocationCache(context: Context) :
         var newlyLocated = 0
         var totalLocated = cached.values.count { it.point != null }
 
-        // Process in throttled batches with batched transactions to minimize disk sync and CPU usage
+        // Process in batches and use transactions to minimize disk synchronization.
         val batchSize = 25
         for (batch in pending.chunked(batchSize)) {
             val db = writableDatabase
@@ -135,8 +135,6 @@ class PhotoMapLocationCache(context: Context) :
                 db.endTransaction()
             }
             onProgress?.invoke(newlyLocated, pending.size, totalLocated)
-            // Duty-cycle throttle: 15ms sleep between chunks to let CPU temperature drop
-            runCatching { Thread.sleep(15) }
         }
         return newlyLocated
     }
