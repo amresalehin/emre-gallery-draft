@@ -105,7 +105,7 @@ fun ArchiveScreen(
                                     contentDescription = item.name,
                                     modifier = Modifier.fillMaxWidth().aspectRatio(1f)
                                         .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
-                                        .clickable { onOpen(item) }
+                                        .clickable { ThumbnailBoundsTracker.captureBounds(item.uri); onOpen(item) }
                                         .graphicsLayer {
                                             alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
                                         },
