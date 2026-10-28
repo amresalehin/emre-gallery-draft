@@ -69,7 +69,8 @@ object PreparedThumbnailCache {
         heightPx: Int
     ): ThumbnailResult? {
         val appContext = context.applicationContext
-        val key = cacheKey(uri.toString(), widthPx, heightPx)
+        val (targetWidth, targetHeight) = normalizedDimensions(widthPx, heightPx)
+        val key = cacheKey(uri.toString(), targetWidth, targetHeight)
         val file = File(cacheDirectory(appContext), "$key.webp")
 
         readPrepared(file)?.let { return ThumbnailResult(it) }
@@ -80,7 +81,7 @@ object PreparedThumbnailCache {
             currentCoroutineContext().ensureActive()
             readPrepared(file)?.let { return@withLock ThumbnailResult(it) }
 
-            val bitmap = loadMediaStoreThumbnail(appContext, uri, widthPx, heightPx)
+            val bitmap = loadMediaStoreThumbnail(appContext, uri, targetWidth, targetHeight)
                 ?: return@withLock null
             writePreparedIfSafe(appContext, file, bitmap)
             ThumbnailResult(bitmap)
@@ -107,10 +108,25 @@ object PreparedThumbnailCache {
         File(context.cacheDir, DIRECTORY_NAME)
 
     private fun cacheFile(context: Context, uri: String, widthPx: Int, heightPx: Int): File {
-        val normalizedWidth = widthPx.coerceIn(96, 512)
-        val normalizedHeight = heightPx.coerceIn(96, 512)
+        val (normalizedWidth, normalizedHeight) = normalizedDimensions(widthPx, heightPx)
         val key = cacheKey(uri, normalizedWidth, normalizedHeight)
         return File(cacheDirectory(context), "$key.webp")
+    }
+
+    /**
+     * Use one shared 420px-bounded thumbnail for ordinary grid/card requests. This lets the
+     * startup prewarm feed Home, Albums, Search, and other small-thumbnail layouts without
+     * creating separate 240/360/420px disk copies of the same media.
+     */
+    private fun normalizedDimensions(widthPx: Int, heightPx: Int): Pair<Int, Int> {
+        val width = widthPx.coerceAtLeast(1)
+        val height = heightPx.coerceAtLeast(1)
+        val largest = maxOf(width, height)
+        return if (largest in 160..PREWARM_WIDTH) {
+            PREWARM_WIDTH to PREWARM_HEIGHT
+        } else {
+            width.coerceIn(96, 512) to height.coerceIn(96, 512)
+        }
     }
 
     private fun cacheKey(uri: String, widthPx: Int, heightPx: Int): String {
