@@ -79,7 +79,7 @@ object PreparedThumbnailCache {
     ): ThumbnailResult? {
         val appContext = context.applicationContext
         val key = cacheKey(uri.toString(), widthPx, heightPx)
-        val file = cacheFile(appContext, uri.toString(), widthPx, heightPx)
+        val file = File(cacheDirectory(appContext), "$key.webp")
 
         readPrepared(file)?.let { return ThumbnailResult(it, fromPreparedDiskCache = true) }
 
@@ -112,7 +112,7 @@ object PreparedThumbnailCache {
     }
 
     private fun cacheDirectory(context: Context): File =
-        File(context.cacheDir, DIRECTORY_NAME).apply { mkdirs() }
+        File(context.cacheDir, DIRECTORY_NAME)
 
     private fun cacheFile(context: Context, uri: String, widthPx: Int, heightPx: Int): File {
         val normalizedWidth = widthPx.coerceIn(96, 512)
@@ -215,7 +215,7 @@ object PreparedThumbnailCache {
             throw cancelled
         } catch (cancelled: OperationCanceledException) {
             throw CancellationException("Thumbnail fetch cancelled", cancelled)
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             null
         }
     }
@@ -249,6 +249,7 @@ object ThumbnailPrewarmManager {
 
             worker?.cancel()
             activeUris = uris
+            completedUris = null
             worker = scope.launch {
                 var completedAll = true
                 try {
@@ -263,7 +264,7 @@ object ThumbnailPrewarmManager {
                                 PreparedThumbnailCache.prepareIfMissing(appContext, item.uri)
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
-                            } catch (_: Throwable) {
+                            } catch (_: Exception) {
                                 false
                             }
                             if (!prepared) completedAll = false
