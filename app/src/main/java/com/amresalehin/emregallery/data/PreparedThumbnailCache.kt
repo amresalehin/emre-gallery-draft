@@ -235,6 +235,9 @@ object PreparedThumbnailCache {
  * skips files already prepared, and can safely resume from the first missing thumbnail next launch.
  */
 object ThumbnailPrewarmManager {
+    private const val WARMUP_FLING_COUNT = 3
+    private const val MAX_SCROLL_WARMUP_ITEMS_PER_FLING = 2
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     private var worker: Job? = null
@@ -247,11 +250,39 @@ object ThumbnailPrewarmManager {
     @Volatile
     private var userIsScrolling = false
 
-    /** Keep bulk warming off the CPU/storage path while the gallery is actively scrolling. */
+    private var qualifyingFlingCount = 0
+    private var allowPriorityWorkDuringScroll = false
+    private var remainingScrollWarmupItems = 0
+
+    /** Keep scroll-time work off by default; only the first few flings get a tiny priority-only budget. */
     fun setUserScrolling(scrolling: Boolean) {
-        if (userIsScrolling == scrolling) return
-        userIsScrolling = scrolling
-        workerSignals.trySend(Unit)
+        synchronized(lock) {
+            if (userIsScrolling == scrolling) return
+            userIsScrolling = scrolling
+            if (!scrolling) {
+                allowPriorityWorkDuringScroll = false
+                remainingScrollWarmupItems = 0
+            }
+            workerSignals.trySend(Unit)
+        }
+    }
+
+    /**
+     * Opens a tiny destination-only prewarm budget for the first three meaningful flings of this
+     * library session. Called after the fling's predicted destination queue has been installed.
+     */
+    fun noteFlingStarted(): Boolean = synchronized(lock) {
+        val allowWarmup = qualifyingFlingCount < WARMUP_FLING_COUNT
+        qualifyingFlingCount++
+        allowPriorityWorkDuringScroll = allowWarmup
+        remainingScrollWarmupItems =
+            if (allowWarmup) MAX_SCROLL_WARMUP_ITEMS_PER_FLING else 0
+
+        // Wake only after the fresh destination queue is ready; the worker remains single-threaded.
+        if (allowWarmup && userIsScrolling && priorityQueue.isNotEmpty()) {
+            workerSignals.trySend(Unit)
+        }
+        allowWarmup
     }
 
     /**
@@ -294,6 +325,9 @@ object ThumbnailPrewarmManager {
             worker?.cancel()
             priorityQueue.clear()
             queuedPriorityUris.clear()
+            qualifyingFlingCount = 0
+            allowPriorityWorkDuringScroll = false
+            remainingScrollWarmupItems = 0
             activeUris = uris
             completedUris = null
             worker = scope.launch {
@@ -303,15 +337,19 @@ object ThumbnailPrewarmManager {
                 try {
                     while (true) {
                         currentCoroutineContext().ensureActive()
-                        // Work selection uses status codes to distinguish completion from a paused
-                        // bulk-warming pass. Predicted rows may still run while scrolling; the
-                        // sequential background sweep waits until scrolling settles.
+                        // Work selection distinguishes completion, pause, and a tightly bounded
+                        // first-fling warm-up. During the first three qualifying flings, only two
+                        // predicted thumbnails may be prepared per fling; bulk sweep never runs in motion.
                         val next = synchronized(lock) {
                             when {
                                 activeUris !== uris -> 0 to null
-                                // Do not generate, decode, compress, or write even predicted thumbnails
-                                // during active movement. Keep the latest queue pending until scrolling
-                                // settles; otherwise prefetch itself competes with frame production.
+                                userIsScrolling && allowPriorityWorkDuringScroll &&
+                                    remainingScrollWarmupItems > 0 && priorityQueue.isNotEmpty() -> {
+                                    val prioritized = priorityQueue.removeFirst()
+                                    queuedPriorityUris.remove(prioritized.uri)
+                                    remainingScrollWarmupItems--
+                                    1 to prioritized
+                                }
                                 userIsScrolling && (priorityQueue.isNotEmpty() || naturalIndex < media.size) -> 2 to null
                                 priorityQueue.isNotEmpty() -> {
                                     val prioritized = priorityQueue.removeFirst()
