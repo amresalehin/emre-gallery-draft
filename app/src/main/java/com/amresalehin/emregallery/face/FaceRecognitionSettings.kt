@@ -89,24 +89,4 @@ object FaceRecognitionSettings {
         preferences(context).edit().putInt(key, coerced).apply()
     }
 
-    const val KEY_CPU_THROTTLE_MODE = "cpu_throttle_mode"
-    const val THROTTLE_BALANCED = "balanced"
-    const val THROTTLE_ECO = "eco"
-    const val THROTTLE_TURBO = "turbo"
-
-    fun cpuThrottleMode(context: Context): String {
-        return preferences(context).getString(KEY_CPU_THROTTLE_MODE, THROTTLE_BALANCED) ?: THROTTLE_BALANCED
-    }
-
-    fun setCpuThrottleMode(context: Context, mode: String) {
-        preferences(context).edit().putString(KEY_CPU_THROTTLE_MODE, mode).apply()
-    }
-
-    fun cpuThrottleCooldownMillis(context: Context): Long {
-        return when (cpuThrottleMode(context)) {
-            THROTTLE_ECO -> 80L
-            THROTTLE_TURBO -> 5L
-            else -> 40L
-        }
-    }
 }
