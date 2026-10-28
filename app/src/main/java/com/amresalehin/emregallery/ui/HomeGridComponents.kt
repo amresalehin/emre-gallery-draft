@@ -550,7 +550,7 @@ fun MosaicMediaItem(
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = ripple(bounded = true, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-                onClick = { if (selected) onToggleSelection() else onOpen(item) },
+                onClick = { if (selected) onToggleSelection() else { ThumbnailBoundsTracker.captureBounds(item.uri); onOpen(item) } },
                 onLongClick = { onLongPress() }
             )
     ) {
@@ -642,7 +642,7 @@ fun MediaGridItem(
             .clickable(
                 interactionSource = interactionSource,
                 indication = ripple(bounded = true, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-                onClick = { onOpen(item) }
+                onClick = { ThumbnailBoundsTracker.captureBounds(item.uri); onOpen(item) }
             )
     ) {
         AsyncImage(
