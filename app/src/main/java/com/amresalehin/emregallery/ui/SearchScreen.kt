@@ -158,7 +158,7 @@ fun SearchScreen(
                                 .aspectRatio(.82f)
                                 .trackThumbnailBounds(item.uri)
                                 .clip(RoundedCornerShape(5.dp))
-                                .clickable { onOpen(item) }
+                                .clickable { ThumbnailBoundsTracker.captureBounds(item.uri); onOpen(item) }
                         ) {
                             AsyncImage(
                                 model = remember(item.uri, context) {
