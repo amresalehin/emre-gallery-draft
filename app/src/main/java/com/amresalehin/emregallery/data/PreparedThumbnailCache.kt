@@ -83,7 +83,7 @@ object PreparedThumbnailCache {
         val mutex = uriLocks.computeIfAbsent(key) { Mutex() }
         return mutex.withLock {
             currentCoroutineContext().ensureActive()
-            readPrepared(file)?.let { return@withLock ThumbnailResult(it, fromPreparedDiskCache = true) }
+            readPrepared(file)?.let { return@withLock ThumbnailResult(it) }
 
             val bitmap = loadMediaStoreThumbnail(appContext, uri, widthPx, heightPx)
                 ?: return@withLock null
