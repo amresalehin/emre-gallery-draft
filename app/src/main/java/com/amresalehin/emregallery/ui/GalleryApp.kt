@@ -1321,7 +1321,7 @@ fun GalleryApp() {
                                 if (dest == destination) {
                                     if (dest == Destination.HOME) {
                                         scope.launch {
-                                            homeListState.animateScrollToItem(0)
+                                            homeListState.scrollToItem(0)
                                         }
                                     }
                                 } else {
