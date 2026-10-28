@@ -179,6 +179,9 @@ fun HomeScreen(
                 ThumbnailPrewarmManager.prioritize(
                     targetIndices.flatMap { predictivePrefetchRows[it].second }.take(36)
                 )
+                // Let only a tiny subset of predicted thumbnails run during the first three
+                // meaningful flings; later flings keep the strict frame-first pause.
+                ThumbnailPrewarmManager.noteFlingStarted()
                 return Velocity.Zero
             }
         }
