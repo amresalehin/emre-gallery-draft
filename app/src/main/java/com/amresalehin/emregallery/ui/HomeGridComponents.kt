@@ -50,7 +50,11 @@ import coil.request.ImageRequest
 import coil.size.Size
 import coil.size.Precision
 import com.amresalehin.emregallery.data.MediaItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -251,6 +255,57 @@ fun HomeScreenSkeleton(
     }
 }
 
+private suspend fun buildMemoryStories(
+    media: List<MediaItem>,
+    currentYear: Int,
+    todayMonth: Int,
+    todayDay: Int
+): List<Pair<String, List<MediaItem>>> = withContext(Dispatchers.Default) {
+    if (media.isEmpty()) return@withContext emptyList()
+
+    val cal = Calendar.getInstance()
+    val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
+    val tripsMap = LinkedHashMap<Int, MutableList<Pair<MediaItem, Long>>>()
+
+    for ((index, item) in media.withIndex()) {
+        if (index % 512 == 0) currentCoroutineContext().ensureActive()
+        val timestamp = if (item.dateTakenMillis > 0L) item.dateTakenMillis else item.dateAddedSeconds * 1000L
+        if (timestamp <= 0L) continue
+        cal.timeInMillis = timestamp
+        val year = cal.get(Calendar.YEAR)
+        val month = cal.get(Calendar.MONTH)
+        val dayOfYear = cal.get(Calendar.DAY_OF_YEAR)
+
+        if (month == todayMonth && dayOfYear == todayDay && year < currentYear) {
+            onThisDayMap.getOrPut(year) { mutableListOf() }.add(item)
+        }
+        val tripKey = year * 1000 + dayOfYear
+        tripsMap.getOrPut(tripKey) { mutableListOf() }.add(item to timestamp)
+    }
+
+    val result = mutableListOf<Pair<String, List<MediaItem>>>()
+    // Google Photos-style "On this day" stories: photos from this calendar date in prior years.
+    onThisDayMap.toSortedMap(compareByDescending { it }).forEach { (year, entries) ->
+        result += "On this day · $year" to entries
+    }
+
+    // Real date-based trip/story groups from the library.
+    val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+    tripsMap.entries
+        .filter { it.value.size >= 4 }
+        .sortedByDescending { it.key }
+        .take(8)
+        .forEach { (_, entries) ->
+            val firstEntry = entries.first()
+            val alreadyShown = result.any { story -> story.second.any { it.uri == firstEntry.first.uri } }
+            if (!alreadyShown) {
+                result += dateFormat.format(Date(firstEntry.second)) to entries.map { it.first }
+            }
+        }
+
+    result.filter { it.second.isNotEmpty() }.take(10)
+}
+
 @Composable
 fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
     val today = remember { Calendar.getInstance() }
@@ -258,50 +313,10 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
     val todayMonth = today.get(Calendar.MONTH)
     val todayDay = today.get(Calendar.DAY_OF_YEAR)
 
-    val stories = remember(media, currentYear, todayMonth, todayDay) {
-        if (media.isEmpty()) return@remember emptyList()
-        val cal = Calendar.getInstance()
-        val eligible = ArrayList<Pair<MediaItem, Long>>(media.size)
-        val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
-        val tripsMap = LinkedHashMap<Int, MutableList<Pair<MediaItem, Long>>>()
-
-        for (item in media) {
-            val timestamp = if (item.dateTakenMillis > 0L) item.dateTakenMillis else item.dateAddedSeconds * 1000L
-            if (timestamp <= 0L) continue
-            eligible.add(item to timestamp)
-            cal.timeInMillis = timestamp
-            val y = cal.get(Calendar.YEAR)
-            val m = cal.get(Calendar.MONTH)
-            val d = cal.get(Calendar.DAY_OF_YEAR)
-
-            if (m == todayMonth && d == todayDay && y < currentYear) {
-                onThisDayMap.getOrPut(y) { mutableListOf() }.add(item)
-            }
-            val tripKey = y * 1000 + d
-            tripsMap.getOrPut(tripKey) { mutableListOf() }.add(item to timestamp)
-        }
-
-        val result = mutableListOf<Pair<String, List<MediaItem>>>()
-
-        // Google Photos-style "On this day" stories: real photos from this calendar date in prior years.
-        onThisDayMap.toSortedMap(compareByDescending { it }).forEach { (year, entries) ->
-            result += "On this day · $year" to entries
-        }
-
-        // Real date-based trip/story groups from the library
-        val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
-        tripsMap.entries
-            .filter { it.value.size >= 4 }
-            .sortedByDescending { it.key }
-            .take(8)
-            .forEach { (_, entries) ->
-                val label = dateFormat.format(Date(entries.first().second))
-                if (result.none { it.second.any { storyItem -> storyItem.uri == entries.first().first.uri } }) {
-                    result += label to entries.map { it.first }
-                }
-            }
-
-        result.filter { it.second.isNotEmpty() }.take(10)
+    var stories by remember { mutableStateOf(emptyList<Pair<String, List<MediaItem>>>()) }
+    LaunchedEffect(media, currentYear, todayMonth, todayDay) {
+        stories = emptyList()
+        stories = buildMemoryStories(media, currentYear, todayMonth, todayDay)
     }
 
     if (stories.isEmpty()) return
