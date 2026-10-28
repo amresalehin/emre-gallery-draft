@@ -1242,15 +1242,15 @@ fun OverviewFacePortrait(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
-            .widthIn(min = 68.dp, max = 84.dp)
+            .widthIn(min = 96.dp, max = 110.dp)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(vertical = 4.dp)
     ) {
         Surface(
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-            modifier = Modifier.size(64.dp)
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
+            modifier = Modifier.size(96.dp)
         ) {
             FaceCropThumbnail(
                 mediaUri = portraitUri,
@@ -1258,26 +1258,19 @@ fun OverviewFacePortrait(
                 engineId = face.engineId,
                 bounds = if (portraitUri == face.mediaUri && portraitIndex == face.faceIndex) faceBounds else null,
                 fallbackText = if (isNamed) displayName else null,
-                contentDescription = if (isNamed) displayName else "Unnamed face",
+                contentDescription = if (isNamed) displayName else "Face",
                 modifier = Modifier.fillMaxSize().clip(CircleShape)
             )
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = if (isNamed) displayName else "Name this person",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (isNamed) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (isNamed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center
-        )
-        if (boxText != null) {
+        if (isNamed) {
+            Spacer(Modifier.height(6.dp))
             Text(
-                text = boxText,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                text = displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
             )
         }

@@ -1465,11 +1465,11 @@ class FaceClusterStore(context: Context) :
         val result = mutableListOf<DetectedMediaFace>()
         readableDatabase.rawQuery(
             """SELECT f.media_uri, f.face_index, f.cluster_id, COALESCE(NULLIF(TRIM(p.name), ''), ''),
-                      f.person_id, f.box_left, f.box_top, f.box_right, f.box_bottom, f.engine_id,
+                      COALESCE(f.person_id, c.person_id, NULLIF(f.cluster_id, '')), f.box_left, f.box_top, f.box_right, f.box_bottom, f.engine_id,
                       portrait.media_uri, portrait.face_index
                FROM faces f
                LEFT JOIN clusters c ON f.cluster_id = c.id AND f.engine_id = c.engine_id
-               LEFT JOIN people p ON f.person_id = p.id AND f.engine_id = p.engine_id
+               LEFT JOIN people p ON COALESCE(f.person_id, c.person_id, NULLIF(f.cluster_id, '')) = p.id AND f.engine_id = p.engine_id
                LEFT JOIN faces portrait ON portrait.face_id = p.cover_face_id
                     AND portrait.person_id = p.id AND portrait.engine_id = p.engine_id
                WHERE f.media_uri = ? AND f.engine_id = ?
@@ -2133,6 +2133,73 @@ class FaceClusterStore(context: Context) :
     private fun getPersonIdForCluster(clusterId: String): String? {
         return readableDatabase.rawQuery("SELECT person_id FROM clusters WHERE id=?", arrayOf(clusterId))
             .use { if (it.moveToFirst() && !it.isNull(0)) it.getString(0) else null }
+    }
+
+    @Synchronized
+    fun getPersonName(personId: String): String {
+        return getPersonName(readableDatabase, personId)
+    }
+
+    @Synchronized
+    fun ensurePersonForFace(mediaUri: String, faceIndex: Int, engineId: String): String {
+        val db = writableDatabase
+        db.rawQuery(
+            "SELECT person_id, cluster_id FROM faces WHERE media_uri=? AND face_index=? AND engine_id=?",
+            arrayOf(mediaUri, faceIndex.toString(), engineId)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                val pId = if (!cursor.isNull(0)) cursor.getString(0) else null
+                if (!pId.isNullOrBlank()) return pId
+                val cId = if (!cursor.isNull(1)) cursor.getString(1) else null
+                if (!cId.isNullOrBlank()) {
+                    val clusterPerson = getPersonIdForCluster(cId)
+                    if (!clusterPerson.isNullOrBlank()) {
+                        db.execSQL(
+                            "UPDATE faces SET person_id=? WHERE media_uri=? AND face_index=? AND engine_id=?",
+                            arrayOf(clusterPerson, mediaUri, faceIndex.toString(), engineId)
+                        )
+                        return clusterPerson
+                    }
+                    val now = System.currentTimeMillis()
+                    val pVals = ContentValues().apply {
+                        put("id", cId)
+                        put("name", "")
+                        put("engine_id", engineId)
+                        put("created_at", now)
+                        put("updated_at", now)
+                    }
+                    db.insertWithOnConflict("people", null, pVals, SQLiteDatabase.CONFLICT_IGNORE)
+                    db.execSQL(
+                        "UPDATE faces SET person_id=? WHERE media_uri=? AND face_index=? AND engine_id=?",
+                        arrayOf(cId, mediaUri, faceIndex.toString(), engineId)
+                    )
+                    db.execSQL("UPDATE clusters SET person_id=? WHERE id=? AND engine_id=?", arrayOf(cId, cId, engineId))
+                    FaceStoreEvents.notifyAllUpdated()
+                    return cId
+                }
+            }
+        }
+        val newPersonId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val pVals = ContentValues().apply {
+            put("id", newPersonId)
+            put("name", "")
+            put("engine_id", engineId)
+            put("created_at", now)
+            put("updated_at", now)
+        }
+        db.insertWithOnConflict("people", null, pVals, SQLiteDatabase.CONFLICT_IGNORE)
+        val fVals = ContentValues().apply {
+            put("person_id", newPersonId)
+        }
+        db.update(
+            "faces",
+            fVals,
+            "media_uri=? AND face_index=? AND engine_id=?",
+            arrayOf(mediaUri, faceIndex.toString(), engineId)
+        )
+        FaceStoreEvents.notifyAllUpdated()
+        return newPersonId
     }
 
     private fun getPersonName(db: SQLiteDatabase, personId: String): String {

@@ -148,6 +148,18 @@ fun PeopleScreen(
     val selectedPerson = remember(visiblePeople, allPeople, selectedPersonId) {
         selectedPersonId?.let { id ->
             allPeople.firstOrNull { it.id == id } ?: visiblePeople.firstOrNull { it.id == id }
+                ?: run {
+                    val pName = store.getPersonName(id)
+                    val sampleUri = store.facesForCluster(id, selectedEngineId).firstOrNull()?.mediaUri
+                    PersonSummary(
+                        id = id,
+                        displayName = pName,
+                        isNamed = pName.isNotBlank() && !pName.equals("Unknown", ignoreCase = true),
+                        faceCount = 0,
+                        sampleUri = sampleUri,
+                        engineId = selectedEngineId
+                    )
+                }
         }
     }
 
@@ -165,9 +177,15 @@ fun PeopleScreen(
         }
     }
 
-    val detailMedia = remember(selectedPersonId, photoByUri, personMediaIndex, selectedEngineId) {
+    val detailMedia = remember(selectedPersonId, photoByUri, personMediaIndex, selectedEngineId, reloadGeneration) {
         selectedPersonId?.let { id ->
-            personMediaIndex[id]?.mediaUris.orEmpty().mapNotNull { photoByUri[it] }
+            val urisFromIndex = personMediaIndex[id]?.mediaUris.orEmpty()
+            val uris = if (urisFromIndex.isNotEmpty()) {
+                urisFromIndex
+            } else {
+                store.facesForCluster(id, selectedEngineId).map { it.mediaUri }.toSet()
+            }
+            uris.mapNotNull { photoByUri[it] }
                 .distinctBy { it.uri }
                 .sortedByDescending { it.dateTakenMillis.takeIf { d -> d > 0 } ?: it.dateAddedSeconds * 1000L }
         }.orEmpty()
@@ -176,6 +194,8 @@ fun PeopleScreen(
     val dayGroups = remember(detailMedia) {
         groupMediaByDay(detailMedia)
     }
+
+    val collapsedDayKeys = remember(selectedPersonId) { mutableStateListOf<Long>() }
 
     BackHandler(enabled = selectedPersonId != null) {
         if (initialPersonId != null && selectedPersonId == initialPersonId) {
@@ -579,10 +599,15 @@ fun PeopleScreen(
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
                     dayGroups.forEach { group ->
+                        val isCollapsed = group.dayKey in collapsedDayKeys
                         item(key = "header_${group.dayKey}") {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .clickable {
+                                        if (isCollapsed) collapsedDayKeys.remove(group.dayKey)
+                                        else collapsedDayKeys.add(group.dayKey)
+                                    }
                                     .padding(horizontal = 16.dp, vertical = 10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
@@ -593,56 +618,52 @@ fun PeopleScreen(
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
-                                Icon(
-                                    Icons.Default.KeyboardArrowDown,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                IconButton(
+                                    onClick = {
+                                        if (isCollapsed) collapsedDayKeys.remove(group.dayKey)
+                                        else collapsedDayKeys.add(group.dayKey)
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isCollapsed) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                        contentDescription = if (isCollapsed) "Expand group" else "Collapse group",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
 
-                        val chunkedRows = group.items.chunked(3)
-                        items(chunkedRows.size) { rowIndex ->
-                            val rowItems = chunkedRows[rowIndex]
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 2.dp, vertical = 1.dp),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                for (col in 0 until 3) {
-                                    val item = rowItems.getOrNull(col)
-                                    if (item != null) {
-                                        Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(Uri.parse(item.uri))
-                                                    .crossfade(false)
-                                                    .build(),
-                                                contentDescription = item.name,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .clickable { onOpenMedia(item) },
-                                                contentScale = ContentScale.Crop
-                                            )
-                                            IconButton(
-                                                onClick = { selectedMediaForAction = item },
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .size(28.dp)
-                                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape)
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.MoreHoriz,
-                                                    contentDescription = "Photo options",
-                                                    tint = MaterialTheme.colorScheme.onSurface,
-                                                    modifier = Modifier.size(16.dp)
+                        if (!isCollapsed) {
+                            val chunkedRows = group.items.chunked(3)
+                            items(chunkedRows.size, key = { rowIndex -> "row_${group.dayKey}_$rowIndex" }) { rowIndex ->
+                                val rowItems = chunkedRows[rowIndex]
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 2.dp, vertical = 1.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    for (col in 0 until 3) {
+                                        val item = rowItems.getOrNull(col)
+                                        if (item != null) {
+                                            Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(LocalContext.current)
+                                                        .data(Uri.parse(item.uri))
+                                                        .crossfade(false)
+                                                        .build(),
+                                                    contentDescription = item.name,
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .clickable { onOpenMedia(item) },
+                                                    contentScale = ContentScale.Crop
                                                 )
                                             }
+                                        } else {
+                                            Spacer(modifier = Modifier.weight(1f))
                                         }
-                                    } else {
-                                        Spacer(modifier = Modifier.weight(1f))
                                     }
                                 }
                             }

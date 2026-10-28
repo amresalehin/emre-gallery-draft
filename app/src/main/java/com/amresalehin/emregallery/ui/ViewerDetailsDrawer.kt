@@ -456,11 +456,20 @@ fun ViewerDetailsDrawer(
                             onEditTagOrPerson = {
                                 if (detectedFaces.size == 1) {
                                     val f = detectedFaces.first()
-                                    if (!f.personId.isNullOrBlank()) {
+                                    coroutineScope.launch {
+                                        val resolvedPersonId = if (!f.personId.isNullOrBlank()) {
+                                            f.personId
+                                        } else {
+                                            withContext(Dispatchers.IO) {
+                                                faceStore.ensurePersonForFace(
+                                                    mediaUri = f.mediaUri,
+                                                    faceIndex = f.faceIndex,
+                                                    engineId = f.engineId.ifBlank { selectedDrawerEngineId }
+                                                )
+                                            }
+                                        }
                                         onClose()
-                                        onOpenPerson?.invoke(f.personId, f.engineId.ifBlank { selectedDrawerEngineId })
-                                    } else {
-                                        renamingFace = f
+                                        onOpenPerson?.invoke(resolvedPersonId, f.engineId.ifBlank { selectedDrawerEngineId })
                                     }
                                 } else if (detectedFaces.size > 1) {
                                     showFaceChooserDialog = true
@@ -469,11 +478,20 @@ fun ViewerDetailsDrawer(
                                 }
                             },
                             onFaceClick = { face ->
-                                if (!face.personId.isNullOrBlank()) {
+                                coroutineScope.launch {
+                                    val resolvedPersonId = if (!face.personId.isNullOrBlank()) {
+                                        face.personId
+                                    } else {
+                                        withContext(Dispatchers.IO) {
+                                            faceStore.ensurePersonForFace(
+                                                mediaUri = face.mediaUri,
+                                                faceIndex = face.faceIndex,
+                                                engineId = face.engineId.ifBlank { selectedDrawerEngineId }
+                                            )
+                                        }
+                                    }
                                     onClose()
-                                    onOpenPerson?.invoke(face.personId, face.engineId.ifBlank { selectedDrawerEngineId })
-                                } else {
-                                    renamingFace = face
+                                    onOpenPerson?.invoke(resolvedPersonId, face.engineId.ifBlank { selectedDrawerEngineId })
                                 }
                             }
                         )
@@ -701,11 +719,20 @@ fun ViewerDetailsDrawer(
                                 .fillMaxWidth()
                                 .clickable {
                                     showFaceChooserDialog = false
-                                    if (!face.personId.isNullOrBlank()) {
+                                    coroutineScope.launch {
+                                        val resolvedPersonId = if (!face.personId.isNullOrBlank()) {
+                                            face.personId
+                                        } else {
+                                            withContext(Dispatchers.IO) {
+                                                faceStore.ensurePersonForFace(
+                                                    mediaUri = face.mediaUri,
+                                                    faceIndex = face.faceIndex,
+                                                    engineId = face.engineId.ifBlank { selectedDrawerEngineId }
+                                                )
+                                            }
+                                        }
                                         onClose()
-                                        onOpenPerson?.invoke(face.personId, face.engineId.ifBlank { selectedDrawerEngineId })
-                                    } else {
-                                        renamingFace = face
+                                        onOpenPerson?.invoke(resolvedPersonId, face.engineId.ifBlank { selectedDrawerEngineId })
                                     }
                                 }
                         ) {
