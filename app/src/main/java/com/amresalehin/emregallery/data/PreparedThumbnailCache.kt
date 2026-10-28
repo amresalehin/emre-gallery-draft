@@ -307,12 +307,15 @@ object ThumbnailPrewarmManager {
                         val next = synchronized(lock) {
                             when {
                                 activeUris !== uris -> 0 to null
+                                // Do not generate, decode, compress, or write even predicted thumbnails
+                                // during active movement. Keep the latest queue pending until scrolling
+                                // settles; otherwise prefetch itself competes with frame production.
+                                userIsScrolling && (priorityQueue.isNotEmpty() || naturalIndex < media.size) -> 2 to null
                                 priorityQueue.isNotEmpty() -> {
                                     val prioritized = priorityQueue.removeFirst()
                                     queuedPriorityUris.remove(prioritized.uri)
                                     1 to prioritized
                                 }
-                                naturalIndex < media.size && userIsScrolling -> 2 to null
                                 naturalIndex < media.size -> 1 to media[naturalIndex++]
                                 else -> 0 to null
                             }
