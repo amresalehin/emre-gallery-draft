@@ -184,6 +184,17 @@ fun HomeScreen(
         }
     }
 
+    // Pack a coarse scroll sample into one primitive so snapshotFlow emits only when the
+    // first lazy item, 96px offset bucket, or scrolling state changes—not at every animation frame.
+    val prefetchScrollSample = remember(listState) {
+        derivedStateOf {
+            val firstIndex = listState.firstVisibleItemIndex
+            val offsetBucket = listState.firstVisibleItemScrollOffset / 96
+            val scrollingBit = if (listState.isScrollInProgress) 1L else 0L
+            (firstIndex.toLong() shl 32) or (offsetBucket.toLong() shl 1) or scrollingBit
+        }
+    }
+
     // Also predict while the finger is dragging (not just when a fling starts). Update the priority
     // window every couple of rows to avoid repeatedly churning the worker queue on every frame.
     LaunchedEffect(listState, predictivePrefetchRows, predictivePrefetchIndex) {
@@ -194,13 +205,12 @@ fun HomeScreen(
         try {
             // Observe coarse scroll buckets rather than every pixel. High-refresh scrolling can
             // produce 120+ updates/second; the prefetch planner only needs direction and row changes.
-            snapshotFlow {
-                Triple(
-                    listState.firstVisibleItemIndex,
-                    listState.firstVisibleItemScrollOffset / 96,
-                    listState.isScrollInProgress
-                )
-            }.distinctUntilChanged().collect { (firstIndex, offsetBucket, isScrolling) ->
+            snapshotFlow { prefetchScrollSample.value }
+                .distinctUntilChanged()
+                .collect { packedSample ->
+                val firstIndex = (packedSample ushr 32).toInt()
+                val offsetBucket = ((packedSample ushr 1) and 0x7FFFFFFFL).toInt()
+                val isScrolling = (packedSample and 1L) != 0L
                 ThumbnailPrewarmManager.setUserScrolling(isScrolling)
 
                 if (predictivePrefetchRows.isEmpty()) {
