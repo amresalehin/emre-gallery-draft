@@ -14,6 +14,8 @@ import androidx.activity.result.IntentSenderRequest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -63,6 +65,90 @@ data class NavBackStackEntry(
     val albumFilter: String? = null,
     val albumFilterReturnDestination: Destination = Destination.ALBUMS
 )
+
+private data class PreparedVisibleMedia(
+    val sourceMedia: List<MediaItem>,
+    val hidden: Set<String>,
+    val inBin: Set<String>,
+    val archive: Set<String>,
+    val favourites: Set<String>,
+    val albumFilter: String?,
+    val searchVideosOnly: Boolean,
+    val submittedQuery: String,
+    val searchStage: SearchStage,
+    val customAlbums: List<CustomAlbum>,
+    val items: List<MediaItem>
+) {
+    fun matches(
+        media: List<MediaItem>,
+        hiddenUris: Set<String>,
+        binUris: Set<String>,
+        archivedUris: Set<String>,
+        favouriteUris: Set<String>,
+        filter: String?,
+        videosOnly: Boolean,
+        query: String,
+        stage: SearchStage,
+        albums: List<CustomAlbum>
+    ): Boolean =
+        (sourceMedia === media || sourceMedia == media) &&
+            (hidden === hiddenUris || hidden == hiddenUris) &&
+            (inBin === binUris || inBin == binUris) &&
+            (archive === archivedUris || archive == archivedUris) &&
+            (favourites === favouriteUris || favourites == favouriteUris) &&
+            albumFilter == filter &&
+            searchVideosOnly == videosOnly &&
+            submittedQuery == query &&
+            searchStage == stage &&
+            (customAlbums === albums || customAlbums == albums)
+}
+
+private suspend fun prepareVisibleMedia(
+    media: List<MediaItem>,
+    hidden: Set<String>,
+    inBin: Set<String>,
+    archive: Set<String>,
+    favourites: Set<String>,
+    albumFilter: String?,
+    searchVideosOnly: Boolean,
+    submittedQuery: String,
+    searchStage: SearchStage,
+    customAlbums: List<CustomAlbum>
+): List<MediaItem> = withContext(Dispatchers.Default) {
+    val result = ArrayList<MediaItem>(media.size)
+    val recentCutoffMillis = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+    val customAlbum = customAlbums.firstOrNull {
+        it.id == albumFilter || it.fullPath == albumFilter || it.name == albumFilter
+    }
+
+    for ((index, item) in media.withIndex()) {
+        if (index % 512 == 0) currentCoroutineContext().ensureActive()
+        val isItemBinned = item.isTrashed || item.uri in inBin
+        val inScope = when (albumFilter) {
+            "Hidden" -> item.uri in hidden && !isItemBinned
+            "Bin" -> isItemBinned
+            "Archive" -> item.uri in archive && !isItemBinned
+            else -> item.uri !in hidden && !isItemBinned && item.uri !in archive
+        }
+        val matchesCategory = when (albumFilter) {
+            null, "Hidden", "Bin", "Archive", "People", "Places", "Map", "Albums", "Folders" -> true
+            "Favourites" -> item.uri in favourites
+            "Videos" -> item.isVideo
+            "Recently added" -> item.dateAddedSeconds * 1000L > recentCutoffMillis
+            else -> {
+                if (customAlbum != null) item.uri in customAlbum.mediaUris
+                else item.relativePath.contains(albumFilter.orEmpty(), true)
+            }
+        }
+        val matchesSearch = searchStage != SearchStage.RESULTS ||
+            item.name.contains(submittedQuery, true) ||
+            item.relativePath.contains(submittedQuery, true)
+        if (inScope && matchesCategory && (!searchVideosOnly || item.isVideo) && matchesSearch) {
+            result.add(item)
+        }
+    }
+    result
+}
 
 val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
 
@@ -577,33 +663,53 @@ fun GalleryApp() {
         }
     }
 
-    val visibleMedia = remember(media, hidden, inBin, archive, favourites, albumFilter, searchVideosOnly, submittedQuery, searchStage, customAlbums) {
-        media.filter { item ->
-            val isItemBinned = item.isTrashed || item.uri in inBin
-            val inScope = when (albumFilter) {
-                "Hidden" -> item.uri in hidden && !isItemBinned
-                "Bin" -> isItemBinned
-                "Archive" -> item.uri in archive && !isItemBinned
-                else -> item.uri !in hidden && !isItemBinned && item.uri !in archive
-            }
-            val matchesCategory = when (albumFilter) {
-                null, "Hidden", "Bin", "Archive", "People", "Places", "Map", "Albums", "Folders" -> true
-                "Favourites" -> item.uri in favourites
-                "Videos" -> item.isVideo
-                "Recently added" -> item.dateAddedSeconds * 1000L > System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
-                else -> {
-                    val albumMatch = customAlbums.firstOrNull { it.id == albumFilter || it.fullPath == albumFilter || it.name == albumFilter }
-                    if (albumMatch != null) {
-                        item.uri in albumMatch.mediaUris
-                    } else {
-                        item.relativePath.contains(albumFilter.orEmpty(), true)
-                    }
-                }
-            }
-            inScope && matchesCategory && (!searchVideosOnly || item.isVideo) &&
-                (searchStage != SearchStage.RESULTS || item.name.contains(submittedQuery, true) || item.relativePath.contains(submittedQuery, true))
+    var preparedVisibleMedia by remember { mutableStateOf<PreparedVisibleMedia?>(null) }
+    LaunchedEffect(media, hidden, inBin, archive, favourites, albumFilter, searchVideosOnly, submittedQuery, searchStage, customAlbums) {
+        val sourceMedia = media
+        val hiddenSnapshot = hidden
+        val binSnapshot = inBin
+        val archiveSnapshot = archive
+        val favouritesSnapshot = favourites
+        val filterSnapshot = albumFilter
+        val videosOnlySnapshot = searchVideosOnly
+        val querySnapshot = submittedQuery
+        val stageSnapshot = searchStage
+        val albumsSnapshot = customAlbums
+
+        val filtered = prepareVisibleMedia(
+            media = sourceMedia,
+            hidden = hiddenSnapshot,
+            inBin = binSnapshot,
+            archive = archiveSnapshot,
+            favourites = favouritesSnapshot,
+            albumFilter = filterSnapshot,
+            searchVideosOnly = videosOnlySnapshot,
+            submittedQuery = querySnapshot,
+            searchStage = stageSnapshot,
+            customAlbums = albumsSnapshot
+        )
+        val prepared = PreparedVisibleMedia(
+            sourceMedia = sourceMedia,
+            hidden = hiddenSnapshot,
+            inBin = binSnapshot,
+            archive = archiveSnapshot,
+            favourites = favouritesSnapshot,
+            albumFilter = filterSnapshot,
+            searchVideosOnly = videosOnlySnapshot,
+            submittedQuery = querySnapshot,
+            searchStage = stageSnapshot,
+            customAlbums = albumsSnapshot,
+            items = filtered
+        )
+        if (prepared.matches(media, hidden, inBin, archive, favourites, albumFilter, searchVideosOnly, submittedQuery, searchStage, customAlbums)) {
+            preparedVisibleMedia = prepared
         }
     }
+    val currentVisibleMedia = preparedVisibleMedia?.takeIf {
+        it.matches(media, hidden, inBin, archive, favourites, albumFilter, searchVideosOnly, submittedQuery, searchStage, customAlbums)
+    }
+    val isPreparingVisibleMedia = currentVisibleMedia == null
+    val visibleMedia = currentVisibleMedia?.items ?: emptyList()
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val topContentPadding = statusBarTop + 68.dp
@@ -760,7 +866,7 @@ fun GalleryApp() {
                     Destination.HOME -> HomeScreen(
                         listState = homeListState,
                         media = visibleMedia,
-                        loading = loading,
+                        loading = loading || isPreparingVisibleMedia,
                         onPermissionGranted = { refreshMedia() },
                         albumTitle = activeAlbumTitle,
                         sortOrder = sortOrderPref,
