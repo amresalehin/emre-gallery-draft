@@ -12,6 +12,7 @@ import android.provider.MediaStore
 import android.util.Size
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -241,6 +242,17 @@ object ThumbnailPrewarmManager {
     private var completedUris: List<String>? = null
     private val priorityQueue = java.util.ArrayDeque<MediaItem>()
     private val queuedPriorityUris = HashSet<String>()
+    private val workerSignals = Channel<Unit>(Channel.CONFLATED)
+
+    @Volatile
+    private var userIsScrolling = false
+
+    /** Keep bulk warming off the CPU/storage path while the gallery is actively scrolling. */
+    fun setUserScrolling(scrolling: Boolean) {
+        if (userIsScrolling == scrolling) return
+        userIsScrolling = scrolling
+        workerSignals.trySend(Unit)
+    }
 
     /**
      * Moves the thumbnails most likely to be seen next to the front of the single IO worker.
@@ -256,6 +268,7 @@ object ThumbnailPrewarmManager {
             items.asSequence().distinctBy { it.uri }.take(120).forEach { item ->
                 if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
             }
+            workerSignals.trySend(Unit)
         }
     }
 
@@ -288,18 +301,31 @@ object ThumbnailPrewarmManager {
                 try {
                     while (true) {
                         currentCoroutineContext().ensureActive()
-                        val item = synchronized(lock) {
+                        // Work selection uses status codes to distinguish completion from a paused
+                        // bulk-warming pass. Predicted rows may still run while scrolling; the
+                        // sequential background sweep waits until scrolling settles.
+                        val next = synchronized(lock) {
                             when {
-                                activeUris !== uris -> null
+                                activeUris !== uris -> 0 to null
                                 priorityQueue.isNotEmpty() -> {
                                     val prioritized = priorityQueue.removeFirst()
                                     queuedPriorityUris.remove(prioritized.uri)
-                                    prioritized
+                                    1 to prioritized
                                 }
-                                naturalIndex < media.size -> media[naturalIndex++]
-                                else -> null
+                                naturalIndex < media.size && userIsScrolling -> 2 to null
+                                naturalIndex < media.size -> 1 to media[naturalIndex++]
+                                else -> 0 to null
                             }
-                        } ?: break
+                        }
+
+                        when (next.first) {
+                            0 -> break
+                            2 -> {
+                                workerSignals.receive()
+                                continue
+                            }
+                        }
+                        val item = next.second ?: continue
 
                         if (!PreparedThumbnailCache.hasPrepared(appContext, item.uri)) {
                             if (!PreparedThumbnailCache.hasStorageHeadroom(appContext)) {
