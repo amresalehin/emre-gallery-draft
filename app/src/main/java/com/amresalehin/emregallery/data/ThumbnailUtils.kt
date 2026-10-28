@@ -27,8 +27,8 @@ fun buildThumbnailRequest(context: Context, uri: String): ImageRequest {
         .data(Uri.parse(uri))
         .size(STANDARD_THUMB_SIZE_PX, STANDARD_THUMB_SIZE_PX)
         .precision(Precision.INEXACT)
-        .crossfade(true)
-        .crossfade(150)
+        // Show prepared grid/card images on the first available frame, without a decorative delay.
+        .crossfade(false)
         .diskCacheKey(thumbnailCacheKey(uri))
         .diskCachePolicy(CachePolicy.ENABLED)
         .memoryCacheKey(thumbnailCacheKey(uri))
