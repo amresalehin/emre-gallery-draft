@@ -226,7 +226,7 @@ class IndexingForegroundService : Service() {
         val photos = loadPhotos()
         if (rescanAll) withContext(Dispatchers.IO) { TesseractOcr.clearCachedResults(this@IndexingForegroundService) }
         val pending = photos.filterNot { TesseractOcr.hasCachedResult(this, Uri.parse(it.uri)) }
-        updateState(task = TASK_OCR, running = true, paused = false, processed = photos.size - pending.size, total = photos.size, error = null)
+        updateState(task = TASK_OCR, running = true, paused = pauseSignal.value, processed = photos.size - pending.size, total = photos.size, error = null)
         postProgress("OCR indexing", "Preparing ${pending.size} images (${model.shortName})", photos.size - pending.size, photos.size)
         var completed = photos.size - pending.size
         for (item in pending) {
@@ -283,7 +283,7 @@ class IndexingForegroundService : Service() {
         updateState(
             task = TASK_FACE,
             running = true,
-            paused = false,
+            paused = pauseSignal.value,
             processed = alreadyDone,
             total = relevantPhotos.size,
             faces = store.indexedFaceCount(engineId),
@@ -361,7 +361,7 @@ class IndexingForegroundService : Service() {
             updateState(
                 task = TASK_MODEL,
                 running = true,
-                paused = false,
+                paused = pauseSignal.value,
                 processed = 0,
                 total = 100,
                 bytes = 0L,
@@ -507,7 +507,7 @@ class IndexingForegroundService : Service() {
         val pending = if (rescanAll) photos else photos.filterNot { cached.containsKey(it.uri) }
         var locatedCount = cached.values.count { it.point != null }
         val doneCount = photos.size - pending.size
-        updateState(task = TASK_LOCATION, running = true, paused = false, processed = doneCount, total = photos.size, faces = locatedCount, error = null)
+        updateState(task = TASK_LOCATION, running = true, paused = pauseSignal.value, processed = doneCount, total = photos.size, faces = locatedCount, error = null)
         postProgress("Map location indexing", "Scanning ${pending.size} photos for GPS geotags", doneCount, photos.size)
         var completed = doneCount
         for (item in pending) {
