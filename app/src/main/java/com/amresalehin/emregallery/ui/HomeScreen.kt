@@ -31,8 +31,47 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.MediaItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
+
+private data class PreparedHomeGrouping(
+    val sourceMedia: List<MediaItem>,
+    val sortOrder: String,
+    val groupBy: String,
+    val sortedMedia: List<MediaItem>,
+    val groups: List<DayGroup>
+)
+
+private data class PreparedHomeRows(
+    val groups: List<DayGroup>,
+    val columns: Int,
+    val groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>
+)
+
+private fun sortGalleryMedia(media: List<MediaItem>, sortOrder: String): List<MediaItem> =
+    when (sortOrder) {
+        "date_asc", "date_taken_asc" -> media.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
+        "date_added_asc" -> media.sortedWith(compareBy({ it.dateAddedSeconds * 1000L }, { it.id }))
+        "date_added_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.dateAddedSeconds * 1000L }.thenBy { it.id })
+        "name_asc" -> media.sortedWith(compareBy({ it.name.lowercase(Locale.getDefault()) }, { it.id }))
+        "name_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id })
+        "size_asc" -> media.sortedWith(compareBy<MediaItem> { it.sizeBytes }.thenBy { it.id })
+        "size_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
+        else -> media.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
+    }
+
+private fun groupGalleryMedia(sortedMedia: List<MediaItem>, groupBy: String): List<DayGroup> =
+    when (groupBy) {
+        "day" -> groupMediaByDay(sortedMedia)
+        "month" -> groupMediaByMonth(sortedMedia)
+        "year" -> groupMediaByYear(sortedMedia)
+        "folder" -> groupMediaByFolder(sortedMedia)
+        "initial" -> groupMediaByInitial(sortedMedia)
+        "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+        else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,34 +132,55 @@ fun HomeScreen(
         return
     }
 
-    val sortedMedia = remember(media, sortOrder) {
-        when (sortOrder) {
-            "date_asc", "date_taken_asc" -> media.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
-            "date_added_asc" -> media.sortedWith(compareBy({ it.dateAddedSeconds * 1000L }, { it.id }))
-            "date_added_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.dateAddedSeconds * 1000L }.thenBy { it.id })
-            "name_asc" -> media.sortedWith(compareBy({ it.name.lowercase(Locale.getDefault()) }, { it.id }))
-            "name_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id })
-            "size_asc" -> media.sortedWith(compareBy<MediaItem> { it.sizeBytes }.thenBy { it.id })
-            "size_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
-            else -> media.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
+    var preparedGrouping by remember { mutableStateOf<PreparedHomeGrouping?>(null) }
+    LaunchedEffect(media, sortOrder, groupBy) {
+        val sourceMedia = media
+        val requestedSortOrder = sortOrder
+        val requestedGroupBy = groupBy
+        val prepared = withContext(Dispatchers.Default) {
+            val sorted = sortGalleryMedia(sourceMedia, requestedSortOrder)
+            PreparedHomeGrouping(
+                sourceMedia = sourceMedia,
+                sortOrder = requestedSortOrder,
+                groupBy = requestedGroupBy,
+                sortedMedia = sorted,
+                groups = groupGalleryMedia(sorted, requestedGroupBy)
+            )
+        }
+        // Ignore stale work if another input arrived while preparation was running.
+        if (sourceMedia === media && requestedSortOrder == sortOrder && requestedGroupBy == groupBy) {
+            preparedGrouping = prepared
         }
     }
 
-    val groups = remember(sortedMedia, groupBy) {
-        when (groupBy) {
-            "day" -> groupMediaByDay(sortedMedia)
-            "month" -> groupMediaByMonth(sortedMedia)
-            "year" -> groupMediaByYear(sortedMedia)
-            "folder" -> groupMediaByFolder(sortedMedia)
-            "initial" -> groupMediaByInitial(sortedMedia)
-            "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
-            else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+    val currentGrouping = preparedGrouping?.takeIf {
+        it.sourceMedia === media && it.sortOrder == sortOrder && it.groupBy == groupBy
+    }
+    val sortedMedia = currentGrouping?.sortedMedia ?: emptyList()
+    val groups = currentGrouping?.groups ?: emptyList()
+
+    var preparedRows by remember { mutableStateOf<PreparedHomeRows?>(null) }
+    LaunchedEffect(currentGrouping, pinchGridColumns) {
+        val grouping = currentGrouping
+        if (grouping == null) {
+            preparedRows = null
+        } else {
+            val requestedColumns = pinchGridColumns.coerceIn(1, 6)
+            val groupSnapshot = grouping.groups
+            val rows = withContext(Dispatchers.Default) {
+                groupSnapshot.map { group -> group to group.items.chunked(requestedColumns) }
+            }
+            if (currentGrouping === grouping && pinchGridColumns.coerceIn(1, 6) == requestedColumns) {
+                preparedRows = PreparedHomeRows(
+                    groups = groupSnapshot,
+                    columns = requestedColumns,
+                    groupedRows = rows
+                )
+            }
         }
     }
-
-    val groupedRows = remember(groups, pinchGridColumns) {
-        groups.map { group -> group to group.items.chunked(pinchGridColumns.coerceIn(1, 6)) }
-    }
+    // Keep the previous column layout visible while the next row chunking pass is prepared.
+    val groupedRows = preparedRows?.takeIf { it.groups === groups }?.groupedRows ?: emptyList()
 
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize()
@@ -214,7 +274,7 @@ fun HomeScreen(
                 }
             }
 
-            if (loading && sortedMedia.isEmpty()) {
+            if (sortedMedia.isEmpty() && (loading || (media.isNotEmpty() && currentGrouping == null))) {
                 item {
                     HomeScreenSkeleton(
                         gridColumns = pinchGridColumns,
