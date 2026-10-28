@@ -51,8 +51,9 @@ import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.FaceClusterStore
-import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceIndexingRepository
+import com.amresalehin.emregallery.face.FaceRecognitionSettings
 
 data class NavBackStackEntry(
     val destination: Destination,
@@ -119,6 +120,7 @@ fun GalleryApp() {
     var homeSelectedUris by remember { mutableStateOf<Set<String>>(emptySet()) }
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
+    var activePersonId by remember { mutableStateOf<String?>(null) }
 
     fun refreshMedia() {
         scope.launch {
@@ -797,8 +799,12 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null); "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        onFilter = { when (it) { "Map" -> navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null); "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
+                        onOpenPerson = { personId ->
+                            activePersonId = personId
+                            navigateTo(Destination.PEOPLE)
+                        },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
                             showCreateAlbumDialog = true
@@ -955,7 +961,11 @@ fun GalleryApp() {
                         }
                         PeopleScreen(
                             media = peopleMedia,
-                            onBack = { performBackNavigation() },
+                            initialPersonId = activePersonId,
+                            onBack = {
+                                activePersonId = null
+                                performBackNavigation()
+                            },
                             onOpenMedia = { item -> openMediaInViewer(item, peopleMedia) },
                             onOpenIndexStatus = { navigateTo(Destination.INDEXING_STATUS) }
                         )
@@ -1174,6 +1184,15 @@ fun GalleryApp() {
                 onOpenMap = {
                     showDetails = false
                     navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = currentItem)
+                },
+                onOpenPerson = { personId, engineId ->
+                    showDetails = false
+                    if (engineId.isNotBlank()) {
+                        FaceRecognitionSettings.setActiveEngine(context, engineId)
+                        FaceEngineRegistry.setActiveEngine(engineId)
+                    }
+                    activePersonId = personId
+                    navigateTo(Destination.PEOPLE)
                 },
                 transitionProgress = viewerTransitionProgress
             )

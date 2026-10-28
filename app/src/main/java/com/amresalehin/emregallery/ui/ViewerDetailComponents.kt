@@ -42,7 +42,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.DetectedMediaFace
+import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceThumbnailHelper
 import com.amresalehin.emregallery.ocr.TesseractOcr
@@ -705,6 +707,8 @@ fun OverviewTabContent(
     onViewErrorDetails: () -> Unit = {},
     onEditTagOrPerson: () -> Unit = {},
     onFaceClick: ((DetectedMediaFace) -> Unit)? = null,
+    selectedEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
+    onSelectEngine: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -913,17 +917,57 @@ fun OverviewTabContent(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    if (faceUiState.engineName.isNotBlank()) {
+                    var modelMenuExpanded by remember { mutableStateOf(false) }
+                    Box {
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
+                            shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier.clickable { modelMenuExpanded = true }
                         ) {
-                            Text(
-                                text = faceUiState.engineName,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                val currentEngineName = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) "Buffalo-L" else "YOLO5Face + MobileFaceNet"
+                                Text(
+                                    text = currentEngineName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Switch face model",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = modelMenuExpanded,
+                            onDismissRequest = { modelMenuExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Buffalo-L") },
+                                trailingIcon = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) {
+                                    { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                                } else null,
+                                onClick = {
+                                    modelMenuExpanded = false
+                                    onSelectEngine(BuffaloLFaceEngine.ENGINE_ID)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("YOLO5Face + MobileFaceNet") },
+                                trailingIcon = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) {
+                                    { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                                } else null,
+                                onClick = {
+                                    modelMenuExpanded = false
+                                    onSelectEngine(EnteFaceConstants.ENGINE_ID)
+                                }
                             )
                         }
                     }

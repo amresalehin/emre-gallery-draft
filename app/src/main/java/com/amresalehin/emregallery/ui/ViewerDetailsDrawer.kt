@@ -148,6 +148,7 @@ fun ViewerDetailsDrawer(
     isBin: Boolean,
     defaultOcrLanguages: Set<String> = setOf("eng"),
     defaultOcrModel: String = "fast",
+    onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -158,16 +159,17 @@ fun ViewerDetailsDrawer(
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     var faceReloadKey by remember { mutableIntStateOf(0) }
     val activeEngineId = remember(context) { FaceRecognitionSettings.getActiveEngine(context) }
-    val factory = remember(activeEngineId) {
-        FaceEngineRegistry.getFactory(activeEngineId) ?: BuffaloLFaceEngineFactory
+    var selectedDrawerEngineId by remember(activeEngineId) { mutableStateOf(activeEngineId) }
+    val factory = remember(selectedDrawerEngineId) {
+        FaceEngineRegistry.getFactory(selectedDrawerEngineId) ?: BuffaloLFaceEngineFactory
     }
 
-    var detectedFaces by remember(item.uri, activeEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
-    var allDetectedFaces by remember(item.uri, activeEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
-    var mediaIndexInfo by remember(item.uri, activeEngineId) { mutableStateOf<FaceClusterStore.MediaIndexedInfo?>(null) }
-    var groupingRequired by remember(item.uri, activeEngineId) { mutableStateOf(false) }
-    var groupingError by remember(item.uri, activeEngineId) { mutableStateOf<String?>(null) }
-    var isLoadingIndexInfo by remember(item.uri, activeEngineId) { mutableStateOf(true) }
+    var detectedFaces by remember(item.uri, selectedDrawerEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
+    var allDetectedFaces by remember(item.uri, selectedDrawerEngineId) { mutableStateOf<List<DetectedMediaFace>>(emptyList()) }
+    var mediaIndexInfo by remember(item.uri, selectedDrawerEngineId) { mutableStateOf<FaceClusterStore.MediaIndexedInfo?>(null) }
+    var groupingRequired by remember(item.uri, selectedDrawerEngineId) { mutableStateOf(false) }
+    var groupingError by remember(item.uri, selectedDrawerEngineId) { mutableStateOf<String?>(null) }
+    var isLoadingIndexInfo by remember(item.uri, selectedDrawerEngineId) { mutableStateOf(true) }
 
     var singleScanJob by remember(item.uri) { mutableStateOf<Job?>(null) }
     var scanPhase by remember(item.uri) { mutableStateOf<String?>(null) }
@@ -177,17 +179,17 @@ fun ViewerDetailsDrawer(
     var isInstallingModel by remember { mutableStateOf(false) }
     var modelInstallProgress by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(item.uri, faceReloadKey, activeEngineId, factory) {
+    LaunchedEffect(item.uri, faceReloadKey, selectedDrawerEngineId, factory) {
         suspend fun refreshFaceState() {
             val snapshot = withContext(Dispatchers.IO) {
-                val allFaces = faceStore.facesForMedia(item.uri, activeEngineId)
-                val info = faceStore.getMediaIndexedInfo(item.uri, activeEngineId)
+                val allFaces = faceStore.facesForMedia(item.uri, selectedDrawerEngineId)
+                val info = faceStore.getMediaIndexedInfo(item.uri, selectedDrawerEngineId)
                 val strategy = factory.clusteringStrategy
                 val needsGrouping = strategy?.let {
-                    faceStore.isGroupingRequired(activeEngineId, factory.modelVersion, it.strategyVersion)
+                    faceStore.isGroupingRequired(selectedDrawerEngineId, factory.modelVersion, it.strategyVersion)
                 } ?: false
                 val error = strategy?.let {
-                    faceStore.groupingFailure(activeEngineId, factory.modelVersion, it.strategyVersion)
+                    faceStore.groupingFailure(selectedDrawerEngineId, factory.modelVersion, it.strategyVersion)
                 }
                 val visibleFaces = allFaces
                 FaceStateSnapshot(allFaces, visibleFaces, info, needsGrouping, error)
@@ -214,7 +216,7 @@ fun ViewerDetailsDrawer(
         }
     }
 
-    val isModelInstalled = remember(activeEngineId, faceReloadKey) {
+    val isModelInstalled = remember(selectedDrawerEngineId, faceReloadKey) {
         factory.isInstalled(context)
     }
 
@@ -229,7 +231,7 @@ fun ViewerDetailsDrawer(
             singleScanJob = coroutineScope.launch {
                 try {
                     val retryGroupingOnly = groupingError != null || groupingRequired
-                    val threshold = if (lowThreshold) FaceRecognitionSettings.LOW_DETECTION_CONFIDENCE_THRESHOLD else FaceRecognitionSettings.detectionConfidence(context, activeEngineId)
+                    val threshold = if (lowThreshold) FaceRecognitionSettings.LOW_DETECTION_CONFIDENCE_THRESHOLD else FaceRecognitionSettings.detectionConfidence(context, selectedDrawerEngineId)
                     val repo = FaceIndexingRepository(context.applicationContext, factory)
                     repo.indexNewMedia(
                         media = listOf(item),
@@ -254,7 +256,7 @@ fun ViewerDetailsDrawer(
                     val msg = e.localizedMessage ?: e.message ?: "Failed to scan photo"
                     lastScanError = msg
                     withContext(Dispatchers.IO) {
-                        faceStore.markMediaFailed(item.uri, activeEngineId, msg)
+                        faceStore.markMediaFailed(item.uri, selectedDrawerEngineId, msg)
                     }
                     faceReloadKey++
                 } finally {
@@ -316,41 +318,41 @@ fun ViewerDetailsDrawer(
                 state = ViewerFaceState.IN_PROGRESS,
                 progressPhase = scanPhase ?: "Scanning photo...",
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             isInstallingModel -> ViewerFaceUiState(
                 state = ViewerFaceState.IN_PROGRESS,
                 progressPhase = modelInstallProgress ?: "Installing model...",
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             !isModelInstalled -> ViewerFaceUiState(
                 state = ViewerFaceState.MODEL_MISSING,
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             isLoadingIndexInfo -> ViewerFaceUiState(
                 state = ViewerFaceState.NOT_INDEXED,
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             lastScanError != null && detectedFaces.isEmpty() && groupingError == null -> ViewerFaceUiState(
                 state = ViewerFaceState.FAILED,
                 errorMessage = lastScanError,
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             mediaIndexInfo?.status == "failed" -> ViewerFaceUiState(
                 state = ViewerFaceState.FAILED,
                 errorMessage = mediaIndexInfo?.errorMessage ?: "Face scan failed for this photo",
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             groupingError != null -> ViewerFaceUiState(
                 state = ViewerFaceState.FAILED,
                 errorMessage = "Grouping failed: $groupingError",
                 engineName = factory.displayName,
-                engineId = activeEngineId,
+                engineId = selectedDrawerEngineId,
                 groupingFailure = true
             )
             detectedFaces.isNotEmpty() -> ViewerFaceUiState(
@@ -358,29 +360,29 @@ fun ViewerDetailsDrawer(
                 faces = detectedFaces,
                 progressPhase = if (groupingRequired) "$detectedCount faces found · waiting to be grouped" else null,
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             groupingRequired && detectedCount > 0 -> ViewerFaceUiState(
                 state = ViewerFaceState.WAITING_FOR_GROUPING,
                 progressPhase = "$detectedCount faces found · waiting to be grouped",
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             detectedCount > 0 -> ViewerFaceUiState(
                 state = ViewerFaceState.GROUPING_INCOMPLETE,
                 progressPhase = "$detectedCount faces found · waiting for a person group",
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             mediaIndexInfo?.status == "indexed" -> ViewerFaceUiState(
                 state = ViewerFaceState.COMPLETED_NO_FACES,
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
             else -> ViewerFaceUiState(
                 state = ViewerFaceState.NOT_INDEXED,
                 engineName = factory.displayName,
-                engineId = activeEngineId
+                engineId = selectedDrawerEngineId
             )
         }
     }
@@ -437,6 +439,13 @@ fun ViewerDetailsDrawer(
                             onEditLocation = { showAddLocationDialog = true },
                             listState = overviewListState,
                             faceUiState = faceUiState,
+                            selectedEngineId = selectedDrawerEngineId,
+                            onSelectEngine = { newEngine ->
+                                selectedDrawerEngineId = newEngine
+                                FaceRecognitionSettings.setActiveEngine(context, newEngine)
+                                FaceEngineRegistry.setActiveEngine(newEngine)
+                                FaceStoreEvents.notifyAllUpdated()
+                            },
                             onScanThisPhoto = { startScan(false) },
                             onCancelScan = cancelScan,
                             onRescanPhoto = { startScan(false) },
@@ -446,7 +455,13 @@ fun ViewerDetailsDrawer(
                             onViewErrorDetails = { showErrorDetailsDialog = true },
                             onEditTagOrPerson = {
                                 if (detectedFaces.size == 1) {
-                                    renamingFace = detectedFaces.first()
+                                    val f = detectedFaces.first()
+                                    if (!f.personId.isNullOrBlank()) {
+                                        onClose()
+                                        onOpenPerson?.invoke(f.personId, f.engineId.ifBlank { selectedDrawerEngineId })
+                                    } else {
+                                        renamingFace = f
+                                    }
                                 } else if (detectedFaces.size > 1) {
                                     showFaceChooserDialog = true
                                 } else {
@@ -454,7 +469,12 @@ fun ViewerDetailsDrawer(
                                 }
                             },
                             onFaceClick = { face ->
-                                if (!face.personId.isNullOrBlank()) renamingFace = face
+                                if (!face.personId.isNullOrBlank()) {
+                                    onClose()
+                                    onOpenPerson?.invoke(face.personId, face.engineId.ifBlank { selectedDrawerEngineId })
+                                } else {
+                                    renamingFace = face
+                                }
                             }
                         )
                     }
@@ -681,7 +701,12 @@ fun ViewerDetailsDrawer(
                                 .fillMaxWidth()
                                 .clickable {
                                     showFaceChooserDialog = false
-                                    renamingFace = face
+                                    if (!face.personId.isNullOrBlank()) {
+                                        onClose()
+                                        onOpenPerson?.invoke(face.personId, face.engineId.ifBlank { selectedDrawerEngineId })
+                                    } else {
+                                        renamingFace = face
+                                    }
                                 }
                         ) {
                             Row(

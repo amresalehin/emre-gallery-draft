@@ -60,16 +60,20 @@ fun AlbumsScreen(
     onOpen: (MediaItem) -> Unit,
     onCreateAlbumClick: (parentPreset: String) -> Unit,
     onDeleteAlbum: (String) -> Unit,
-    onRenameAlbum: (String, String) -> Unit
+    onRenameAlbum: (String, String) -> Unit,
+    onOpenPerson: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
-    val activeEngineId = FaceRecognitionSettings.getActiveEngine(context)
+    var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     var detectedPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
-    LaunchedEffect(Unit) {
+    var engineMenuExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedEngineId) {
         suspend fun refreshPeople() {
-            val engine = FaceRecognitionSettings.getActiveEngine(context)
-            detectedPeople = withContext(Dispatchers.IO) { faceStore.personSummaries(engineId = engine) }
+            detectedPeople = withContext(Dispatchers.IO) {
+                faceStore.personSummaries(engineId = selectedEngineId)
+            }
         }
         refreshPeople()
         kotlinx.coroutines.coroutineScope {
@@ -134,67 +138,215 @@ fun AlbumsScreen(
             bottom = bottomContentPadding
         )
     ) {
-        // 1. People & pets Card (empty faces, smaller floating arrow in corner)
+        // 1. People card: single row, very large clickable faces, model dropdown pill, and 'See all >'
         item {
             Surface(
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 tonalElevation = 2.dp,
-                shadowElevation = 5.dp,
+                shadowElevation = 4.dp,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("albums_people_card")
             ) {
-                                val avatarSlots = remember(detectedPeople) {
-                    (detectedPeople + List((14 - detectedPeople.size).coerceAtLeast(0)) { null }).take(14)
-                }
-                Box(modifier = Modifier.padding(14.dp)) {
-                    LazyHorizontalGrid(
-                        rows = GridCells.Fixed(2),
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Header Row: Model selector pill on left, "See all >" on right
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(130.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        gridItems(avatarSlots) { person ->
+                        // Model Dropdown Pill
+                        Box {
                             Surface(
-                                shape = CircleShape,
+                                shape = RoundedCornerShape(24.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                                 modifier = Modifier
-                                    .size(58.dp)
-                                    .clickable { onFilter("People") }
+                                    .clickable { engineMenuExpanded = true }
+                                    .testTag("album_face_model_chip")
                             ) {
-                                FaceCropThumbnail(                                    mediaUri = person?.portraitUri,
-                                    faceIndex = person?.portraitFaceIndex,
-                                    engineId = person?.engineId ?: activeEngineId,
-                                    contentDescription = person?.displayName?.takeIf { it.isNotBlank() } ?: "Person",
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Face,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = if (selectedEngineId == com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID) "YOLO5Face" else "Buffalo-L",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Select engine",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = engineMenuExpanded,
+                                onDismissRequest = { engineMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Buffalo-L") },
+                                    trailingIcon = if (selectedEngineId == com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID) {
+                                        { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                                    } else null,
+                                    onClick = {
+                                        engineMenuExpanded = false
+                                        selectedEngineId = com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID
+                                        FaceRecognitionSettings.setActiveEngine(context, com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID)
+                                        com.amresalehin.emregallery.face.FaceEngineRegistry.setActiveEngine(com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID)
+                                        FaceStoreEvents.notifyAllUpdated()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("YOLO5Face + MobileFaceNet") },
+                                    trailingIcon = if (selectedEngineId == com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID) {
+                                        { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                                    } else null,
+                                    onClick = {
+                                        engineMenuExpanded = false
+                                        selectedEngineId = com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID
+                                        FaceRecognitionSettings.setActiveEngine(context, com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID)
+                                        com.amresalehin.emregallery.face.FaceEngineRegistry.setActiveEngine(com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID)
+                                        FaceStoreEvents.notifyAllUpdated()
+                                    }
+                                )
+                            }
+                        }
+
+                        // "See all >" Pill
+                        Surface(
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                            modifier = Modifier
+                                .clickable { onFilter("People") }
+                                .testTag("album_face_see_all_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "See all",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = "See all people",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
                     }
 
-                    // Circular arrow button in top right
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .size(28.dp)
-                            .align(Alignment.TopEnd)
-                            .clickable { onFilter("People") }
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Default.ArrowForward,
-                                contentDescription = "Open People",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(14.dp)
-                            )
+                    // Single horizontal row containing very large circular faces
+                    if (detectedPeople.isEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            repeat(4) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                                    modifier = Modifier
+                                        .size(96.dp)
+                                        .clickable { onFilter("People") }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.Face,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                            modifier = Modifier.size(38.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        androidx.compose.foundation.lazy.LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(18.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            items(detectedPeople.size, key = { detectedPeople[it].id }) { index ->
+                                val person = detectedPeople[index]
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .width(96.dp)
+                                        .clickable {
+                                            if (onOpenPerson != null) {
+                                                onOpenPerson(person.id)
+                                            } else {
+                                                onFilter("People")
+                                            }
+                                        }
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                        modifier = Modifier.size(96.dp)
+                                    ) {
+                                        FaceCropThumbnail(
+                                            mediaUri = person.portraitUri ?: person.sampleUri,
+                                            faceIndex = person.portraitFaceIndex,
+                                            engineId = person.engineId.ifBlank { selectedEngineId },
+                                            contentDescription = person.displayName.takeIf { it.isNotBlank() } ?: "Person",
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(CircleShape)
+                                        )
+                                    }
+
+                                    // Under each face: show name ONLY if configured/available. If not, show nothing!
+                                    if (person.isNamed && person.displayName.isNotBlank()) {
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            text = person.displayName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

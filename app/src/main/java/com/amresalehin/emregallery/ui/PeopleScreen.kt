@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.graphics.asImageBitmap
 import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceThumbnailHelper
@@ -56,7 +57,8 @@ fun PeopleScreen(
     media: List<MediaItem>,
     onBack: () -> Unit,
     onOpenMedia: (MediaItem) -> Unit,
-    onOpenIndexStatus: () -> Unit
+    onOpenIndexStatus: () -> Unit,
+    initialPersonId: String? = null
 ) {
     val context = LocalContext.current
     val store = remember { FaceClusterStore(context.applicationContext) }
@@ -70,15 +72,18 @@ fun PeopleScreen(
     val reloadScope = rememberCoroutineScope()
     var reloadGeneration by remember { mutableIntStateOf(0) }
 
-    var selectedPersonId by remember { mutableStateOf<String?>(null) }
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: People, 1: Review & Hidden, 2: Pets
+    var selectedPersonId by remember(initialPersonId) { mutableStateOf<String?>(initialPersonId) }
     var searchQuery by remember { mutableStateOf("") }
     var showAllPeople by remember { mutableStateOf(false) }
+    var isSortAscending by remember { mutableStateOf(false) }
+    var engineDropdownExpanded by remember { mutableStateOf(false) }
+    var showAvatarPicker by remember { mutableStateOf(false) }
 
     fun setEngine(target: String) {
         selectedEngineId = target
         FaceRecognitionSettings.setActiveEngine(context, target)
         FaceEngineRegistry.setActiveEngine(target)
+        FaceStoreEvents.notifyAllUpdated()
     }
 
     // Dialog states
@@ -97,22 +102,26 @@ fun PeopleScreen(
         reloadScope.launch {
             val snapshot = withContext(Dispatchers.IO) {
                 PeopleScreenSnapshot(
-                    people=store.personSummaries(includeHidden=false,engineId=engineId),
-                    hiddenPeople=store.personSummaries(includeHidden=true,engineId=engineId).filter { it.isHidden },
-                    suggestions=store.getPendingSuggestions(engineId=engineId),
-                    mediaIndex=store.personMediaIndex(engineId,availableUris)
+                    people = store.personSummaries(includeHidden = false, engineId = engineId),
+                    hiddenPeople = store.personSummaries(includeHidden = true, engineId = engineId).filter { it.isHidden },
+                    suggestions = store.getPendingSuggestions(engineId = engineId),
+                    mediaIndex = store.personMediaIndex(engineId, availableUris)
                 )
             }
-            if(request==reloadGeneration && engineId==selectedEngineId) {
-                allPeople=snapshot.people
-                hiddenPeople=snapshot.hiddenPeople
-                pendingSuggestions=snapshot.suggestions
-                personMediaIndex=snapshot.mediaIndex
+            if (request == reloadGeneration && engineId == selectedEngineId) {
+                allPeople = snapshot.people
+                hiddenPeople = snapshot.hiddenPeople
+                pendingSuggestions = snapshot.suggestions
+                personMediaIndex = snapshot.mediaIndex
             }
         }
     }
 
-    LaunchedEffect(selectedEngineId) { selectedPersonId = null }
+    LaunchedEffect(selectedEngineId) {
+        if (initialPersonId == null) {
+            selectedPersonId = null
+        }
+    }
 
     LaunchedEffect(selectedEngineId, photoByUri) {
         reload()
@@ -147,12 +156,33 @@ fun PeopleScreen(
         else visiblePeople.filter { it.displayName.contains(searchQuery.trim(), ignoreCase = true) }
     }
 
+    val sortedMatchingPeople = remember(matchingPeople, isSortAscending) {
+        if (isSortAscending) {
+            matchingPeople.sortedWith(compareBy<PersonSummary> { !it.isNamed }
+                .thenBy { it.displayName.lowercase(Locale.getDefault()) })
+        } else {
+            matchingPeople
+        }
+    }
+
     val detailMedia = remember(selectedPersonId, photoByUri, personMediaIndex, selectedEngineId) {
         selectedPersonId?.let { id ->
             personMediaIndex[id]?.mediaUris.orEmpty().mapNotNull { photoByUri[it] }
                 .distinctBy { it.uri }
                 .sortedByDescending { it.dateTakenMillis.takeIf { d -> d > 0 } ?: it.dateAddedSeconds * 1000L }
         }.orEmpty()
+    }
+
+    val dayGroups = remember(detailMedia) {
+        groupMediaByDay(detailMedia)
+    }
+
+    BackHandler(enabled = selectedPersonId != null) {
+        if (initialPersonId != null && selectedPersonId == initialPersonId) {
+            onBack()
+        } else {
+            selectedPersonId = null
+        }
     }
 
     Column(
@@ -162,51 +192,264 @@ fun PeopleScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Top App Bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = {
-                    if (selectedPersonId != null) selectedPersonId = null else onBack()
-                }
+        if (selectedPersonId == null) {
+            // Top App Bar / Search Bar (Matching Image 3)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 6.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    Icons.Default.ArrowBack,
-                    contentDescription = if (selectedPersonId != null) "Back to people" else "Back to albums"
-                )
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Back to albums"
+                    )
+                }
+
+                // Search Bar pill
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            decorationBox = { innerTextField ->
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        "People and pets",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                innerTextField()
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear search", modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+
+                // Sort toggle button
+                IconButton(
+                    onClick = { isSortAscending = !isSortAscending },
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SwapVert,
+                        contentDescription = "Sort people",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                // Model dropdown chip
+                Box {
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.clickable { engineDropdownExpanded = true }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) "YOLO5Face" else "Buffalo-L",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Select engine",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = engineDropdownExpanded,
+                        onDismissRequest = { engineDropdownExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Buffalo-L") },
+                            trailingIcon = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) {
+                                { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                            } else null,
+                            onClick = {
+                                engineDropdownExpanded = false
+                                setEngine(BuffaloLFaceEngine.ENGINE_ID)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("YOLO5Face + MobileFaceNet") },
+                            trailingIcon = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) {
+                                { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                            } else null,
+                            onClick = {
+                                engineDropdownExpanded = false
+                                setEngine(EnteFaceConstants.ENGINE_ID)
+                            }
+                        )
+                    }
+                }
             }
 
-            val titleText = when {
-                selectedPerson != null -> if (selectedPerson.isNamed) selectedPerson.displayName else "Unnamed Person"
-                selectedPersonId != null -> "Person"
-                else -> "People & pets"
+            // Main People Grid: Clean 3 columns, no photo counts, names shown only if configured
+            if (sortedMatchingPeople.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(28.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Face,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = if (searchQuery.isBlank()) "No face groups found yet" else "No matching people",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = if (searchQuery.isBlank()) "Scan photos in Index Status to identify people and group their faces." else "Try another name or clear your search.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                        if (searchQuery.isBlank()) {
+                            Button(onClick = onOpenIndexStatus) {
+                                Text("Open Index Status")
+                            }
+                        } else {
+                            TextButton(onClick = { searchQuery = "" }) {
+                                Text("Clear search")
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 32.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(22.dp)
+                ) {
+                    gridItems(sortedMatchingPeople, key = { it.id }) { person ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedPersonId = person.id },
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // Circular face avatar
+                            PersonAvatar(person = person, size = 96.dp)
+
+                            // Under avatar: Show name ONLY if configured. If not, show nothing!
+                            if (person.isNamed && person.displayName.isNotBlank()) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = person.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
             }
-
-            Text(
-                text = titleText,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-
-            if (selectedPersonId != null && selectedPerson != null) {
-                // Rename icon
+        } else {
+            // Selected Person Own Page (Matching Image 2)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 6.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 IconButton(
                     onClick = {
-                        renamePersonId = selectedPerson.id
-                        renameValue = selectedPerson.displayName
+                        if (initialPersonId != null && selectedPersonId == initialPersonId) {
+                            onBack()
+                        } else {
+                            selectedPersonId = null
+                        }
                     }
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = "Rename person")
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "Back to people"
+                    )
                 }
 
-                // More Options Menu (Merge, Hide, etc.)
+                // Search in person pill
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Search in ${if (selectedPerson?.isNamed == true) selectedPerson.displayName else "Person"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // 3-dots overflow menu (Merge, Hide, etc.)
                 Box {
                     IconButton(onClick = { personMenuExpanded = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "Person options")
@@ -224,397 +467,104 @@ fun PeopleScreen(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text(if (selectedPerson.isHidden) "Restore person" else "Hide person") },
+                            text = { Text(if (selectedPerson?.isHidden == true) "Restore person" else "Hide person") },
                             leadingIcon = {
                                 Icon(
-                                    if (selectedPerson.isHidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                    if (selectedPerson?.isHidden == true) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                                     contentDescription = null
                                 )
                             },
                             onClick = {
                                 personMenuExpanded = false
-                                reloadScope.launch(Dispatchers.IO) {
-                                    store.setPersonHidden(selectedPerson.id, !selectedPerson.isHidden)
-                                    reload()
+                                if (selectedPerson != null) {
+                                    reloadScope.launch(Dispatchers.IO) {
+                                        store.setPersonHidden(selectedPerson.id, !selectedPerson.isHidden)
+                                        reload()
+                                    }
+                                    if (!selectedPerson.isHidden) selectedPersonId = null
                                 }
-                                if (!selectedPerson.isHidden) selectedPersonId = null
                             }
                         )
                     }
                 }
             }
 
-            IconButton(onClick = { reload() }) {
-                Icon(Icons.Default.Refresh, contentDescription = "Refresh people and pets")
-            }
-        }
-
-        if (selectedPersonId == null) {
-            // Search Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                singleLine = true,
-                shape = RoundedCornerShape(28.dp),
-                placeholder = { Text("Search people") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear search")
+            // Person Profile Header (Matching Image 2)
+            if (selectedPerson != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Circular avatar with camera picker badge
+                    Box(contentAlignment = Alignment.BottomEnd) {
+                        PersonAvatar(person = selectedPerson, size = 90.dp)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.surface),
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clickable { showAvatarPicker = true }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoCamera,
+                                    contentDescription = "Pick avatar",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
-                }
-            )
 
-            // Engine Selector Chips
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = selectedEngineId == BuffaloLFaceEngine.ENGINE_ID,
-                    onClick = { setEngine(BuffaloLFaceEngine.ENGINE_ID) },
-                    label = { Text("Buffalo_L (Default)") },
-                    leadingIcon = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) {
-                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    } else null
-                )
-                FilterChip(
-                    selected = selectedEngineId == EnteFaceConstants.ENGINE_ID,
-                    onClick = { setEngine(EnteFaceConstants.ENGINE_ID) },
-                    label = { Text("Ente (YOLO5Face)") },
-                    leadingIcon = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) {
-                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                    } else null
-                )
-            }
+                    Spacer(Modifier.width(18.dp))
 
-            // Tabs: People, Review & Hidden, Pets
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = MaterialTheme.colorScheme.background,
-                contentColor = MaterialTheme.colorScheme.onSurface
-            ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = { Text("People (${visiblePeople.size})") },
-                    icon = { Icon(Icons.Default.Face, contentDescription = null) }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = {
-                        val reviewBadge = pendingSuggestions.size + hiddenPeople.size
-                        Text(if (reviewBadge > 0) "Review ($reviewBadge)" else "Review")
-                    },
-                    icon = { Icon(Icons.Default.Rule, contentDescription = null) }
-                )
-                Tab(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    text = { Text("Pets") },
-                    icon = { Icon(Icons.Default.Pets, contentDescription = null) }
-                )
-            }
-
-            when (selectedTab) {
-                // Tab 0: Main People Grid
-                0 -> {
-                    if (matchingPeople.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxSize().padding(28.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (selectedPerson.isNamed) selectedPerson.displayName else "Add name",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selectedPerson.isNamed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.clickable {
+                                    renamePersonId = selectedPerson.id
+                                    renameValue = if (selectedPerson.isNamed) selectedPerson.displayName else ""
+                                }
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            IconButton(
+                                onClick = {
+                                    renamePersonId = selectedPerson.id
+                                    renameValue = if (selectedPerson.isNamed) selectedPerson.displayName else ""
+                                },
+                                modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(
-                                    Icons.Default.Face,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(46.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit name",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                val hasHiddenGroups = allPeople.isNotEmpty() && !showAllPeople && searchQuery.isBlank()
-                                Text(
-                                    if (hasHiddenGroups) {
-                                        "${allPeople.size} unnamed people hidden"
-                                    } else if (searchQuery.isBlank()) {
-                                        "No face groups found yet"
-                                    } else {
-                                        "No matching people"
-                                    },
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    textAlign = TextAlign.Center
-                                )
-                                Text(
-                                    if (hasHiddenGroups) {
-                                        "Groups with fewer than $minimumGroupFaces photos are filtered by default."
-                                    } else if (searchQuery.isBlank()) {
-                                        "Scan photos in Index Status to identify people and group their faces."
-                                    } else {
-                                        "Try another name or clear your search."
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.Center
-                                )
-                                if (hasHiddenGroups) {
-                                    Button(onClick = { showAllPeople = true }) {
-                                        Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Show all ${allPeople.size} people")
-                                    }
-                                } else if (searchQuery.isBlank()) {
-                                    Button(onClick = onOpenIndexStatus) {
-                                        Text("Open Index Status")
-                                    }
-                                } else {
-                                    TextButton(onClick = { searchQuery = "" }) {
-                                        Text("Clear search")
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 104.dp),
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 28.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(20.dp)
-                        ) {
-                            gridItems(matchingPeople, key = { it.id }) { person ->
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { selectedPersonId = person.id },
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.BottomEnd) {
-                                        PersonAvatar(person = person, size = 88.dp)
-
-                                        // Subtle compact pencil action for instant naming/renaming
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                                            modifier = Modifier
-                                                .size(26.dp)
-                                                .clickable {
-                                                    renamePersonId = person.id
-                                                    renameValue = person.displayName
-                                                }
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    Icons.Default.Edit,
-                                                    contentDescription = "Edit name",
-                                                    modifier = Modifier.size(13.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurface
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    // Display name (never "Unknown")
-                                    val label = if (person.isNamed) person.displayName else "Add name"
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = if (person.isNamed) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (person.isNamed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${person.faceCount} ${if (person.faceCount == 1) "photo" else "photos"}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Tab 1: Review Suggestions & Hidden People
-                1 -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // Ambiguous Match Suggestions
-                        if (pendingSuggestions.isNotEmpty()) {
-                            Text(
-                                "Suggested Matches",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            pendingSuggestions.forEach { suggestion ->
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainer,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(LocalContext.current)
-                                                .data(Uri.parse(suggestion.mediaUri))
-                                                .crossfade(false)
-                                                .build(),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(52.dp).clip(CircleShape),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                        Spacer(Modifier.width(12.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(
-                                                "Is this ${suggestion.suggestedPersonName}?",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Text(
-                                                "Similarity match: ${(1f - suggestion.distance / 2f).coerceIn(0f, 1f) * 100}%",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                reloadScope.launch(Dispatchers.IO) {
-                                                    store.acceptSuggestion(suggestion.id)
-                                                    reload()
-                                                }
-                                            }
-                                        ) {
-                                            Icon(Icons.Default.Check, contentDescription = "Accept match", tint = MaterialTheme.colorScheme.primary)
-                                        }
-                                        IconButton(
-                                            onClick = {
-                                                reloadScope.launch(Dispatchers.IO) {
-                                                    store.rejectSuggestion(suggestion.id)
-                                                    reload()
-                                                }
-                                            }
-                                        ) {
-                                            Icon(Icons.Default.Close, contentDescription = "Reject match", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                }
                             }
                         }
 
-                        // Hidden / Ignored People
-                        if (hiddenPeople.isNotEmpty()) {
-                            Text(
-                                "Hidden People",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            hiddenPeople.forEach { hidden ->
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainer,
-                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        PersonAvatar(person = hidden, size = 48.dp)
-                                        Spacer(Modifier.width(12.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(
-                                                if (hidden.isNamed) hidden.displayName else "Unnamed Person",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                            Text(
-                                                "${hidden.faceCount} photos",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        TextButton(
-                                            onClick = {
-                                                reloadScope.launch(Dispatchers.IO) {
-                                                    store.setPersonHidden(hidden.id, false)
-                                                    reload()
-                                                }
-                                            }
-                                        ) {
-                                            Text("Restore")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if (pendingSuggestions.isEmpty() && hiddenPeople.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
-                                    Text("No suggestions or hidden people", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Tab 2: Pets
-                else -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize().padding(28.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Pets,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                "Pet groups aren’t available yet",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Medium,
-                                textAlign = TextAlign.Center
-                            )
-                            Text(
-                                "Emre Gallery groups people using on-device face recognition. Pet grouping will be added in a future update.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
-                            )
-                        }
+                        Text(
+                            text = "${java.text.NumberFormat.getInstance().format(detailMedia.size)} ${if (detailMedia.size == 1) "photo" else "photos"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
-        } else {
-            // Selected Person Details View
+
+            // Photos grouped by date headers ("Today", "Yesterday", "Sunday", etc.) matching Image 2
             if (detailMedia.isEmpty()) {
                 Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                     Text(
@@ -624,38 +574,136 @@ fun PeopleScreen(
                     )
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
+                androidx.compose.foundation.lazy.LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(start = 2.dp, end = 2.dp, top = 8.dp, bottom = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                    contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
-                    gridItems(detailMedia, key = { it.uri }) { item ->
-                        Box {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(Uri.parse(item.uri))
-                                    .crossfade(false)
-                                    .build(),
-                                contentDescription = item.name,
+                    dayGroups.forEach { group ->
+                        item(key = "header_${group.dayKey}") {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .aspectRatio(1f)
-                                    .clickable { onOpenMedia(item) },
-                                contentScale = ContentScale.Crop
-                            )
-                            // Menu button for photo-level action
-                            IconButton(
-                                onClick = { selectedMediaForAction = item },
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(32.dp)
-                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape)
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.MoreHoriz, contentDescription = "Photo options", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(16.dp))
+                                Text(
+                                    text = group.dayLabel,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
+
+                        val chunkedRows = group.items.chunked(3)
+                        items(chunkedRows.size) { rowIndex ->
+                            val rowItems = chunkedRows[rowIndex]
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 2.dp, vertical = 1.dp),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                for (col in 0 until 3) {
+                                    val item = rowItems.getOrNull(col)
+                                    if (item != null) {
+                                        Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(Uri.parse(item.uri))
+                                                    .crossfade(false)
+                                                    .build(),
+                                                contentDescription = item.name,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .clickable { onOpenMedia(item) },
+                                                contentScale = ContentScale.Crop
+                                            )
+                                            IconButton(
+                                                onClick = { selectedMediaForAction = item },
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .size(28.dp)
+                                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f), CircleShape)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.MoreHoriz,
+                                                    contentDescription = "Photo options",
+                                                    tint = MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Avatar Picker Modal Bottom Sheet
+    if (showAvatarPicker && selectedPerson != null) {
+        ModalBottomSheet(
+            onDismissRequest = { showAvatarPicker = false },
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "Choose profile photo",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Tap any photo to set it as this person's avatar",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(16.dp))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    gridItems(detailMedia, key = { "avatar_${it.uri}" }) { mediaItem ->
+                        AsyncImage(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(Uri.parse(mediaItem.uri))
+                                .crossfade(false)
+                                .build(),
+                            contentDescription = "Select as avatar",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    reloadScope.launch(Dispatchers.IO) {
+                                        store.setPersonCover(selectedPerson.id, mediaItem.uri)
+                                        reload()
+                                    }
+                                    showAvatarPicker = false
+                                },
+                            contentScale = ContentScale.Crop
+                        )
                     }
                 }
             }
