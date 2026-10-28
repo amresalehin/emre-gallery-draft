@@ -268,7 +268,9 @@ object ThumbnailPrewarmManager {
             items.asSequence().distinctBy { it.uri }.take(36).forEach { item ->
                 if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
             }
-            workerSignals.trySend(Unit)
+            // While scrolling the worker is parked on this signal. Keep replacing the pending
+            // destination window without waking it for each scroll update; wake once motion stops.
+            if (!userIsScrolling) workerSignals.trySend(Unit)
         }
     }
 
