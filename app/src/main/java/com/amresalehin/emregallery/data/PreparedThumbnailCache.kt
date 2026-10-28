@@ -25,7 +25,6 @@ import kotlinx.coroutines.yield
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Disk-backed thumbnail preparation for the gallery.
@@ -41,21 +40,16 @@ object PreparedThumbnailCache {
     private const val PREWARM_WIDTH = 420
     private const val PREWARM_HEIGHT = 420
 
-    private val uriLocks = ConcurrentHashMap<String, Mutex>()
+    // Fixed stripes avoid retaining one Mutex and URI-sized key per photo for large libraries.
+    private val uriLocks = Array(256) { Mutex() }
 
     data class ThumbnailResult(val bitmap: Bitmap)
 
     fun hasPrepared(context: Context, uri: String, widthPx: Int = PREWARM_WIDTH, heightPx: Int = PREWARM_HEIGHT): Boolean {
         val file = cacheFile(context.applicationContext, uri, widthPx, heightPx)
-        if (!file.isFile || file.length() <= 0L) return false
-
-        // Validate the WebP header without allocating a decoded bitmap.
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        runCatching { BitmapFactory.decodeFile(file.absolutePath, bounds) }
-        if (bounds.outWidth > 0 && bounds.outHeight > 0) return true
-
-        runCatching { file.delete() }
-        return false
+        // Keep the background pass cheap: full decode/validation occurs only on a cache hit
+        // that is actually requested by Coil. Corrupt entries are removed by readPrepared().
+        return file.isFile && file.length() > 0L
     }
 
     fun hasStorageHeadroom(context: Context): Boolean = runCatching {
@@ -80,7 +74,8 @@ object PreparedThumbnailCache {
 
         readPrepared(file)?.let { return ThumbnailResult(it) }
 
-        val mutex = uriLocks.computeIfAbsent(key) { Mutex() }
+        val stripeIndex = (key.hashCode() and Int.MAX_VALUE) % uriLocks.size
+        val mutex = uriLocks[stripeIndex]
         return mutex.withLock {
             currentCoroutineContext().ensureActive()
             readPrepared(file)?.let { return@withLock ThumbnailResult(it) }
