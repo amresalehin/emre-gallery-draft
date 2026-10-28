@@ -17,7 +17,8 @@ class GalleryApplication : Application() {
         super.onCreate()
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
         val isLowRam = activityManager?.isLowRamDevice ?: false
-        val cachePercent = if (isLowRam) 0.18 else 0.25
+        // Use one larger cache budget across devices; retain a bound to avoid OOM process kills.
+        val cachePercent = 0.35
 
         // Bounded CPU concurrency prevents thumbnail fetching/decoding from saturating all CPU cores
         // during fast scrolling, keeping UI and RenderThread at 60/120Hz without processor throttling.
