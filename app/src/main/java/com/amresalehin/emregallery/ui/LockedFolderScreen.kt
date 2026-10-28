@@ -897,12 +897,11 @@ private fun AddPhotosToLockedSheet(
                                     selectedForLock = if (isSelected) selectedForLock - item.uri else selectedForLock + item.uri
                                 }
                         ) {
+                            val context = LocalContext.current
                             AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(Uri.parse(item.uri))
-                                    .size(360, 360)
-                                    .precision(Precision.INEXACT)
-                                    .build(),
+                                model = remember(item.uri, context) {
+                                    ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                                },
                                 contentDescription = item.name,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.Crop

@@ -660,11 +660,11 @@ fun PeopleScreen(
                                         val item = rowItems.getOrNull(col)
                                         if (item != null) {
                                             Box(modifier = Modifier.weight(1f).aspectRatio(1f)) {
+                                                val context = LocalContext.current
                                                 AsyncImage(
-                                                    model = ImageRequest.Builder(LocalContext.current)
-                                                        .data(Uri.parse(item.uri))
-                                                        .crossfade(false)
-                                                        .build(),
+                                                    model = remember(item.uri, context) {
+                                                        ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                                                    },
                                                     contentDescription = item.name,
                                                     modifier = Modifier
                                                         .fillMaxSize()
@@ -717,11 +717,11 @@ fun PeopleScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     gridItems(detailMedia, key = { "avatar_${it.uri}" }) { mediaItem ->
+                        val context = LocalContext.current
                         AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(Uri.parse(mediaItem.uri))
-                                .crossfade(false)
-                                .build(),
+                            model = remember(mediaItem.uri, context) {
+                                ThumbnailUtils.buildThumbnailRequest(context, mediaItem.uri)
+                            },
                             contentDescription = "Select as avatar",
                             modifier = Modifier
                                 .fillMaxWidth()

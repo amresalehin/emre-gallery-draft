@@ -117,8 +117,14 @@ fun HomeFastScrollbar(
                 val thumbHeightPx = (viewportPx * visibleItems.size / totalItems.toFloat())
                     .coerceIn(minThumbPx, viewportPx)
                 val maxThumbTravel = (viewportPx - thumbHeightPx).coerceAtLeast(1f)
-                val scrollFraction = (listState.firstVisibleItemIndex.toFloat() /
-                    (totalItems - visibleItems.size).coerceAtLeast(1)).coerceIn(0f, 1f)
+
+                // Sub-pixel continuous float position: combine index with scroll offset to eliminate integer snapping
+                val firstItem = visibleItems.firstOrNull()
+                val itemHeightPx = (firstItem?.size ?: 1).coerceAtLeast(1).toFloat()
+                val subItemFraction = (listState.firstVisibleItemScrollOffset.toFloat() / itemHeightPx).coerceIn(0f, 1f)
+                val continuousIndex = listState.firstVisibleItemIndex.toFloat() + subItemFraction
+                val maxIndex = (totalItems - visibleItems.size).coerceAtLeast(1).toFloat()
+                val scrollFraction = (continuousIndex / maxIndex).coerceIn(0f, 1f)
                 val thumbTopPx = maxThumbTravel * scrollFraction
 
                 val inMotion = dragging || listState.isScrollInProgress

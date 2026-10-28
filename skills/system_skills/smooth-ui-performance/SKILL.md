@@ -1,9 +1,10 @@
 ---
 name: "smooth-ui-performance"
 description: >-
-  Instructs architectural patterns for maintaining silky-smooth 60/90/120 FPS performance on low-end hardware.
+  Instructs architectural patterns for maintaining silky-smooth 60/90/120 FPS performance on low-end hardware and high refresh rate panels.
   Covers UI thread decoupling, hardware acceleration, GPU compositing, view recycling, aggressive multi-tier downsampling,
-  two-pass thumbnail loading, bitmap pooling with inBitmap, and decoupled background metadata queries in gallery applications.
+  two-pass thumbnail loading, bitmap pooling with inBitmap, decoupled background metadata queries, and 120 FPS perceptual judder fixes
+  (sub-pixel snapping, graphicsLayer vs offset, touch input jitter, retinal tracking disruption, and crossfade/aspect ratio constraints in Jetpack Compose).
 ---
 
 # Smooth UI Performance: Low-End Hardware Optimization & Thread Decoupling
@@ -107,3 +108,173 @@ Fetching photo metadata (dates, geotags, filenames, camera info) directly from d
 | **Data Fetching** | Reads fast in-memory list pointer | Queries cursor & batches IDs | Idle |
 | **Image Decoding** | Idle | Streams, downsamples & binds to `inBitmap` | Idle |
 | **Displaying** | Issues draw command to surface | Idle | Renders hardware bitmap to display layer |
+
+---
+
+# 120 FPS Perceptual Judder, Spatial Consistency & High Refresh Rate Panels
+
+If an app is hitting a steady 120 frames per second on a 120 Hz panel and still feels stuttery, the problem is no longer frame delivery—it is **spatial inconsistency**, **input-to-display desynchronization**, or **display hardware behavior**. The eye registers motion smoothness not just from refresh rate, but from uniform spatial displacement between frames.
+
+---
+
+### 1. Touch Input Jitter & Asymmetric Spatial Delta ($dY$)
+
+At 120 Hz, a new frame is presented every **8.33 milliseconds**. If an app moves content strictly based on raw touch digitizer events, input timing variations will cause visual judder:
+
+- **Non-uniform displacements:** If your finger moves at a constant speed, the list should ideally move by an exact distance each frame (e.g., `10px, 10px, 10px, 10px`).
+- **Input poll desync:** If the touch sensor (even a 240 Hz or 360 Hz digitizer) delivers events at slight timing offsets relative to the VSYNC boundary, the captured scroll offsets might calculate to `14px, 6px, 15px, 5px`.
+- Even though the GPU renders 120 frames with zero dropped frames, the physical motion on screen oscillates between speeding up and slowing down. The human retina tracks the speed anomaly and interprets it as a stutter.
+- **The fix:** Modern physics engines use predictive motion filtering and spline interpolation (like Android's `VelocityTracker` and gesture interpolators) to smooth out the positional delta curve across VSYNC intervals instead of binding directly to raw touch packets.
+
+---
+
+### 2. Sub-Pixel Snapping and Integer Truncation
+
+When the scroll position is calculated as a floating-point number (e.g., scrolling at 1.4 pixels per frame):
+
+- If the layout or canvas engine truncates or rounds positions to whole integers before drawing (`Canvas.translate(x, y.toInt())` or `Modifier.offset { IntOffset(...) }`), the frame translations will render as:
+
+$$1\text{px}, 1\text{px}, 2\text{px}, 1\text{px}, 2\text{px}$$
+
+- This micro-jumping between 1-pixel and 2-pixel movements at high speeds creates a visible, high-frequency crawl or vibrating jitter on sharp edges and text, completely destroying the sensation of fluid motion.
+
+---
+
+### 3. Asymmetric Image Pop-In (Retinal Tracking Disruption)
+
+When you scroll, your eyes do not look at the phone statically; they actively track specific elements across the screen (smooth pursuit eye movement).
+
+- If the list itself is gliding at a flawless 120 fps, but image thumbnails swap from a low-res blur/placeholder to a high-res bitmap mid-flight, the visual feature your eye is tracking suddenly alters in contrast, sharpness, or edge definition.
+- This abrupt visual jump halts smooth retinal pursuit for a split second, tricking the brain into feeling a hitch even when the animation frame rate never dipped below 120 fps.
+
+---
+
+## Jetpack Compose & Modern Android Implementation: 120 FPS Polish
+
+In Jetpack Compose and Modern Android, maintaining an actual 120 FPS render pipeline while suffering from perceptual judder is typically caused by three specific failure points:
+
+---
+
+### 1. Fixing Input Jitter & Pointer Desync
+
+In Compose, if you read pointer movements using raw `pointerInput` coordinates (`pointerInputChange.positionChange()`) and feed those directly into a layout state, you bypass the platform's native resampler and introduce digitizer phase-jitter.
+
+#### A. Do Not Drive Custom Scrolling via Raw Delta Accumulation
+
+If building scrollable containers, avoid manually accumulating raw drag offsets into a state variable:
+
+* **Use `scrollable` or `draggable` modifiers:** Compose’s built-in `Modifier.scrollable(...)` routes through `ScrollableState`, which properly consumes consumed deltas and works in tandem with the platform's fling physics (`FlingBehavior`).
+* **Velocity Calculation Strategy:** When handling custom gestures, never calculate velocity manually with `delta / deltaTime`. Always delegate to `VelocityTracker`:
+
+```kotlin
+// In custom pointer input
+val velocityTracker = remember { VelocityTracker() }
+
+Modifier.pointerInput(Unit) {
+    detectDragGestures(
+        onDrag = { change, dragAmount ->
+            change.consume()
+            velocityTracker.addPosition(change.uptimeMillis, change.position)
+            // Update translation/offset
+        },
+        onDragEnd = {
+            val velocity = velocityTracker.calculateVelocity()
+            // Launch fling animation using platform spline physics
+        }
+    )
+}
+```
+
+#### B. Align Custom Canvas Gestures with `withFrameNanos`
+
+If you are doing continuous position updates or running an interactive canvas simulation, update position state strictly inside a `withFrameNanos` / `withFrameMillis` loop (which hooks directly into Android's `Choreographer` VSYNC signal), rather than updating state immediately on every raw pointer packet.
+
+---
+
+### 2. Fixing Sub-Pixel Crawl & Integer Truncation
+
+Compose performs layout on integer pixel grids (`IntOffset`, `IntSize`, `Constraints`). Passing fractional scroll offsets into layout modifiers causes continuous micro-jumps between integer boundaries.
+
+#### A. Route Offsets Through `graphicsLayer` (Draw Phase), Not Layout Modifiers
+
+* **The Anti-Pattern (Causes Sub-Pixel Stutter):**
+```kotlin
+// BAD: Truncates float to Int, forces re-measurement/re-layout every frame
+Modifier.offset { IntOffset(0, scrollY.roundToInt()) }
+```
+
+* **The Fix (Sub-Pixel Antialiasing via Skia/RenderThread):**
+```kotlin
+// GOOD: Preserves float precision, renders on GPU matrix, skips Recomposition & Layout
+Modifier.graphicsLayer {
+    translationY = scrollY // scrollY is a Float
+}
+```
+
+Using `graphicsLayer` delegates the transformation directly to Skia / Vulkan draw matrices. The edges and text are antialiased against physical display subpixels without rounding to discrete integer coordinates.
+
+#### B. Decouple Recomposition from Frame Invalidation
+
+When a scroll coordinate changes at 120 Hz, triggering a Compose recomposition loop can introduce small frame-pacing anomalies. Ensure continuous fractional values are passed as lambdas directly to drawing phases:
+
+```kotlin
+// BAD: Recomposes on every 0.1f delta
+val scrollOffset by scrollState
+
+// GOOD: Lambda reads state during Draw phase only
+Modifier.graphicsLayer {
+    translationY = scrollState.value
+}
+```
+
+---
+
+### 3. Fixing Asymmetric Image Pop-In (Smooth Pursuit Preservation)
+
+In Jetpack Compose, asynchronous image loaders (like **Coil**) often swap loaded bitmaps into `AsyncImage` synchronously during active scrolling. When a high-res bitmap replaces a blurry or blank placeholder, the eye tracking the element across 120 Hz loses fixation.
+
+#### A. Throttle Image Loading During Fast Flings
+
+Pause or restrict Coil from decoding and dispatching new high-res bitmaps while the list is flinging rapidly.
+
+Using `LazyListState`:
+
+```kotlin
+val listState = rememberLazyListState()
+val isFastScrolling by remember {
+    derivedStateOf {
+        // Suppress image decode transitions if scroll is active and velocity is high
+        listState.isScrollInProgress
+    }
+}
+
+// Pass state to image loader or conditionally defer high-res loading
+AsyncImage(
+    model = ImageRequest.Builder(LocalContext.current)
+        .data(imageUrl)
+        // If scrolling fast, keep low-res cache or defer memory decode
+        .crossfade(enable = true)
+        .crossfade(150) // Smooth alpha ramp prevents ocular shock
+        .build(),
+    contentDescription = null,
+    modifier = Modifier
+        .fillMaxWidth()
+        .aspectRatio(16f / 9f) // STRICT: Lock layout geometry permanently
+)
+```
+
+#### B. Absolute Aspect Ratio Enforcement
+
+Never allow an image component to load with dynamic wrapping (`wrapContentHeight()` or missing aspect ratios):
+
+* If the incoming bitmap resolves with dimensions differing by even a fraction of a DP, it triggers an instant layout pass that shifts neighboring items by a discrete pixel delta.
+* Always define an explicit `Modifier.aspectRatio(...)` or fixed `.size(...)` on the image container so the geometric layout remains completely immutable before, during, and after the bitmap renders.
+
+---
+
+### Summary Checklist for Compose at 120 Hz
+
+1. **Translations:** Replace `Modifier.offset { IntOffset(...) }` with `Modifier.graphicsLayer { translationY = ... }`.
+2. **Phase Isolation:** Keep scroll offset state reads out of the Composition block; defer them to the Draw phase (`graphicsLayer` lambda).
+3. **Fling & Inertia:** Use Compose's default `ScrollableDefaults.flingBehavior()` or pass pointer events through `VelocityTracker.calculateVelocity()`.
+4. **Bitmap Swaps:** Always specify `crossfade(100..150)` and strict `aspectRatio` on `AsyncImage` so visual edges do not pop instantly during foveal pursuit.

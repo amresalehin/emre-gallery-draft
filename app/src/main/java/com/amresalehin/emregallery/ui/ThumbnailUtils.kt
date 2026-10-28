@@ -30,7 +30,8 @@ object ThumbnailUtils {
             .data(Uri.parse(uri))
             .size(widthPx, heightPx)
             .precision(Precision.INEXACT)
-            .crossfade(false)
+            .crossfade(true)
+            .crossfade(150)
             .diskCacheKey(mediaThumbnailKey(uri))
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCacheKey(mediaThumbnailKey(uri))
@@ -58,7 +59,8 @@ object ThumbnailUtils {
             builder
                 .size(THUMBNAIL_DIMENSION, THUMBNAIL_DIMENSION)
                 .precision(Precision.INEXACT)
-                .crossfade(false)
+                .crossfade(true)
+                .crossfade(150)
                 .diskCacheKey(mediaThumbnailKey(uri))
                 .memoryCacheKey(mediaThumbnailKey(uri))
         } else {
@@ -70,7 +72,8 @@ object ThumbnailUtils {
                 .placeholderMemoryCacheKey(mediaThumbnailKey(uri))
                 .diskCacheKey("${uri}:viewer-scaled")
                 .memoryCacheKey("${uri}:viewer-scaled")
-                .crossfade(100)
+                .crossfade(true)
+                .crossfade(150)
         }
         return builder.build()
     }
