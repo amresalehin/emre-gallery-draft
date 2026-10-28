@@ -230,6 +230,7 @@ fun BinScreen(
                             if (selectionMode) {
                                 selectedUris = if (isSelected) selectedUris - item.uri else selectedUris + item.uri
                             } else {
+                                ThumbnailBoundsTracker.captureBounds(item.uri)
                                 onOpen(item)
                             }
                         },
