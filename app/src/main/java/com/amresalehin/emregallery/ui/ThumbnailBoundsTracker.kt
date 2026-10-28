@@ -55,6 +55,9 @@ object ThumbnailBoundsTracker {
         if (bounds.width > 5f && bounds.height > 5f) cacheBounds(uri, bounds)
     }
 
+    /** Snapshot the source bounds before a click navigates away and disposes its cell. */
+    fun captureBounds(uri: String): Rect? = getBounds(uri)
+
     fun getBounds(uri: String): Rect? {
         val coords = coordinatesMap[uri]
         if (coords != null && coords.isAttached) {
