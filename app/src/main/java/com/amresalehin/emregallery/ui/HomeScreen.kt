@@ -44,12 +44,6 @@ private data class PreparedHomeGrouping(
     val groups: List<DayGroup>
 )
 
-private data class PreparedHomeRows(
-    val groups: List<DayGroup>,
-    val columns: Int,
-    val groupedRows: List<Pair<DayGroup, List<List<MediaItem>>>>
-)
-
 private fun sortGalleryMedia(media: List<MediaItem>, sortOrder: String): List<MediaItem> =
     when (sortOrder) {
         "date_asc", "date_taken_asc" -> media.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
@@ -158,29 +152,6 @@ fun HomeScreen(
     }
     val sortedMedia = currentGrouping?.sortedMedia ?: emptyList()
     val groups = currentGrouping?.groups ?: emptyList()
-
-    var preparedRows by remember { mutableStateOf<PreparedHomeRows?>(null) }
-    LaunchedEffect(currentGrouping, pinchGridColumns) {
-        val grouping = currentGrouping
-        if (grouping == null) {
-            preparedRows = null
-        } else {
-            val requestedColumns = pinchGridColumns.coerceIn(1, 6)
-            val groupSnapshot = grouping.groups
-            val rows = withContext(Dispatchers.Default) {
-                groupSnapshot.map { group -> group to group.items.chunked(requestedColumns) }
-            }
-            if (currentGrouping === grouping && pinchGridColumns.coerceIn(1, 6) == requestedColumns) {
-                preparedRows = PreparedHomeRows(
-                    groups = groupSnapshot,
-                    columns = requestedColumns,
-                    groupedRows = rows
-                )
-            }
-        }
-    }
-    // Keep the previous column layout visible while the next row chunking pass is prepared.
-    val groupedRows = preparedRows?.takeIf { it.groups === groups }?.groupedRows ?: emptyList()
 
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize()
@@ -326,7 +297,7 @@ fun HomeScreen(
                     }
                 }
 
-                groupedRows.forEach { (group, rowChunks) ->
+                groups.forEach { group ->
                     if (group.dayLabel.isNotBlank()) {
                         item(key = "header_${group.dayKey}", contentType = "header") {
                             Row(
@@ -351,13 +322,19 @@ fun HomeScreen(
                         }
                     }
 
+                    val columns = pinchGridColumns.coerceIn(1, 6)
+                    val rowCount = (group.items.size + columns - 1) / columns
                     items(
-                        count = rowChunks.size,
-                        key = { rIdx -> "day_${group.dayKey}_row_${rowChunks[rIdx].first().id}" },
+                        count = rowCount,
+                        key = { rowIndex ->
+                            "day_${group.dayKey}_row_${group.items[rowIndex * columns].id}"
+                        },
                         contentType = { "photo_row" }
                     ) { rowIndex ->
+                        val startIndex = rowIndex * columns
+                        val endIndex = minOf(startIndex + columns, group.items.size)
                         JustifiedMosaicRow(
-                            items = rowChunks[rowIndex],
+                            items = group.items.subList(startIndex, endIndex),
                             containerWidth = containerWidth,
                             rowIndex = rowIndex,
                             isSquare = (gridStyle == "square"),
