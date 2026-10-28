@@ -45,6 +45,7 @@ import kotlinx.coroutines.withContext
 class IndexingForegroundService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var taskJob: Job? = null
+    @Volatile private var stoppedForSystemTimeout = false
     private val pauseSignal = MutableStateFlow(false)
     private val prefs by lazy { getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE) }
 
@@ -110,6 +111,7 @@ class IndexingForegroundService : Service() {
             return if (active) START_STICKY else START_NOT_STICKY
         }
 
+        if (taskJob?.isActive == true) return START_STICKY
         val title = when (action) {
             ACTION_START_OCR -> "OCR indexing"
             ACTION_START_FACE -> "Face indexing"
@@ -118,7 +120,6 @@ class IndexingForegroundService : Service() {
             else -> "Media indexing"
         }
         startForegroundCompat(buildNotification(title, "Starting…", 0, 0))
-        if (taskJob?.isActive == true) return START_STICKY
 
         val taskRequest = commandIntent ?: return START_NOT_STICKY
         if (restoredFromSystem) {
