@@ -43,11 +43,15 @@ private class HomeMediaIdentity(private val value: Any) {
     override fun hashCode(): Int = System.identityHashCode(value)
 }
 
-private data class PreparedHomeGrouping(
+private data class PreparedHomeSort(
     val sourceMedia: List<MediaItem>,
     val sortOrder: String,
-    val groupBy: String,
+    val sortedMedia: List<MediaItem>
+)
+
+private data class PreparedHomeGrouping(
     val sortedMedia: List<MediaItem>,
+    val groupBy: String,
     val groups: List<DayGroup>
 )
 
@@ -133,31 +137,41 @@ fun HomeScreen(
         return
     }
 
-    var preparedGrouping by remember { mutableStateOf<PreparedHomeGrouping?>(null) }
-    LaunchedEffect(HomeMediaIdentity(media), sortOrder, groupBy) {
+    var preparedSort by remember { mutableStateOf<PreparedHomeSort?>(null) }
+    LaunchedEffect(HomeMediaIdentity(media), sortOrder) {
         val sourceMedia = media
         val requestedSortOrder = sortOrder
+        val sorted = withContext(Dispatchers.Default) {
+            sortGalleryMedia(sourceMedia, requestedSortOrder)
+        }
+        // Ignore stale work if another input arrived while sorting was running.
+        if (sourceMedia === media && requestedSortOrder == sortOrder) {
+            preparedSort = PreparedHomeSort(sourceMedia, requestedSortOrder, sorted)
+        }
+    }
+    val currentSort = preparedSort?.takeIf {
+        it.sourceMedia === media && it.sortOrder == sortOrder
+    }
+    val sortedMedia = currentSort?.sortedMedia ?: emptyList()
+
+    var preparedGrouping by remember { mutableStateOf<PreparedHomeGrouping?>(null) }
+    LaunchedEffect(HomeMediaIdentity(sortedMedia), groupBy) {
+        val sourceSortedMedia = sortedMedia
         val requestedGroupBy = groupBy
-        val prepared = withContext(Dispatchers.Default) {
-            val sorted = sortGalleryMedia(sourceMedia, requestedSortOrder)
-            PreparedHomeGrouping(
-                sourceMedia = sourceMedia,
-                sortOrder = requestedSortOrder,
+        val groups = withContext(Dispatchers.Default) {
+            groupGalleryMedia(sourceSortedMedia, requestedGroupBy)
+        }
+        if (sourceSortedMedia === sortedMedia && requestedGroupBy == groupBy) {
+            preparedGrouping = PreparedHomeGrouping(
+                sortedMedia = sourceSortedMedia,
                 groupBy = requestedGroupBy,
-                sortedMedia = sorted,
-                groups = groupGalleryMedia(sorted, requestedGroupBy)
+                groups = groups
             )
         }
-        // Ignore stale work if another input arrived while preparation was running.
-        if (sourceMedia === media && requestedSortOrder == sortOrder && requestedGroupBy == groupBy) {
-            preparedGrouping = prepared
-        }
     }
-
     val currentGrouping = preparedGrouping?.takeIf {
-        it.sourceMedia === media && it.sortOrder == sortOrder && it.groupBy == groupBy
+        it.sortedMedia === sortedMedia && it.groupBy == groupBy
     }
-    val sortedMedia = currentGrouping?.sortedMedia ?: emptyList()
     val groups = currentGrouping?.groups ?: emptyList()
 
     BoxWithConstraints(
