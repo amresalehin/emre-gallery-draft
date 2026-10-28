@@ -10,15 +10,31 @@ import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
 
 object FaceThumbnailHelper {
-    private val memoryCache = LruCache<String, Bitmap>(100)
+    // Dynamic cache capacities: Space-Time tradeoff trades memory for zero-lag rendering.
+    // Rather than artificially capping at 100 face crops and 8 base images, allocate
+    // capacity scaled to the system memory class and only trim when Android requests it.
+    private val maxHeapBytes = Runtime.getRuntime().maxMemory()
+    private val thumbnailCacheLimit = ((maxHeapBytes / (1024 * 1024)) * 3).toInt().coerceIn(500, 2500)
+    private val baseCacheLimit = ((maxHeapBytes / (1024 * 1024)) / 8).toInt().coerceIn(24, 96)
+
+    private val memoryCache = LruCache<String, Bitmap>(thumbnailCacheLimit)
 
     // Base downsampled image cache to avoid repeated expensive full-res decodes for group photos
     private data class CachedBaseImage(val bitmap: Bitmap, val originalWidth: Int, val originalHeight: Int)
-    private val baseImageCache = LruCache<String, CachedBaseImage>(8)
+    private val baseImageCache = LruCache<String, CachedBaseImage>(baseCacheLimit)
 
     fun clearCache() {
         synchronized(memoryCache) { memoryCache.evictAll() }
         synchronized(baseImageCache) { baseImageCache.evictAll() }
+    }
+
+    fun trimMemory(level: Int) {
+        synchronized(memoryCache) {
+            memoryCache.trimToSize(memoryCache.size() / 2)
+        }
+        synchronized(baseImageCache) {
+            baseImageCache.trimToSize(baseImageCache.size() / 2)
+        }
     }
 
     fun invalidate(uri: String) {

@@ -34,31 +34,32 @@ class EnteFaceEngine private constructor(
     private val embedder = EnteFaceEmbedder(embedderSession, EnteFaceConstants.EMBEDDING_DIMENSION)
 
     private data class DecodedImage(val bitmap: Bitmap, val origW: Int, val origH: Int)
-    @Volatile private var cachedDecoded: Pair<Uri, DecodedImage>? = null
+    private val decodedCache = object : android.util.LruCache<Uri, DecodedImage>(16) {
+        override fun entryRemoved(evicted: Boolean, key: Uri?, oldValue: DecodedImage?, newValue: DecodedImage?) {
+            super.entryRemoved(evicted, key, oldValue, newValue)
+            if (evicted && oldValue != null && oldValue !== newValue && !oldValue.bitmap.isRecycled) {
+                oldValue.bitmap.recycle()
+            }
+        }
+    }
 
     private fun getOrDecode(uri: Uri): DecodedImage? {
-        synchronized(this) {
-            val cached = cachedDecoded
-            if (cached != null && cached.first == uri && !cached.second.bitmap.isRecycled) {
-                return cached.second
+        synchronized(decodedCache) {
+            val cached = decodedCache.get(uri)
+            if (cached != null && !cached.bitmap.isRecycled) {
+                return cached
             }
         }
         val img = decodeOrientedImage(uri) ?: return null
-        synchronized(this) {
-            cachedDecoded?.second?.bitmap?.let { if (!it.isRecycled) it.recycle() }
-            cachedDecoded = uri to img
+        synchronized(decodedCache) {
+            decodedCache.put(uri, img)
         }
         return img
     }
 
     private fun releaseDecoded(uri: Uri) {
-        synchronized(this) {
-            val cached = cachedDecoded
-            if (cached != null && cached.first == uri) {
-                if (!cached.second.bitmap.isRecycled) cached.second.bitmap.recycle()
-                cachedDecoded = null
-            }
-        }
+        // Maintained in decodedCache according to Space-Time Tradeoff so subsequent embedding passes
+        // or neighboring scans bypass CPU-heavy image decompression.
     }
 
     override fun detectFaces(uri: Uri): List<RawFaceDetection> {
@@ -221,9 +222,12 @@ class EnteFaceEngine private constructor(
 
 
     override fun close() {
-        synchronized(this) {
-            cachedDecoded?.second?.bitmap?.let { if (!it.isRecycled) it.recycle() }
-            cachedDecoded = null
+        synchronized(decodedCache) {
+            val snapshot = decodedCache.snapshot()
+            decodedCache.evictAll()
+            for ((_, img) in snapshot) {
+                if (!img.bitmap.isRecycled) img.bitmap.recycle()
+            }
         }
         runCatching { detectorSession.close() }
         runCatching { embedderSession.close() }

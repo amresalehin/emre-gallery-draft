@@ -135,8 +135,6 @@ class PhotoMapLocationCache(context: Context) :
                 db.endTransaction()
             }
             onProgress?.invoke(newlyLocated, pending.size, totalLocated)
-            // Duty-cycle throttle: 15ms sleep between chunks to let CPU temperature drop
-            runCatching { Thread.sleep(15) }
         }
         return newlyLocated
     }

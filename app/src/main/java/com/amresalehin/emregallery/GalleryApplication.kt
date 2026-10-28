@@ -17,14 +17,16 @@ class GalleryApplication : Application() {
         super.onCreate()
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
         val isLowRam = activityManager?.isLowRamDevice ?: false
-        val cachePercent = if (isLowRam) 0.18 else 0.25
 
-        // Bounded CPU concurrency prevents thumbnail fetching/decoding from saturating all CPU cores
-        // during fast scrolling, keeping UI and RenderThread at 60/120Hz without processor throttling.
-        val cpuCores = Runtime.getRuntime().availableProcessors()
-        val workerParallelism = (cpuCores / 2).coerceIn(2, 4)
-        val imageIoDispatcher = Dispatchers.IO.limitedParallelism(workerParallelism)
-        val imageComputeDispatcher = Dispatchers.Default.limitedParallelism(workerParallelism)
+        // Unconstrained memory caching: Allocate up to 45% (30% on low-RAM) of JVM heap to Coil.
+        // With largeHeap enabled, this unlocks hundreds of megabytes for raw pre-decoded bitmaps,
+        // avoiding recurring decompression bottlenecks during 120Hz continuous scrolling.
+        val cachePercent = if (isLowRam) 0.30 else 0.45
+
+        // Unconstrained concurrency: Utilize full Dispatchers without artificial core-capping
+        // so that multi-core processors decode thumbnails at maximum throughput.
+        val imageIoDispatcher = Dispatchers.IO
+        val imageComputeDispatcher = Dispatchers.Default
 
         val imageLoader = ImageLoader.Builder(this)
             .fetcherDispatcher(imageIoDispatcher)
@@ -38,7 +40,7 @@ class GalleryApplication : Application() {
             .diskCache {
                 DiskCache.Builder()
                     .directory(File(cacheDir, "image_cache"))
-                    .maxSizeBytes(262144000L)
+                    .maxSizeBytes(1073741824L) // 1GB disk cache
                     .build()
             }
             .components {
@@ -57,6 +59,36 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
+    }
+
+    /**
+     * Emre never limits itself when Android is not limiting it.
+     * When Android signals genuine memory constraints via onTrimMemory,
+     * memory caches are trimmed or cleared according to severity.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        runCatching {
+            val coilCache = Coil.imageLoader(this).memoryCache
+            when {
+                level >= TRIM_MEMORY_RUNNING_CRITICAL || level >= TRIM_MEMORY_COMPLETE -> {
+                    coilCache?.clear()
+                    com.amresalehin.emregallery.face.FaceThumbnailHelper.clearCache()
+                }
+                level >= TRIM_MEMORY_RUNNING_LOW || level >= TRIM_MEMORY_BACKGROUND -> {
+                    coilCache?.trimMemory(level)
+                    com.amresalehin.emregallery.face.FaceThumbnailHelper.trimMemory(level)
+                }
+            }
+        }
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        runCatching {
+            Coil.imageLoader(this).memoryCache?.clear()
+            com.amresalehin.emregallery.face.FaceThumbnailHelper.clearCache()
+        }
     }
 }
 

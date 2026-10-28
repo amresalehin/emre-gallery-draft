@@ -90,23 +90,30 @@ object FaceRecognitionSettings {
     }
 
     const val KEY_CPU_THROTTLE_MODE = "cpu_throttle_mode"
+    const val THROTTLE_UNCONSTRAINED = "unconstrained"
+    const val THROTTLE_TURBO = "turbo"
     const val THROTTLE_BALANCED = "balanced"
     const val THROTTLE_ECO = "eco"
-    const val THROTTLE_TURBO = "turbo"
 
     fun cpuThrottleMode(context: Context): String {
-        return preferences(context).getString(KEY_CPU_THROTTLE_MODE, THROTTLE_BALANCED) ?: THROTTLE_BALANCED
+        return preferences(context).getString(KEY_CPU_THROTTLE_MODE, THROTTLE_UNCONSTRAINED) ?: THROTTLE_UNCONSTRAINED
     }
 
     fun setCpuThrottleMode(context: Context, mode: String) {
         preferences(context).edit().putString(KEY_CPU_THROTTLE_MODE, mode).apply()
     }
 
+    /**
+     * Emre never limits itself when Android is not limiting it.
+     * Default unconstrained mode operates with 0ms artificial cooldown for maximum continuous throughput.
+     */
     fun cpuThrottleCooldownMillis(context: Context): Long {
         return when (cpuThrottleMode(context)) {
-            THROTTLE_ECO -> 80L
-            THROTTLE_TURBO -> 5L
-            else -> 40L
+            THROTTLE_ECO -> 40L
+            THROTTLE_BALANCED -> 10L
+            THROTTLE_TURBO -> 0L
+            THROTTLE_UNCONSTRAINED -> 0L
+            else -> 0L
         }
     }
 }

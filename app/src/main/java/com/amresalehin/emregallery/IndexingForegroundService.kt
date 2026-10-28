@@ -73,12 +73,14 @@ class IndexingForegroundService : Service() {
         }
         if (action == ACTION_PAUSE) {
             pauseSignal.value = true
+            prefs.edit().putBoolean(KEY_PAUSED, true).apply()
             updateState(paused = true)
             refreshNotification("Paused")
             return START_NOT_STICKY
         }
         if (action == ACTION_RESUME) {
             pauseSignal.value = false
+            prefs.edit().putBoolean(KEY_PAUSED, false).apply()
             updateState(paused = false)
             refreshNotification("Resuming")
             return START_NOT_STICKY
@@ -123,6 +125,7 @@ class IndexingForegroundService : Service() {
                         intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
                     )
                 }
+                prefs.edit().putBoolean(KEY_PAUSED, false).apply()
                 updateState(running = false, paused = false, error = null)
             } catch (cancelled: CancellationException) {
                 updateState(running = false, paused = false, error = "Cancelled")
@@ -145,10 +148,14 @@ class IndexingForegroundService : Service() {
         val photos = loadPhotos()
         if (rescanAll) withContext(Dispatchers.IO) { TesseractOcr.clearCachedResults(this@IndexingForegroundService) }
         val pending = photos.filterNot { TesseractOcr.hasCachedResult(this, Uri.parse(it.uri)) }
-        updateState(task = TASK_OCR, running = true, paused = false, processed = photos.size - pending.size, total = photos.size, error = null)
+        val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
+        pauseSignal.value = initialPaused
+        updateState(task = TASK_OCR, running = true, paused = initialPaused, processed = photos.size - pending.size, total = photos.size, error = null)
         postProgress("OCR indexing", "Preparing ${pending.size} images (${model.shortName})", photos.size - pending.size, photos.size)
         var completed = photos.size - pending.size
-        val cooldown = FaceRecognitionSettings.cpuThrottleCooldownMillis(this).coerceAtLeast(30L)
+        // Unconstrained operation: do not artificially clamp cooldown to at least 30ms.
+        // Uses the configured throttle cooldown (0ms for unconstrained/turbo).
+        val cooldown = FaceRecognitionSettings.cpuThrottleCooldownMillis(this)
         for (item in pending) {
             awaitResume()
             currentCoroutineContext().ensureActive()
@@ -165,7 +172,6 @@ class IndexingForegroundService : Service() {
             if (completed % 4 == 0 || completed == photos.size) {
                 postProgress("OCR indexing", "Processed $completed of ${photos.size} images (${model.title})", completed, photos.size)
             }
-            // Thermal throttling prevention: cooling duty-cycle pause keeps CPU below thermal trip point
             if (cooldown > 0L) {
                 delay(cooldown)
             }
@@ -202,11 +208,13 @@ class IndexingForegroundService : Service() {
 
         val relevantPhotos = if (targetUris != null) photos.filter { it.uri in targetUris } else photos
         val alreadyDone = if (retryFailedOnly) 0 else store.indexedMediaCount(relevantPhotos.map { it.uri }, engineId = engineId)
+        val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
+        pauseSignal.value = initialPaused
 
         updateState(
             task = TASK_FACE,
             running = true,
-            paused = false,
+            paused = initialPaused,
             processed = alreadyDone,
             total = relevantPhotos.size,
             faces = store.indexedFaceCount(engineId),
@@ -430,7 +438,9 @@ class IndexingForegroundService : Service() {
         val pending = if (rescanAll) photos else photos.filterNot { cached.containsKey(it.uri) }
         var locatedCount = cached.values.count { it.point != null }
         val doneCount = photos.size - pending.size
-        updateState(task = TASK_LOCATION, running = true, paused = false, processed = doneCount, total = photos.size, faces = locatedCount, error = null)
+        val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
+        pauseSignal.value = initialPaused
+        updateState(task = TASK_LOCATION, running = true, paused = initialPaused, processed = doneCount, total = photos.size, faces = locatedCount, error = null)
         postProgress("Map location indexing", "Scanning ${pending.size} photos for GPS geotags", doneCount, photos.size)
         var completed = doneCount
         for (item in pending) {
@@ -448,8 +458,7 @@ class IndexingForegroundService : Service() {
             if (completed % 8 == 0 || completed == photos.size) {
                 postProgress("Map location indexing", "Scanned $completed of ${photos.size} photos · $locatedCount geotagged", completed, photos.size)
             }
-            // Thermal throttling cooldown
-            delay(15L)
+            // Continuous unconstrained operation without artificial thermal cooldown
             kotlinx.coroutines.yield()
         }
     }

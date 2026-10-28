@@ -1124,16 +1124,17 @@ fun FaceRecognitionCard(
                                     }
                                     Text(
                                         when (currentThrottleMode) {
-                                            FaceRecognitionSettings.THROTTLE_ECO -> "Saver (80ms)"
-                                            FaceRecognitionSettings.THROTTLE_TURBO -> "Turbo (5ms)"
-                                            else -> "Balanced (40ms)"
+                                            FaceRecognitionSettings.THROTTLE_ECO -> "Saver (40ms)"
+                                            FaceRecognitionSettings.THROTTLE_BALANCED -> "Balanced (10ms)"
+                                            FaceRecognitionSettings.THROTTLE_TURBO -> "Turbo (0ms)"
+                                            else -> "Continuous (0ms)"
                                         },
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
                                 Text(
-                                    "Prevents processor overheating and thermal clock throttling so the gallery UI remains smooth at 60/120Hz.",
+                                    "Continuous operation without artificial processing cooldowns when Android is not limiting the app, preserving fluid 120Hz/120Fps responsiveness.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                     fontSize = 11.sp
@@ -1143,9 +1144,10 @@ fun FaceRecognitionCard(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     listOf(
-                                        FaceRecognitionSettings.THROTTLE_ECO to "Saver",
+                                        FaceRecognitionSettings.THROTTLE_UNCONSTRAINED to "Continuous",
+                                        FaceRecognitionSettings.THROTTLE_TURBO to "Turbo",
                                         FaceRecognitionSettings.THROTTLE_BALANCED to "Balanced",
-                                        FaceRecognitionSettings.THROTTLE_TURBO to "Turbo"
+                                        FaceRecognitionSettings.THROTTLE_ECO to "Saver"
                                     ).forEach { (mode, label) ->
                                         val isSelected = currentThrottleMode == mode
                                         Surface(
