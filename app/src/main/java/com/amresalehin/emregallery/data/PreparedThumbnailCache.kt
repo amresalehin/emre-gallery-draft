@@ -43,10 +43,7 @@ object PreparedThumbnailCache {
 
     private val uriLocks = ConcurrentHashMap<String, Mutex>()
 
-    data class ThumbnailResult(
-        val bitmap: Bitmap,
-        val fromPreparedDiskCache: Boolean
-    )
+    data class ThumbnailResult(val bitmap: Bitmap)
 
     fun hasPrepared(context: Context, uri: String, widthPx: Int = PREWARM_WIDTH, heightPx: Int = PREWARM_HEIGHT): Boolean {
         val file = cacheFile(context.applicationContext, uri, widthPx, heightPx)
@@ -81,7 +78,7 @@ object PreparedThumbnailCache {
         val key = cacheKey(uri.toString(), widthPx, heightPx)
         val file = File(cacheDirectory(appContext), "$key.webp")
 
-        readPrepared(file)?.let { return ThumbnailResult(it, fromPreparedDiskCache = true) }
+        readPrepared(file)?.let { return ThumbnailResult(it) }
 
         val mutex = uriLocks.computeIfAbsent(key) { Mutex() }
         return mutex.withLock {
@@ -91,7 +88,7 @@ object PreparedThumbnailCache {
             val bitmap = loadMediaStoreThumbnail(appContext, uri, widthPx, heightPx)
                 ?: return@withLock null
             writePreparedIfSafe(appContext, file, bitmap)
-            ThumbnailResult(bitmap, fromPreparedDiskCache = false)
+            ThumbnailResult(bitmap)
         }
     }
 
