@@ -142,6 +142,7 @@ fun HomeScreen(
     val predictivePrefetchIndex = remember(predictivePrefetchRows) {
         predictivePrefetchRows.mapIndexed { index, row -> row.first to index }.toMap()
     }
+    var observedScrollDirection by remember(listState) { mutableIntStateOf(1) }
 
     val predictivePrefetchConnection = remember(listState, predictivePrefetchRows, predictivePrefetchIndex) {
         object : NestedScrollConnection {
@@ -149,8 +150,9 @@ fun HomeScreen(
                 val velocityY = available.y
                 if (abs(velocityY) < 1200f || predictivePrefetchRows.isEmpty()) return Velocity.Zero
 
-                // In LazyColumn coordinates, an upward finger fling (negative Y) advances to later rows.
-                val forward = velocityY < 0f
+                // Use the direction observed during the drag rather than relying on platform-specific
+                // fling-velocity sign conventions. The velocity magnitude still estimates travel distance.
+                val forward = observedScrollDirection > 0
                 val visibleRowInfos = listState.layoutInfo.visibleItemsInfo.filter {
                     predictivePrefetchIndex.containsKey(it.key.toString())
                 }
@@ -208,6 +210,7 @@ fun HomeScreen(
                     else -> previousDirection
                 }
             } ?: 1
+            observedScrollDirection = direction
             val moving = listState.isScrollInProgress
             val anchor = if (direction > 0) visibleRows.last() else visibleRows.first()
             val movedEnough = previousAnchor < 0 || abs(anchor - previousAnchor) >= 2
