@@ -50,7 +50,15 @@ object PreparedThumbnailCache {
 
     fun hasPrepared(context: Context, uri: String, widthPx: Int = PREWARM_WIDTH, heightPx: Int = PREWARM_HEIGHT): Boolean {
         val file = cacheFile(context.applicationContext, uri, widthPx, heightPx)
-        return file.isFile && file.length() > 0L
+        if (!file.isFile || file.length() <= 0L) return false
+
+        // Validate the WebP header without allocating a decoded bitmap.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching { BitmapFactory.decodeFile(file.absolutePath, bounds) }
+        if (bounds.outWidth > 0 && bounds.outHeight > 0) return true
+
+        runCatching { file.delete() }
+        return false
     }
 
     fun hasStorageHeadroom(context: Context): Boolean = runCatching {
@@ -267,7 +275,7 @@ object ThumbnailPrewarmManager {
                     throw cancelled
                 } finally {
                     synchronized(lock) {
-                        if (activeUris == uris) {
+                        if (activeUris === uris) {
                             worker = null
                             if (completedAll) completedUris = uris
                         }
