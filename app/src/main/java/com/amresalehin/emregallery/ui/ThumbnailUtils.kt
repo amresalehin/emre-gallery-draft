@@ -30,8 +30,9 @@ object ThumbnailUtils {
             .data(Uri.parse(uri))
             .size(widthPx, heightPx)
             .precision(Precision.INEXACT)
-            .crossfade(true)
-            .crossfade(150)
+            // Grid thumbnails should appear on the first available frame; the outline is already
+            // visible, so a crossfade only adds perceived latency while rapidly scrolling.
+            .crossfade(false)
             .diskCacheKey(mediaThumbnailKey(uri))
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCacheKey(mediaThumbnailKey(uri))
