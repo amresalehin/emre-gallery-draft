@@ -189,49 +189,74 @@ fun HomeScreen(
         var previousAnchor = -1
         var previousDirection = 1
 
-        snapshotFlow {
-            val visibleRows = listState.layoutInfo.visibleItemsInfo
-                .mapNotNull { predictivePrefetchIndex[it.key.toString()] }
-                .distinct()
-                .sorted()
-            Triple(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, visibleRows)
-        }.distinctUntilChanged().collect { (firstIndex, offset, visibleRows) ->
-            if (visibleRows.isEmpty() || predictivePrefetchRows.isEmpty()) {
-                previousPosition = firstIndex to offset
-                return@collect
-            }
-
-            val direction = previousPosition?.let { previous ->
-                when {
-                    firstIndex > previous.first -> 1
-                    firstIndex < previous.first -> -1
-                    offset > previous.second -> 1
-                    offset < previous.second -> -1
-                    else -> previousDirection
-                }
-            } ?: 1
-            observedScrollDirection = direction
-            val moving = listState.isScrollInProgress
-            val anchor = if (direction > 0) visibleRows.last() else visibleRows.first()
-            val movedEnough = previousAnchor < 0 || abs(anchor - previousAnchor) >= 2
-            if (movedEnough || direction != previousDirection) {
-                val forwardCount = if (moving) 14 else 6
-                val backwardCount = if (moving) 2 else 4
-                val lastIndex = predictivePrefetchRows.lastIndex
-                val targetIndices = if (direction > 0) {
-                    (anchor..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
-                        (anchor - 1 downTo (anchor - backwardCount).coerceAtLeast(0)).toList()
-                } else {
-                    (anchor downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
-                        (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
-                }
-                ThumbnailPrewarmManager.prioritize(
-                    targetIndices.distinct().flatMap { predictivePrefetchRows[it].second }.take(120)
+        try {
+            // Observe a coarse offset bucket instead of every pixel. This keeps direction tracking
+            // responsive while avoiding repeated list creation, map/filter, distinct and sort work
+            // for every high-refresh-rate scroll update.
+            snapshotFlow {
+                Triple(
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset / 96,
+                    listState.isScrollInProgress
                 )
-                previousAnchor = anchor
-                previousDirection = direction
+            }.distinctUntilChanged().collect { (firstIndex, offsetBucket, isScrolling) ->
+                ThumbnailPrewarmManager.setUserScrolling(isScrolling)
+
+                if (predictivePrefetchRows.isEmpty()) {
+                    previousPosition = firstIndex to offsetBucket
+                    return@collect
+                }
+
+                // Scan the already-laid-out viewport in place: no intermediate list or sorting.
+                var firstVisiblePhotoRow = Int.MAX_VALUE
+                var lastVisiblePhotoRow = -1
+                for (info in listState.layoutInfo.visibleItemsInfo) {
+                    val rowIndex = predictivePrefetchIndex[info.key.toString()] ?: continue
+                    if (rowIndex < firstVisiblePhotoRow) firstVisiblePhotoRow = rowIndex
+                    if (rowIndex > lastVisiblePhotoRow) lastVisiblePhotoRow = rowIndex
+                }
+                if (lastVisiblePhotoRow < 0) {
+                    previousPosition = firstIndex to offsetBucket
+                    return@collect
+                }
+
+                val direction = previousPosition?.let { previous ->
+                    when {
+                        firstIndex > previous.first -> 1
+                        firstIndex < previous.first -> -1
+                        offsetBucket > previous.second -> 1
+                        offsetBucket < previous.second -> -1
+                        else -> previousDirection
+                    }
+                } ?: 1
+                observedScrollDirection = direction
+
+                val anchor = if (direction > 0) lastVisiblePhotoRow else firstVisiblePhotoRow
+                val movedEnough = previousAnchor < 0 || abs(anchor - previousAnchor) >= 2
+                if (movedEnough || direction != previousDirection) {
+                    // During a drag keep only a modest forward window, unless the fling hook below
+                    // identifies a much longer predicted distance. Small reverse buffers handle a
+                    // quick change of direction without prewarming the entire library.
+                    val forwardCount = if (isScrolling) 14 else 6
+                    val backwardCount = if (isScrolling) 2 else 4
+                    val lastIndex = predictivePrefetchRows.lastIndex
+                    val targetIndices = if (direction > 0) {
+                        (anchor..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
+                            (anchor - 1 downTo (anchor - backwardCount).coerceAtLeast(0)).toList()
+                    } else {
+                        (anchor downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
+                            (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
+                    }
+                    ThumbnailPrewarmManager.prioritize(
+                        targetIndices.distinct().flatMap { predictivePrefetchRows[it].second }.take(120)
+                    )
+                    previousAnchor = anchor
+                    previousDirection = direction
+                }
+                previousPosition = firstIndex to offsetBucket
             }
-            previousPosition = firstIndex to offset
+        } finally {
+            ThumbnailPrewarmManager.setUserScrolling(false)
         }
     }
 
