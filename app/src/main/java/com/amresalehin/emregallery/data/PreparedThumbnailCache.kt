@@ -265,7 +265,7 @@ object ThumbnailPrewarmManager {
             if (worker?.isActive != true || activeUris.isNullOrEmpty()) return
             priorityQueue.clear()
             queuedPriorityUris.clear()
-            items.asSequence().distinctBy { it.uri }.take(120).forEach { item ->
+            items.asSequence().distinctBy { it.uri }.take(36).forEach { item ->
                 if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
             }
             workerSignals.trySend(Unit)
