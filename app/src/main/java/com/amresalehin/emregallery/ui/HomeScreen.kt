@@ -190,9 +190,8 @@ fun HomeScreen(
         var previousDirection = 1
 
         try {
-            // Observe a coarse offset bucket instead of every pixel. This keeps direction tracking
-            // responsive while avoiding repeated list creation, map/filter, distinct and sort work
-            // for every high-refresh-rate scroll update.
+            // Observe coarse scroll buckets rather than every pixel. High-refresh scrolling can
+            // produce 120+ updates/second; the prefetch planner only needs direction and row changes.
             snapshotFlow {
                 Triple(
                     listState.firstVisibleItemIndex,
@@ -207,7 +206,7 @@ fun HomeScreen(
                     return@collect
                 }
 
-                // Scan the already-laid-out viewport in place: no intermediate list or sorting.
+                // Scan the current viewport without map/filter/distinct/sort allocations.
                 var firstVisiblePhotoRow = Int.MAX_VALUE
                 var lastVisiblePhotoRow = -1
                 for (info in listState.layoutInfo.visibleItemsInfo) {
@@ -234,9 +233,6 @@ fun HomeScreen(
                 val anchor = if (direction > 0) lastVisiblePhotoRow else firstVisiblePhotoRow
                 val movedEnough = previousAnchor < 0 || abs(anchor - previousAnchor) >= 2
                 if (movedEnough || direction != previousDirection) {
-                    // During a drag keep only a modest forward window, unless the fling hook below
-                    // identifies a much longer predicted distance. Small reverse buffers handle a
-                    // quick change of direction without prewarming the entire library.
                     val forwardCount = if (isScrolling) 14 else 6
                     val backwardCount = if (isScrolling) 2 else 4
                     val lastIndex = predictivePrefetchRows.lastIndex
@@ -247,8 +243,9 @@ fun HomeScreen(
                         (anchor downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
                             (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
                     }
+                    val mediaLimit = if (isScrolling) 36 else 120
                     ThumbnailPrewarmManager.prioritize(
-                        targetIndices.distinct().flatMap { predictivePrefetchRows[it].second }.take(120)
+                        targetIndices.distinct().flatMap { predictivePrefetchRows[it].second }.take(mediaLimit)
                     )
                     previousAnchor = anchor
                     previousDirection = direction
