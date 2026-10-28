@@ -266,7 +266,7 @@ fun HomeScreen(
                 }
             }
 
-            if (sortedMedia.isEmpty() && (loading || (media.isNotEmpty() && currentGrouping == null))) {
+            if (sortedMedia.isEmpty() && (loading || (media.isNotEmpty() && (currentSort == null || currentGrouping == null)))) {
                 item {
                     HomeScreenSkeleton(
                         gridColumns = pinchGridColumns,
