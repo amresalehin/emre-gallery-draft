@@ -31,7 +31,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -61,11 +60,15 @@ class IndexingForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: ACTION_STATUS
+        val restoredFromSystem = intent == null
+        val commandIntent = intent ?: restoreActiveCommand()
+        val action = commandIntent?.action ?: ACTION_STATUS
+
         if (action == ACTION_CANCEL) {
             taskJob?.cancel()
             taskJob = null
             pauseSignal.value = false
+            clearActiveCommand()
             updateState(running = false, paused = false, error = "Cancelled")
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -75,21 +78,36 @@ class IndexingForegroundService : Service() {
             pauseSignal.value = true
             updateState(paused = true)
             refreshNotification("Paused")
-            return START_NOT_STICKY
+            return if (taskJob?.isActive == true || restoreActiveCommand() != null) {
+                START_STICKY
+            } else {
+                START_NOT_STICKY
+            }
         }
         if (action == ACTION_RESUME) {
             pauseSignal.value = false
+            if (taskJob?.isActive == true) {
+                updateState(paused = false)
+                refreshNotification("Resuming")
+                return START_STICKY
+            }
+            val savedTask = restoreActiveCommand()
+            if (savedTask != null) {
+                updateState(running = true, paused = false, error = null)
+                // Resume from persistent per-item checkpoints. A rescan is never repeated on restart.
+                return onStartCommand(savedTask, flags, startId)
+            }
             updateState(paused = false)
-            refreshNotification("Resuming")
+            refreshNotification("Ready to resume")
             return START_NOT_STICKY
         }
         if (action == ACTION_STATUS) {
-            // Reconcile stale persisted state after process death without restarting work.
-            if (taskJob?.isActive != true) {
-                updateState(running = false, paused = false)
+            val active = taskJob?.isActive == true
+            if (!active) {
+                if (restoreActiveCommand() == null) updateState(running = false, paused = false)
                 stopSelf()
             }
-            return START_NOT_STICKY
+            return if (active) START_STICKY else START_NOT_STICKY
         }
 
         val title = when (action) {
@@ -100,43 +118,105 @@ class IndexingForegroundService : Service() {
             else -> "Media indexing"
         }
         startForegroundCompat(buildNotification(title, "Starting…", 0, 0))
-        if (taskJob?.isActive == true) return START_NOT_STICKY
+        if (taskJob?.isActive == true) return START_STICKY
+
+        val taskRequest = commandIntent ?: return START_NOT_STICKY
+        if (restoredFromSystem) {
+            pauseSignal.value = prefs.getBoolean(KEY_PAUSED, false)
+        } else {
+            pauseSignal.value = false
+        }
+        saveActiveCommand(taskRequest)
 
         taskJob = serviceScope.launch {
             try {
                 when (action) {
                     ACTION_START_OCR -> runOcr(
-                        intent?.getStringArrayListExtra(EXTRA_LANGUAGES)?.ifEmpty { arrayListOf("eng") } ?: arrayListOf("eng"),
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
-                        intent?.getStringExtra(EXTRA_MODEL) ?: "fast"
+                        taskRequest.getStringArrayListExtra(EXTRA_LANGUAGES)?.ifEmpty { arrayListOf("eng") } ?: arrayListOf("eng"),
+                        taskRequest.getBooleanExtra(EXTRA_RESCAN_ALL, false),
+                        taskRequest.getStringExtra(EXTRA_MODEL) ?: "fast"
                     )
                     ACTION_START_FACE -> runFace(
-                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
-                        engineId = intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID,
-                        retryFailedOnly = intent?.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false) == true
+                        rescanAll = taskRequest.getBooleanExtra(EXTRA_RESCAN_ALL, false),
+                        engineId = taskRequest.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID,
+                        retryFailedOnly = taskRequest.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false)
                     )
                     ACTION_START_LOCATION -> runLocation(
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
+                        taskRequest.getBooleanExtra(EXTRA_RESCAN_ALL, false)
                     )
                     ACTION_DOWNLOAD_MODEL -> downloadModel(
-                        intent?.getBooleanExtra(EXTRA_FORCE, false) == true,
-                        intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
+                        taskRequest.getBooleanExtra(EXTRA_FORCE, false),
+                        taskRequest.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
                     )
                 }
-                updateState(running = false, paused = false, error = null)
+                if (!stoppedForSystemTimeout) updateState(running = false, paused = false, error = null)
             } catch (cancelled: CancellationException) {
-                updateState(running = false, paused = false, error = "Cancelled")
+                if (!stoppedForSystemTimeout) updateState(running = false, paused = false, error = "Cancelled")
                 throw cancelled
             } catch (e: Exception) {
-                updateState(running = false, paused = false, error = e.localizedMessage ?: "Indexing failed")
+                if (!stoppedForSystemTimeout) {
+                    updateState(running = false, paused = false, error = e.localizedMessage ?: "Indexing failed")
+                }
             } finally {
                 taskJob = null
                 pauseSignal.value = false
+                if (stoppedForSystemTimeout) {
+                    updateState(
+                        running = false,
+                        paused = true,
+                        error = SYSTEM_TIMEOUT_MESSAGE
+                    )
+                    // Keep the saved task request. A user can resume after bringing Emre to foreground.
+                    stoppedForSystemTimeout = false
+                } else {
+                    clearActiveCommand()
+                }
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
         }
-        return START_NOT_STICKY
+        // If Android reclaims the process, restore the saved request and continue from checkpoints.
+        return START_STICKY
+    }
+
+    private fun saveActiveCommand(intent: Intent) {
+        prefs.edit()
+            .putString(KEY_ACTIVE_ACTION, intent.action)
+            .putBoolean(KEY_ACTIVE_RESCAN_ALL, intent.getBooleanExtra(EXTRA_RESCAN_ALL, false))
+            .putString(KEY_ACTIVE_ENGINE_ID, intent.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID)
+            .putBoolean(KEY_ACTIVE_RETRY_FAILED_ONLY, intent.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false))
+            .putString(KEY_ACTIVE_MODEL, intent.getStringExtra(EXTRA_MODEL) ?: "fast")
+            .putBoolean(KEY_ACTIVE_FORCE, intent.getBooleanExtra(EXTRA_FORCE, false))
+            .putStringSet(KEY_ACTIVE_LANGUAGES, intent.getStringArrayListExtra(EXTRA_LANGUAGES)?.toSet() ?: setOf("eng"))
+            .commit()
+    }
+
+    private fun restoreActiveCommand(): Intent? {
+        val savedAction = prefs.getString(KEY_ACTIVE_ACTION, null) ?: return null
+        return Intent(this, IndexingForegroundService::class.java).setAction(savedAction).apply {
+            // Completed media remain checkpointed. Do not clear or reprocess them on restart.
+            putExtra(EXTRA_RESCAN_ALL, false)
+            putExtra(EXTRA_ENGINE_ID, prefs.getString(KEY_ACTIVE_ENGINE_ID, BuffaloLFaceEngine.ENGINE_ID))
+            putExtra(EXTRA_RETRY_FAILED_ONLY, prefs.getBoolean(KEY_ACTIVE_RETRY_FAILED_ONLY, false))
+            putExtra(EXTRA_MODEL, prefs.getString(KEY_ACTIVE_MODEL, "fast"))
+            putExtra(EXTRA_FORCE, false)
+            putStringArrayListExtra(
+                EXTRA_LANGUAGES,
+                ArrayList(prefs.getStringSet(KEY_ACTIVE_LANGUAGES, setOf("eng")) ?: setOf("eng"))
+            )
+        }
+    }
+
+    private fun clearActiveCommand() {
+        prefs.edit()
+            .remove(KEY_ACTIVE_ACTION)
+            .remove(KEY_ACTIVE_RESCAN_ALL)
+            .remove(KEY_ACTIVE_ENGINE_ID)
+            .remove(KEY_ACTIVE_RETRY_FAILED_ONLY)
+            .remove(KEY_ACTIVE_MODEL)
+            .remove(KEY_ACTIVE_FORCE)
+            .remove(KEY_ACTIVE_LANGUAGES)
+            .apply()
     }
 
     private suspend fun runOcr(languages: List<String>, rescanAll: Boolean, modelId: String = "fast") {
@@ -148,7 +228,6 @@ class IndexingForegroundService : Service() {
         updateState(task = TASK_OCR, running = true, paused = false, processed = photos.size - pending.size, total = photos.size, error = null)
         postProgress("OCR indexing", "Preparing ${pending.size} images (${model.shortName})", photos.size - pending.size, photos.size)
         var completed = photos.size - pending.size
-        val cooldown = FaceRecognitionSettings.cpuThrottleCooldownMillis(this).coerceAtLeast(30L)
         for (item in pending) {
             awaitResume()
             currentCoroutineContext().ensureActive()
@@ -165,10 +244,7 @@ class IndexingForegroundService : Service() {
             if (completed % 4 == 0 || completed == photos.size) {
                 postProgress("OCR indexing", "Processed $completed of ${photos.size} images (${model.title})", completed, photos.size)
             }
-            // Thermal throttling prevention: cooling duty-cycle pause keeps CPU below thermal trip point
-            if (cooldown > 0L) {
-                delay(cooldown)
-            }
+            // Yield cooperatively without adding an artificial per-image cooldown.
             kotlinx.coroutines.yield()
         }
     }
@@ -448,8 +524,7 @@ class IndexingForegroundService : Service() {
             if (completed % 8 == 0 || completed == photos.size) {
                 postProgress("Map location indexing", "Scanned $completed of ${photos.size} photos · $locatedCount geotagged", completed, photos.size)
             }
-            // Thermal throttling cooldown
-            delay(15L)
+            // Yield cooperatively without adding an artificial per-image cooldown.
             kotlinx.coroutines.yield()
         }
     }
@@ -486,6 +561,16 @@ class IndexingForegroundService : Service() {
         return b.build()
     }
 
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        // Android owns this limit. Stop promptly and preserve checkpoints for a user-initiated resume.
+        stoppedForSystemTimeout = true
+        pauseSignal.value = true
+        updateState(running = false, paused = true, error = SYSTEM_TIMEOUT_MESSAGE)
+        taskJob?.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf(startId)
+    }
+
     override fun onDestroy() {
         serviceScope.cancel()
         super.onDestroy()
@@ -520,6 +605,16 @@ class IndexingForegroundService : Service() {
         const val KEY_ERROR = "error"
         const val KEY_ENGINE_ID = "engine_id"
         const val KEY_PHOTOS_WITH_FACES = "photos_with_faces"
+
+        private const val KEY_ACTIVE_ACTION = "active_action"
+        private const val KEY_ACTIVE_RESCAN_ALL = "active_rescan_all"
+        private const val KEY_ACTIVE_ENGINE_ID = "active_engine_id"
+        private const val KEY_ACTIVE_RETRY_FAILED_ONLY = "active_retry_failed_only"
+        private const val KEY_ACTIVE_MODEL = "active_model"
+        private const val KEY_ACTIVE_FORCE = "active_force"
+        private const val KEY_ACTIVE_LANGUAGES = "active_languages"
+        private const val SYSTEM_TIMEOUT_MESSAGE =
+            "Android background time limit reached. Progress is saved; open Emre Gallery and resume indexing."
 
         const val TASK_LOCATION = "location"
         private const val TASK_OCR = "ocr"
