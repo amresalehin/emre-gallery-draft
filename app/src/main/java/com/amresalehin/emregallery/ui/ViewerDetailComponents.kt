@@ -40,12 +40,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.alpha
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.DetectedMediaFace
 import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceClusterStore
+import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceThumbnailHelper
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
@@ -290,6 +293,10 @@ fun ViewerFaceContainer(
     onFaceClick: ((DetectedMediaFace) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
+    val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
+
     when (faceUiState.state) {
         ViewerFaceState.NOT_INDEXED -> {
             Surface(
@@ -320,6 +327,7 @@ fun ViewerFaceContainer(
                     }
                     Button(
                         onClick = onScanThisPhoto,
+                        enabled = !isBusy,
                         modifier = Modifier
                             .defaultMinSize(minHeight = 48.dp)
                             .testTag("scan_this_photo_button")
@@ -422,7 +430,8 @@ fun ViewerFaceContainer(
                     faceUiState.faces.forEach { face ->
                         OverviewFacePortrait(
                             face = face,
-                            onClick = { onFaceClick?.invoke(face) }
+                            enabled = !isBusy,
+                            onClick = if (!isBusy) { { onFaceClick?.invoke(face) } } else null
                         )
                     }
                 }
@@ -432,6 +441,7 @@ fun ViewerFaceContainer(
                 ) {
                     FilledTonalButton(
                         onClick = onRescanPhoto,
+                        enabled = !isBusy,
                         modifier = Modifier
                             .weight(1f)
                             .defaultMinSize(minHeight = 48.dp)
@@ -443,6 +453,7 @@ fun ViewerFaceContainer(
                     }
                     OutlinedButton(
                         onClick = onEditTagOrPerson,
+                        enabled = !isBusy,
                         modifier = Modifier
                             .weight(1f)
                             .defaultMinSize(minHeight = 48.dp)
@@ -488,6 +499,7 @@ fun ViewerFaceContainer(
                     ) {
                         FilledTonalButton(
                             onClick = onRescanLowThreshold,
+                            enabled = !isBusy,
                             modifier = Modifier
                                 .weight(1f)
                                 .defaultMinSize(minHeight = 48.dp)
@@ -499,6 +511,7 @@ fun ViewerFaceContainer(
                         }
                         OutlinedButton(
                             onClick = onRescanPhoto,
+                            enabled = !isBusy,
                             modifier = Modifier
                                 .defaultMinSize(minHeight = 48.dp)
                                 .testTag("rescan_photo_button")
@@ -540,6 +553,7 @@ fun ViewerFaceContainer(
                     }
                     Button(
                         onClick = onInstallModel,
+                        enabled = !isBusy,
                         modifier = Modifier
                             .defaultMinSize(minHeight = 48.dp)
                             .testTag("install_model_button")
@@ -587,6 +601,7 @@ fun ViewerFaceContainer(
                     ) {
                         FilledTonalButton(
                             onClick = onRetryScan,
+                            enabled = !isBusy,
                             modifier = Modifier
                                 .weight(1f)
                                 .defaultMinSize(minHeight = 48.dp)
@@ -917,13 +932,18 @@ fun OverviewTabContent(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
+                    val context = LocalContext.current
+                    val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
+                    val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
                     var modelMenuExpanded by remember { mutableStateOf(false) }
                     Box {
                         Surface(
                             shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                            modifier = Modifier.clickable { modelMenuExpanded = true }
+                            modifier = Modifier
+                                .clickable(enabled = !isBusy) { modelMenuExpanded = true }
+                                .alpha(if (!isBusy) 1.0f else 0.5f)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -946,27 +966,33 @@ fun OverviewTabContent(
                             }
                         }
                         DropdownMenu(
-                            expanded = modelMenuExpanded,
+                            expanded = modelMenuExpanded && !isBusy,
                             onDismissRequest = { modelMenuExpanded = false }
                         ) {
                             DropdownMenuItem(
                                 text = { Text("Buffalo-L") },
+                                enabled = !isBusy,
                                 trailingIcon = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) {
                                     { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                                 } else null,
                                 onClick = {
                                     modelMenuExpanded = false
-                                    onSelectEngine(BuffaloLFaceEngine.ENGINE_ID)
+                                    if (!FaceProcessingCoordinator.isBusy(context)) {
+                                        onSelectEngine(BuffaloLFaceEngine.ENGINE_ID)
+                                    }
                                 }
                             )
                             DropdownMenuItem(
                                 text = { Text("YOLO5Face + MobileFaceNet") },
+                                enabled = !isBusy,
                                 trailingIcon = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) {
                                     { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                                 } else null,
                                 onClick = {
                                     modelMenuExpanded = false
-                                    onSelectEngine(EnteFaceConstants.ENGINE_ID)
+                                    if (!FaceProcessingCoordinator.isBusy(context)) {
+                                        onSelectEngine(EnteFaceConstants.ENGINE_ID)
+                                    }
                                 }
                             )
                         }
@@ -1223,6 +1249,7 @@ fun FaceCropThumbnail(
 @Composable
 fun OverviewFacePortrait(
     face: DetectedMediaFace,
+    enabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -1243,7 +1270,8 @@ fun OverviewFacePortrait(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .widthIn(min = 96.dp, max = 110.dp)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null && enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .alpha(if (enabled) 1f else 0.45f)
             .padding(vertical = 4.dp)
     ) {
         Surface(
@@ -1376,6 +1404,10 @@ fun ActionsTabContent(
     var modeExpanded by remember { mutableStateOf(false) }
     var langExpanded by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+    val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
+    val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
+
     LazyColumn(
         state = listState,
         modifier = modifier.fillMaxSize(),
@@ -1400,6 +1432,7 @@ fun ActionsTabContent(
                         if (onRescanPhoto != null) {
                             TextButton(
                                 onClick = onRescanPhoto,
+                                enabled = !isBusy,
                                 modifier = Modifier.defaultMinSize(minHeight = 48.dp)
                             ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1418,7 +1451,8 @@ fun ActionsTabContent(
                         detectedFaces.forEach { face ->
                             ActionFacePortrait(
                                 face = face,
-                                onRename = { onRenameFaceClick(face) }
+                                enabled = !isBusy,
+                                onRename = { if (!FaceProcessingCoordinator.isBusy(context)) onRenameFaceClick(face) }
                             )
                         }
                     }
@@ -1648,6 +1682,7 @@ fun ActionsTabContent(
 @Composable
 fun ActionFacePortrait(
     face: DetectedMediaFace,
+    enabled: Boolean = true,
     onRename: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1659,7 +1694,9 @@ fun ActionFacePortrait(
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier.widthIn(min = 56.dp, max = 70.dp)
+        modifier = modifier
+            .widthIn(min = 56.dp, max = 70.dp)
+            .alpha(if (enabled) 1.0f else 0.45f)
     ) {
         Surface(
             shape = CircleShape,
@@ -1691,6 +1728,7 @@ fun ActionFacePortrait(
         Spacer(Modifier.height(2.dp))
         IconButton(
             onClick = onRename,
+            enabled = enabled,
             modifier = Modifier.size(26.dp)
         ) {
             Icon(

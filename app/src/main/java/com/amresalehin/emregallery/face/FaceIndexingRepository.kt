@@ -78,6 +78,12 @@ class FaceIndexingRepository(
     ): FaceIndexingProgress = withContext(Dispatchers.IO) {
         val photos = media.filterNot { it.isVideo }
         val engineId = engineFactory.engineId
+        val operationHandle = FaceProcessingCoordinator.beginOperation(
+            operationId = "repo_index_${System.nanoTime()}",
+            type = if (forceRescanUris.isNotEmpty()) FaceProcessingOperation.RESCANNING else FaceProcessingOperation.SCANNING,
+            engineId = engineId,
+            description = "Face indexing (${engineFactory.displayName})"
+        )
         val candidates = if (targetUrisOnly != null) {
             photos.filter { it.uri in targetUrisOnly }
         } else photos
@@ -399,6 +405,7 @@ class FaceIndexingRepository(
         } finally {
             engine?.close()
             FaceStoreEvents.notifyAllUpdated()
+            operationHandle.close()
         }
 
         val finalProgress = FaceIndexingProgress(
@@ -431,13 +438,20 @@ class FaceIndexingRepository(
         onDetailedProgress: (DetailedDownloadProgress) -> Unit = {}
     ) = withContext(Dispatchers.IO) {
         val engineId = engineFactory.engineId
-        try {
-            engineFactory.downloadModel(context, force, onProgress, onStage, awaitIfResumed, onDetailedProgress)
-            lastEngineFailures.remove(engineId)
-            activeEngineDescription = engineFactory.displayName
-        } catch (e: Exception) {
-            lastEngineFailures[engineId] = e.localizedMessage ?: "Download failed"
-            throw e
+        FaceProcessingCoordinator.withProcessing(
+            operationId = "repo_download_${System.nanoTime()}",
+            type = FaceProcessingOperation.MODEL_DOWNLOAD,
+            engineId = engineId,
+            description = "Downloading ${engineFactory.displayName}"
+        ) {
+            try {
+                engineFactory.downloadModel(context, force, onProgress, onStage, awaitIfResumed, onDetailedProgress)
+                lastEngineFailures.remove(engineId)
+                activeEngineDescription = engineFactory.displayName
+            } catch (e: Exception) {
+                lastEngineFailures[engineId] = e.localizedMessage ?: "Download failed"
+                throw e
+            }
         }
     }
 }

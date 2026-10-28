@@ -38,8 +38,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.EnteFaceConstants
+import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.face.StageState
 import java.text.NumberFormat
@@ -125,7 +127,11 @@ fun FaceRecognitionCard(
     var showErrorLogDialog by remember { mutableStateOf(false) }
     var isAdvancedSettingsExpanded by remember { mutableStateOf(false) }
 
-    val isModelSwitchingDisabled = currentFindingState.isRunning ||
+    val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
+    val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
+
+    val isModelSwitchingDisabled = isBusy ||
+        currentFindingState.isRunning ||
         currentFindingState.isPaused ||
         currentClusteringState.isClusteringRunning ||
         currentDownloadState.isDownloading ||
@@ -467,7 +473,7 @@ fun FaceRecognitionCard(
                     }
 
                     DropdownMenu(
-                        expanded = isDropdownExpanded,
+                        expanded = isDropdownExpanded && !isModelSwitchingDisabled,
                         onDismissRequest = { isDropdownExpanded = false },
                         modifier = Modifier
                             .fillMaxWidth(0.9f)
@@ -475,6 +481,7 @@ fun FaceRecognitionCard(
                     ) {
                         // Option 1: Buffalo - L (~300 MB)
                         DropdownMenuItem(
+                            enabled = !isModelSwitchingDisabled,
                             text = {
                                 Column {
                                     Text(
@@ -499,8 +506,10 @@ fun FaceRecognitionCard(
                                     )
                                 } else {
                                     IconButton(
+                                        enabled = !isModelSwitchingDisabled,
                                         onClick = {
                                             isDropdownExpanded = false
+                                            if (FaceProcessingCoordinator.isBusy(context)) return@IconButton
                                             if (isEnte && currentDownloadState.isDownloading) {
                                                 pendingEngineSwitch = BuffaloLFaceEngine.ENGINE_ID
                                             } else {
@@ -522,6 +531,7 @@ fun FaceRecognitionCard(
                             },
                             onClick = {
                                 isDropdownExpanded = false
+                                if (FaceProcessingCoordinator.isBusy(context)) return@DropdownMenuItem
                                 if (isEnte && currentDownloadState.isDownloading) {
                                     pendingEngineSwitch = BuffaloLFaceEngine.ENGINE_ID
                                 } else {
@@ -535,6 +545,7 @@ fun FaceRecognitionCard(
 
                         // Option 2: YOLO5Face + MobileFaceNet (~25 MB)
                         DropdownMenuItem(
+                            enabled = !isModelSwitchingDisabled,
                             text = {
                                 Column {
                                     Text(
@@ -559,8 +570,10 @@ fun FaceRecognitionCard(
                                     )
                                 } else {
                                     IconButton(
+                                        enabled = !isModelSwitchingDisabled,
                                         onClick = {
                                             isDropdownExpanded = false
+                                            if (FaceProcessingCoordinator.isBusy(context)) return@IconButton
                                             if (!isEnte && currentDownloadState.isDownloading) {
                                                 pendingEngineSwitch = EnteFaceConstants.ENGINE_ID
                                             } else {
@@ -582,6 +595,7 @@ fun FaceRecognitionCard(
                             },
                             onClick = {
                                 isDropdownExpanded = false
+                                if (FaceProcessingCoordinator.isBusy(context)) return@DropdownMenuItem
                                 if (!isEnte && currentDownloadState.isDownloading) {
                                     pendingEngineSwitch = EnteFaceConstants.ENGINE_ID
                                 } else {

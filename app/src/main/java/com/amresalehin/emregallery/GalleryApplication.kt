@@ -63,5 +63,6 @@ class GalleryApplication : Application() {
         // Deterministic registration of both face recognition engines
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
+        com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
     }
 }

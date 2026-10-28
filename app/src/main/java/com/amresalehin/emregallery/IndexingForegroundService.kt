@@ -20,6 +20,8 @@ import com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory
 import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceIndexingRepository
+import com.amresalehin.emregallery.face.FaceProcessingCoordinator
+import com.amresalehin.emregallery.face.FaceProcessingOperation
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.CancellationException
@@ -170,13 +172,19 @@ class IndexingForegroundService : Service() {
         val photos = loadPhotos()
         val store = FaceClusterStore(applicationContext)
         val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
-
-        if (rescanAll) {
-            withContext(Dispatchers.IO) {
-                // Reset indexed status for selected engine to reprocess photos without wiping identities
-                store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId))
+        val serviceHandle = FaceProcessingCoordinator.beginOperation(
+            operationId = "foreground_service_face_$engineId",
+            type = if (rescanAll) FaceProcessingOperation.RESCANNING else FaceProcessingOperation.SCANNING,
+            engineId = engineId,
+            description = "Service Face Indexing (${factory.displayName})"
+        )
+        try {
+            if (rescanAll) {
+                withContext(Dispatchers.IO) {
+                    // Reset indexed status for selected engine to reprocess photos without wiping identities
+                    store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId))
+                }
             }
-        }
 
         val targetUris = if (retryFailedOnly) {
             store.getFailedMedia(engineId).map { it.first }.toSet()
@@ -247,63 +255,75 @@ class IndexingForegroundService : Service() {
                 postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · ${store.indexedFaceCount(engineId)} faces$targetName$statusSnippet$groupingSnippet", done, relevantPhotos.size)
             }
         )
+        } finally {
+            serviceHandle.close()
+        }
     }
 
     private suspend fun downloadModel(force: Boolean, engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
         val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
-
-        updateState(
-            task = TASK_MODEL,
-            running = true,
-            paused = false,
-            processed = 0,
-            total = 100,
-            bytes = 0L,
-            bytesTotal = 0L,
-            speed = 0L,
-            eta = 0L,
+        val serviceHandle = FaceProcessingCoordinator.beginOperation(
+            operationId = "foreground_service_model_$engineId",
+            type = FaceProcessingOperation.MODEL_DOWNLOAD,
             engineId = engineId,
-            error = null
+            description = "Service Model Download (${factory.displayName})"
         )
-        postProgress("Downloading face model", "Starting download for ${factory.displayName}", 0, 100)
+        try {
+            updateState(
+                task = TASK_MODEL,
+                running = true,
+                paused = false,
+                processed = 0,
+                total = 100,
+                bytes = 0L,
+                bytesTotal = 0L,
+                speed = 0L,
+                eta = 0L,
+                engineId = engineId,
+                error = null
+            )
+            postProgress("Downloading face model", "Starting download for ${factory.displayName}", 0, 100)
 
-        FaceIndexingRepository(applicationContext, factory).downloadModel(
-            force = force,
-            onProgress = { received, total ->
-                updateState(
-                    bytes = received,
-                    bytesTotal = total,
-                    processed = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0,
-                    total = 100,
-                    engineId = engineId
-                )
-                postProgress("Downloading face model", "${received / (1024 * 1024)} MB of ${(total / (1024 * 1024)).coerceAtLeast(1)} MB", if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0, 100)
-            },
-            onStage = { stage ->
-                updateState(stage = stage, engineId = engineId)
-                postProgress("Preparing face model", when (stage) {
-                    "connecting" -> "Connecting to model repository…"
-                    "verifying" -> "Verifying cryptographic checksums…"
-                    "extracting" -> "Extracting model archive…"
-                    "installing" -> "Installing model files…"
-                    "ready" -> "${factory.displayName} ready"
-                    else -> "Preparing model…"
-                }, -1, 0)
-            },
-            awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
-            onDetailedProgress = { detail ->
-                updateState(
-                    bytes = detail.bytesReceived,
-                    bytesTotal = detail.totalBytes,
-                    speed = detail.speedBytesPerSec,
-                    eta = detail.etaSeconds,
-                    stage = detail.stage,
-                    processed = if (detail.totalBytes > 0) (detail.bytesReceived * 100 / detail.totalBytes).toInt().coerceIn(0, 100) else 0,
-                    total = 100,
-                    engineId = engineId
-                )
-            }
-        )
+            FaceIndexingRepository(applicationContext, factory).downloadModel(
+                force = force,
+                onProgress = { received, total ->
+                    updateState(
+                        bytes = received,
+                        bytesTotal = total,
+                        processed = if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0,
+                        total = 100,
+                        engineId = engineId
+                    )
+                    postProgress("Downloading face model", "${received / (1024 * 1024)} MB of ${(total / (1024 * 1024)).coerceAtLeast(1)} MB", if (total > 0) (received * 100 / total).toInt().coerceIn(0, 100) else 0, 100)
+                },
+                onStage = { stage ->
+                    updateState(stage = stage, engineId = engineId)
+                    postProgress("Preparing face model", when (stage) {
+                        "connecting" -> "Connecting to model repository…"
+                        "verifying" -> "Verifying cryptographic checksums…"
+                        "extracting" -> "Extracting model archive…"
+                        "installing" -> "Installing model files…"
+                        "ready" -> "${factory.displayName} ready"
+                        else -> "Preparing model…"
+                    }, -1, 0)
+                },
+                awaitIfResumed = { awaitResume(); currentCoroutineContext().ensureActive() },
+                onDetailedProgress = { detail ->
+                    updateState(
+                        bytes = detail.bytesReceived,
+                        bytesTotal = detail.totalBytes,
+                        speed = detail.speedBytesPerSec,
+                        eta = detail.etaSeconds,
+                        stage = detail.stage,
+                        processed = if (detail.totalBytes > 0) (detail.bytesReceived * 100 / detail.totalBytes).toInt().coerceIn(0, 100) else 0,
+                        total = 100,
+                        engineId = engineId
+                    )
+                }
+            )
+        } finally {
+            serviceHandle.close()
+        }
     }
 
     private suspend fun awaitResume() {
@@ -379,6 +399,7 @@ class IndexingForegroundService : Service() {
             putString(KEY_ERROR, error)
             apply()
         }
+        FaceProcessingCoordinator.refreshState()
     }
 
     private fun postProgress(title: String, message: String, progress: Int, max: Int) {

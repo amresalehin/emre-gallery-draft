@@ -1769,7 +1769,12 @@ class FaceClusterStore(context: Context) :
         maxDistance: Float = 0.60f,
         engineId: String = BuffaloLFaceEngine.ENGINE_ID,
         modelVersion: String = BuffaloLFaceEngine.MODEL_VERSION
-    ): Int {
+    ): Int = FaceProcessingCoordinator.withProcessing(
+        operationId = "reclusterAllSafely_${System.nanoTime()}",
+        type = FaceProcessingOperation.GROUPING,
+        engineId = engineId,
+        description = "Reclustering all faces"
+    ) {
         val db = writableDatabase
         db.beginTransaction()
         try {
@@ -2002,7 +2007,12 @@ class FaceClusterStore(context: Context) :
     fun reclusterAll(maxDistance: Float = 0.60f): Int = reclusterAllSafely(maxDistance)
 
     @Synchronized
-    fun resetClustersOnly(engineId: String = BuffaloLFaceEngine.ENGINE_ID) {
+    fun resetClustersOnly(engineId: String = BuffaloLFaceEngine.ENGINE_ID) = FaceProcessingCoordinator.withProcessing(
+        operationId = "resetClustersOnly_${System.nanoTime()}",
+        type = FaceProcessingOperation.FACE_DB_MUTATION,
+        engineId = engineId,
+        description = "Resetting face clusters"
+    ) {
         val db = writableDatabase
         db.beginTransaction()
         try {
@@ -2142,6 +2152,17 @@ class FaceClusterStore(context: Context) :
 
     @Synchronized
     fun ensurePersonForFace(mediaUri: String, faceIndex: Int, engineId: String): String {
+        if (FaceProcessingCoordinator.isBusy()) {
+            val db = readableDatabase
+            val existingPersonId = db.rawQuery(
+                "SELECT person_id FROM faces WHERE media_uri=? AND face_index=? AND engine_id=?",
+                arrayOf(mediaUri, faceIndex.toString(), engineId)
+            ).use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null
+            }
+            if (!existingPersonId.isNullOrBlank()) return existingPersonId
+            return ""
+        }
         val db = writableDatabase
         db.rawQuery(
             "SELECT person_id, cluster_id FROM faces WHERE media_uri=? AND face_index=? AND engine_id=?",

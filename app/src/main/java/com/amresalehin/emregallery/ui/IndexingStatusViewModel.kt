@@ -19,6 +19,8 @@ import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceStoreEvents
 import com.amresalehin.emregallery.face.StageProgress
 import com.amresalehin.emregallery.face.StageState
+import com.amresalehin.emregallery.face.FaceProcessingCoordinator
+import com.amresalehin.emregallery.face.FaceProcessingOperation
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
@@ -629,6 +631,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         }
 
         viewModelScope.launch {
+            val clusterHandle = FaceProcessingCoordinator.beginOperation(
+                operationId = "manual_clustering_$engineId",
+                type = FaceProcessingOperation.GROUPING,
+                engineId = engineId,
+                description = "Grouping facial embeddings"
+            )
             try {
                 data class ClusteringResult(
                     val grouped: Boolean,
@@ -747,6 +755,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     }
                 }
             } finally {
+                clusterHandle.close()
                 _uiState.update {
                     if (engineId == EnteFaceConstants.ENGINE_ID) {
                         it.copy(enteClustering = it.enteClustering.copy(isClusteringRunning = false))
@@ -764,6 +773,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         if (clusteringState.isClusteringRunning) return
 
         viewModelScope.launch {
+            val resetHandle = FaceProcessingCoordinator.beginOperation(
+                operationId = "manual_reset_clusters_$engineId",
+                type = FaceProcessingOperation.FACE_DB_MUTATION,
+                engineId = engineId,
+                description = "Resetting face clusters"
+            )
             try {
                 withContext(Dispatchers.IO) {
                     faceStore.resetClustersOnly(engineId)
@@ -807,6 +822,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                     }
                 }
             } finally {
+                resetHandle.close()
                 _uiState.update {
                     if (engineId == EnteFaceConstants.ENGINE_ID) {
                         it.copy(enteClustering = it.enteClustering.copy(isClusteringRunning = false))

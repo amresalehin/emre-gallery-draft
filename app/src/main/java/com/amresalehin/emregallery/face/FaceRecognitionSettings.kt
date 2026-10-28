@@ -31,9 +31,8 @@ object FaceRecognitionSettings {
             ?: BuffaloLFaceEngine.ENGINE_ID
     }
 
-    fun setActiveEngine(context: Context, engineId: String) {
-        preferences(context).edit().putString(KEY_ACTIVE_ENGINE, engineId).apply()
-        FaceEngineRegistry.setActiveEngine(engineId)
+    fun setActiveEngine(context: Context, engineId: String): Boolean {
+        return FaceProcessingCoordinator.trySwitchEngine(context, engineId)
     }
 
     fun detectionConfidence(context: Context, engineId: String = BuffaloLFaceEngine.ENGINE_ID): Float {

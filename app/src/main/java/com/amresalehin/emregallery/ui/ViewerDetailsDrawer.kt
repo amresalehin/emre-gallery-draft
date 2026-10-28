@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PhotoMapLocationCache
@@ -176,6 +177,12 @@ fun ViewerDetailsDrawer(
     var lastScanError by remember(item.uri) { mutableStateOf<String?>(null) }
     var showErrorDetailsDialog by remember { mutableStateOf(false) }
     var showFaceChooserDialog by remember { mutableStateOf(false) }
+    val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
+    LaunchedEffect(isProcessingActive) {
+        if (isProcessingActive) {
+            showFaceChooserDialog = false
+        }
+    }
     var isInstallingModel by remember { mutableStateOf(false) }
     var modelInstallProgress by remember { mutableStateOf<String?>(null) }
 
@@ -221,14 +228,20 @@ fun ViewerDetailsDrawer(
     }
 
     val startScan: (Boolean) -> Unit = { lowThreshold ->
-        if (singleScanJob?.isActive == true || item.isVideo) {
-            // mutex: active scan
+        if (singleScanJob?.isActive == true || item.isVideo || FaceProcessingCoordinator.isBusy(context)) {
+            // mutex: active scan or busy
         } else if (!isModelInstalled) {
             // missing dependencies
         } else {
             lastScanError = null
             scanPhase = "Initializing..."
             singleScanJob = coroutineScope.launch {
+                val scanHandle = FaceProcessingCoordinator.beginOperation(
+                    operationId = "viewer_single_scan_${item.uri}",
+                    type = FaceProcessingOperation.SCANNING,
+                    engineId = selectedDrawerEngineId,
+                    description = "Scanning single photo"
+                )
                 try {
                     val retryGroupingOnly = groupingError != null || groupingRequired
                     val threshold = if (lowThreshold) FaceRecognitionSettings.LOW_DETECTION_CONFIDENCE_THRESHOLD else FaceRecognitionSettings.detectionConfidence(context, selectedDrawerEngineId)
@@ -260,6 +273,7 @@ fun ViewerDetailsDrawer(
                     }
                     faceReloadKey++
                 } finally {
+                    scanHandle.close()
                     singleScanJob = null
                     scanPhase = null
                 }
@@ -274,10 +288,16 @@ fun ViewerDetailsDrawer(
     }
 
     val installModel: () -> Unit = {
-        if (!isInstallingModel) {
+        if (!isInstallingModel && !FaceProcessingCoordinator.isBusy(context)) {
             isInstallingModel = true
             modelInstallProgress = "Starting download..."
             coroutineScope.launch {
+                val installHandle = FaceProcessingCoordinator.beginOperation(
+                    operationId = "viewer_model_install",
+                    type = FaceProcessingOperation.MODEL_DOWNLOAD,
+                    engineId = selectedDrawerEngineId,
+                    description = "Installing face model"
+                )
                 try {
                     val repo = FaceIndexingRepository(context.applicationContext, factory)
                     repo.downloadModel(
@@ -290,6 +310,7 @@ fun ViewerDetailsDrawer(
                 } catch (e: Exception) {
                     lastScanError = "Failed to download model: ${e.localizedMessage ?: e.message}"
                 } finally {
+                    installHandle.close()
                     isInstallingModel = false
                     modelInstallProgress = null
                 }
@@ -441,10 +462,14 @@ fun ViewerDetailsDrawer(
                             faceUiState = faceUiState,
                             selectedEngineId = selectedDrawerEngineId,
                             onSelectEngine = { newEngine ->
-                                selectedDrawerEngineId = newEngine
-                                FaceRecognitionSettings.setActiveEngine(context, newEngine)
-                                FaceEngineRegistry.setActiveEngine(newEngine)
-                                FaceStoreEvents.notifyAllUpdated()
+                                if (!FaceProcessingCoordinator.isBusy(context)) {
+                                    val switched = FaceRecognitionSettings.setActiveEngine(context, newEngine)
+                                    if (switched) {
+                                        selectedDrawerEngineId = newEngine
+                                        FaceEngineRegistry.setActiveEngine(newEngine)
+                                        FaceStoreEvents.notifyAllUpdated()
+                                    }
+                                }
                             },
                             onScanThisPhoto = { startScan(false) },
                             onCancelScan = cancelScan,
@@ -454,44 +479,60 @@ fun ViewerDetailsDrawer(
                             onRetryScan = { startScan(false) },
                             onViewErrorDetails = { showErrorDetailsDialog = true },
                             onEditTagOrPerson = {
-                                if (detectedFaces.size == 1) {
-                                    val f = detectedFaces.first()
-                                    coroutineScope.launch {
-                                        val resolvedPersonId = if (!f.personId.isNullOrBlank()) {
-                                            f.personId
-                                        } else {
-                                            withContext(Dispatchers.IO) {
-                                                faceStore.ensurePersonForFace(
-                                                    mediaUri = f.mediaUri,
-                                                    faceIndex = f.faceIndex,
-                                                    engineId = f.engineId.ifBlank { selectedDrawerEngineId }
-                                                )
+                                if (!FaceProcessingCoordinator.isBusy(context)) {
+                                    if (detectedFaces.size == 1) {
+                                        val f = detectedFaces.first()
+                                        coroutineScope.launch {
+                                            if (FaceProcessingCoordinator.isBusy(context)) return@launch
+                                            val resolvedPersonId = if (!f.personId.isNullOrBlank()) {
+                                                f.personId
+                                            } else {
+                                                withContext(Dispatchers.IO) {
+                                                    FaceProcessingCoordinator.runIfIdle {
+                                                        faceStore.ensurePersonForFace(
+                                                            mediaUri = f.mediaUri,
+                                                            faceIndex = f.faceIndex,
+                                                            engineId = f.engineId.ifBlank { selectedDrawerEngineId }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            if (!resolvedPersonId.isNullOrBlank() && !FaceProcessingCoordinator.isBusy(context)) {
+                                                onClose()
+                                                onOpenPerson?.invoke(resolvedPersonId, f.engineId.ifBlank { selectedDrawerEngineId })
                                             }
                                         }
-                                        onClose()
-                                        onOpenPerson?.invoke(resolvedPersonId, f.engineId.ifBlank { selectedDrawerEngineId })
+                                    } else if (detectedFaces.size > 1) {
+                                        if (!FaceProcessingCoordinator.isBusy(context)) {
+                                            showFaceChooserDialog = true
+                                        }
+                                    } else {
+                                        showAddTagDialog = true
                                     }
-                                } else if (detectedFaces.size > 1) {
-                                    showFaceChooserDialog = true
-                                } else {
-                                    showAddTagDialog = true
                                 }
                             },
                             onFaceClick = { face ->
-                                coroutineScope.launch {
-                                    val resolvedPersonId = if (!face.personId.isNullOrBlank()) {
-                                        face.personId
-                                    } else {
-                                        withContext(Dispatchers.IO) {
-                                            faceStore.ensurePersonForFace(
-                                                mediaUri = face.mediaUri,
-                                                faceIndex = face.faceIndex,
-                                                engineId = face.engineId.ifBlank { selectedDrawerEngineId }
-                                            )
+                                if (!FaceProcessingCoordinator.isBusy(context)) {
+                                    coroutineScope.launch {
+                                        if (FaceProcessingCoordinator.isBusy(context)) return@launch
+                                        val resolvedPersonId = if (!face.personId.isNullOrBlank()) {
+                                            face.personId
+                                        } else {
+                                            withContext(Dispatchers.IO) {
+                                                FaceProcessingCoordinator.runIfIdle {
+                                                    faceStore.ensurePersonForFace(
+                                                        mediaUri = face.mediaUri,
+                                                        faceIndex = face.faceIndex,
+                                                        engineId = face.engineId.ifBlank { selectedDrawerEngineId }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (!resolvedPersonId.isNullOrBlank() && !FaceProcessingCoordinator.isBusy(context)) {
+                                            onClose()
+                                            onOpenPerson?.invoke(resolvedPersonId, face.engineId.ifBlank { selectedDrawerEngineId })
                                         }
                                     }
-                                    onClose()
-                                    onOpenPerson?.invoke(resolvedPersonId, face.engineId.ifBlank { selectedDrawerEngineId })
                                 }
                             }
                         )
@@ -717,22 +758,28 @@ fun ViewerDetailsDrawer(
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
+                                .clickable(enabled = !isProcessingActive) {
+                                    if (FaceProcessingCoordinator.isBusy(context)) return@clickable
                                     showFaceChooserDialog = false
                                     coroutineScope.launch {
+                                        if (FaceProcessingCoordinator.isBusy(context)) return@launch
                                         val resolvedPersonId = if (!face.personId.isNullOrBlank()) {
                                             face.personId
                                         } else {
                                             withContext(Dispatchers.IO) {
-                                                faceStore.ensurePersonForFace(
-                                                    mediaUri = face.mediaUri,
-                                                    faceIndex = face.faceIndex,
-                                                    engineId = face.engineId.ifBlank { selectedDrawerEngineId }
-                                                )
+                                                FaceProcessingCoordinator.runIfIdle {
+                                                    faceStore.ensurePersonForFace(
+                                                        mediaUri = face.mediaUri,
+                                                        faceIndex = face.faceIndex,
+                                                        engineId = face.engineId.ifBlank { selectedDrawerEngineId }
+                                                    )
+                                                }
                                             }
                                         }
-                                        onClose()
-                                        onOpenPerson?.invoke(resolvedPersonId, face.engineId.ifBlank { selectedDrawerEngineId })
+                                        if (!resolvedPersonId.isNullOrBlank() && !FaceProcessingCoordinator.isBusy(context)) {
+                                            onClose()
+                                            onOpenPerson?.invoke(resolvedPersonId, face.engineId.ifBlank { selectedDrawerEngineId })
+                                        }
                                     }
                                 }
                         ) {

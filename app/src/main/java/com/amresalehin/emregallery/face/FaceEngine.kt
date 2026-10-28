@@ -182,7 +182,20 @@ object FaceEngineRegistry {
         }
     }
 
-    fun setActiveEngine(engineId: String) {
+    fun setActiveEngine(engineId: String): Boolean {
+        if (FaceProcessingCoordinator.isBusy()) {
+            return false
+        }
+        synchronized(factories) {
+            if (factories.containsKey(engineId)) {
+                activeEngineId = engineId
+                return true
+            }
+        }
+        return false
+    }
+
+    internal fun setDirectActiveEngine(engineId: String) {
         synchronized(factories) {
             if (factories.containsKey(engineId)) {
                 activeEngineId = engineId

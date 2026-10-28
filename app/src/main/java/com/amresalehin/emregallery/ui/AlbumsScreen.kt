@@ -35,6 +35,9 @@ import coil.request.ImageRequest
 import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.face.FaceStoreEvents
+import androidx.compose.ui.draw.alpha
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.PersonSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -64,6 +67,8 @@ fun AlbumsScreen(
     onOpenPerson: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
+    val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
     var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
     var detectedPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
@@ -172,7 +177,8 @@ fun AlbumsScreen(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                                 modifier = Modifier
-                                    .clickable { engineMenuExpanded = true }
+                                    .clickable(enabled = !isBusy) { engineMenuExpanded = true }
+                                    .alpha(if (!isBusy) 1.0f else 0.5f)
                                     .testTag("album_face_model_chip")
                             ) {
                                 Row(
@@ -202,33 +208,39 @@ fun AlbumsScreen(
                             }
 
                             DropdownMenu(
-                                expanded = engineMenuExpanded,
+                                expanded = engineMenuExpanded && !isBusy,
                                 onDismissRequest = { engineMenuExpanded = false }
                             ) {
                                 DropdownMenuItem(
                                     text = { Text("Buffalo-L") },
+                                    enabled = !isBusy,
                                     trailingIcon = if (selectedEngineId == com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID) {
                                         { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                                     } else null,
                                     onClick = {
                                         engineMenuExpanded = false
-                                        selectedEngineId = com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID
-                                        FaceRecognitionSettings.setActiveEngine(context, com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID)
-                                        com.amresalehin.emregallery.face.FaceEngineRegistry.setActiveEngine(com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID)
-                                        FaceStoreEvents.notifyAllUpdated()
+                                        if (!FaceProcessingCoordinator.isBusy(context)) {
+                                            selectedEngineId = com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID
+                                            FaceRecognitionSettings.setActiveEngine(context, com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID)
+                                            com.amresalehin.emregallery.face.FaceEngineRegistry.setActiveEngine(com.amresalehin.emregallery.face.BuffaloLFaceEngine.ENGINE_ID)
+                                            FaceStoreEvents.notifyAllUpdated()
+                                        }
                                     }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("YOLO5Face + MobileFaceNet") },
+                                    enabled = !isBusy,
                                     trailingIcon = if (selectedEngineId == com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID) {
                                         { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                                     } else null,
                                     onClick = {
                                         engineMenuExpanded = false
-                                        selectedEngineId = com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID
-                                        FaceRecognitionSettings.setActiveEngine(context, com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID)
-                                        com.amresalehin.emregallery.face.FaceEngineRegistry.setActiveEngine(com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID)
-                                        FaceStoreEvents.notifyAllUpdated()
+                                        if (!FaceProcessingCoordinator.isBusy(context)) {
+                                            selectedEngineId = com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID
+                                            FaceRecognitionSettings.setActiveEngine(context, com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID)
+                                            com.amresalehin.emregallery.face.FaceEngineRegistry.setActiveEngine(com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID)
+                                            FaceStoreEvents.notifyAllUpdated()
+                                        }
                                     }
                                 )
                             }
@@ -306,13 +318,16 @@ fun AlbumsScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     modifier = Modifier
                                         .width(96.dp)
-                                        .clickable {
-                                            if (onOpenPerson != null) {
-                                                onOpenPerson(person.id)
-                                            } else {
-                                                onFilter("People")
+                                        .clickable(enabled = !isBusy) {
+                                            if (!FaceProcessingCoordinator.isBusy(context)) {
+                                                if (onOpenPerson != null) {
+                                                    onOpenPerson(person.id)
+                                                } else {
+                                                    onFilter("People")
+                                                }
                                             }
                                         }
+                                        .alpha(if (!isBusy) 1.0f else 0.5f)
                                 ) {
                                     Surface(
                                         shape = CircleShape,

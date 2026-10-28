@@ -40,6 +40,9 @@ import com.amresalehin.emregallery.face.FaceStoreEvents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.draw.alpha
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.PersonSummary
 import com.amresalehin.emregallery.face.ReviewSuggestion
 import java.util.Locale
@@ -79,7 +82,11 @@ fun PeopleScreen(
     var engineDropdownExpanded by remember { mutableStateOf(false) }
     var showAvatarPicker by remember { mutableStateOf(false) }
 
+    val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
+    val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
+
     fun setEngine(target: String) {
+        if (FaceProcessingCoordinator.isBusy(context)) return
         selectedEngineId = target
         FaceRecognitionSettings.setActiveEngine(context, target)
         FaceEngineRegistry.setActiveEngine(target)
@@ -292,7 +299,9 @@ fun PeopleScreen(
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.clickable { engineDropdownExpanded = true }
+                        modifier = Modifier
+                            .clickable(enabled = !isBusy) { engineDropdownExpanded = true }
+                            .alpha(if (!isBusy) 1.0f else 0.5f)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -313,11 +322,12 @@ fun PeopleScreen(
                     }
 
                     DropdownMenu(
-                        expanded = engineDropdownExpanded,
+                        expanded = engineDropdownExpanded && !isBusy,
                         onDismissRequest = { engineDropdownExpanded = false }
                     ) {
                         DropdownMenuItem(
                             text = { Text("Buffalo-L") },
+                            enabled = !isBusy,
                             trailingIcon = if (selectedEngineId == BuffaloLFaceEngine.ENGINE_ID) {
                                 { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                             } else null,
@@ -328,6 +338,7 @@ fun PeopleScreen(
                         )
                         DropdownMenuItem(
                             text = { Text("YOLO5Face + MobileFaceNet") },
+                            enabled = !isBusy,
                             trailingIcon = if (selectedEngineId == EnteFaceConstants.ENGINE_ID) {
                                 { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                             } else null,
