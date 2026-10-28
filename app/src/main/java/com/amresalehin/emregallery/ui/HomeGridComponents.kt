@@ -335,7 +335,7 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
                         .clickable(
                             interactionSource = memInteractionSource,
                             indication = ripple(bounded = true),
-                            onClick = { onOpen(cover) }
+                            onClick = { ThumbnailBoundsTracker.captureBounds(cover.uri); onOpen(cover) }
                         )
                 ) {
                     val context = LocalContext.current
