@@ -136,7 +136,10 @@ fun GalleryApp() {
 
                 // Start disk-backed preparation after permissions and the MediaStore list are ready.
                 // This worker is independent of composition and never holds the whole library in RAM.
-                ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
+                withContext(Dispatchers.Default) {
+                    // URI fingerprinting may traverse tens of thousands of rows; keep it off Main.
+                    ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
+                }
             }
         }
     }
