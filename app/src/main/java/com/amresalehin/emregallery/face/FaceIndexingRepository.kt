@@ -8,7 +8,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.runBlocking
 import java.util.concurrent.ConcurrentHashMap
 
 enum class StageState {
@@ -83,7 +82,6 @@ class FaceIndexingRepository(
         }
         val photos = media.filterNot { it.isVideo }
         val engineId = engineFactory.engineId
-        val cooldownMillis = FaceRecognitionSettings.cpuThrottleCooldownMillis(context)
         val operationHandle = FaceProcessingCoordinator.beginOperation(
             operationId = "repo_index_${System.nanoTime()}",
             type = if (forceRescanUris.isNotEmpty()) FaceProcessingOperation.RESCANNING else FaceProcessingOperation.SCANNING,
@@ -332,11 +330,7 @@ class FaceIndexingRepository(
                             failedItems = failedList.toList()
                         )
                     )
-                    // Thermal throttling prevention: duty-cycle cooling pause between photos keeps
-                    // CPU core temperatures within safe limits and prevents system thermal throttling.
-                    if (cooldownMillis > 0L) {
-                        kotlinx.coroutines.delay(cooldownMillis)
-                    }
+                    // Yield cooperatively without adding an artificial per-photo cooldown.
                     kotlinx.coroutines.yield()
                 }
             }
