@@ -400,7 +400,9 @@ fun PhotoMapDetailsCard(
                                     .clickable { onPhotoClick(photo, point) }
                             ) {
                                 AsyncImage(
-                                    model = ImageRequest.Builder(context).data(Uri.parse(photo.uri)).crossfade(false).build(),
+                                    model = remember(photo.uri, context) {
+                                        ThumbnailUtils.buildThumbnailRequest(context, photo.uri)
+                                    },
                                     contentDescription = photo.name,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()

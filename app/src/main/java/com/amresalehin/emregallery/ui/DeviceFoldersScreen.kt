@@ -91,15 +91,11 @@ fun DeviceFoldersScreen(
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                             ) {
                                 if (cover != null) {
+                                    val context = LocalContext.current
                                     AsyncImage(
-                                        model = ImageRequest.Builder(LocalContext.current)
-                                            .data(Uri.parse(cover.uri))
-                                            .size(240, 240)
-                                            .crossfade(false)
-                                            .diskCacheKey("${cover.uri}_device_folder")
-                                            .diskCachePolicy(CachePolicy.ENABLED)
-                                            .memoryCacheKey("${cover.uri}_device_folder")
-                                            .build(),
+                                        model = remember(cover.uri, context) {
+                                            ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 240, 240)
+                                        },
                                         contentDescription = "Folder preview",
                                         modifier = Modifier.fillMaxSize(),
                                         contentScale = ContentScale.Crop

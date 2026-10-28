@@ -60,8 +60,11 @@ fun CustomAlbumCard(
                     .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             ) {
                 if (coverItem != null) {
+                    val context = androidx.compose.ui.platform.LocalContext.current
                     AsyncImage(
-                        model = coverItem.uri,
+                        model = remember(coverItem.uri, context) {
+                            ThumbnailUtils.buildThumbnailRequest(context, coverItem.uri)
+                        },
                         contentDescription = album.name,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -415,8 +418,11 @@ fun AddPhotosToAlbumDialog(
                                         }
                                     }
                             ) {
+                                val context = androidx.compose.ui.platform.LocalContext.current
                                 AsyncImage(
-                                    model = item.uri,
+                                    model = remember(item.uri, context) {
+                                        ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                                    },
                                     contentDescription = item.name,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()

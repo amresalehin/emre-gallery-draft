@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -332,15 +333,15 @@ private fun LockedMediaCard(
                         onLongClick = onLongPress
                     )
             ) {
+                val context = LocalContext.current
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(Uri.parse(item.uri))
-                        .crossfade(true)
-                        .size(Size(640, 640))
-                        .precision(Precision.INEXACT)
-                        .build(),
+                    model = remember(item.uri, context) {
+                        ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                    },
                     contentDescription = item.name,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
+                    },
                     contentScale = ContentScale.Crop
                 )
                 if (item.isVideo) {

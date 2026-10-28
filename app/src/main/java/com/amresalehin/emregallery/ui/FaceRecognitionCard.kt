@@ -1109,6 +1109,71 @@ fun FaceRecognitionCard(
                                 )
                             }
 
+                            // Processor & Thermal Throttling Control
+                            var currentThrottleMode by remember { mutableStateOf(FaceRecognitionSettings.cpuThrottleMode(context)) }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Text("CPU & Thermal Throttling", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    Text(
+                                        when (currentThrottleMode) {
+                                            FaceRecognitionSettings.THROTTLE_ECO -> "Saver (80ms)"
+                                            FaceRecognitionSettings.THROTTLE_TURBO -> "Turbo (5ms)"
+                                            else -> "Balanced (40ms)"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(
+                                    "Prevents processor overheating and thermal clock throttling so the gallery UI remains smooth at 60/120Hz.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                    fontSize = 11.sp
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(
+                                        FaceRecognitionSettings.THROTTLE_ECO to "Saver",
+                                        FaceRecognitionSettings.THROTTLE_BALANCED to "Balanced",
+                                        FaceRecognitionSettings.THROTTLE_TURBO to "Turbo"
+                                    ).forEach { (mode, label) ->
+                                        val isSelected = currentThrottleMode == mode
+                                        Surface(
+                                            onClick = {
+                                                currentThrottleMode = mode
+                                                FaceRecognitionSettings.setCpuThrottleMode(context, mode)
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                            ),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                modifier = Modifier.padding(vertical = 8.dp),
+                                                textAlign = TextAlign.Center,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
                             // Clustering Actions
                             Row(
                                 modifier = Modifier.fillMaxWidth(),

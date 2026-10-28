@@ -64,7 +64,7 @@ data class NavBackStackEntry(
     val albumFilterReturnDestination: Destination = Destination.ALBUMS
 )
 
-val LocalViewerCoordinatedProgress = compositionLocalOf { 0f }
+val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,6 +140,8 @@ fun GalleryApp() {
     }
     LaunchedEffect(media, hidden, inBin) {
         if (media.isNotEmpty()) {
+            // Delay background scanning so initial app launch, first layout, and scrolling are 100% smooth
+            delay(3000)
             withContext(Dispatchers.IO) {
                 runCatching {
                     val locationCache = com.amresalehin.emregallery.data.PhotoMapLocationCache(context.applicationContext)
@@ -643,10 +645,9 @@ fun GalleryApp() {
             }
 
             val baseDestination = if (destination == Destination.VIEWER) previousDestination else destination
-            val coordinatedProgress = if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f
             val returnDestination = if (destination == Destination.VIEWER) previousDestination else destination
 
-            CompositionLocalProvider(LocalViewerCoordinatedProgress provides coordinatedProgress) {
+            CompositionLocalProvider(LocalViewerCoordinatedProgress provides { if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f }) {
                 AnimatedContent(
                     targetState = baseDestination,
                 transitionSpec = {
@@ -1199,14 +1200,17 @@ fun GalleryApp() {
         }
 
         // Wider top and bottom edge blur across app screens, smoothly fading with return progress
-        val showEdgeBlurs = destination != Destination.VIEWER || coordinatedProgress < 0.99f
+        val showEdgeBlurs = destination != Destination.VIEWER || viewerTransitionProgress.value < 0.99f
         if (showEdgeBlurs) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(0.045f)
-                    .graphicsLayer { alpha = (1f - coordinatedProgress).coerceIn(0f, 1f) }
+                    .graphicsLayer {
+                        val cp = if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f
+                        alpha = (1f - cp).coerceIn(0f, 1f)
+                    }
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
@@ -1224,7 +1228,10 @@ fun GalleryApp() {
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .fillMaxHeight(0.045f)
-                    .graphicsLayer { alpha = (1f - coordinatedProgress).coerceIn(0f, 1f) }
+                    .graphicsLayer {
+                        val cp = if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f
+                        alpha = (1f - cp).coerceIn(0f, 1f)
+                    }
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
@@ -1253,8 +1260,9 @@ fun GalleryApp() {
                         .statusBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                         .graphicsLayer {
-                            translationY = -(size.height + 60.dp.toPx()) * coordinatedProgress
-                            alpha = (1f - coordinatedProgress * 1.15f).coerceIn(0f, 1f)
+                            val cp = if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f
+                            translationY = -(size.height + 60.dp.toPx()) * cp
+                            alpha = (1f - cp * 1.15f).coerceIn(0f, 1f)
                         }
                 ) {
                     FloatingSearchPill(
@@ -1290,8 +1298,9 @@ fun GalleryApp() {
                         .navigationBarsPadding()
                         .padding(horizontal = 24.dp, vertical = 12.dp)
                         .graphicsLayer {
-                            translationY = (size.height + 60.dp.toPx()) * coordinatedProgress
-                            alpha = (1f - coordinatedProgress * 1.15f).coerceIn(0f, 1f)
+                            val cp = if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f
+                            translationY = (size.height + 60.dp.toPx()) * cp
+                            alpha = (1f - cp * 1.15f).coerceIn(0f, 1f)
                         }
                 ) {
                     if (albumFilter == null && returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {

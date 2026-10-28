@@ -14,7 +14,6 @@ import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        GalleryApplication.disableTouchPointTaps(this)
         enableEdgeToEdge()
         setContent {
             val preferences = remember { PreferencesRepository(applicationContext) }
@@ -24,16 +23,5 @@ class MainActivity : FragmentActivity() {
             }
         }
     }
-
-    override fun onResume() {
-        super.onResume()
-        GalleryApplication.disableTouchPointTaps(this)
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) {
-            GalleryApplication.disableTouchPointTaps(this)
-        }
-    }
 }
+

@@ -14,11 +14,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -95,26 +97,28 @@ fun ArchiveScreen(
                     ) {
                         Column {
                             Box(modifier = Modifier.trackThumbnailBounds(item.uri)) {
-                                val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
+                                val context = LocalContext.current
                                 AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(Uri.parse(item.uri))
-                                        .crossfade(true)
-                                        .size(Size(720, 720))
-                                        .precision(Precision.INEXACT)
-                                        .build(),
+                                    model = remember(item.uri, context) {
+                                        ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                                    },
                                     contentDescription = item.name,
                                     modifier = Modifier.fillMaxWidth().aspectRatio(1f)
                                         .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
                                         .clickable { onOpen(item) }
-                                        .alpha(if (isThumbnailActiveInViewer) 0f else 1f),
+                                        .graphicsLayer {
+                                            alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
+                                        },
                                     contentScale = ContentScale.Crop
                                 )
-                                if (item.isVideo && !isThumbnailActiveInViewer) {
+                                if (item.isVideo) {
                                     Icon(
                                         Icons.Default.PlayCircle,
                                         contentDescription = "Video",
-                                        modifier = Modifier.align(Alignment.Center).size(36.dp),
+                                        modifier = Modifier.align(Alignment.Center).size(36.dp)
+                                            .graphicsLayer {
+                                                alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
+                                            },
                                         tint = Color.White
                                     )
                                 }

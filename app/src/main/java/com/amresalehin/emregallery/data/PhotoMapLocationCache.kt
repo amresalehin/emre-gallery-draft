@@ -91,23 +91,52 @@ class PhotoMapLocationCache(context: Context) :
         forceRescan: Boolean = false,
         onProgress: ((scanned: Int, total: Int, located: Int) -> Unit)? = null
     ): Int {
+        // Enforce background priority so this scanner never contends with the UI thread or RenderThread
+        runCatching {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+        }
         val items = media
         if (forceRescan) {
             clearAll()
         }
         val cached = loadAll()
         val pending = if (forceRescan) items else items.filterNot { cached.containsKey(it.uri) }
+        if (pending.isEmpty()) return 0
+
         var newlyLocated = 0
         var totalLocated = cached.values.count { it.point != null }
 
-        pending.forEachIndexed { index, item ->
-            val point = extractLocation(context, item.uri)
-            save(item.uri, point)
-            if (point != null) {
-                newlyLocated++
-                totalLocated++
+        // Process in throttled batches with batched transactions to minimize disk sync and CPU usage
+        val batchSize = 25
+        for (batch in pending.chunked(batchSize)) {
+            val db = writableDatabase
+            db.beginTransaction()
+            try {
+                for (item in batch) {
+                    val point = extractLocation(context, item.uri)
+                    val values = ContentValues().apply {
+                        put("uri", item.uri)
+                        if (point == null) {
+                            putNull("latitude")
+                            putNull("longitude")
+                        } else {
+                            put("latitude", point.latitude)
+                            put("longitude", point.longitude)
+                        }
+                    }
+                    db.insertWithOnConflict("photo_locations", null, values, SQLiteDatabase.CONFLICT_REPLACE)
+                    if (point != null) {
+                        newlyLocated++
+                        totalLocated++
+                    }
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
             }
-            onProgress?.invoke(index + 1, pending.size, totalLocated)
+            onProgress?.invoke(newlyLocated, pending.size, totalLocated)
+            // Duty-cycle throttle: 15ms sleep between chunks to let CPU temperature drop
+            runCatching { Thread.sleep(15) }
         }
         return newlyLocated
     }

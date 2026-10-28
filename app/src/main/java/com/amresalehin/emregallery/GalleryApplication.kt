@@ -1,46 +1,37 @@
 package com.amresalehin.emregallery
 
 import android.app.Application
+import android.content.Context
 import coil.Coil
 import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
+import kotlinx.coroutines.Dispatchers
 import java.io.File
 
-import android.content.Context
-import android.provider.Settings
-
-import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
-
 class GalleryApplication : Application() {
-    companion object {
-        fun disableTouchPointTaps(context: Context) {
-            runCatching {
-                Settings.System.putInt(context.contentResolver, "show_touches", 0)
-            }
-            runCatching {
-                Settings.System.putInt(context.contentResolver, "pointer_location", 0)
-            }
-            runCatching {
-                Runtime.getRuntime().exec("settings put system show_touches 0")
-            }
-            runCatching {
-                Runtime.getRuntime().exec("settings put system pointer_location 0")
-            }
-            runCatching {
-                Runtime.getRuntime().exec(arrayOf("sh", "-c", "settings put system show_touches 0; settings put system pointer_location 0"))
-            }
-        }
-    }
 
     override fun onCreate() {
         super.onCreate()
-        disableTouchPointTaps(this)
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        val isLowRam = activityManager?.isLowRamDevice ?: false
+        val cachePercent = if (isLowRam) 0.18 else 0.25
+
+        // Bounded CPU concurrency prevents thumbnail fetching/decoding from saturating all CPU cores
+        // during fast scrolling, keeping UI and RenderThread at 60/120Hz without processor throttling.
+        val cpuCores = Runtime.getRuntime().availableProcessors()
+        val workerParallelism = (cpuCores / 2).coerceIn(2, 4)
+        val imageIoDispatcher = Dispatchers.IO.limitedParallelism(workerParallelism)
+        val imageComputeDispatcher = Dispatchers.Default.limitedParallelism(workerParallelism)
+
         val imageLoader = ImageLoader.Builder(this)
+            .fetcherDispatcher(imageIoDispatcher)
+            .decoderDispatcher(imageComputeDispatcher)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.35)
+                    .maxSizePercent(cachePercent)
                     .strongReferencesEnabled(true)
                     .build()
             }
@@ -54,9 +45,11 @@ class GalleryApplication : Application() {
                 add(MediaStoreThumbnailFetcher.Factory(this@GalleryApplication))
                 add(VideoFrameDecoder.Factory())
             }
+            .bitmapConfig(if (isLowRam) android.graphics.Bitmap.Config.RGB_565 else android.graphics.Bitmap.Config.ARGB_8888)
+            .allowRgb565(true)
+            .allowHardware(true)
             .crossfade(false)
             .respectCacheHeaders(false)
-            .allowHardware(true)
             .build()
         Coil.setImageLoader(imageLoader)
 
@@ -66,3 +59,4 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
     }
 }
+

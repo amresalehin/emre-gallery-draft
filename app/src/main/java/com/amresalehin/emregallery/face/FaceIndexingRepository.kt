@@ -76,8 +76,14 @@ class FaceIndexingRepository(
         forceRescanUris: Set<String> = emptySet(),
         targetUrisOnly: Set<String>? = null
     ): FaceIndexingProgress = withContext(Dispatchers.IO) {
+        // Enforce background scheduling priority so inference threads run on efficiency cores
+        // and never starve the UI/render threads.
+        runCatching {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+        }
         val photos = media.filterNot { it.isVideo }
         val engineId = engineFactory.engineId
+        val cooldownMillis = FaceRecognitionSettings.cpuThrottleCooldownMillis(context)
         val operationHandle = FaceProcessingCoordinator.beginOperation(
             operationId = "repo_index_${System.nanoTime()}",
             type = if (forceRescanUris.isNotEmpty()) FaceProcessingOperation.RESCANNING else FaceProcessingOperation.SCANNING,
@@ -326,6 +332,12 @@ class FaceIndexingRepository(
                             failedItems = failedList.toList()
                         )
                     )
+                    // Thermal throttling prevention: duty-cycle cooling pause between photos keeps
+                    // CPU core temperatures within safe limits and prevents system thermal throttling.
+                    if (cooldownMillis > 0L) {
+                        kotlinx.coroutines.delay(cooldownMillis)
+                    }
+                    kotlinx.coroutines.yield()
                 }
             }
 

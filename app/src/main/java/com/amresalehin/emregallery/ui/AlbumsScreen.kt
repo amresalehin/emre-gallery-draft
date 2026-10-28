@@ -456,15 +456,11 @@ fun AlbumsScreen(
                                             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                     ) {
                                         if (cover != null) {
+                                            val context = LocalContext.current
                                             AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(Uri.parse(cover.uri))
-                                                    .size(240, 160)
-                                                    .crossfade(false)
-                                                    .diskCacheKey("${cover.uri}_album_collection_cover")
-                                                    .diskCachePolicy(CachePolicy.ENABLED)
-                                                    .memoryCacheKey("${cover.uri}_album_collection_cover")
-                                                    .build(),
+                                                model = remember(cover.uri, context) {
+                                                    ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 240, 160)
+                                                },
                                                 contentDescription = "Preview of ${album.name}",
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Crop

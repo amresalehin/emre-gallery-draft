@@ -140,6 +140,7 @@ class IndexingForegroundService : Service() {
     }
 
     private suspend fun runOcr(languages: List<String>, rescanAll: Boolean, modelId: String = "fast") {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val model = com.amresalehin.emregallery.ocr.TesseractModel.fromId(modelId)
         val photos = loadPhotos()
         if (rescanAll) withContext(Dispatchers.IO) { TesseractOcr.clearCachedResults(this@IndexingForegroundService) }
@@ -147,6 +148,7 @@ class IndexingForegroundService : Service() {
         updateState(task = TASK_OCR, running = true, paused = false, processed = photos.size - pending.size, total = photos.size, error = null)
         postProgress("OCR indexing", "Preparing ${pending.size} images (${model.shortName})", photos.size - pending.size, photos.size)
         var completed = photos.size - pending.size
+        val cooldown = FaceRecognitionSettings.cpuThrottleCooldownMillis(this).coerceAtLeast(30L)
         for (item in pending) {
             awaitResume()
             currentCoroutineContext().ensureActive()
@@ -160,7 +162,14 @@ class IndexingForegroundService : Service() {
             }
             completed++
             updateState(processed = completed, total = photos.size)
-            postProgress("OCR indexing", "Processed $completed of ${photos.size} images (${model.title})", completed, photos.size)
+            if (completed % 4 == 0 || completed == photos.size) {
+                postProgress("OCR indexing", "Processed $completed of ${photos.size} images (${model.title})", completed, photos.size)
+            }
+            // Thermal throttling prevention: cooling duty-cycle pause keeps CPU below thermal trip point
+            if (cooldown > 0L) {
+                delay(cooldown)
+            }
+            kotlinx.coroutines.yield()
         }
     }
 
@@ -169,6 +178,7 @@ class IndexingForegroundService : Service() {
         engineId: String = BuffaloLFaceEngine.ENGINE_ID,
         retryFailedOnly: Boolean = false
     ) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val photos = loadPhotos()
         val store = FaceClusterStore(applicationContext)
         val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
@@ -249,10 +259,12 @@ class IndexingForegroundService : Service() {
                     clusteringProcessed = p.clusteringStage.processed,
                     clusteringTotal = p.clusteringStage.total
                 )
-                val targetName = if (p.currentItemName.isNotBlank()) " · ${p.currentItemName}" else ""
-                val statusSnippet = if (p.currentItemStatus.isNotBlank()) " (${p.currentItemStatus})" else ""
-                val groupingSnippet = if (p.groupingStatus.isNotBlank()) " · ${p.groupingStatus}" else ""
-                postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · ${store.indexedFaceCount(engineId)} faces$targetName$statusSnippet$groupingSnippet", done, relevantPhotos.size)
+                if (done % 3 == 0 || done == relevantPhotos.size) {
+                    val targetName = if (p.currentItemName.isNotBlank()) " · ${p.currentItemName}" else ""
+                    val statusSnippet = if (p.currentItemStatus.isNotBlank()) " (${p.currentItemStatus})" else ""
+                    val groupingSnippet = if (p.groupingStatus.isNotBlank()) " · ${p.groupingStatus}" else ""
+                    postProgress("Face indexing", "Processed $done of ${relevantPhotos.size} images · ${store.indexedFaceCount(engineId)} faces$targetName$statusSnippet$groupingSnippet", done, relevantPhotos.size)
+                }
             }
         )
         } finally {
@@ -410,6 +422,7 @@ class IndexingForegroundService : Service() {
     }
 
     private suspend fun runLocation(rescanAll: Boolean) {
+        runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
         val photos = loadPhotos()
         val cache = com.amresalehin.emregallery.data.PhotoMapLocationCache(applicationContext)
         if (rescanAll) withContext(Dispatchers.IO) { cache.clearAll() }
@@ -435,6 +448,9 @@ class IndexingForegroundService : Service() {
             if (completed % 8 == 0 || completed == photos.size) {
                 postProgress("Map location indexing", "Scanned $completed of ${photos.size} photos · $locatedCount geotagged", completed, photos.size)
             }
+            // Thermal throttling cooldown
+            delay(15L)
+            kotlinx.coroutines.yield()
         }
     }
 

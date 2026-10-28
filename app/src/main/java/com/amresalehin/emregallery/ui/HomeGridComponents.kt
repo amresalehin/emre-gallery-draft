@@ -53,6 +53,7 @@ import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -258,33 +259,43 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
     val todayDay = today.get(Calendar.DAY_OF_YEAR)
 
     val stories = remember(media, currentYear, todayMonth, todayDay) {
-        val eligible = media.mapNotNull { item ->
-            val timestamp = item.dateTakenMillis.takeIf { it > 0L } ?: item.dateAddedSeconds * 1000L
-            if (timestamp <= 0L) null else item to Calendar.getInstance().apply { timeInMillis = timestamp }
+        if (media.isEmpty()) return@remember emptyList()
+        val cal = Calendar.getInstance()
+        val eligible = ArrayList<Pair<MediaItem, Long>>(media.size)
+        val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
+        val tripsMap = LinkedHashMap<Int, MutableList<Pair<MediaItem, Long>>>()
+
+        for (item in media) {
+            val timestamp = if (item.dateTakenMillis > 0L) item.dateTakenMillis else item.dateAddedSeconds * 1000L
+            if (timestamp <= 0L) continue
+            eligible.add(item to timestamp)
+            cal.timeInMillis = timestamp
+            val y = cal.get(Calendar.YEAR)
+            val m = cal.get(Calendar.MONTH)
+            val d = cal.get(Calendar.DAY_OF_YEAR)
+
+            if (m == todayMonth && d == todayDay && y < currentYear) {
+                onThisDayMap.getOrPut(y) { mutableListOf() }.add(item)
+            }
+            val tripKey = y * 1000 + d
+            tripsMap.getOrPut(tripKey) { mutableListOf() }.add(item to timestamp)
         }
+
         val result = mutableListOf<Pair<String, List<MediaItem>>>()
 
         // Google Photos-style "On this day" stories: real photos from this calendar date in prior years.
-        val onThisDay = eligible.filter { (_, date) ->
-            date.get(Calendar.MONTH) == todayMonth &&
-                date.get(Calendar.DAY_OF_YEAR) == todayDay &&
-                date.get(Calendar.YEAR) < currentYear
-        }.groupBy { (_, date) -> date.get(Calendar.YEAR) }
-            .toSortedMap(compareByDescending { it })
-        onThisDay.forEach { (year, entries) ->
-            result += "On this day · $year" to entries.map { it.first }
+        onThisDayMap.toSortedMap(compareByDescending { it }).forEach { (year, entries) ->
+            result += "On this day · $year" to entries
         }
 
-        // Real date-based trip/story groups from the library, not generic sample cards.
-        eligible.groupBy { (_, date) ->
-            date.get(Calendar.YEAR) * 100 + date.get(Calendar.DAY_OF_YEAR)
-        }.entries
+        // Real date-based trip/story groups from the library
+        val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+        tripsMap.entries
             .filter { it.value.size >= 4 }
             .sortedByDescending { it.key }
             .take(8)
             .forEach { (_, entries) ->
-                val date = entries.first().second
-                val label = SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(date.time)
+                val label = dateFormat.format(Date(entries.first().second))
                 if (result.none { it.second.any { storyItem -> storyItem.uri == entries.first().first.uri } }) {
                     result += label to entries.map { it.first }
                 }
@@ -321,19 +332,14 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
                             onClick = { onOpen(cover) }
                         )
                 ) {
-                    val isCoverActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == cover.uri
+                    val context = LocalContext.current
                     AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(Uri.parse(cover.uri))
-                            .size(264, 368)
-                            .crossfade(false)
-                            .diskCacheKey("${cover.uri}_memory_story")
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .memoryCacheKey("${cover.uri}_memory_story")
-                            .build(),
+                        model = remember(cover.uri, context) {
+                            ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 264, 368)
+                        },
                         contentDescription = title,
                         modifier = Modifier.fillMaxSize().graphicsLayer {
-                            alpha = if (isCoverActiveInViewer) 0f else 1f
+                            alpha = if (ThumbnailBoundsTracker.activeViewerUri == cover.uri) 0f else 1f
                         },
                         contentScale = ContentScale.Crop
                     )
@@ -513,25 +519,13 @@ fun MosaicMediaItem(
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
-    val imageRequest = remember(item.uri) {
-        ImageRequest.Builder(context)
-            .data(Uri.parse(item.uri))
-            .size(480, 480)
-            .precision(Precision.INEXACT)
-            .crossfade(false)
-            .diskCacheKey("${item.uri}_thumb")
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .memoryCacheKey("${item.uri}_thumb")
-            .build()
+    val imageRequest = remember(item.uri, context) {
+        ThumbnailUtils.buildThumbnailRequest(context, item.uri)
     }
 
     val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val itemScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "mosaic_press_scale"
-    )
+    val itemScale = if (isPressed) 0.95f else 1f
 
     Box(
         modifier = modifier
@@ -554,12 +548,11 @@ fun MosaicMediaItem(
                 onLongClick = { onLongPress() }
             )
     ) {
-        val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
         AsyncImage(
             model = imageRequest,
             contentDescription = item.name,
             modifier = Modifier.fillMaxSize().graphicsLayer {
-                alpha = if (isThumbnailActiveInViewer) 0f else 1f
+                alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
             },
             contentScale = ContentScale.Crop
         )
@@ -577,11 +570,14 @@ fun MosaicMediaItem(
                 Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.padding(4.dp))
             }
         }
-        if (item.isVideo && !isThumbnailActiveInViewer) {
+        if (item.isVideo) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(6.dp)
+                    .graphicsLayer {
+                        alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
+                    }
                     .background(Color.Black.copy(alpha = 0.55f), CircleShape)
                     .padding(3.dp)
             ) {
@@ -617,25 +613,13 @@ fun MediaGridItem(
     }
 
     val context = LocalContext.current
-    val imageRequest = remember(item.uri) {
-        ImageRequest.Builder(context)
-            .data(Uri.parse(item.uri))
-            .size(480, 480)
-            .precision(Precision.INEXACT)
-            .crossfade(false)
-            .diskCacheKey("${item.uri}_thumb")
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .memoryCacheKey("${item.uri}_thumb")
-            .build()
+    val imageRequest = remember(item.uri, context) {
+        ThumbnailUtils.buildThumbnailRequest(context, item.uri)
     }
 
     val interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val itemScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "thumb_press_scale"
-    )
+    val itemScale = if (isPressed) 0.95f else 1f
 
     Box(
         modifier = Modifier
@@ -655,20 +639,22 @@ fun MediaGridItem(
                 onClick = { onOpen(item) }
             )
     ) {
-        val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
         AsyncImage(
             model = imageRequest,
             contentDescription = item.name,
             modifier = Modifier.fillMaxSize().graphicsLayer {
-                alpha = if (isThumbnailActiveInViewer) 0f else 1f
+                alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
             },
             contentScale = ContentScale.Crop
         )
-        if (item.isVideo && !isThumbnailActiveInViewer) {
+        if (item.isVideo) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(6.dp)
+                    .graphicsLayer {
+                        alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
+                    }
                     .background(Color.Black.copy(alpha = 0.55f), CircleShape)
                     .padding(3.dp)
             ) {

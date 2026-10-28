@@ -43,6 +43,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -282,76 +283,74 @@ fun ViewerScreen(
             initiateClose()
         }
 
-        // Calculate geometry for shared-element transition toward original source thumbnail
-        val progress = transitionProgress.value
         val targetBounds = remember(item.uri) { ThumbnailBoundsTracker.getBounds(item.uri) }
-
-        val destTransX: Float
-        val destTransY: Float
-        val destScaleX: Float
-        val destScaleY: Float
-        if (targetBounds != null) {
-            val thumbW = targetBounds.width
-            val thumbH = targetBounds.height
-            val thumbCenterX = targetBounds.left + thumbW / 2f
-            val thumbCenterY = targetBounds.top + thumbH / 2f
-            val screenCenterX = screenWidthPx / 2f
-            val screenCenterY = screenHeightPx / 2f
-            destTransX = thumbCenterX - screenCenterX
-            destTransY = thumbCenterY - screenCenterY
-            destScaleX = (thumbW / screenWidthPx).coerceIn(0.01f, 1f)
-            destScaleY = (thumbH / screenHeightPx).coerceIn(0.01f, 1f)
-        } else {
-            destTransX = 0f
-            destTransY = 0f
-            destScaleX = 0.85f
-            destScaleY = 0.85f
-        }
-
-        val currentScaleX = destScaleX + (1f - destScaleX) * progress
-        val currentScaleY = destScaleY + (1f - destScaleY) * progress
-        val currentTransX = destTransX * (1f - progress)
-        val currentTransY = destTransY * (1f - progress) + dismissOffsetY.value * progress
-        val cornerRadius = ((1f - progress) * 10f).dp
-        // Do NOT fade out the image before reaching progress == 0 when targetBounds is present.
-        // It stays fully opaque so it lands directly on top of the thumbnail with zero blank dip/flicker.
-        val viewerAlpha = if (targetBounds == null && isClosing) progress.coerceIn(0f, 1f) else 1f
-
-        // Background scrim calculation
-        val currentDismissY = dismissOffsetY.value
-        val dismissFraction = (abs(currentDismissY) / 540f).coerceIn(0f, 1f)
-        val backdropAlpha = (1f - dismissFraction * 0.70f).coerceIn(0.30f, 1f)
-        val scrimAlpha = if (videoState.isFullscreen) 1f else (progress * backdropAlpha).coerceIn(0f, 1f)
-        val controlsAlpha = if (isClosing) ((progress - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
-        val outgoingTopBarOffset = with(density) { -(80.dp.toPx()) * (1f - progress) }
-        val outgoingBottomBarOffset = with(density) { (80.dp.toPx()) * (1f - progress) }
-
-        val backgroundColor = if (videoState.isFullscreen) {
-            Color.Black
-        } else {
-            MaterialTheme.colorScheme.background.copy(alpha = scrimAlpha)
-        }
+        val bgThemeColor = MaterialTheme.colorScheme.background
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(backgroundColor)
+                .drawBehind {
+                    if (videoState.isFullscreen) {
+                        drawRect(Color.Black)
+                    } else {
+                        val p = transitionProgress.value
+                        val currentDismissY = dismissOffsetY.value
+                        val dismissFraction = (abs(currentDismissY) / 540f).coerceIn(0f, 1f)
+                        val backdropAlpha = (1f - dismissFraction * 0.70f).coerceIn(0.30f, 1f)
+                        val scrimAlpha = (p * backdropAlpha).coerceIn(0f, 1f)
+                        drawRect(bgThemeColor.copy(alpha = scrimAlpha))
+                    }
+                }
         ) {
             // Horizontal Media Pager with coordinated shared-element geometry
             HorizontalPager(
                 state = pagerState,
+                beyondViewportPageCount = 1,
                 flingBehavior = PagerDefaults.flingBehavior(state = pagerState),
                 userScrollEnabled = !isCurrentZoomed && !videoState.isFullscreen && !showDetails,
                 pageSpacing = 16.dp,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        translationX = currentTransX
-                        translationY = currentTransY
-                        scaleX = currentScaleX
-                        scaleY = currentScaleY
-                        alpha = viewerAlpha
-                        clip = progress < 0.99f || dismissFraction > 0.02f
+                        val p = transitionProgress.value
+                        val currentDismissY = dismissOffsetY.value
+                        val dismissFraction = (abs(currentDismissY) / 540f).coerceIn(0f, 1f)
+                        val bounds = targetBounds ?: ThumbnailBoundsTracker.getBounds(item.uri)
+
+                        val destTransX: Float
+                        val destTransY: Float
+                        val destScaleX: Float
+                        val destScaleY: Float
+                        if (bounds != null && size.width > 0f && size.height > 0f) {
+                            val thumbW = bounds.width
+                            val thumbH = bounds.height
+                            val thumbCenterX = bounds.left + thumbW / 2f
+                            val thumbCenterY = bounds.top + thumbH / 2f
+                            val screenCenterX = size.width / 2f
+                            val screenCenterY = size.height / 2f
+                            destTransX = thumbCenterX - screenCenterX
+                            destTransY = thumbCenterY - screenCenterY
+                            destScaleX = (thumbW / size.width).coerceIn(0.01f, 1f)
+                            destScaleY = (thumbH / size.height).coerceIn(0.01f, 1f)
+                        } else {
+                            destTransX = 0f
+                            destTransY = 0f
+                            destScaleX = 0.85f
+                            destScaleY = 0.85f
+                        }
+
+                        val curScaleX = destScaleX + (1f - destScaleX) * p
+                        val curScaleY = destScaleY + (1f - destScaleY) * p
+                        val curTransX = destTransX * (1f - p)
+                        val curTransY = destTransY * (1f - p) + currentDismissY * p
+                        val cornerRadius = ((1f - p) * 10f).dp
+
+                        translationX = curTransX
+                        translationY = curTransY
+                        scaleX = curScaleX
+                        scaleY = curScaleY
+                        alpha = if (bounds == null && isClosing) p.coerceIn(0f, 1f) else 1f
+                        clip = p < 0.99f || dismissFraction > 0.02f
                         shape = RoundedCornerShape(cornerRadius)
                     },
                 key = { pageIndex -> items.getOrNull(pageIndex)?.uri ?: pageIndex.toString() }
@@ -429,7 +428,7 @@ fun ViewerScreen(
                     onZoomChanged = { zoomed ->
                         if (isCurrent) isCurrentZoomed = zoomed
                     },
-                    transitionProgress = progress,
+                    transitionProgress = transitionProgress.value,
                     hasTargetBounds = targetBounds != null
                 )
             }
@@ -450,8 +449,9 @@ fun ViewerScreen(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .graphicsLayer {
-                            translationY = outgoingTopBarOffset
-                            alpha = controlsAlpha
+                            val p = transitionProgress.value
+                            translationY = -(80.dp.toPx()) * (1f - p)
+                            alpha = if (isClosing) ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
                         }
                 )
             }
@@ -484,8 +484,9 @@ fun ViewerScreen(
                         .fillMaxWidth()
                         .navigationBarsPadding()
                         .graphicsLayer {
-                            translationY = outgoingBottomBarOffset
-                            alpha = controlsAlpha
+                            val p = transitionProgress.value
+                            translationY = (80.dp.toPx()) * (1f - p)
+                            alpha = if (isClosing) ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
                         },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -658,27 +659,7 @@ private fun ZoomableMediaItem(
     // Decoding an independent video frame here can make the poster change before ExoPlayer's first frame.
     val context = LocalContext.current
     val imageRequest = remember(item.uri, isVideo, context) {
-        val request = ImageRequest.Builder(context)
-            .data(Uri.parse(item.uri))
-            .diskCachePolicy(CachePolicy.ENABLED)
-
-        if (isVideo) {
-            request
-                .size(480, 480)
-                .precision(Precision.INEXACT)
-                .crossfade(false)
-                .diskCacheKey("${item.uri}_thumb")
-                .memoryCacheKey("${item.uri}_thumb")
-        } else {
-            request
-                .size(Size.ORIGINAL)
-                .precision(Precision.EXACT)
-                .placeholderMemoryCacheKey("${item.uri}_thumb")
-                .diskCacheKey("${item.uri}:viewer-original")
-                .memoryCacheKey("${item.uri}:viewer-original")
-                .crossfade(100)
-        }
-        request.build()
+        ThumbnailUtils.buildViewerRequest(context, item.uri, isVideo)
     }
 
     // Reset zoom when navigating away from this page

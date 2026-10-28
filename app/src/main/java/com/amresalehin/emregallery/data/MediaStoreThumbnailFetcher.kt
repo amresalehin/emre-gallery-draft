@@ -32,14 +32,22 @@ class MediaStoreThumbnailFetcher(
         }
         val widthPx = widthDim.px
         val heightPx = heightDim.px
-        if (widthPx > 600 || heightPx > 600) {
+        if (widthPx > 1024 || heightPx > 1024) {
             return@withContext null
         }
+
         val bitmap: Bitmap? = try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val clampedWidth = widthPx.coerceIn(120, 512)
-                val clampedHeight = heightPx.coerceIn(120, 512)
-                context.contentResolver.loadThumbnail(uri, Size(clampedWidth, clampedHeight), null)
+                val clampedWidth = widthPx.coerceIn(96, 512)
+                val clampedHeight = heightPx.coerceIn(96, 512)
+                val signal = android.os.CancellationSignal()
+                val job = coroutineContext[kotlinx.coroutines.Job]
+                val handle = job?.invokeOnCompletion { signal.cancel() }
+                try {
+                    context.contentResolver.loadThumbnail(uri, Size(clampedWidth, clampedHeight), signal)
+                } finally {
+                    handle?.dispose()
+                }
             } else {
                 val id = try {
                     ContentUris.parseId(uri)
@@ -55,6 +63,9 @@ class MediaStoreThumbnailFetcher(
                 } else null
             }
         } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException || t is android.os.OperationCanceledException) {
+                throw kotlinx.coroutines.CancellationException("Thumbnail fetch cancelled", t)
+            }
             null
         }
 
@@ -75,7 +86,7 @@ class MediaStoreThumbnailFetcher(
                 val widthDim = options.size.width
                 val heightDim = options.size.height
                 if (widthDim is Dimension.Pixels && heightDim is Dimension.Pixels) {
-                    if (widthDim.px <= 600 && heightDim.px <= 600) {
+                    if (widthDim.px <= 1024 && heightDim.px <= 1024) {
                         return MediaStoreThumbnailFetcher(context, data, options)
                     }
                 }

@@ -15,11 +15,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -148,7 +150,7 @@ fun SearchScreen(
                 }
                 LazyVerticalGrid(columns = GridCells.Fixed(3), contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     gridItems(results) { item ->
-                        val isThumbnailActiveInViewer = ThumbnailBoundsTracker.activeViewerUri == item.uri
+                        val context = LocalContext.current
                         Box(
                             Modifier
                                 .fillMaxWidth()
@@ -158,20 +160,24 @@ fun SearchScreen(
                                 .clickable { onOpen(item) }
                         ) {
                             AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(Uri.parse(item.uri))
-                                    .size(600, 600)
-                                    .crossfade(false)
-                                    .diskCacheKey("${item.uri}_thumb")
-                                    .diskCachePolicy(CachePolicy.ENABLED)
-                                    .memoryCacheKey("${item.uri}_thumb")
-                                    .build(),
+                                model = remember(item.uri, context) {
+                                    ThumbnailUtils.buildThumbnailRequest(context, item.uri)
+                                },
                                 item.name,
-                                Modifier.fillMaxSize().alpha(if (isThumbnailActiveInViewer) 0f else 1f),
+                                Modifier.fillMaxSize().graphicsLayer {
+                                    alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
+                                },
                                 contentScale = ContentScale.Crop
                             )
-                            if (item.isVideo && !isThumbnailActiveInViewer) {
-                                Icon(Icons.Default.PlayArrow, null, Modifier.align(Alignment.BottomEnd).padding(4.dp), tint = Color.White)
+                            if (item.isVideo) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    null,
+                                    Modifier.align(Alignment.BottomEnd).padding(4.dp).graphicsLayer {
+                                        alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
+                                    },
+                                    tint = Color.White
+                                )
                             }
                         }
                     }

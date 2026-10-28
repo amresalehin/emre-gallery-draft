@@ -145,8 +145,18 @@ class FaceProcessingCoordinatorTest {
 
     @Test
     fun testEnsurePersonForFaceBlockedDuringProcessing() {
-        // First record a face in DB without person assignment
+        // First record cluster and face in DB without person assignment
         val db = store.writableDatabase
+        val clusterCv = android.content.ContentValues().apply {
+            put("id", "cluster_1")
+            put("display_name", "Cluster 1")
+            put("centroid", ByteArray(10))
+            put("engine_id", BuffaloLFaceEngine.ENGINE_ID)
+            put("model_version", "w600k_r50")
+            put("updated_at", System.currentTimeMillis())
+        }
+        db.insertOrThrow("clusters", null, clusterCv)
+
         val cv = android.content.ContentValues().apply {
             put("face_id", "buffalo_l#content://media/photo1#0")
             put("media_uri", "content://media/photo1")
@@ -159,10 +169,10 @@ class FaceProcessingCoordinatorTest {
             put("box_top", 10f)
             put("box_right", 50f)
             put("box_bottom", 50f)
-            put("confidence", 0.95f)
-            put("quality", 0.95f)
+            put("detection_confidence", 0.95f)
+            put("quality_score", 0.95f)
         }
-        db.insert("faces", null, cv)
+        db.insertOrThrow("faces", null, cv)
 
         // Start processing (e.g. indexing or grouping)
         val handle = FaceProcessingCoordinator.beginOperation(

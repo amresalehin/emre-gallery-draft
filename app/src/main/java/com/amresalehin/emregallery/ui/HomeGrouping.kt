@@ -30,16 +30,27 @@ fun groupMediaByDay(media: List<MediaItem>): List<DayGroup> {
     val dayFormatOtherYear = SimpleDateFormat("EEE, d MMM yyyy", Locale.getDefault())
 
     val groupedMap = LinkedHashMap<Long, MutableList<MediaItem>>()
+    var lastTimestamp = Long.MIN_VALUE
+    var lastDayStart = Long.MIN_VALUE
 
     for (item in media) {
         val timestamp = if (item.dateTakenMillis > 0) item.dateTakenMillis else (item.dateAddedSeconds * 1000L)
         val validTimestamp = if (timestamp > 0) timestamp else todayStart
-        cal.timeInMillis = validTimestamp
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        val dayStart = cal.timeInMillis
+
+        // Fast-path: Chronologically adjacent items falling on the exact same day reuse the dayStart
+        // without invoking 4 sequential Calendar field mutations.
+        val dayStart = if (lastDayStart != Long.MIN_VALUE && validTimestamp >= lastDayStart && validTimestamp < lastDayStart + 86_400_000L) {
+            lastDayStart
+        } else {
+            cal.timeInMillis = validTimestamp
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }
+        lastDayStart = dayStart
+        lastTimestamp = validTimestamp
 
         groupedMap.getOrPut(dayStart) { mutableListOf() }.add(item)
     }
@@ -74,18 +85,34 @@ fun groupMediaByMonth(media: List<MediaItem>): List<DayGroup> {
     val monthFormatOtherYear = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
 
     val groupedMap = LinkedHashMap<Long, MutableList<MediaItem>>()
+    var lastMonthStart = Long.MIN_VALUE
 
     for (item in media) {
         val timestamp = if (item.dateTakenMillis > 0) item.dateTakenMillis else (item.dateAddedSeconds * 1000L)
         val validTimestamp = if (timestamp > 0) timestamp else System.currentTimeMillis()
-        cal.timeInMillis = validTimestamp
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        val monthStart = cal.timeInMillis
 
+        val monthStart = if (lastMonthStart != Long.MIN_VALUE && validTimestamp >= lastMonthStart && validTimestamp < lastMonthStart + 27 * 86_400_000L) {
+            cal.timeInMillis = validTimestamp
+            if (cal.get(Calendar.MONTH) == cal.apply { timeInMillis = lastMonthStart }.get(Calendar.MONTH)) {
+                lastMonthStart
+            } else {
+                cal.set(Calendar.DAY_OF_MONTH, 1)
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                cal.timeInMillis
+            }
+        } else {
+            cal.timeInMillis = validTimestamp
+            cal.set(Calendar.DAY_OF_MONTH, 1)
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }
+        lastMonthStart = monthStart
         groupedMap.getOrPut(monthStart) { mutableListOf() }.add(item)
     }
 
@@ -106,17 +133,25 @@ fun groupMediaByYear(media: List<MediaItem>): List<DayGroup> {
     if (media.isEmpty()) return emptyList()
     val cal = Calendar.getInstance()
     val groupedMap = LinkedHashMap<Long, MutableList<MediaItem>>()
+    var lastYearStart = Long.MIN_VALUE
+
     for (item in media) {
         val timestamp = if (item.dateTakenMillis > 0) item.dateTakenMillis else (item.dateAddedSeconds * 1000L)
         val validTimestamp = if (timestamp > 0) timestamp else System.currentTimeMillis()
-        cal.timeInMillis = validTimestamp
-        cal.set(Calendar.MONTH, 0)
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        val yearStart = cal.timeInMillis
+
+        val yearStart = if (lastYearStart != Long.MIN_VALUE && validTimestamp >= lastYearStart && validTimestamp < lastYearStart + 365L * 86_400_000L) {
+            lastYearStart
+        } else {
+            cal.timeInMillis = validTimestamp
+            cal.set(Calendar.MONTH, 0)
+            cal.set(Calendar.DAY_OF_MONTH, 1)
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }
+        lastYearStart = yearStart
         groupedMap.getOrPut(yearStart) { mutableListOf() }.add(item)
     }
     val yearFormat = SimpleDateFormat("yyyy", Locale.getDefault())
