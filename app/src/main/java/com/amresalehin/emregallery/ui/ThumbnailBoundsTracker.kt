@@ -18,9 +18,9 @@ import java.util.LinkedHashMap
 /**
  * Tracks on-screen bounding boxes of thumbnails across gallery screens.
  *
- * Only mounted thumbnails retain LayoutCoordinates. Bounds are computed on demand (or just before
- * the source cell is disposed) and stored in a small LRU so shared-element viewer transitions can
- * still return to a recently visible thumbnail without keeping every scrolled-past composition alive.
+ * Only mounted thumbnails retain LayoutCoordinates. Bounds are captured on demand when a thumbnail
+ * is opened and stored in a small LRU so shared-element viewer transitions can return to a recently
+ * visible thumbnail without keeping every scrolled-past composition alive or measuring rows on disposal.
  */
 object ThumbnailBoundsTracker {
     private const val MAX_CACHED_BOUNDS = 64
