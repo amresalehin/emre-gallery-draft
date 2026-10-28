@@ -14,6 +14,7 @@ import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestGalleryRefreshRate()
         enableEdgeToEdge()
         setContent {
             val preferences = remember { PreferencesRepository(applicationContext) }
