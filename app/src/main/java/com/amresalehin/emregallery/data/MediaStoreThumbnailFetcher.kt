@@ -42,7 +42,7 @@ class MediaStoreThumbnailFetcher(
         DrawableResult(
             drawable = BitmapDrawable(context.resources, prepared.bitmap),
             isSampled = true,
-            dataSource = if (prepared.fromPreparedDiskCache) DataSource.DISK else DataSource.LOCAL
+            dataSource = DataSource.DISK
         )
     }
 
