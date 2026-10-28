@@ -47,6 +47,7 @@ import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.LockedVaultManager
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
+import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
@@ -127,8 +128,15 @@ fun GalleryApp() {
             lockedVaultItems = withContext(Dispatchers.IO) { runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList()) }
             if (hasMediaPermission(context)) {
                 loading = true
-                media = withContext(Dispatchers.IO) { runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList()) }
+                val loadedMedia = withContext(Dispatchers.IO) {
+                    runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())
+                }
+                media = loadedMedia
                 loading = false
+
+                // Start disk-backed preparation after permissions and the MediaStore list are ready.
+                // This worker is independent of composition and never holds the whole library in RAM.
+                ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
             }
         }
     }
