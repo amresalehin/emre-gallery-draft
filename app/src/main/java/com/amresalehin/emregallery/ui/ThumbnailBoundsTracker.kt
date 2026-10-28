@@ -1,12 +1,9 @@
 package com.amresalehin.emregallery.ui
 
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -25,7 +22,12 @@ import java.util.LinkedHashMap
 object ThumbnailBoundsTracker {
     private const val MAX_CACHED_BOUNDS = 64
 
-    private val coordinatesMap = mutableMapOf<String, LayoutCoordinates>()
+    // Bound both maps independently. An access-ordered map keeps currently/recently placed cells,
+    // but never grows with the total number of photos visited during a long scroll session.
+    private val coordinatesMap = object : LinkedHashMap<String, LayoutCoordinates>(MAX_CACHED_BOUNDS + 1, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, LayoutCoordinates>?): Boolean =
+            size > MAX_CACHED_BOUNDS
+    }
     private val cachedBounds = LinkedHashMap<String, Rect>(MAX_CACHED_BOUNDS + 1, 0.75f, true)
 
     /** Currently active viewer media item URI; hides the duplicate source thumbnail during transitions. */
@@ -90,24 +92,12 @@ object ThumbnailBoundsTracker {
 }
 
 /**
- * Track coordinates only while this thumbnail is composed. The holder is deliberately not Compose
- * state, so placement updates do not trigger recomposition.
+ * Track thumbnail coordinates with a single placement callback. Avoid Modifier.composed and per-cell
+ * lifecycle effects in this hot path; the tracker itself bounds coordinate references to 64 entries.
  */
-fun Modifier.trackThumbnailBounds(uri: String): Modifier = composed {
-    val coordinatesRef = remember(uri) { arrayOfNulls<LayoutCoordinates>(1) }
-
-    DisposableEffect(uri) {
-        onDispose {
-            coordinatesRef[0]?.let { ThumbnailBoundsTracker.unregisterCoordinates(uri, it) }
-            coordinatesRef[0] = null
-        }
-    }
-
-    this.onPlaced { coordinates ->
-        if (coordinates.isAttached) {
-            coordinatesRef[0] = coordinates
-            ThumbnailBoundsTracker.registerCoordinates(uri, coordinates)
-        }
+fun Modifier.trackThumbnailBounds(uri: String): Modifier = this.onPlaced { coordinates ->
+    if (coordinates.isAttached) {
+        ThumbnailBoundsTracker.registerCoordinates(uri, coordinates)
     }
 }
 
