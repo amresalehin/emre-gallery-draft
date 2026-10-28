@@ -66,6 +66,13 @@ data class NavBackStackEntry(
     val albumFilterReturnDestination: Destination = Destination.ALBUMS
 )
 
+private class GalleryInputIdentity(private val value: Any) {
+    override fun equals(other: Any?): Boolean =
+        other is GalleryInputIdentity && value === other.value
+
+    override fun hashCode(): Int = System.identityHashCode(value)
+}
+
 private data class PreparedVisibleMedia(
     val sourceMedia: List<MediaItem>,
     val hidden: Set<String>,
@@ -91,16 +98,16 @@ private data class PreparedVisibleMedia(
         stage: SearchStage,
         albums: List<CustomAlbum>
     ): Boolean =
-        (sourceMedia === media || sourceMedia == media) &&
-            (hidden === hiddenUris || hidden == hiddenUris) &&
-            (inBin === binUris || inBin == binUris) &&
-            (archive === archivedUris || archive == archivedUris) &&
-            (favourites === favouriteUris || favourites == favouriteUris) &&
+        sourceMedia === media &&
+            hidden === hiddenUris &&
+            inBin === binUris &&
+            archive === archivedUris &&
+            favourites === favouriteUris &&
             albumFilter == filter &&
             searchVideosOnly == videosOnly &&
             submittedQuery == query &&
             searchStage == stage &&
-            (customAlbums === albums || customAlbums == albums)
+            customAlbums === albums
 }
 
 private suspend fun prepareVisibleMedia(
@@ -664,7 +671,18 @@ fun GalleryApp() {
     }
 
     var preparedVisibleMedia by remember { mutableStateOf<PreparedVisibleMedia?>(null) }
-    LaunchedEffect(media, hidden, inBin, archive, favourites, albumFilter, searchVideosOnly, submittedQuery, searchStage, customAlbums) {
+    LaunchedEffect(
+        GalleryInputIdentity(media),
+        GalleryInputIdentity(hidden),
+        GalleryInputIdentity(inBin),
+        GalleryInputIdentity(archive),
+        GalleryInputIdentity(favourites),
+        albumFilter,
+        searchVideosOnly,
+        submittedQuery,
+        searchStage,
+        GalleryInputIdentity(customAlbums)
+    ) {
         val sourceMedia = media
         val hiddenSnapshot = hidden
         val binSnapshot = inBin
