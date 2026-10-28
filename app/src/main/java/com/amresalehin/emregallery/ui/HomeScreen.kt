@@ -25,6 +25,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,6 +35,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import com.amresalehin.emregallery.data.ThumbnailPrewarmManager
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -122,8 +130,110 @@ fun HomeScreen(
         groups.map { group -> group to group.items.chunked(pinchGridColumns.coerceIn(1, 6)) }
     }
 
+    // Keep a stable map from LazyColumn row keys to compact media rows. Scroll prediction uses
+    // row indexes, not all photo cells, so fling planning stays cheap for very large libraries.
+    val predictivePrefetchRows = remember(groupedRows) {
+        groupedRows.flatMap { (group, rowChunks) ->
+            rowChunks.map { row ->
+                "day_${group.dayKey}_row_${row.first().id}" to row
+            }
+        }
+    }
+    val predictivePrefetchIndex = remember(predictivePrefetchRows) {
+        predictivePrefetchRows.mapIndexed { index, row -> row.first to index }.toMap()
+    }
+
+    val predictivePrefetchConnection = remember(listState, predictivePrefetchRows, predictivePrefetchIndex) {
+        object : NestedScrollConnection {
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val velocityY = available.y
+                if (abs(velocityY) < 1200f || predictivePrefetchRows.isEmpty()) return Velocity.Zero
+
+                // In LazyColumn coordinates, an upward finger fling (negative Y) advances to later rows.
+                val forward = velocityY < 0f
+                val visibleRowInfos = listState.layoutInfo.visibleItemsInfo.filter {
+                    predictivePrefetchIndex.containsKey(it.key.toString())
+                }
+                val visibleIndices = visibleRowInfos.mapNotNull {
+                    predictivePrefetchIndex[it.key.toString()]
+                }
+                if (visibleIndices.isEmpty()) return Velocity.Zero
+
+                val anchor = if (forward) visibleIndices.maxOrNull()!! else visibleIndices.minOrNull()!!
+                val averageRowHeight = visibleRowInfos.map { it.size.toFloat() }
+                    .average().toFloat().coerceAtLeast(1f)
+                // Estimate travel from velocity, then cap work to a bounded window. The fling itself
+                // remains native; this only moves likely destination thumbnails to the worker's front.
+                val predictedRows = (abs(velocityY) * 0.32f / averageRowHeight)
+                    .roundToInt().coerceIn(4, 36)
+                val lastIndex = predictivePrefetchRows.lastIndex
+                val targetIndices = if (forward) {
+                    (anchor + 1..(anchor + predictedRows).coerceAtMost(lastIndex)).toList()
+                } else {
+                    (anchor - 1 downTo (anchor - predictedRows).coerceAtLeast(0)).toList()
+                }
+                ThumbnailPrewarmManager.prioritize(
+                    targetIndices.flatMap { predictivePrefetchRows[it].second }.take(120)
+                )
+                return Velocity.Zero
+            }
+        }
+    }
+
+    // Also predict while the finger is dragging (not just when a fling starts). Update the priority
+    // window every couple of rows to avoid repeatedly churning the worker queue on every frame.
+    LaunchedEffect(listState, predictivePrefetchRows, predictivePrefetchIndex) {
+        var previousPosition: Pair<Int, Int>? = null
+        var previousAnchor = -1
+        var previousDirection = 1
+
+        snapshotFlow {
+            val visibleRows = listState.layoutInfo.visibleItemsInfo
+                .mapNotNull { predictivePrefetchIndex[it.key.toString()] }
+                .distinct()
+                .sorted()
+            Triple(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset, visibleRows)
+        }.distinctUntilChanged().collect { (firstIndex, offset, visibleRows) ->
+            if (visibleRows.isEmpty() || predictivePrefetchRows.isEmpty()) {
+                previousPosition = firstIndex to offset
+                return@collect
+            }
+
+            val direction = previousPosition?.let { previous ->
+                when {
+                    firstIndex > previous.first -> 1
+                    firstIndex < previous.first -> -1
+                    offset > previous.second -> 1
+                    offset < previous.second -> -1
+                    else -> previousDirection
+                }
+            } ?: 1
+            val moving = listState.isScrollInProgress
+            val anchor = if (direction > 0) visibleRows.last() else visibleRows.first()
+            val movedEnough = previousAnchor < 0 || abs(anchor - previousAnchor) >= 2
+            if (movedEnough || direction != previousDirection) {
+                val forwardCount = if (moving) 14 else 6
+                val backwardCount = if (moving) 2 else 4
+                val lastIndex = predictivePrefetchRows.lastIndex
+                val targetIndices = if (direction > 0) {
+                    (anchor..(anchor + forwardCount).coerceAtMost(lastIndex)).toList() +
+                        (anchor - 1 downTo (anchor - backwardCount).coerceAtLeast(0)).toList()
+                } else {
+                    (anchor downTo (anchor - forwardCount).coerceAtLeast(0)).toList() +
+                        (anchor + 1..(anchor + backwardCount).coerceAtMost(lastIndex)).toList()
+                }
+                ThumbnailPrewarmManager.prioritize(
+                    targetIndices.distinct().flatMap { predictivePrefetchRows[it].second }.take(120)
+                )
+                previousAnchor = anchor
+                previousDirection = direction
+            }
+            previousPosition = firstIndex to offset
+        }
+    }
+
     BoxWithConstraints(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize().nestedScroll(predictivePrefetchConnection)
     ) {
         val containerWidth = maxWidth - 24.dp
         LazyColumn(
