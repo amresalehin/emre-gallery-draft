@@ -136,6 +136,22 @@ class ViewerPlaybackStateTest {
     }
 
     @Test
+    fun thumbnailBoundsCacheEvictsOldEntries() {
+        repeat(80) { index ->
+            val uri = "content://media/external/images/media/$index"
+            val offset = index.toFloat()
+            ThumbnailBoundsTracker.updateBounds(
+                uri,
+                Rect(offset, offset, offset + 100f, offset + 100f)
+            )
+        }
+
+        // The tracker must retain only a small recent window, not every item ever scrolled past.
+        assertNull(ThumbnailBoundsTracker.getBounds("content://media/external/images/media/0"))
+        assertNotNull(ThumbnailBoundsTracker.getBounds("content://media/external/images/media/79"))
+    }
+
+    @Test
     fun testReturnAnimationCoordinateMath() {
         val screenWidth = 1080f
         val screenHeight = 2400f
