@@ -239,6 +239,25 @@ object ThumbnailPrewarmManager {
     private var worker: Job? = null
     private var activeUris: List<String>? = null
     private var completedUris: List<String>? = null
+    private val priorityQueue = java.util.ArrayDeque<MediaItem>()
+    private val queuedPriorityUris = HashSet<String>()
+
+    /**
+     * Moves the thumbnails most likely to be seen next to the front of the single IO worker.
+     * Only a bounded window is retained; replacing it on direction changes drops stale predictions
+     * without creating a second competing decoder or unbounded queue.
+     */
+    fun prioritize(items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        synchronized(lock) {
+            if (worker?.isActive != true || activeUris.isNullOrEmpty()) return
+            priorityQueue.clear()
+            queuedPriorityUris.clear()
+            items.asSequence().distinctBy { it.uri }.take(120).forEach { item ->
+                if (queuedPriorityUris.add(item.uri)) priorityQueue.addLast(item)
+            }
+        }
+    }
 
     fun start(context: Context, media: List<MediaItem>) {
         val appContext = context.applicationContext
@@ -248,6 +267,8 @@ object ThumbnailPrewarmManager {
             if (uris.isEmpty()) {
                 worker?.cancel()
                 worker = null
+                priorityQueue.clear()
+                queuedPriorityUris.clear()
                 activeUris = emptyList()
                 completedUris = emptyList()
                 return
@@ -256,13 +277,30 @@ object ThumbnailPrewarmManager {
             if (completedUris == uris) return
 
             worker?.cancel()
+            priorityQueue.clear()
+            queuedPriorityUris.clear()
             activeUris = uris
             completedUris = null
             worker = scope.launch {
                 var completedAll = true
+                var naturalIndex = 0
+                var processedCount = 0
                 try {
-                    for ((index, item) in media.withIndex()) {
+                    while (true) {
                         currentCoroutineContext().ensureActive()
+                        val item = synchronized(lock) {
+                            when {
+                                activeUris !== uris -> null
+                                priorityQueue.isNotEmpty() -> {
+                                    val prioritized = priorityQueue.removeFirst()
+                                    queuedPriorityUris.remove(prioritized.uri)
+                                    prioritized
+                                }
+                                naturalIndex < media.size -> media[naturalIndex++]
+                                else -> null
+                            }
+                        } ?: break
+
                         if (!PreparedThumbnailCache.hasPrepared(appContext, item.uri)) {
                             if (!PreparedThumbnailCache.hasStorageHeadroom(appContext)) {
                                 completedAll = false
@@ -277,8 +315,9 @@ object ThumbnailPrewarmManager {
                             }
                             if (!prepared) completedAll = false
                         }
+                        processedCount++
                         // Regularly yield so visible requests and other IO work can run promptly.
-                        if (index % 8 == 0) yield()
+                        if (processedCount % 8 == 0) yield()
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -286,6 +325,8 @@ object ThumbnailPrewarmManager {
                     synchronized(lock) {
                         if (activeUris === uris) {
                             worker = null
+                            priorityQueue.clear()
+                            queuedPriorityUris.clear()
                             if (completedAll) completedUris = uris
                         }
                     }
