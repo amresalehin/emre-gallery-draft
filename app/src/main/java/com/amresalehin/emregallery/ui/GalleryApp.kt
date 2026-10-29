@@ -1168,7 +1168,7 @@ fun GalleryApp() {
                             onBack = { performBackNavigation() },
                             onOpen = { openMediaInViewer(it, searchResults) },
                             onOpenPerson = { personId -> activePersonId = personId; navigateTo(Destination.PEOPLE) },
-                            onOpenAlbum = { album -> albumFilterReturnDestination = Destination.SEARCH; albumFilter = album.fullPath; navigateTo(Destination.HOME) },
+                            onOpenAlbum = { album -> albumFilterReturnDestination = Destination.SEARCH; albumFilter = album.id; navigateTo(Destination.HOME) },
                             videosOnly = searchVideosOnly,
                             onVideosOnly = { searchVideosOnly = it }
                         )
