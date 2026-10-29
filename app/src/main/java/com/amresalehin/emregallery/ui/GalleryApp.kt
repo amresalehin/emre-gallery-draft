@@ -622,6 +622,9 @@ fun GalleryApp() {
                 viewerStoryTitle = null
             }
         }
+        if (destination == Destination.SEARCH) {
+            searchStage = if (searchQuery.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING
+        }
     }
 
     val canGoBack = homeSelectedUris.isNotEmpty() || backStack.isNotEmpty() || destination != Destination.HOME || albumFilter != null || showSidePanel || (destination == Destination.VIEWER && showDetails)
