@@ -46,7 +46,6 @@ fun SearchScreen(
     recentSearches: List<String>,
     customAlbums: List<CustomAlbum>,
     customTagsMap: Map<String, Set<String>>,
-    customPeopleMap: Map<String, Set<String>>,
     namedPeople: List<PersonSummary>,
     onQuery: (String) -> Unit,
     onSubmit: (String) -> Unit,
@@ -60,29 +59,23 @@ fun SearchScreen(
     onVideosOnly: (Boolean) -> Unit
 ) {
     val returnProgress = LocalViewerCoordinatedProgress.current
-    Column(
-        Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp)
-    ) {
+    Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(horizontal = 16.dp)) {
         Row(
             modifier = Modifier.padding(top = 8.dp, bottom = 8.dp).destinationTopBarEntrance(returnProgress),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = SearchInk) }
+            IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back", tint = SearchInk) }
             OutlinedTextField(
                 value = query,
                 onValueChange = onQuery,
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Search photos, people, places…", maxLines = 1) },
                 singleLine = true,
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = SearchMuted) },
+                leadingIcon = { Icon(Icons.Default.Search, null, tint = SearchMuted) },
                 trailingIcon = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (query.isNotBlank()) {
-                            IconButton(onClick = { onQuery("") }) { Icon(Icons.Default.Close, "Clear query", tint = SearchInk) }
-                        }
-                        IconButton(onClick = { onVideosOnly(!videosOnly) }) {
-                            Icon(Icons.Default.FilterList, "Toggle video filter", tint = SearchInk)
-                        }
+                        if (query.isNotBlank()) IconButton(onClick = { onQuery("") }) { Icon(Icons.Default.Close, "Clear query", tint = SearchInk) }
+                        IconButton(onClick = { onVideosOnly(!videosOnly) }) { Icon(Icons.Default.FilterList, "Toggle video filter", tint = SearchInk) }
                     }
                 },
                 shape = CircleShape,
@@ -99,30 +92,27 @@ fun SearchScreen(
                 )
             )
         }
-
         when (stage) {
             SearchStage.DISCOVERY -> LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(bottom = 24.dp)
             ) {
                 if (namedPeople.isNotEmpty()) {
                     item { Text("People", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
                     items(namedPeople.take(6), key = { "discovery-person-${it.id}" }) { person ->
-                        PersonSuggestionRow(person = person, onClick = { onOpenPerson(person.id) })
+                        PersonSuggestionRow(person, onClick = { onOpenPerson(person.id) })
                     }
                 }
                 if (customAlbums.isNotEmpty()) {
                     item { Text("Albums", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
                     items(customAlbums.take(6), key = { "discovery-album-${it.id}" }) { album ->
-                        AlbumSuggestionRow(album = album, results = results, onClick = { onOpenAlbum(album) })
+                        AlbumSuggestionRow(album, results, onClick = { onOpenAlbum(album) })
                     }
                 }
                 item {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Recent searches", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        TextButton(onClick = onClearRecent, colors = ButtonDefaults.textButtonColors(contentColor = SearchInk)) {
-                            Text("Clear all")
-                        }
+                        TextButton(onClick = onClearRecent, colors = ButtonDefaults.textButtonColors(contentColor = SearchInk)) { Text("Clear all") }
                     }
                     if (recentSearches.isEmpty()) {
                         Text("Your recent searches will appear here.", color = SearchMuted)
@@ -139,148 +129,107 @@ fun SearchScreen(
                     }
                 }
             }
-
             SearchStage.TYPING -> {
-                Row(
-                    modifier = Modifier.padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+                Row(Modifier.padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = !videosOnly,
-                        onClick = { onVideosOnly(false) },
-                        label = { Text("Photos & videos") },
+                        selected = !videosOnly, onClick = { onVideosOnly(false) }, label = { Text("Photos & videos") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            selectedLabelColor = SearchInk,
-                            selectedLeadingIconColor = SearchInk
+                            selectedLabelColor = SearchInk
                         )
                     )
                     FilterChip(
-                        selected = videosOnly,
-                        onClick = { onVideosOnly(true) },
-                        label = { Text("Videos") },
+                        selected = videosOnly, onClick = { onVideosOnly(true) }, label = { Text("Videos") },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            selectedLabelColor = SearchInk,
-                            selectedLeadingIconColor = SearchInk
+                            selectedLabelColor = SearchInk
                         )
                     )
                 }
-
                 val queryKey = query.trim()
                 val matchingPeople = remember(queryKey, namedPeople) {
-                    if (queryKey.isBlank()) emptyList() else namedPeople
-                        .filter { it.isNamed && it.displayName.contains(queryKey, ignoreCase = true) }
-                        .take(2)
+                    if (queryKey.isBlank()) emptyList() else namedPeople.filter {
+                        it.isNamed && it.displayName.contains(queryKey, true)
+                    }.take(2)
                 }
                 val matchingAlbums = remember(queryKey, customAlbums) {
-                    if (queryKey.isBlank()) emptyList() else customAlbums
-                        .filter { it.name.contains(queryKey, true) || it.fullPath.contains(queryKey, true) }
-                        .take(2)
+                    if (queryKey.isBlank()) emptyList() else customAlbums.filter {
+                        it.name.contains(queryKey, true) || it.fullPath.contains(queryKey, true)
+                    }.take(2)
                 }
                 val matchingFiles = remember(queryKey, results) {
-                    if (queryKey.isBlank()) emptyList() else results
-                        .filter { it.name.contains(queryKey, true) || it.relativePath.contains(queryKey, true) }
-                        .distinctBy { it.uri }
-                        .take(2)
+                    if (queryKey.isBlank()) emptyList() else results.filter {
+                        it.name.contains(queryKey, true) || it.relativePath.contains(queryKey, true)
+                    }.distinctBy { it.uri }.take(2)
                 }
                 val matchingTags = remember(queryKey, customTagsMap) {
-                    if (queryKey.isBlank()) emptyList() else customTagsMap.values.flatten()
-                        .distinct()
-                        .filter { it.contains(queryKey, true) }
-                        .sortedBy { it.lowercase(Locale.ROOT) }
-                        .take(2)
+                    if (queryKey.isBlank()) emptyList() else customTagsMap.values.flatten().distinct()
+                        .filter { it.contains(queryKey, true) }.sortedBy { it.lowercase(Locale.ROOT) }.take(2)
                 }
                 val matchingPlaces = remember(queryKey, results) {
-                    if (queryKey.isBlank()) emptyList() else results
-                        .mapNotNull { item ->
-                            item.relativePath.split('/', '\\\\').dropLast(1).lastOrNull()?.trim()
-                                ?.takeIf { it.isNotBlank() && it.contains(queryKey, true) }
-                        }
-                        .distinctBy { it.lowercase(Locale.ROOT) }
-                        .take(2)
+                    if (queryKey.isBlank()) emptyList() else results.mapNotNull { item ->
+                        item.relativePath.split('/', '\\\\').dropLast(1).lastOrNull()?.trim()
+                            ?.takeIf { it.isNotBlank() && it.contains(queryKey, true) }
+                    }.distinctBy { it.lowercase(Locale.ROOT) }.take(2)
                 }
-
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                    contentPadding = PaddingValues(bottom = 12.dp)
-                ) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
                     if (matchingPeople.isNotEmpty()) {
                         item { SuggestionSectionHeader("People", onSeeAll = { onSubmit(queryKey) }) }
                         items(matchingPeople, key = { "person-${it.id}" }) { person ->
-                            PersonSuggestionRow(person = person, onClick = { onOpenPerson(person.id) })
+                            PersonSuggestionRow(person, onClick = { onOpenPerson(person.id) })
                         }
                     }
                     if (matchingPlaces.isNotEmpty()) {
                         item { SuggestionSectionHeader("Places", onSeeAll = { onSubmit(queryKey) }) }
-                        items(matchingPlaces, key = { "place-$it" }) { place ->
-                            SimpleSuggestionRow(
-                                title = place,
-                                subtitle = "Location folder",
-                                icon = Icons.Default.Place,
-                                onClick = { onSubmit(place) }
-                            )
+                        items(matchingPlaces, key = { "place-$it" }) {
+                            SimpleSuggestionRow(it, "Location folder", Icons.Default.Place, onClick = { onSubmit(it) })
                         }
                     }
                     if (matchingAlbums.isNotEmpty()) {
                         item { SuggestionSectionHeader("Albums", onSeeAll = { onSubmit(queryKey) }) }
                         items(matchingAlbums, key = { "album-${it.id}" }) { album ->
-                            AlbumSuggestionRow(album = album, results = results, onClick = { onOpenAlbum(album) })
+                            AlbumSuggestionRow(album, results, onClick = { onOpenAlbum(album) })
                         }
                     }
                     if (matchingFiles.isNotEmpty()) {
                         item { SuggestionSectionHeader("Files", onSeeAll = { onSubmit(queryKey) }) }
                         items(matchingFiles, key = { "file-${it.uri}" }) { item ->
-                            MediaSuggestionRow(item = item, onClick = { onOpen(item) })
+                            MediaSuggestionRow(item, onClick = { onOpen(item) })
                         }
                     }
                     if (matchingTags.isNotEmpty()) {
                         item { SuggestionSectionHeader("Tags", onSeeAll = { onSubmit(queryKey) }) }
                         items(matchingTags, key = { "tag-$it" }) { tag ->
                             SimpleSuggestionRow(
-                                title = tag,
-                                subtitle = "${customTagsMap.values.count { tag in it }} tagged items",
-                                icon = Icons.Default.LocalOffer,
-                                onClick = { onSubmit(tag) }
+                                tag, "${customTagsMap.values.count { tag in it }} tagged items",
+                                Icons.Default.LocalOffer, onClick = { onSubmit(tag) }
                             )
                         }
                     }
-                    if (matchingPeople.isEmpty() && matchingPlaces.isEmpty() && matchingAlbums.isEmpty() &&
-                        matchingFiles.isEmpty() && matchingTags.isEmpty()
-                    ) {
+                    if (matchingPeople.isEmpty() && matchingPlaces.isEmpty() && matchingAlbums.isEmpty() && matchingFiles.isEmpty() && matchingTags.isEmpty()) {
                         item {
-                            Text(
-                                "No matching suggestions",
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
-                                color = SearchMuted
-                            )
+                            Text("No matching suggestions", modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp), color = SearchMuted)
                         }
                     }
                     item {
                         TextButton(
-                            onClick = { onSubmit(queryKey) },
-                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { onSubmit(queryKey) }, modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.textButtonColors(contentColor = SearchInk)
                         ) { Text("Search for ‘$queryKey’") }
                     }
                 }
             }
-
             SearchStage.RESULTS -> {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(query.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = SearchInk)
                         Text("${results.size} items", color = SearchMuted)
                     }
-                    IconButton(onClick = { onVideosOnly(!videosOnly) }) {
-                        Icon(Icons.Default.FilterList, "Filter results", tint = SearchInk)
-                    }
+                    IconButton(onClick = { onVideosOnly(!videosOnly) }) { Icon(Icons.Default.FilterList, "Filter results", tint = SearchInk) }
                 }
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                    columns = GridCells.Fixed(3), contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp), verticalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     gridItems(results) { item ->
                         val context = LocalContext.current
@@ -296,15 +245,13 @@ fun SearchScreen(
                                 },
                                 contentScale = ContentScale.Crop
                             )
-                            if (item.isVideo) {
-                                Icon(
-                                    Icons.Default.PlayArrow, null,
-                                    Modifier.align(Alignment.BottomEnd).padding(4.dp).graphicsLayer {
-                                        alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
-                                    },
-                                    tint = Color.White
-                                )
-                            }
+                            if (item.isVideo) Icon(
+                                Icons.Default.PlayArrow, null,
+                                Modifier.align(Alignment.BottomEnd).padding(4.dp).graphicsLayer {
+                                    alpha = if (ThumbnailBoundsTracker.activeViewerUri == item.uri) 0f else 1f
+                                },
+                                tint = Color.White
+                            )
                         }
                     }
                 }
@@ -315,10 +262,7 @@ fun SearchScreen(
 
 @Composable
 private fun SuggestionSectionHeader(title: String, onSeeAll: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
+    Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         TextButton(
             onClick = onSeeAll,
@@ -330,25 +274,18 @@ private fun SuggestionSectionHeader(title: String, onSeeAll: () -> Unit) {
 
 @Composable
 private fun PersonSuggestionRow(person: PersonSummary, onClick: () -> Unit) {
-    val context = LocalContext.current
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
-    ) {
+    Surface(Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onClick), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
-                model = person.portraitUri ?: person.sampleUri,
-                contentDescription = person.displayName,
-                modifier = Modifier.size(52.dp).clip(CircleShape),
-                contentScale = ContentScale.Crop
+                model = person.portraitUri ?: person.sampleUri, contentDescription = person.displayName,
+                modifier = Modifier.size(52.dp).clip(CircleShape), contentScale = ContentScale.Crop
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(person.displayName, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${person.faceCount} items", style = MaterialTheme.typography.bodySmall, color = SearchMuted)
             }
-            Icon(Icons.Default.NorthWest, contentDescription = "Open person", tint = SearchMuted)
+            Icon(Icons.Default.NorthWest, "Open person", tint = SearchMuted)
         }
     }
 }
@@ -356,33 +293,25 @@ private fun PersonSuggestionRow(person: PersonSummary, onClick: () -> Unit) {
 @Composable
 private fun AlbumSuggestionRow(album: CustomAlbum, results: List<MediaItem>, onClick: () -> Unit) {
     val cover = remember(album, results) { results.firstOrNull { it.uri in album.mediaUris } }
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
-    ) {
+    Surface(Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onClick), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (cover != null) {
                 val context = LocalContext.current
                 AsyncImage(
                     model = remember(cover.uri, context) { ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 180, 180) },
-                    contentDescription = album.name,
-                    modifier = Modifier.size(76.dp, 72.dp).clip(RoundedCornerShape(10.dp)),
-                    contentScale = ContentScale.Crop
+                    contentDescription = album.name, modifier = Modifier.size(76.dp, 72.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop
                 )
             } else {
-                Box(
-                    Modifier.size(76.dp, 72.dp).clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                    contentAlignment = Alignment.Center
-                ) { Icon(Icons.Default.PhotoAlbum, null, tint = SearchMuted) }
+                Box(Modifier.size(76.dp, 72.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.PhotoAlbum, null, tint = SearchMuted)
+                }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(album.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${album.mediaUris.size} items", style = MaterialTheme.typography.bodySmall, color = SearchMuted)
             }
-            Icon(Icons.Default.NorthWest, contentDescription = "Open album", tint = SearchMuted)
+            Icon(Icons.Default.NorthWest, "Open album", tint = SearchMuted)
         }
     }
 }
@@ -390,25 +319,19 @@ private fun AlbumSuggestionRow(album: CustomAlbum, results: List<MediaItem>, onC
 @Composable
 private fun MediaSuggestionRow(item: MediaItem, onClick: () -> Unit) {
     val context = LocalContext.current
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
-    ) {
+    Surface(Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onClick), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             AsyncImage(
-                model = ImageRequest.Builder(context).data(Uri.parse(item.uri)).size(180, 180)
-                    .crossfade(true).diskCachePolicy(CachePolicy.ENABLED).memoryCachePolicy(CachePolicy.ENABLED).build(),
-                contentDescription = null,
-                modifier = Modifier.size(76.dp, 72.dp).clip(RoundedCornerShape(10.dp)),
-                contentScale = ContentScale.Crop
+                model = ImageRequest.Builder(context).data(Uri.parse(item.uri)).size(180, 180).crossfade(true)
+                    .diskCachePolicy(CachePolicy.ENABLED).memoryCachePolicy(CachePolicy.ENABLED).build(),
+                contentDescription = null, modifier = Modifier.size(76.dp, 72.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(item.relativePath, style = MaterialTheme.typography.bodySmall, color = SearchMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Icon(Icons.Default.NorthWest, contentDescription = null, tint = SearchMuted)
+            Icon(Icons.Default.NorthWest, null, tint = SearchMuted)
         }
     }
 }
@@ -420,22 +343,17 @@ private fun SimpleSuggestionRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
-    ) {
+    Surface(Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onClick), shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center
-            ) { Icon(icon, null, tint = SearchMuted) }
+            Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = SearchMuted)
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = SearchMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Icon(Icons.Default.NorthWest, contentDescription = null, tint = SearchMuted)
+            Icon(Icons.Default.NorthWest, null, tint = SearchMuted)
         }
     }
 }
