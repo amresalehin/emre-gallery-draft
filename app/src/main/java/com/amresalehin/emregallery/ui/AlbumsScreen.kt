@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -21,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -28,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import coil.request.CachePolicy
@@ -278,14 +282,13 @@ fun AlbumsScreen(
 
                     // Single horizontal row containing very large circular faces
                     if (detectedPeople.isEmpty()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            repeat(4) {
+                            items(4) {
                                 Surface(
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -368,221 +371,216 @@ fun AlbumsScreen(
             }
         }
 
-        // 2. Album (2/3rd, squaricle) and Device Folder (1/3rd, portrait) in same row
+        // 2. Albums Section (full-width section with header, count, 'See all >' pill, and carousel)
         item {
-            Row(
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                tonalElevation = 2.dp,
+                shadowElevation = 4.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    .testTag("albums_section_card")
             ) {
-                // Left Column: Albums collection preview with nested mini album cards
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    tonalElevation = 2.dp,
-                    shadowElevation = 5.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                Column(
                     modifier = Modifier
-                        .weight(2f)
-                        .fillMaxHeight()
-                        .clickable { onFilter("Albums") }
-                        .testTag("albums_section_card")
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Column(
+                    // Header Row: album icon, "Albums", count, and "See all >" pill
+                    Row(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                Icons.Default.PhotoAlbum,
+                                imageVector = Icons.Default.PhotoLibrary,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp)
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(24.dp)
                             )
                             Text(
-                                "Albums",
-                                style = MaterialTheme.typography.titleSmall,
+                                text = "Albums",
+                                style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                customAlbums.size.toString(),
-                                style = MaterialTheme.typography.labelMedium,
+                                text = customAlbums.size.toString(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Normal,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
-                        if (customAlbums.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("Create your first album", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        } else {
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(2),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                userScrollEnabled = false,
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                        // "See all >" Pill
+                        Surface(
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                            modifier = Modifier
+                                .clickable { onFilter("Albums") }
+                                .testTag("albums_see_all_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                gridItems(customAlbums.take(4), key = { it.id }) { album ->
-                                    val cover = normalMedia.firstOrNull { it.uri in album.mediaUris }
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(54.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                    ) {
-                                        if (cover != null) {
-                                            val context = LocalContext.current
-                                            AsyncImage(
-                                                model = remember(cover.uri, context) {
-                                                    ThumbnailUtils.buildThumbnailRequest(context, cover.uri, 240, 160)
-                                                },
-                                                contentDescription = "Preview of ${album.name}",
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .background(
-                                                        Brush.verticalGradient(
-                                                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.72f))
-                                                        )
-                                                    )
-                                            )
-                                        }
-                                    }
-                                }
+                                Text(
+                                    text = "See all",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = "See all albums",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Content Carousel or Empty State
+                    if (customAlbums.isEmpty()) {
+                        AlbumsEmptyState(onCreateClick = { onCreateAlbumClick("") })
+                    } else {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(customAlbums, key = { it.id }) { album ->
+                                val palette = AlbumPalettes[customAlbums.indexOf(album) % AlbumPalettes.size]
+                                AlbumCardItem(
+                                    album = album,
+                                    palette = palette,
+                                    normalMedia = normalMedia,
+                                    onClick = { onFilter(album.name) },
+                                    onRename = {
+                                        albumToRename = album
+                                        renameText = album.name
+                                    },
+                                    onDelete = { onDeleteAlbum(album.id) }
+                                )
                             }
                         }
                     }
                 }
+            }
+        }
 
-                // Right Column: Device folders with two compact preview tiles
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    tonalElevation = 2.dp,
-                    shadowElevation = 5.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        // 3. Folders Section (full-width section with header, count, 'See all >' pill, and carousel)
+        item {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                tonalElevation = 2.dp,
+                shadowElevation = 4.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("folders_section_card")
+            ) {
+                Column(
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clickable { onFilter("Folders") }
-                        .testTag("folders_section_card")
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    val folderPreview = folders.take(2)
-                    Column(
+                    // Header Row: folder icon, "Folders", count, and "See all >" pill
+                    Row(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                Icons.Default.Folder,
+                                imageVector = Icons.Default.Folder,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(24.dp)
                             )
                             Text(
-                                "Folders",
-                                style = MaterialTheme.typography.titleSmall,
+                                text = "Folders",
+                                style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = folders.size.toString(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Normal,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
-                        if (folderPreview.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                                contentAlignment = Alignment.Center
+                        // "See all >" Pill
+                        Surface(
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                            modifier = Modifier
+                                .clickable { onFilter("Folders") }
+                                .testTag("folders_see_all_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
+                                Text(
+                                    text = "See all",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                                 Icon(
-                                    Icons.Default.FolderOpen,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = "See all folders",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
-                        } else {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                folderPreview.forEach { folder ->
-                                    val cover = folder.value.firstOrNull()
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                    ) {
-                                        if (cover != null) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(Uri.parse(cover.uri))
-                                                    .size(240, 160)
-                                                    .crossfade(true)
-                                                    .crossfade(150)
-                                                    .diskCacheKey("${cover.uri}_folder_collection_cover")
-                                                    .diskCachePolicy(CachePolicy.ENABLED)
-                                                    .memoryCacheKey("${cover.uri}_folder_collection_cover")
-                                                    .build(),
-                                                contentDescription = "Preview of ${folder.key.substringAfterLast('/')}",
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        }
-                                    }
-                                }
+                        }
+                    }
+
+                    // Content Carousel or Empty State
+                    if (folders.isEmpty()) {
+                        FoldersEmptyState()
+                    } else {
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            items(folders, key = { it.key }) { folder ->
+                                val palette = FolderPalettes[folders.indexOf(folder) % FolderPalettes.size]
+                                FolderCardItem(
+                                    folderKey = folder.key,
+                                    items = folder.value,
+                                    palette = palette,
+                                    onClick = { onFilter(folder.key) }
+                                )
                             }
                         }
-
-                        Text(
-                            "${folders.size} ${if (folders.size == 1) "folder" else "folders"}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
                 }
             }
@@ -739,38 +737,570 @@ fun AlbumsScreen(
     }
 }
 
-@Composable
-fun FolderCard(name: String, items: List<MediaItem>, onClick: () -> Unit, onMore: () -> Unit) {
-    Column(Modifier.width(142.dp)) {
-        Box(Modifier.fillMaxWidth().height(126.dp).clip(RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClick = onClick)) {
-            items.firstOrNull()?.let {
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(Uri.parse(it.uri))
-                        .size(300, 300)
-                        .crossfade(true)
-                        .crossfade(150)
-                        .diskCacheKey("${it.uri}_thumb")
-                        .diskCachePolicy(CachePolicy.ENABLED)
-                        .memoryCacheKey("${it.uri}_thumb")
-                        .build(),
-                    contentDescription = name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
-            IconButton(onClick = onMore, modifier = Modifier.align(Alignment.BottomEnd).padding(3.dp).size(32.dp).background(Color.Black.copy(alpha = .35f), CircleShape)) { Icon(Icons.Default.MoreVert, null, tint = Color.White) }
+data class CardPalette(
+    val bgColor: Color,
+    val textColor: Color,
+    val badgeBg: Color
+)
+
+private val FolderPalettes = listOf(
+    CardPalette(bgColor = Color(0xFFFFD572), textColor = Color(0xFF231B05), badgeBg = Color(0xFF383120)),
+    CardPalette(bgColor = Color(0xFFA5D1FE), textColor = Color(0xFF0F1E2E), badgeBg = Color(0xFF22364A)),
+    CardPalette(bgColor = Color(0xFFD6B4FC), textColor = Color(0xFF251336), badgeBg = Color(0xFF3B274B)),
+    CardPalette(bgColor = Color(0xFFA6E5A8), textColor = Color(0xFF132B14), badgeBg = Color(0xFF243E26)),
+    CardPalette(bgColor = Color(0xFFFFB5B5), textColor = Color(0xFF331414), badgeBg = Color(0xFF4A2626)),
+    CardPalette(bgColor = Color(0xFF98E8DE), textColor = Color(0xFF0E2B27), badgeBg = Color(0xFF1E3F3C)),
+    CardPalette(bgColor = Color(0xFFFFC39A), textColor = Color(0xFF331B0A), badgeBg = Color(0xFF4D301C))
+)
+
+private val AlbumPalettes = listOf(
+    CardPalette(bgColor = Color(0xFFE8DEF8), textColor = Color(0xFF25163D), badgeBg = Color(0xFF3C2754)),
+    CardPalette(bgColor = Color(0xFFFFD8E4), textColor = Color(0xFF3B1020), badgeBg = Color(0xFF522234)),
+    CardPalette(bgColor = Color(0xFFD0E4FF), textColor = Color(0xFF0A223B), badgeBg = Color(0xFF1E3A57)),
+    CardPalette(bgColor = Color(0xFFBCEBD9), textColor = Color(0xFF0D2D23), badgeBg = Color(0xFF234539)),
+    CardPalette(bgColor = Color(0xFFFFF0B3), textColor = Color(0xFF332505), badgeBg = Color(0xFF4A3815)),
+    CardPalette(bgColor = Color(0xFFFFD9D0), textColor = Color(0xFF3B120B), badgeBg = Color(0xFF54251D))
+)
+
+class FolderTabShape(
+    private val tabWidthRatio: Float = 0.44f,
+    private val tabHeightDp: Dp = 12.dp,
+    private val cornerRadiusDp: Dp = 18.dp
+) : Shape {
+    override fun createOutline(
+        size: androidx.compose.ui.geometry.Size,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        density: androidx.compose.ui.unit.Density
+    ): androidx.compose.ui.graphics.Outline {
+        val r = with(density) { cornerRadiusDp.toPx() }
+        val th = with(density) { tabHeightDp.toPx() }
+        val tw = (size.width * tabWidthRatio).coerceAtMost(size.width - r * 2)
+        val w = size.width
+        val h = size.height
+
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(0f, r)
+            quadraticTo(0f, 0f, r, 0f)
+            lineTo(tw - r * 0.5f, 0f)
+            cubicTo(
+                tw, 0f,
+                tw + 3f, th,
+                tw + r * 0.7f, th
+            )
+            lineTo(w - r, th)
+            quadraticTo(w, th, w, th + r)
+            lineTo(w, h - r)
+            quadraticTo(w, h, w - r, h)
+            lineTo(r, h)
+            quadraticTo(0f, h, 0f, h - r)
+            close()
         }
-        Text(name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 6.dp))
-        Text("${items.size} items", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        return androidx.compose.ui.graphics.Outline.Generic(path)
     }
 }
 
 @Composable
-fun CreateCollectionCard(onClick: () -> Unit) {
-    Column(Modifier.width(142.dp)) {
-        Surface(onClick = onClick, color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().height(126.dp)) { Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.Add, "Create album", Modifier.size(38.dp), tint = MaterialTheme.colorScheme.onSurface) } }
-        Text("Create album", fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 6.dp))
-        Text("Add new collection", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+private fun FolderCardItem(
+    folderKey: String,
+    items: List<MediaItem>,
+    palette: CardPalette,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val folderTitle = folderKey.substringAfterLast('/').ifBlank { "Internal storage" }
+    var menuOpen by remember { mutableStateOf(false) }
+
+    Surface(
+        shape = FolderTabShape(),
+        color = palette.bgColor,
+        modifier = modifier
+            .width(160.dp)
+            .height(220.dp)
+            .clickable(onClick = onClick)
+            .testTag("folder_card_${folderTitle.replace(' ', '_')}")
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Count badge at top-right in recessed area beside folder tab
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = palette.badgeBg.copy(alpha = 0.92f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 6.dp, end = 8.dp)
+            ) {
+                Text(
+                    text = items.size.toString(),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    ),
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 10.dp, end = 10.dp, top = 26.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // 2x2 Collage of up to 4 images
+                Collage2x2(
+                    items = items.take(4),
+                    palette = palette,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(136.dp)
+                )
+
+                // Bottom title row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = folderTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Box {
+                        IconButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Folder options",
+                                tint = palette.textColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Open folder") },
+                                onClick = {
+                                    menuOpen = false
+                                    onClick()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.FolderOpen, contentDescription = null)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlbumCardItem(
+    album: CustomAlbum,
+    palette: CardPalette,
+    normalMedia: List<MediaItem>,
+    onClick: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val albumMedia = remember(album, normalMedia) {
+        normalMedia.filter { it.uri in album.mediaUris }.take(4)
+    }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = palette.bgColor,
+        border = BorderStroke(1.5.dp, palette.textColor.copy(alpha = 0.22f)),
+        modifier = modifier
+            .width(160.dp)
+            .height(220.dp)
+            .clickable(onClick = onClick)
+            .testTag("album_card_${album.id}")
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Album spine binding accent on left
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .fillMaxHeight()
+                    .padding(vertical = 14.dp)
+                    .align(Alignment.CenterStart)
+                    .background(
+                        palette.textColor.copy(alpha = 0.16f),
+                        RoundedCornerShape(2.dp)
+                    )
+            )
+
+            // Count badge at top-right
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = palette.badgeBg.copy(alpha = 0.92f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp)
+            ) {
+                Text(
+                    text = album.mediaUris.size.toString(),
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    ),
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 12.dp, end = 10.dp, top = 26.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                // 2x2 collage
+                Collage2x2(
+                    items = albumMedia,
+                    palette = palette,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(136.dp)
+                )
+
+                // Bottom title row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = album.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.textColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Box {
+                        IconButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Album options",
+                                tint = palette.textColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Open album") },
+                                onClick = {
+                                    menuOpen = false
+                                    onClick()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.PhotoLibrary, contentDescription = null)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Rename") },
+                                onClick = {
+                                    menuOpen = false
+                                    onRename()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Edit, contentDescription = null)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Delete") },
+                                onClick = {
+                                    menuOpen = false
+                                    onDelete()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, contentDescription = null)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Collage2x2(
+    items: List<MediaItem>,
+    palette: CardPalette,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            CollageCell(
+                item = items.getOrNull(0),
+                palette = palette,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            )
+            CollageCell(
+                item = items.getOrNull(1),
+                palette = palette,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            CollageCell(
+                item = items.getOrNull(2),
+                palette = palette,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            )
+            CollageCell(
+                item = items.getOrNull(3),
+                palette = palette,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            )
+        }
+    }
+}
+
+@Composable
+private fun CollageCell(
+    item: MediaItem?,
+    palette: CardPalette,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(palette.textColor.copy(alpha = 0.08f)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (item != null) {
+            val context = LocalContext.current
+            AsyncImage(
+                model = remember(item.uri, context) {
+                    ThumbnailUtils.buildThumbnailRequest(context, item.uri, 200, 200)
+                },
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.Image,
+                contentDescription = null,
+                tint = palette.textColor.copy(alpha = 0.22f),
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AlbumsEmptyState(
+    onCreateClick: () -> Unit
+) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(4) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color(0xFF1E2026),
+                border = BorderStroke(1.dp, Color(0xFF2C2E38)),
+                modifier = Modifier
+                    .width(160.dp)
+                    .height(220.dp)
+                    .clickable { onCreateClick() }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // 2x2 placeholder grid
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(136.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            PlaceholderGridCell(Modifier.weight(1f).fillMaxHeight())
+                            PlaceholderGridCell(Modifier.weight(1f).fillMaxHeight())
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            PlaceholderGridCell(Modifier.weight(1f).fillMaxHeight())
+                            PlaceholderGridCell(Modifier.weight(1f).fillMaxHeight())
+                        }
+                    }
+
+                    // Skeleton text bars at bottom
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 2.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.68f)
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(Color(0xFF2C2F3D))
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.42f)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF242735))
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FoldersEmptyState() {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(4) {
+            Surface(
+                shape = FolderTabShape(),
+                color = Color(0xFF1E2026),
+                border = BorderStroke(1.dp, Color(0xFF2C2E38)),
+                modifier = Modifier
+                    .width(160.dp)
+                    .height(220.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 10.dp, end = 10.dp, top = 26.dp, bottom = 10.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(136.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            PlaceholderGridCell(Modifier.weight(1f).fillMaxHeight())
+                            PlaceholderGridCell(Modifier.weight(1f).fillMaxHeight())
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            PlaceholderGridCell(Modifier.weight(1f).fillMaxHeight())
+                            PlaceholderGridCell(Modifier.weight(1f).fillMaxHeight())
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 2.dp, vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.68f)
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(Color(0xFF2C2F3D))
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.42f)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF242735))
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaceholderGridCell(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF252733)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Image,
+            contentDescription = null,
+            tint = Color(0xFF434657),
+            modifier = Modifier.size(20.dp)
+        )
     }
 }

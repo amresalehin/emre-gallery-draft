@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -168,59 +169,40 @@ fun WelcomeScreen(
             when (step) {
                 0 -> {
                     // Screen 1: Minimalist Emre Splash for First Setup Run
-                    // Centered logo, "Emre Is Waiting" message, and transparent bottom-right navigation chevron.
+                    // Centered large logo, no corner arrow, and subtle "Tap to continue" at the bottom
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .clickable { currentStep = 1 }
+                            .testTag("welcome_intro_next_button")
                     ) {
-                        Column(
+                        // Centered large logo
+                        Icon(
+                            painter = painterResource(R.drawable.ic_app_logo),
+                            contentDescription = "Emre Gallery",
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 32.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_app_logo),
-                                contentDescription = "Emre Gallery",
-                                modifier = Modifier.size(76.dp),
-                                tint = Color(0xFF1D2228)
-                            )
-                            Spacer(Modifier.height(24.dp))
-                            Text(
-                                text = "Emre Is Waiting",
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 32.sp,
-                                fontWeight = FontWeight.Normal,
-                                letterSpacing = 0.5.sp,
-                                color = Color(0xFF14171B),
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.testTag("welcome_intro_title")
-                            )
-                        }
+                                .size(168.dp)
+                                .align(Alignment.Center)
+                                .testTag("welcome_intro_logo"),
+                            tint = Color(0xFF1D2228)
+                        )
 
-                        // Top-right navigation chevron: transparent button, only the arrow is visible
-                        IconButton(
-                            onClick = { currentStep = 1 },
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = Color.Transparent,
-                                contentColor = Color(0xFF161A20)
+                        // Bottom "Tap to continue" in small font size
+                        Text(
+                            text = stringResource(R.string.welcome_tap_to_continue),
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Normal,
+                                letterSpacing = 0.3.sp,
+                                color = Color.White.copy(alpha = 0.82f)
                             ),
+                            textAlign = TextAlign.Center,
                             modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .statusBarsPadding()
-                                .padding(end = 20.dp, top = 16.dp)
-                                .size(56.dp)
-                                .testTag("welcome_intro_next_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Proceed to setup",
-                                tint = Color(0xFF161A20),
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
+                                .align(Alignment.BottomCenter)
+                                .navigationBarsPadding()
+                                .padding(bottom = 42.dp)
+                                .testTag("welcome_intro_tap_to_continue")
+                        )
                     }
                 }
                 1 -> {
