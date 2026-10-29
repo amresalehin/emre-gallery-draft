@@ -550,7 +550,13 @@ fun GalleryApp() {
         }
     }
 
-    val canGoBack = homeSelectedUris.isNotEmpty() || backStack.isNotEmpty() || destination != Destination.HOME || albumFilter != null || showSidePanel || (destination == Destination.VIEWER && showDetails)
+    val canGoBack = destination != Destination.VIEWER && (
+        homeSelectedUris.isNotEmpty() ||
+        backStack.isNotEmpty() ||
+        destination != Destination.HOME ||
+        albumFilter != null ||
+        showSidePanel
+    )
 
     PredictiveBackHandler(enabled = canGoBack) { progress: Flow<BackEventCompat> ->
         try {
@@ -1127,6 +1133,10 @@ fun GalleryApp() {
                 onToggleControls = { showViewerControls = !showViewerControls },
                 onToggleDetails = { showDetails = !showDetails; showViewerControls = true },
                 onBack = { performBackNavigation() },
+                onTransitionEnd = {
+                    ThumbnailBoundsTracker.activeViewerUri = null
+                    performBackNavigation()
+                },
                 onFavourite = { scope.launch { prefs.toggleFavourite(currentItem.uri) } },
                 onToggleHide = {
                     val isAlreadyLocked = currentItem.relativePath == "Locked" || currentItem.uri in lockedVaultItems.map { it.uri }

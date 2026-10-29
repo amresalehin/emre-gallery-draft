@@ -100,6 +100,7 @@ fun ViewerScreen(
     onToggleControls: () -> Unit,
     onToggleDetails: () -> Unit,
     onBack: () -> Unit,
+    onTransitionEnd: () -> Unit = onBack,
     onFavourite: () -> Unit,
     onToggleHide: () -> Unit,
     onToggleBin: () -> Unit,
@@ -230,7 +231,9 @@ fun ViewerScreen(
             )
         }
 
-        // Shared return animation close initiator
+        val thumbCornerRadiusPx = with(density) { 10.dp.toPx() }
+
+        // Shared return animation close initiator gated behind onTransitionEnd
         val initiateClose: () -> Unit = {
             if (!isClosing) {
                 isClosing = true
@@ -239,19 +242,28 @@ fun ViewerScreen(
                         onToggleDetails()
                     }
                     ThumbnailBoundsTracker.activeViewerUri = item.uri
-                    transitionProgress.animateTo(
-                        targetValue = 0f,
-                        animationSpec = ReturnSpringSpec
-                    )
-                    ThumbnailBoundsTracker.activeViewerUri = null
-                    onBack()
+                    try {
+                        transitionProgress.animateTo(
+                            targetValue = 0f,
+                            animationSpec = ReturnSpringSpec
+                        )
+                    } finally {
+                        onTransitionEnd()
+                        ThumbnailBoundsTracker.activeViewerUri = null
+                    }
                 }
             }
         }
 
         // --- Android Back Handling Priority ---
+        // Priority 0: In-flight BackHandler lock during return transition to prevent repetitive
+        // back navigation or gestures from prematurely destroying the view before the spring reaches 0f.
+        BackHandler(enabled = isClosing) {
+            // Locked in-flight: no-op, absorbs back press until return spring reaches 0f and onTransitionEnd fires.
+        }
+
         // Priority 1: Video fullscreen mode exits first
-        BackHandler(enabled = videoState.isFullscreen) {
+        BackHandler(enabled = !isClosing && videoState.isFullscreen) {
             videoState.isFullscreen = false
         }
 
@@ -263,14 +275,18 @@ fun ViewerScreen(
                     transitionProgress.snapTo((1f - backEvent.progress).coerceIn(0f, 1f))
                 }
                 isClosing = true
-                transitionProgress.animateTo(
-                    targetValue = 0f,
-                    animationSpec = ReturnSpringSpec
-                )
-                ThumbnailBoundsTracker.activeViewerUri = null
-                onBack()
+                try {
+                    transitionProgress.animateTo(
+                        targetValue = 0f,
+                        animationSpec = ReturnSpringSpec
+                    )
+                } finally {
+                    onTransitionEnd()
+                    ThumbnailBoundsTracker.activeViewerUri = null
+                }
             } catch (e: CancellationException) {
                 // Return transition was cancelled or interrupted
+                isClosing = false
                 transitionProgress.animateTo(
                     targetValue = 1f,
                     animationSpec = ReturnSpringSpec
@@ -314,44 +330,26 @@ fun ViewerScreen(
                     .graphicsLayer {
                         val p = transitionProgress.value
                         val currentDismissY = dismissOffsetY.value
-                        val dismissFraction = (abs(currentDismissY) / 540f).coerceIn(0f, 1f)
                         val bounds = targetBounds ?: ThumbnailBoundsTracker.getBounds(item.uri)
 
-                        val destTransX: Float
-                        val destTransY: Float
-                        val destScaleX: Float
-                        val destScaleY: Float
-                        if (bounds != null && size.width > 0f && size.height > 0f) {
-                            val thumbW = bounds.width
-                            val thumbH = bounds.height
-                            val thumbCenterX = bounds.left + thumbW / 2f
-                            val thumbCenterY = bounds.top + thumbH / 2f
-                            val screenCenterX = size.width / 2f
-                            val screenCenterY = size.height / 2f
-                            destTransX = thumbCenterX - screenCenterX
-                            destTransY = thumbCenterY - screenCenterY
-                            destScaleX = (thumbW / size.width).coerceIn(0.01f, 1f)
-                            destScaleY = (thumbH / size.height).coerceIn(0.01f, 1f)
-                        } else {
-                            destTransX = 0f
-                            destTransY = 0f
-                            destScaleX = 0.85f
-                            destScaleY = 0.85f
-                        }
+                        val transform = calculateSharedElementTransform(
+                            progress = p,
+                            viewportWidth = size.width,
+                            viewportHeight = size.height,
+                            thumbBounds = bounds,
+                            imageWidth = item.width,
+                            imageHeight = item.height,
+                            thumbCornerRadiusPx = thumbCornerRadiusPx,
+                            dismissOffsetY = currentDismissY
+                        )
 
-                        val curScaleX = destScaleX + (1f - destScaleX) * p
-                        val curScaleY = destScaleY + (1f - destScaleY) * p
-                        val curTransX = destTransX * (1f - p)
-                        val curTransY = destTransY * (1f - p) + currentDismissY * p
-                        val cornerRadius = ((1f - p) * 10f).dp
-
-                        translationX = curTransX
-                        translationY = curTransY
-                        scaleX = curScaleX
-                        scaleY = curScaleY
+                        translationX = transform.translationX
+                        translationY = transform.translationY
+                        scaleX = transform.scale
+                        scaleY = transform.scale
                         alpha = if (bounds == null && isClosing) p.coerceIn(0f, 1f) else 1f
-                        clip = p < 0.99f || dismissFraction > 0.02f
-                        shape = RoundedCornerShape(cornerRadius)
+                        clip = transform.isClipped
+                        shape = transform.clipShape
                     },
                 key = { pageIndex -> items.getOrNull(pageIndex)?.uri ?: pageIndex.toString() }
             ) { pageIndex ->
@@ -388,8 +386,8 @@ fun ViewerScreen(
                         }
                     },
                     onSwipeDownRelease = { velocityDown ->
-                        // Media closer cannot activate while details are open
-                        if (!isCurrentZoomed && !showDetails && !videoState.isFullscreen) {
+                        // Media closer cannot activate while details are open or already closing
+                        if (!isCurrentZoomed && !showDetails && !videoState.isFullscreen && !isClosing) {
                             val dismissDistanceThreshold = screenHeightPx * 0.15f
                             if (dismissOffsetY.value > dismissDistanceThreshold || velocityDown > minFlingVelocity * 1.3f) {
                                 coroutineScope.launch {
@@ -401,12 +399,15 @@ fun ViewerScreen(
                                             animationSpec = ReturnSpringSpec
                                         )
                                     }
-                                    transitionProgress.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = ReturnSpringSpec
-                                    )
-                                    ThumbnailBoundsTracker.activeViewerUri = null
-                                    onBack()
+                                    try {
+                                        transitionProgress.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = ReturnSpringSpec
+                                        )
+                                    } finally {
+                                        onTransitionEnd()
+                                        ThumbnailBoundsTracker.activeViewerUri = null
+                                    }
                                 }
                             } else {
                                 coroutineScope.launch {
@@ -870,11 +871,7 @@ private fun ZoomableMediaItem(
                 model = imageRequest,
                 contentDescription = item.name,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = if (hasTargetBounds) {
-                    transitionContentScale(transitionProgress)
-                } else {
-                    ContentScale.Fit
-                }
+                contentScale = ContentScale.Fit
             )
 
             // Video Surface when current item is a video

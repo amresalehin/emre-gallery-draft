@@ -6,6 +6,8 @@ import androidx.compose.ui.layout.ContentScale
 import com.amresalehin.emregallery.ui.ThumbnailBoundsTracker
 import com.amresalehin.emregallery.ui.transitionContentScale
 import com.amresalehin.emregallery.ui.ViewerVideoState
+import com.amresalehin.emregallery.ui.calculateSharedElementTransform
+import com.amresalehin.emregallery.ui.SharedElementClipShape
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -173,5 +175,112 @@ class ViewerPlaybackStateTest {
         assertEquals(destScale, currentScaleThumb, 0.001f)
         assertEquals(destTransX, currentTransXThumb, 0.001f)
         assertEquals(destTransY, currentTransYThumb, 0.001f)
+    }
+
+    @Test
+    fun testIsotropicUniformScalingLandscapeImage() {
+        val viewportWidth = 1080f
+        val viewportHeight = 2400f
+        val thumbBounds = Rect(left = 60f, top = 400f, right = 420f, bottom = 760f) // 360x360
+        val imgWidth = 4000
+        val imgHeight = 3000 // 4:3 landscape
+
+        val transformAt0 = calculateSharedElementTransform(
+            progress = 0f,
+            viewportWidth = viewportWidth,
+            viewportHeight = viewportHeight,
+            thumbBounds = thumbBounds,
+            imageWidth = imgWidth,
+            imageHeight = imgHeight,
+            thumbCornerRadiusPx = 28f
+        )
+
+        // Fit in fullscreen: min(1080/4000, 2400/3000) = 1080/4000 = 0.27
+        // Crop in thumbnail (360x360): max(360/4000, 360/3000) = 360/3000 = 0.12
+        // Uniform scale = 0.12 / 0.27 = 0.4444f
+        val expectedScale = (360f / 3000f) / (1080f / 4000f)
+        assertEquals(expectedScale, transformAt0.scale, 0.001f)
+
+        // Translation centers thumbnail at progress 0
+        val expectedTransX = (thumbBounds.left + thumbBounds.width / 2f) - (viewportWidth / 2f)
+        val expectedTransY = (thumbBounds.top + thumbBounds.height / 2f) - (viewportHeight / 2f)
+        assertEquals(expectedTransX, transformAt0.translationX, 0.001f)
+        assertEquals(expectedTransY, transformAt0.translationY, 0.001f)
+
+        // At progress 1f (fullscreen)
+        val transformAt1 = calculateSharedElementTransform(
+            progress = 1f,
+            viewportWidth = viewportWidth,
+            viewportHeight = viewportHeight,
+            thumbBounds = thumbBounds,
+            imageWidth = imgWidth,
+            imageHeight = imgHeight
+        )
+        assertEquals(1f, transformAt1.scale, 0.001f)
+        assertEquals(0f, transformAt1.translationX, 0.001f)
+        assertEquals(0f, transformAt1.translationY, 0.001f)
+        assertFalse(transformAt1.isClipped)
+    }
+
+    @Test
+    fun testDynamicRoundRectClipBoundsExpansion() {
+        val viewportWidth = 1080f
+        val viewportHeight = 2400f
+        val thumbBounds = Rect(left = 100f, top = 200f, right = 400f, bottom = 600f) // 300x400
+        val radiusPx = 28f
+
+        val transformAt0 = calculateSharedElementTransform(
+            progress = 0f,
+            viewportWidth = viewportWidth,
+            viewportHeight = viewportHeight,
+            thumbBounds = thumbBounds,
+            imageWidth = 3000,
+            imageHeight = 4000,
+            thumbCornerRadiusPx = radiusPx
+        )
+
+        assertTrue(transformAt0.isClipped)
+        assertTrue(transformAt0.clipShape is com.amresalehin.emregallery.ui.SharedElementClipShape)
+        val clipShape0 = transformAt0.clipShape as com.amresalehin.emregallery.ui.SharedElementClipShape
+
+        // Scaled on screen by transformAt0.scale, width and height must match thumbBounds
+        val scaledClipWidth = (clipShape0.right - clipShape0.left) * transformAt0.scale
+        val scaledClipHeight = (clipShape0.bottom - clipShape0.top) * transformAt0.scale
+        val scaledCornerRadius = clipShape0.cornerRadius * transformAt0.scale
+
+        assertEquals(thumbBounds.width, scaledClipWidth, 0.01f)
+        assertEquals(thumbBounds.height, scaledClipHeight, 0.01f)
+        assertEquals(radiusPx, scaledCornerRadius, 0.01f)
+
+        // At progress 1f (fullscreen), clip bounds match full viewport
+        val transformAt1 = calculateSharedElementTransform(
+            progress = 1f,
+            viewportWidth = viewportWidth,
+            viewportHeight = viewportHeight,
+            thumbBounds = thumbBounds,
+            imageWidth = 3000,
+            imageHeight = 4000,
+            thumbCornerRadiusPx = radiusPx
+        )
+        val clipShape1 = transformAt1.clipShape as com.amresalehin.emregallery.ui.SharedElementClipShape
+        assertEquals(0f, clipShape1.left, 0.001f)
+        assertEquals(0f, clipShape1.top, 0.001f)
+        assertEquals(viewportWidth, clipShape1.right, 0.001f)
+        assertEquals(viewportHeight, clipShape1.bottom, 0.001f)
+        assertEquals(0f, clipShape1.cornerRadius, 0.001f)
+    }
+
+    @Test
+    fun testNullThumbBoundsFallback() {
+        val transform = calculateSharedElementTransform(
+            progress = 0f,
+            viewportWidth = 1080f,
+            viewportHeight = 2400f,
+            thumbBounds = null
+        )
+        assertEquals(0.85f, transform.scale, 0.001f)
+        assertEquals(0f, transform.translationX, 0.001f)
+        assertEquals(0f, transform.translationY, 0.001f)
+        assertTrue(transform.isClipped)
     }
 }
