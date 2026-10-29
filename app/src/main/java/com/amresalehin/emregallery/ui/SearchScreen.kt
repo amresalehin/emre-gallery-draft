@@ -168,7 +168,7 @@ fun SearchScreen(
                 }
                 val matchingPlaces = remember(queryKey, results) {
                     if (queryKey.isBlank()) emptyList() else results.mapNotNull { item ->
-                        item.relativePath.split('/', '\\\\').dropLast(1).lastOrNull()?.trim()
+                        item.relativePath.split('/', '\\').dropLast(1).lastOrNull()?.trim()
                             ?.takeIf { it.isNotBlank() && it.contains(queryKey, true) }
                     }.distinctBy { it.lowercase(Locale.ROOT) }.take(2)
                 }
