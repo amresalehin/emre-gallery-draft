@@ -55,6 +55,7 @@ import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.face.PersonSummary
 import com.amresalehin.emregallery.data.StoryGroup
 
 data class NavBackStackEntry(
@@ -115,6 +116,7 @@ fun GalleryApp() {
     val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
+    var namedSearchPeople by remember { mutableStateOf<List<PersonSummary>>(emptyList()) }
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
     var lastHomeButtonTapAt by remember { mutableLongStateOf(0L) }
     var showHomeViewOptionsSheet by remember { mutableStateOf(false) }
@@ -153,6 +155,14 @@ fun GalleryApp() {
     LaunchedEffect(Unit) {
         scope.launch(Dispatchers.IO) {
             lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
+        }
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val store = FaceClusterStore(context.applicationContext)
+                val engine = FaceRecognitionSettings.getActiveEngine(context.applicationContext)
+                namedSearchPeople = store.personSummaries(includeHidden = false, engineId = engine)
+                    .filter { it.isNamed }
+            }
         }
         if (hasMediaPermission(context)) refreshMedia()
     }
@@ -1142,12 +1152,17 @@ fun GalleryApp() {
                             stage = searchStage,
                             results = searchResults,
                             recentSearches = recentSearches,
+                            customAlbums = customAlbums,
+                            customTagsMap = customTagsMap,
+                            namedPeople = namedSearchPeople,
                             onQuery = { searchQuery = it; searchStage = if (it.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING },
                             onSubmit = { submittedQuery = it.trim(); searchQuery = it.trim(); searchStage = SearchStage.RESULTS; if (it.isNotBlank()) scope.launch { prefs.addRecentSearch(it.trim()) } },
                             onRecent = { searchQuery = it; submittedQuery = it; searchStage = SearchStage.RESULTS },
                             onClearRecent = { scope.launch { prefs.clearRecentSearches() } },
                             onBack = { performBackNavigation() },
                             onOpen = { openMediaInViewer(it, searchResults) },
+                            onOpenPerson = { personId -> activePersonId = personId; navigateTo(Destination.PEOPLE) },
+                            onOpenAlbum = { album -> albumFilterReturnDestination = Destination.SEARCH; albumFilter = album.fullPath; navigateTo(Destination.HOME) },
                             videosOnly = searchVideosOnly,
                             onVideosOnly = { searchVideosOnly = it }
                         )
