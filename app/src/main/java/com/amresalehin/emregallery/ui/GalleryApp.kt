@@ -574,6 +574,7 @@ fun GalleryApp() {
             backStack.isNotEmpty() -> {
                 val entry = backStack.removeAt(backStack.size - 1)
                 destination = entry.destination
+                if (destination == Destination.SEARCH) searchStage = if (searchQuery.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING
                 selectedMedia = entry.selectedMedia
                 viewerMediaList = entry.viewerMediaList
                 viewerStoryTitle = entry.viewerStoryTitle
