@@ -65,20 +65,22 @@ internal fun loadSavedPhotoMapCamera(context: Context): SavedPhotoMapCamera? {
 }
 
 internal fun persistPhotoMapCamera(context: Context, map: MapView) {
-    if (map.width <= 0 || map.height <= 0) return
+    runCatching {
+        if (map.width <= 0 || map.height <= 0) return
 
-    val center = map.mapCenter
-    val zoom = map.zoomLevelDouble
-    if (!center.latitude.isFinite() || !center.longitude.isFinite() ||
-        !zoom.isFinite() || zoom <= 0.0
-    ) return
+        val center = map.mapCenter
+        val zoom = map.zoomLevelDouble
+        if (!center.latitude.isFinite() || !center.longitude.isFinite() ||
+            !zoom.isFinite() || zoom <= 0.0
+        ) return
 
-    context.getSharedPreferences(PHOTO_MAP_CAMERA_PREFERENCES, Context.MODE_PRIVATE)
-        .edit()
-        .putString(CAMERA_LATITUDE_KEY, center.latitude.toString())
-        .putString(CAMERA_LONGITUDE_KEY, center.longitude.toString())
-        .putString(CAMERA_ZOOM_KEY, zoom.toString())
-        .apply()
+        context.getSharedPreferences(PHOTO_MAP_CAMERA_PREFERENCES, Context.MODE_PRIVATE)
+            .edit()
+            .putString(CAMERA_LATITUDE_KEY, center.latitude.toString())
+            .putString(CAMERA_LONGITUDE_KEY, center.longitude.toString())
+            .putString(CAMERA_ZOOM_KEY, zoom.toString())
+            .apply()
+    }
 }
 
 /**

@@ -156,6 +156,14 @@ fun PhotoMapViewContainer(
                     val savedCamera = loadSavedPhotoMapCamera(ctx)
                     MapView(ctx).apply {
                         var cameraInitialized = false
+                        val cameraSaveRunnable = Runnable {
+                            if (cameraInitialized) persistPhotoMapCamera(ctx, this@apply)
+                        }
+                        fun scheduleCameraPersistence() {
+                            removeCallbacks(cameraSaveRunnable)
+                            postDelayed(cameraSaveRunnable, 350L)
+                        }
+
                         clipToOutline = true
                         outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
                         setTileSource(if (mapLayer == "Satellite") PhotoMapTiles.satelliteTileSource() else TileSourceFactory.MAPNIK)
@@ -197,12 +205,12 @@ fun PhotoMapViewContainer(
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
                                 latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
-                                if (cameraInitialized) persistPhotoMapCamera(ctx, this@apply)
+                                if (cameraInitialized) scheduleCameraPersistence()
                                 return true
                             }
                             override fun onZoom(event: ZoomEvent?): Boolean {
                                 latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
-                                if (cameraInitialized) persistPhotoMapCamera(ctx, this@apply)
+                                if (cameraInitialized) scheduleCameraPersistence()
                                 return true
                             }
                         })
@@ -228,7 +236,8 @@ fun PhotoMapViewContainer(
                         if (!map.overlays.contains(marker)) map.overlays.add(marker)
                     }
 
-                    map.post { latestOnBoundsChanged.value(calculateMapBounds(map, context)) }
+                    // Viewport bounds are emitted by map gestures and initial camera setup.
+                    // Do not post another bounds update from every AndroidView recomposition.
                     map.invalidate()
                 }
             )
