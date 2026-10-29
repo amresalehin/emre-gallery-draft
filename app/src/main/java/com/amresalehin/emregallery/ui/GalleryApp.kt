@@ -157,11 +157,17 @@ fun GalleryApp() {
             lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
         }
         scope.launch(Dispatchers.IO) {
-            runCatching {
-                val store = FaceClusterStore(context.applicationContext)
-                val engine = FaceRecognitionSettings.getActiveEngine(context.applicationContext)
-                namedSearchPeople = store.personSummaries(includeHidden = false, engineId = engine)
-                    .filter { it.isNamed }
+            suspend fun refreshNamedPeople() {
+                runCatching {
+                    val store = FaceClusterStore(context.applicationContext)
+                    val engine = FaceRecognitionSettings.getActiveEngine(context.applicationContext)
+                    val people = store.personSummaries(includeHidden = false, engineId = engine).filter { it.isNamed }
+                    withContext(Dispatchers.Main) { namedSearchPeople = people }
+                }
+            }
+            refreshNamedPeople()
+            kotlinx.coroutines.coroutineScope {
+                launch { com.amresalehin.emregallery.face.FaceStoreEvents.peopleUpdates.collect { refreshNamedPeople() } }
             }
         }
         if (hasMediaPermission(context)) refreshMedia()
