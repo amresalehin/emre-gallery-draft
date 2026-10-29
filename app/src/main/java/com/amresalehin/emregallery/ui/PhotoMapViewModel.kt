@@ -30,13 +30,13 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
     private val _uiState = MutableStateFlow(PhotoMapUiState())
     val uiState: StateFlow<PhotoMapUiState> = _uiState.asStateFlow()
 
-    suspend fun getLocationForMedia(context: Context, uri: String): GeoPoint? {
+    suspend fun getLocationForMedia(context: Context, item: MediaItem): GeoPoint? {
         return withContext(Dispatchers.IO) {
-            val cached = locationCache.loadAll()[uri]?.point
+            val cached = locationCache.loadAll()[item.uri]?.point
             if (cached != null) return@withContext cached
-            val extracted = PhotoMapLocationCache.extractLocation(context, uri)
+            val extracted = PhotoMapLocationCache.extractLocation(context, item.uri, isVideo = item.isVideo)
             if (extracted != null) {
-                locationCache.save(uri, extracted)
+                locationCache.save(item.uri, extracted)
             }
             extracted
         }
@@ -85,7 +85,7 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
                 if (!isActive) break
 
                 val point = withContext(Dispatchers.IO) {
-                    PhotoMapLocationCache.extractLocation(context, item.uri)
+                    PhotoMapLocationCache.extractLocation(context, item.uri, isVideo = item.isVideo)
                 }
 
                 withContext(Dispatchers.IO) {
@@ -97,7 +97,9 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
                 }
                 scanned++
 
-                if (scanned % 12 == 0 || scanned == uncachedItems.size) {
+                // Avoid republishing the growing location list too frequently: each update
+                // invalidates the heatmap cache and recomposes the viewport grid.
+                if (scanned % 128 == 0 || scanned == uncachedItems.size) {
                     val currentList = result.toList()
                     val currentScanned = scanned
                     _uiState.update {

@@ -92,7 +92,7 @@ fun readMediaMetadata(context: Context, item: MediaItem): Map<String, String> {
     val uri = Uri.parse(item.uri)
 
     // First, reliably extract coordinates using unredacted location reader
-    val locationPoint = com.amresalehin.emregallery.data.PhotoMapLocationCache.extractLocation(context, item.uri)
+    val locationPoint = com.amresalehin.emregallery.data.PhotoMapLocationCache.extractLocation(context, item.uri, isVideo = item.isVideo)
     if (locationPoint != null) {
         values["latitude"] = locationPoint.latitude.toString()
         values["longitude"] = locationPoint.longitude.toString()

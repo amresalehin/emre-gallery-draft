@@ -94,18 +94,26 @@ class PhotoHeatmapOverlay(
         if (shadow || points.isEmpty() || mapView.width <= 0 || mapView.height <= 0) return
 
         val key = createRenderKey(mapView) ?: return
-        val renderedBitmap = synchronized(renderLock) {
-            cachedRender?.takeIf { it.key == key && !it.bitmap.isRecycled }?.bitmap
+        // Hold the render lock through drawing. updatePoints() recycles the previous bitmap;
+        // releasing this lock before Canvas.drawBitmap() allowed a concurrent update to recycle
+        // the bitmap after lookup, causing a runtime crash while indexing was updating points.
+        val drewCachedBitmap = synchronized(renderLock) {
+            val renderedBitmap = cachedRender
+                ?.takeIf { it.key == key && !it.bitmap.isRecycled }
+                ?.bitmap
+            if (renderedBitmap != null) {
+                canvas.drawBitmap(
+                    renderedBitmap,
+                    null,
+                    RectF(0f, 0f, mapView.width.toFloat(), mapView.height.toFloat()),
+                    bitmapPaint
+                )
+                true
+            } else {
+                false
+            }
         }
-        if (renderedBitmap != null) {
-            canvas.drawBitmap(
-                renderedBitmap,
-                null,
-                RectF(0f, 0f, mapView.width.toFloat(), mapView.height.toFloat()),
-                bitmapPaint
-            )
-            return
-        }
+        if (drewCachedBitmap) return
 
         requestRender(mapView, key)
     }

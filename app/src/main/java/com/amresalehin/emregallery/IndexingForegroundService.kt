@@ -447,7 +447,7 @@ class IndexingForegroundService : Service() {
             awaitResume()
             currentCoroutineContext().ensureActive()
             val point = withContext(Dispatchers.IO) {
-                com.amresalehin.emregallery.data.PhotoMapLocationCache.extractLocation(applicationContext, item.uri)
+                com.amresalehin.emregallery.data.PhotoMapLocationCache.extractLocation(applicationContext, item.uri, isVideo = item.isVideo)
             }
             withContext(Dispatchers.IO) {
                 cache.save(item.uri, point)

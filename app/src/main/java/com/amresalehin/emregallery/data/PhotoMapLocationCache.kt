@@ -109,11 +109,16 @@ class PhotoMapLocationCache(context: Context) :
         // Process in throttled batches with batched transactions to minimize disk sync and CPU usage
         val batchSize = 25
         for (batch in pending.chunked(batchSize)) {
+            // Parse media before starting the DB transaction. ContentResolver/EXIF I/O can be
+            // slow; holding a write lock during it blocks other location-cache readers/writers.
+            val extracted = batch.map { item ->
+                item to extractLocation(context, item.uri, isVideo = item.isVideo)
+            }
+
             val db = writableDatabase
             db.beginTransaction()
             try {
-                for (item in batch) {
-                    val point = extractLocation(context, item.uri)
+                for ((item, point) in extracted) {
                     val values = ContentValues().apply {
                         put("uri", item.uri)
                         if (point == null) {
@@ -145,7 +150,11 @@ class PhotoMapLocationCache(context: Context) :
          * Handles unredacted MediaStore URIs (via ACCESS_MEDIA_LOCATION and MediaStore.setRequireOriginal),
          * seekable FileDescriptors, stream fallbacks, and ISO 6709 coordinates.
          */
-        fun extractLocation(context: Context, uriString: String): GeoPoint? {
+        fun extractLocation(
+            context: Context,
+            uriString: String,
+            isVideo: Boolean = false
+        ): GeoPoint? {
             val uri = Uri.parse(uriString)
 
             // Direct local file support
@@ -206,18 +215,22 @@ class PhotoMapLocationCache(context: Context) :
                 if (fromOrigStream != null) return fromOrigStream
             }
 
-            // 4. Try MediaMetadataRetriever (works for videos and some image formats with ISO 6709 metadata)
-            val fromMetadata = runCatching {
-                val retriever = MediaMetadataRetriever()
-                try {
-                    retriever.setDataSource(context, uri)
-                    val locStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION)
-                    parseIso6709(locStr)
-                } finally {
-                    retriever.release()
-                }
-            }.getOrNull()
-            if (fromMetadata != null) return fromMetadata
+            // Avoid spinning up native media decoders for photos. This fallback is for video
+            // container metadata (ISO 6709) only; invoking it for every photo without EXIF GPS
+            // is expensive across large libraries and can exhaust native media resources.
+            if (isVideo) {
+                val fromMetadata = runCatching {
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(context, uri)
+                        val locStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_LOCATION)
+                        parseIso6709(locStr)
+                    } finally {
+                        retriever.release()
+                    }
+                }.getOrNull()
+                if (fromMetadata != null) return fromMetadata
+            }
 
             return null
         }

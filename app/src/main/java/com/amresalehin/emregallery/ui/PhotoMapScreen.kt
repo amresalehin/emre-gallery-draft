@@ -255,7 +255,7 @@ fun PhotoMapScreen(
         val map = mapRef ?: return@LaunchedEffect
         if (lastFocusedUri == requestedItem.uri) return@LaunchedEffect
 
-        val point = viewModel.getLocationForMedia(context, requestedItem.uri)
+        val point = viewModel.getLocationForMedia(context, requestedItem)
         if (point != null) {
             selectedMapMedia = requestedItem to point
             focusSinglePhoto(map, point, animated = true)
