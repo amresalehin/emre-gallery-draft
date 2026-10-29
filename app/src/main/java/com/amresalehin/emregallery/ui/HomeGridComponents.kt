@@ -258,7 +258,7 @@ fun HomeScreenSkeleton(
 }
 
 @Composable
-fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
+fun MemoriesStrip(media: List<MediaItem>, onOpenMemory: (title: String, items: List<MediaItem>) -> Unit) {
     val today = remember { Calendar.getInstance() }
     val currentYear = today.get(Calendar.YEAR)
     val todayMonth = today.get(Calendar.MONTH)
@@ -335,7 +335,7 @@ fun MemoriesStrip(media: List<MediaItem>, onOpen: (MediaItem) -> Unit) {
                         .clickable(
                             interactionSource = memInteractionSource,
                             indication = ripple(bounded = true),
-                            onClick = { onOpen(cover) }
+                            onClick = { onOpenMemory(title, storyMedia) }
                         )
                 ) {
                     val context = LocalContext.current

@@ -64,6 +64,7 @@ fun HomeScreen(
     onAddToAlbum: ((Set<String>) -> Unit)? = null,
     selectedUris: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
+    onOpenMemory: (title: String, items: List<MediaItem>) -> Unit = { _, _ -> },
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -369,7 +370,7 @@ fun HomeScreen(
                     item { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
                 }
                 if (albumTitle == null) {
-                    item { MemoriesStrip(sortedMedia, onOpen) }
+                    item { MemoriesStrip(sortedMedia, onOpenMemory) }
                     item {
                         HorizontalDivider(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),

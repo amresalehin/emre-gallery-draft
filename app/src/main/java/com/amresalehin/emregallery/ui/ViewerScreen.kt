@@ -9,6 +9,7 @@ import android.view.ViewConfiguration
 import androidx.activity.BackEventCompat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
@@ -85,6 +86,7 @@ fun ViewerScreen(
     item: MediaItem,
     items: List<MediaItem>,
     customAlbums: List<CustomAlbum>,
+    storyTitle: String? = null,
     defaultOcrLanguages: Set<String> = setOf("eng"),
     defaultOcrModel: String = "fast",
     customTags: Set<String>,
@@ -194,6 +196,82 @@ fun ViewerScreen(
         if (current != null && current.uri != item.uri) {
             onOpenNeighbor(current)
             ThumbnailBoundsTracker.activeViewerUri = current.uri
+        }
+    }
+
+    // Story mode state
+    val isStoryMode = storyTitle != null
+    var storyProgress by remember { mutableFloatStateOf(0f) }
+    var isStoryHolding by remember { mutableStateOf(false) }
+    var showEndOfStory by remember { mutableStateOf(false) }
+
+    // Reset story progress on page change
+    LaunchedEffect(pagerState.currentPage) {
+        storyProgress = 0f
+        showEndOfStory = false
+    }
+
+    // Auto-advance story timer (~4.5s per photo, synchronized with video playback for videos)
+    if (isStoryMode) {
+        val isCurrentItemVideo = item.isVideo
+        val isPaused = isStoryHolding || showDetails || showMore || confirmMoveToBin || confirmPermanentDelete || isCurrentZoomed || isClosing || showEndOfStory || (isCurrentItemVideo && !videoState.isPlaying)
+
+        LaunchedEffect(pagerState.currentPage, isPaused, isCurrentItemVideo, videoState.durationMs, videoState.positionMs) {
+            if (showEndOfStory || isClosing) return@LaunchedEffect
+
+            if (isCurrentItemVideo) {
+                if (videoState.durationMs > 0L) {
+                    storyProgress = (videoState.positionMs.toFloat() / videoState.durationMs.toFloat()).coerceIn(0f, 1f)
+                    if (videoState.positionMs >= videoState.durationMs - 150L && videoState.durationMs > 500L) {
+                        if (pagerState.currentPage < items.size - 1) {
+                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                        } else {
+                            showEndOfStory = true
+                        }
+                    }
+                }
+            } else {
+                if (!isPaused) {
+                    val totalDurationMs = 4500f
+                    val startProgress = storyProgress
+                    val startTime = System.currentTimeMillis()
+                    while (!isPaused && storyProgress < 1f) {
+                        val elapsed = System.currentTimeMillis() - startTime
+                        val newProgress = (startProgress + elapsed / totalDurationMs).coerceIn(0f, 1f)
+                        storyProgress = newProgress
+                        if (newProgress >= 1f) {
+                            if (pagerState.currentPage < items.size - 1) {
+                                pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                            } else {
+                                showEndOfStory = true
+                            }
+                            break
+                        }
+                        delay(16L)
+                    }
+                }
+            }
+        }
+    }
+
+    val stepPrevious: () -> Unit = {
+        showEndOfStory = false
+        storyProgress = 0f
+        if (pagerState.currentPage > 0) {
+            coroutineScope.launch {
+                pagerState.animateScrollToPage(pagerState.currentPage - 1)
+            }
+        }
+    }
+
+    val stepNext: () -> Unit = {
+        if (pagerState.currentPage < items.size - 1) {
+            storyProgress = 0f
+            coroutineScope.launch {
+                pagerState.animateScrollToPage(pagerState.currentPage + 1)
+            }
+        } else {
+            showEndOfStory = true
         }
     }
 
@@ -428,6 +506,10 @@ fun ViewerScreen(
                     onZoomChanged = { zoomed ->
                         if (isCurrent) isCurrentZoomed = zoomed
                     },
+                    isStoryMode = isStoryMode,
+                    onStoryTapLeft = stepPrevious,
+                    onStoryTapRight = stepNext,
+                    onStoryHoldingChanged = { isStoryHolding = it },
                     transitionProgress = transitionProgress.value,
                     hasTargetBounds = targetBounds != null
                 )
@@ -435,25 +517,52 @@ fun ViewerScreen(
 
             // Edge gradient shading behind top and bottom bars (hidden in fullscreen or when sheet rises)
             if (!videoState.isFullscreen) {
-                ViewerEdgeShading(visible = showControls && !isClosing)
+                ViewerEdgeShading(visible = ((showControls && !isStoryMode) || (isStoryMode && !isStoryHolding && !showEndOfStory)) && !isClosing)
             }
 
-            // Top App Bar in standard view
-            if (showControls && !videoState.isFullscreen) {
-                ViewerTopAppBar(
-                    isFavourite = favourite,
-                    onBack = { initiateClose() },
-                    onShare = shareMedia,
-                    onToggleFavourite = onFavourite,
-                    onMore = { showMore = true },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .graphicsLayer {
-                            val p = transitionProgress.value
-                            translationY = -(80.dp.toPx()) * (1f - p)
-                            alpha = if (isClosing) ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
-                        }
-                )
+            // Top App Bar in standard or story view
+            if (!videoState.isFullscreen) {
+                if (isStoryMode) {
+                    val showStoryBar = !isStoryHolding && !isClosing && !showEndOfStory
+                    AnimatedVisibility(
+                        visible = showStoryBar,
+                        enter = fadeIn(animationSpec = tween(150)),
+                        exit = fadeOut(animationSpec = tween(150)),
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    ) {
+                        ViewerStoryTopBar(
+                            storyTitle = storyTitle,
+                            currentIndex = pagerState.currentPage,
+                            itemCount = items.size,
+                            currentProgress = storyProgress,
+                            isFavourite = favourite,
+                            onBack = { initiateClose() },
+                            onShare = shareMedia,
+                            onToggleFavourite = onFavourite,
+                            onMore = { showMore = true },
+                            modifier = Modifier.graphicsLayer {
+                                val p = transitionProgress.value
+                                translationY = -(80.dp.toPx()) * (1f - p)
+                                alpha = if (isClosing) ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
+                            }
+                        )
+                    }
+                } else if (showControls) {
+                    ViewerTopAppBar(
+                        isFavourite = favourite,
+                        onBack = { initiateClose() },
+                        onShare = shareMedia,
+                        onToggleFavourite = onFavourite,
+                        onMore = { showMore = true },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .graphicsLayer {
+                                val p = transitionProgress.value
+                                translationY = -(80.dp.toPx()) * (1f - p)
+                                alpha = if (isClosing) ((p - 0.35f) / 0.65f).coerceIn(0f, 1f) else 1f
+                            }
+                    )
+                }
             }
 
             // Fullscreen quick exit back button
@@ -499,7 +608,7 @@ fun ViewerScreen(
                         )
                     }
 
-                    if (!videoState.isFullscreen) {
+                    if (!videoState.isFullscreen && !isStoryMode) {
                         ViewerBottomActionBar(
                             isBin = isBin,
                             onEdit = launchEdit,
@@ -542,6 +651,22 @@ fun ViewerScreen(
                     defaultOcrLanguages = defaultOcrLanguages,
                     defaultOcrModel = defaultOcrModel,
                     onOpenPerson = onOpenPerson
+                )
+            }
+
+            // Soft "End of memory" overlay
+            if (isStoryMode && showEndOfStory && !isClosing) {
+                EndOfStoryOverlay(
+                    storyTitle = storyTitle,
+                    itemCount = items.size,
+                    onReplay = {
+                        showEndOfStory = false
+                        storyProgress = 0f
+                        coroutineScope.launch {
+                            pagerState.scrollToPage(0)
+                        }
+                    },
+                    onClose = { initiateClose() }
                 )
             }
         }
@@ -645,6 +770,10 @@ private fun ZoomableMediaItem(
     onSwipeDownDelta: (Float) -> Unit,
     onSwipeDownRelease: (Float) -> Unit,
     onZoomChanged: (Boolean) -> Unit,
+    isStoryMode: Boolean = false,
+    onStoryTapLeft: () -> Unit = {},
+    onStoryTapRight: () -> Unit = {},
+    onStoryHoldingChanged: (Boolean) -> Unit = {},
     transitionProgress: Float = 1f,
     hasTargetBounds: Boolean = false,
     modifier: Modifier = Modifier
@@ -703,10 +832,14 @@ private fun ZoomableMediaItem(
                         var longPressTriggered = false
 
                         val longPressJob = launch {
-                            delay(500L)
+                            delay(if (isStoryMode) 180L else 500L)
                             if (!isDragging && !isPinching && scale <= 1.02f) {
-                                longPressTriggered = true
-                                onLongPress()
+                                if (isStoryMode) {
+                                    onStoryHoldingChanged(true)
+                                } else {
+                                    longPressTriggered = true
+                                    onLongPress()
+                                }
                             }
                         }
 
@@ -752,6 +885,7 @@ private fun ZoomableMediaItem(
 
                                 if (totalMovementX > touchSlop || totalMovementY > touchSlop) {
                                     longPressJob.cancel()
+                                    if (isStoryMode) onStoryHoldingChanged(false)
                                 }
 
                                 if (scale > 1.02f && !isVideo) {
@@ -793,6 +927,7 @@ private fun ZoomableMediaItem(
                         }
 
                         longPressJob.cancel()
+                        if (isStoryMode) onStoryHoldingChanged(false)
 
                         val velocityY = velocityTracker.calculateVelocity().y
                         if (isVerticalSwipe) {
@@ -804,47 +939,55 @@ private fun ZoomableMediaItem(
                                 onSwipeDownRelease(velocityY)
                             }
                         } else if (!isPinching && !longPressTriggered && totalMovementX < touchSlop && totalMovementY < touchSlop) {
-                            val now = System.currentTimeMillis()
-                            if (now - lastTapTime < 280L && (down.position - lastTapPos).getDistance() < touchSlop * 3f && !isVideo) {
-                                lastTapTime = 0L
-                                if (scale > 1.2f) {
-                                    launch {
-                                        val startScale = scale
-                                        val startX = offsetX
-                                        val startY = offsetY
-                                        animate(0f, 1f, animationSpec = tween(200)) { fraction, _ ->
-                                            scale = startScale + (1f - startScale) * fraction
-                                            offsetX = startX * (1f - fraction)
-                                            offsetY = startY * (1f - fraction)
+                            if (isStoryMode) {
+                                if (down.position.x < width * 0.30f) {
+                                    onStoryTapLeft()
+                                } else {
+                                    onStoryTapRight()
+                                }
+                            } else {
+                                val now = System.currentTimeMillis()
+                                if (now - lastTapTime < 280L && (down.position - lastTapPos).getDistance() < touchSlop * 3f && !isVideo) {
+                                    lastTapTime = 0L
+                                    if (scale > 1.2f) {
+                                        launch {
+                                            val startScale = scale
+                                            val startX = offsetX
+                                            val startY = offsetY
+                                            animate(0f, 1f, animationSpec = tween(200)) { fraction, _ ->
+                                                scale = startScale + (1f - startScale) * fraction
+                                                offsetX = startX * (1f - fraction)
+                                                offsetY = startY * (1f - fraction)
+                                            }
+                                        }
+                                    } else {
+                                        launch {
+                                            val targetScale = 2.5f
+                                            val focalX = down.position.x - width / 2f
+                                            val focalY = down.position.y - height / 2f
+                                            val maxX = (width * (targetScale - 1f)) / 2f
+                                            val maxY = (height * (targetScale - 1f)) / 2f
+                                            val targetOffsetX = (-focalX * (targetScale - 1f)).coerceIn(-maxX, maxX)
+                                            val targetOffsetY = (-focalY * (targetScale - 1f)).coerceIn(-maxY, maxY)
+
+                                            val startScale = scale
+                                            val startX = offsetX
+                                            val startY = offsetY
+                                            animate(0f, 1f, animationSpec = tween(220)) { fraction, _ ->
+                                                scale = startScale + (targetScale - startScale) * fraction
+                                                offsetX = startX + (targetOffsetX - startX) * fraction
+                                                offsetY = startY + (targetOffsetY - startY) * fraction
+                                            }
                                         }
                                     }
                                 } else {
+                                    lastTapTime = now
+                                    lastTapPos = down.position
                                     launch {
-                                        val targetScale = 2.5f
-                                        val focalX = down.position.x - width / 2f
-                                        val focalY = down.position.y - height / 2f
-                                        val maxX = (width * (targetScale - 1f)) / 2f
-                                        val maxY = (height * (targetScale - 1f)) / 2f
-                                        val targetOffsetX = (-focalX * (targetScale - 1f)).coerceIn(-maxX, maxX)
-                                        val targetOffsetY = (-focalY * (targetScale - 1f)).coerceIn(-maxY, maxY)
-
-                                        val startScale = scale
-                                        val startX = offsetX
-                                        val startY = offsetY
-                                        animate(0f, 1f, animationSpec = tween(220)) { fraction, _ ->
-                                            scale = startScale + (targetScale - startScale) * fraction
-                                            offsetX = startX + (targetOffsetX - startX) * fraction
-                                            offsetY = startY + (targetOffsetY - startY) * fraction
+                                        delay(280L)
+                                        if (lastTapTime == now) {
+                                            onToggleControls()
                                         }
-                                    }
-                                }
-                            } else {
-                                lastTapTime = now
-                                lastTapPos = down.position
-                                launch {
-                                    delay(280L)
-                                    if (lastTapTime == now) {
-                                        onToggleControls()
                                     }
                                 }
                             }

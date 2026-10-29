@@ -60,6 +60,7 @@ data class NavBackStackEntry(
     val destination: Destination,
     val selectedMedia: MediaItem? = null,
     val viewerMediaList: List<MediaItem> = emptyList(),
+    val viewerStoryTitle: String? = null,
     val mapFocusItem: MediaItem? = null,
     val albumFilter: String? = null,
     val albumFilterReturnDestination: Destination = Destination.ALBUMS
@@ -83,6 +84,7 @@ fun GalleryApp() {
     var loading by remember { mutableStateOf(hasMediaPermission(context)) }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
     var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var viewerStoryTitle by remember { mutableStateOf<String?>(null) }
     var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
     val backStack = remember { mutableStateListOf<NavBackStackEntry>() }
     val viewerTransitionProgress = remember { Animatable(0f) }
@@ -447,7 +449,8 @@ fun GalleryApp() {
         rememberPrevious: Boolean = true,
         newSelectedMedia: MediaItem? = selectedMedia,
         newMapFocusItem: MediaItem? = mapFocusItem,
-        newViewerMediaList: List<MediaItem> = viewerMediaList
+        newViewerMediaList: List<MediaItem> = viewerMediaList,
+        newViewerStoryTitle: String? = if (dest == Destination.VIEWER) viewerStoryTitle else null
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -460,6 +463,7 @@ fun GalleryApp() {
                     destination = destination,
                     selectedMedia = selectedMedia,
                     viewerMediaList = viewerMediaList,
+                    viewerStoryTitle = viewerStoryTitle,
                     mapFocusItem = mapFocusItem,
                     albumFilter = albumFilter,
                     albumFilterReturnDestination = albumFilterReturnDestination
@@ -471,12 +475,14 @@ fun GalleryApp() {
         selectedMedia = newSelectedMedia
         mapFocusItem = newMapFocusItem
         viewerMediaList = newViewerMediaList
+        viewerStoryTitle = newViewerStoryTitle
     }
 
     fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
         val safeList = if (list.any { it.uri == item.uri }) list else listOf(item)
         selectedMedia = item
         viewerMediaList = safeList
+        viewerStoryTitle = null
         showViewerControls = false
         showDetails = false
         scope.launch { viewerTransitionProgress.snapTo(0f) }
@@ -484,7 +490,26 @@ fun GalleryApp() {
             dest = Destination.VIEWER,
             rememberPrevious = true,
             newSelectedMedia = item,
-            newViewerMediaList = safeList
+            newViewerMediaList = safeList,
+            newViewerStoryTitle = null
+        )
+    }
+
+    fun openMemoryInViewer(title: String, items: List<MediaItem>) {
+        if (items.isEmpty()) return
+        val cover = items.first()
+        selectedMedia = cover
+        viewerMediaList = items
+        viewerStoryTitle = title
+        showViewerControls = true
+        showDetails = false
+        scope.launch { viewerTransitionProgress.snapTo(0f) }
+        navigateTo(
+            dest = Destination.VIEWER,
+            rememberPrevious = true,
+            newSelectedMedia = cover,
+            newViewerMediaList = items,
+            newViewerStoryTitle = title
         )
     }
 
@@ -510,6 +535,7 @@ fun GalleryApp() {
                 destination = entry.destination
                 selectedMedia = entry.selectedMedia
                 viewerMediaList = entry.viewerMediaList
+                viewerStoryTitle = entry.viewerStoryTitle
                 mapFocusItem = entry.mapFocusItem
                 albumFilter = entry.albumFilter
                 albumFilterReturnDestination = entry.albumFilterReturnDestination
@@ -518,6 +544,7 @@ fun GalleryApp() {
             albumFilter != null -> {
                 albumFilter = null
                 destination = albumFilterReturnDestination
+                viewerStoryTitle = null
             }
             destination in listOf(
                 Destination.DEVICE_FOLDERS,
@@ -533,6 +560,7 @@ fun GalleryApp() {
             ) -> {
                 destination = Destination.ALBUMS
                 mapFocusItem = null
+                viewerStoryTitle = null
             }
             destination in listOf(
                 Destination.LIBRARY_OVERVIEW,
@@ -541,11 +569,13 @@ fun GalleryApp() {
                 Destination.ABOUT
             ) -> {
                 destination = Destination.SETTINGS
+                viewerStoryTitle = null
             }
             else -> {
                 destination = Destination.HOME
                 mapFocusItem = null
                 selectedMedia = null
+                viewerStoryTitle = null
             }
         }
     }
@@ -800,6 +830,7 @@ fun GalleryApp() {
                         },
                         selectedUris = homeSelectedUris,
                         onSelectionChange = { homeSelectedUris = it },
+                        onOpenMemory = { title, items -> openMemoryInViewer(title, items) },
                         onOpen = { openMediaInViewer(it, visibleMedia) }
                     )
                     Destination.ALBUMS -> AlbumsScreen(
@@ -1111,6 +1142,7 @@ fun GalleryApp() {
             ViewerScreen(
                 item = currentItem,
                 items = itemsForViewer,
+                storyTitle = viewerStoryTitle,
                 defaultOcrLanguages = ocrLanguagesPref,
                 defaultOcrModel = ocrModelPref,
                 favourite = currentItem.uri in favourites,

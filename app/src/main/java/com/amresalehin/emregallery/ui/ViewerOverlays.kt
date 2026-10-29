@@ -5,15 +5,23 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 /**
  * Top and bottom edge gradient shading behind the overlay controls.
@@ -95,6 +103,210 @@ fun ViewerTopAppBar(
             onClick = onToggleFavourite
         )
         ViewerButton(Icons.Default.MoreVert, "More", onMore)
+    }
+}
+
+/**
+ * Story top bar with segmented progress indicators, memory title, and story controls.
+ */
+@Composable
+fun ViewerStoryTopBar(
+    storyTitle: String,
+    currentIndex: Int,
+    itemCount: Int,
+    currentProgress: Float,
+    isFavourite: Boolean,
+    onBack: () -> Unit,
+    onShare: () -> Unit,
+    onToggleFavourite: () -> Unit,
+    onMore: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        // Segmented progress indicator
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            val count = itemCount.coerceAtLeast(1)
+            for (i in 0 until count) {
+                val segmentProgress = when {
+                    i < currentIndex -> 1f
+                    i == currentIndex -> currentProgress.coerceIn(0f, 1f)
+                    else -> 0f
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Color.White.copy(alpha = 0.35f))
+                ) {
+                    if (segmentProgress > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(fraction = segmentProgress)
+                                .background(Color.White)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Header with Back button, Title + subtitle, and action buttons
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ViewerButton(Icons.Default.ArrowBack, "Close memory", onBack)
+            Spacer(Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = storyTitle,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${currentIndex + 1} of $itemCount",
+                    color = Color.White.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.labelSmall
+                )
+            }
+            ViewerButton(Icons.Default.Share, "Share", onShare)
+            ViewerButton(
+                icon = if (isFavourite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                label = "Favourite",
+                onClick = onToggleFavourite
+            )
+            ViewerButton(Icons.Default.MoreVert, "More", onMore)
+        }
+    }
+}
+
+/**
+ * Soft "End of memory" overlay shown after the last photo in a memory.
+ */
+@Composable
+fun EndOfStoryOverlay(
+    storyTitle: String,
+    itemCount: Int,
+    onReplay: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // Auto-dismiss after 6 seconds if left untouched
+    LaunchedEffect(Unit) {
+        delay(6000L)
+        onClose()
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.72f))
+            .clickable(onClick = onClose),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .padding(horizontal = 32.dp)
+                .fillMaxWidth()
+                .clickable(enabled = false) {},
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(34.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Spacer(Modifier.height(18.dp))
+
+                Text(
+                    text = "You're all caught up",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    text = storyTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    text = "$itemCount photos and videos remembered",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onClose,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Done")
+                    }
+
+                    Button(
+                        onClick = onReplay,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Replay, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Replay")
+                    }
+                }
+            }
+        }
     }
 }
 
