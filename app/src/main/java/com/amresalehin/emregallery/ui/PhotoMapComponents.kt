@@ -2,7 +2,6 @@ package com.amresalehin.emregallery.ui
 
 import android.content.Context
 import android.net.Uri
-import android.view.MotionEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,6 +18,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -131,11 +131,12 @@ fun PhotoMapViewContainer(
     selectedMedia: Pair<MediaItem, GeoPoint>? = null,
     onOpenSelected: () -> Unit = {},
     onMapReady: (MapView) -> Unit,
-    onUserMapGesture: () -> Unit = {},
     onBoundsChanged: (BoundingBox?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val latestOnMapReady = rememberUpdatedState(onMapReady)
+    val latestOnBoundsChanged = rememberUpdatedState(onBoundsChanged)
     val heatmapPoints = remember(locatedMedia) { locatedMedia.map { it.second } }
     val heatmapOverlay = remember { PhotoHeatmapOverlay() }
     val selectedMarker = remember { mutableStateOf<Marker?>(null) }
@@ -152,7 +153,9 @@ fun PhotoMapViewContainer(
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)),
                 factory = { ctx ->
                     Configuration.getInstance().userAgentValue = ctx.packageName
+                    val savedCamera = loadSavedPhotoMapCamera(ctx)
                     MapView(ctx).apply {
+                        var cameraInitialized = false
                         clipToOutline = true
                         outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
                         setTileSource(if (mapLayer == "Satellite") PhotoMapTiles.satelliteTileSource() else TileSourceFactory.MAPNIK)
@@ -164,50 +167,48 @@ fun PhotoMapViewContainer(
                         val initialFitZoom = calculateWorldFitZoom(this)
                         minZoomLevel = initialFitZoom
                         controller.setZoom(initialFitZoom)
-                        controller.setCenter(GeoPoint(0.0, 0.0))
-                        addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                        controller.setCenter(WORLD_VIEW_CENTER)
+
+                        // Initialize the camera once after measurement. Indexing never reframes it.
+                        addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
                             val newW = right - left
                             val newH = bottom - top
-                            val oldW = oldRight - oldLeft
-                            val oldH = oldBottom - oldTop
-                            if (newW > 0 && newH > 0 && (newW != oldW || newH != oldH)) {
+                            if (newW > 0 && newH > 0 && !cameraInitialized) {
                                 val fitZoom = calculateWorldFitZoom(this)
-                                minZoomLevel = fitZoom
-                                if (zoomLevelDouble < fitZoom) {
+                                minZoomLevel = if (savedCamera != null) {
+                                    minOf(fitZoom, savedCamera.zoom)
+                                } else {
+                                    fitZoom
+                                }
+                                if (savedCamera != null) {
+                                    controller.setCenter(GeoPoint(savedCamera.latitude, savedCamera.longitude))
+                                    controller.setZoom(savedCamera.zoom)
+                                } else {
+                                    controller.setCenter(WORLD_VIEW_CENTER)
                                     controller.setZoom(fitZoom)
                                 }
+                                cameraInitialized = true
+                                latestOnMapReady.value(this)
+                                latestOnBoundsChanged.value(calculateMapBounds(this, ctx))
+                                invalidate()
                             }
                         }
-                        setOnTouchListener { _, event ->
-                            if (event.actionMasked == MotionEvent.ACTION_MOVE ||
-                                event.actionMasked == MotionEvent.ACTION_POINTER_DOWN
-                            ) {
-                                onUserMapGesture()
-                            }
-                            // Observe gestures only; let MapView retain normal touch handling.
-                            false
-                        }
-                        onMapReady(this)
+
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
-                                onBoundsChanged(calculateMapBounds(this@apply, ctx))
+                                latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
+                                if (cameraInitialized) persistPhotoMapCamera(ctx, this@apply)
                                 return true
                             }
                             override fun onZoom(event: ZoomEvent?): Boolean {
-                                val fitZoom = calculateWorldFitZoom(this@apply)
-                                if (this@apply.zoomLevelDouble < fitZoom) {
-                                    this@apply.controller.setZoom(fitZoom)
-                                }
-                                onBoundsChanged(calculateMapBounds(this@apply, ctx))
+                                latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
+                                if (cameraInitialized) persistPhotoMapCamera(ctx, this@apply)
                                 return true
                             }
                         })
                     }
                 },
                 update = { map ->
-                    onMapReady(map)
-                    val fitZoom = calculateWorldFitZoom(map)
-                    map.minZoomLevel = fitZoom
                     heatmapOverlay.updatePoints(heatmapPoints)
                     if (!map.overlays.contains(heatmapOverlay)) {
                         map.overlays.add(heatmapOverlay)
@@ -227,7 +228,7 @@ fun PhotoMapViewContainer(
                         if (!map.overlays.contains(marker)) map.overlays.add(marker)
                     }
 
-                    map.post { onBoundsChanged(calculateMapBounds(map, context)) }
+                    map.post { latestOnBoundsChanged.value(calculateMapBounds(map, context)) }
                     map.invalidate()
                 }
             )

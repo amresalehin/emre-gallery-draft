@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +32,54 @@ val WORLD_VIEW_BOUNDS = BoundingBox(
     WORLD_VIEW_LAT_SOUTH,
     WORLD_VIEW_LON_WEST
 )
+
+private const val PHOTO_MAP_CAMERA_PREFERENCES = "photo_map_camera"
+private const val CAMERA_LATITUDE_KEY = "latitude"
+private const val CAMERA_LONGITUDE_KEY = "longitude"
+private const val CAMERA_ZOOM_KEY = "zoom"
+
+/** A camera snapshot saved independently of the photo-indexing lifecycle. */
+internal data class SavedPhotoMapCamera(
+    val latitude: Double,
+    val longitude: Double,
+    val zoom: Double
+)
+
+internal fun loadSavedPhotoMapCamera(context: Context): SavedPhotoMapCamera? {
+    val preferences = context.getSharedPreferences(
+        PHOTO_MAP_CAMERA_PREFERENCES,
+        Context.MODE_PRIVATE
+    )
+    val latitude = preferences.getString(CAMERA_LATITUDE_KEY, null)?.toDoubleOrNull()
+        ?: return null
+    val longitude = preferences.getString(CAMERA_LONGITUDE_KEY, null)?.toDoubleOrNull()
+        ?: return null
+    val zoom = preferences.getString(CAMERA_ZOOM_KEY, null)?.toDoubleOrNull()
+        ?: return null
+
+    if (!latitude.isFinite() || latitude !in -90.0..90.0) return null
+    if (!longitude.isFinite() || longitude !in -180.0..180.0) return null
+    if (!zoom.isFinite() || zoom <= 0.0 || zoom > 30.0) return null
+
+    return SavedPhotoMapCamera(latitude, longitude, zoom)
+}
+
+internal fun persistPhotoMapCamera(context: Context, map: MapView) {
+    if (map.width <= 0 || map.height <= 0) return
+
+    val center = map.mapCenter
+    val zoom = map.zoomLevelDouble
+    if (!center.latitude.isFinite() || !center.longitude.isFinite() ||
+        !zoom.isFinite() || zoom <= 0.0
+    ) return
+
+    context.getSharedPreferences(PHOTO_MAP_CAMERA_PREFERENCES, Context.MODE_PRIVATE)
+        .edit()
+        .putString(CAMERA_LATITUDE_KEY, center.latitude.toString())
+        .putString(CAMERA_LONGITUDE_KEY, center.longitude.toString())
+        .putString(CAMERA_ZOOM_KEY, zoom.toString())
+        .apply()
+}
 
 /**
  * Calculates the zoom level required for a single Mercator world frame (256 * 2^z)
@@ -191,17 +240,14 @@ fun PhotoMapScreen(
     }
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
-    var initialWorldFramed by remember(media) { mutableStateOf(false) }
-    var allMediaFramed by remember(media) { mutableStateOf(false) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
-    var userHasMovedMap by remember(media) { mutableStateOf(false) }
     var lastFocusedUri by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(media) {
         viewModel.loadAndScanMedia(media)
     }
 
-    // Direct camera focus for requested item
+    // A requested photo is an explicit navigation action, so it may move the camera.
     LaunchedEffect(focusItem?.uri, mapRef) {
         val requestedItem = focusItem ?: return@LaunchedEffect
         val map = mapRef ?: return@LaunchedEffect
@@ -218,58 +264,17 @@ fun PhotoMapScreen(
                 message = "Cannot focus on \"${requestedItem.name}\": no accessible GPS coordinates found.",
                 duration = SnackbarDuration.Short
             )
-            val points = uiState.locatedMedia.map { it.second }
-            if (!userHasMovedMap && points.isNotEmpty()) {
-                fitPointsToMap(map, points, animated = true)
-            } else if (!userHasMovedMap) {
-                showWorldView(map, animated = true)
-            }
         }
     }
 
-    // Simplified Initial Fit Logic: Two-state rule based on indexing status
-    LaunchedEffect(mapRef, uiState.loading, uiState.locatedMedia.size) {
-        if (focusItem != null) return@LaunchedEffect
-        val map = mapRef ?: return@LaunchedEffect
-
-        if (uiState.loading) {
-            // 1. While Indexing is in Progress:
-            // Fit the entire world view automatically.
-            // Frame the world viewport to fill the container cleanly using the nearest bounding constraint.
-            if (!initialWorldFramed && !userHasMovedMap) {
-                showWorldView(map, animated = false)
-                initialWorldFramed = true
-            }
-        } else {
-            // 2. When All Media / Geotags are Indexed & Cached:
-            // Compute the geographic bounding box of all available geotagged items.
-            // If valid coordinates exist, call fitBounds(allMediaBounds, padding) with standard edge padding.
-            // If no items contain geotags, gracefully fall back to the single world fit.
-            if (!allMediaFramed && !userHasMovedMap) {
-                val geotaggedPoints = uiState.locatedMedia.map { it.second }
-                if (geotaggedPoints.isNotEmpty()) {
-                    val allMediaBounds = computeMediaBoundingBox(geotaggedPoints)
-                    if (allMediaBounds != null) {
-                        if (geotaggedPoints.size == 1) {
-                            focusSinglePhoto(map, geotaggedPoints.first(), animated = initialWorldFramed)
-                        } else {
-                            fitBounds(map, allMediaBounds, animated = initialWorldFramed)
-                        }
-                    } else {
-                        showWorldView(map, animated = initialWorldFramed)
-                    }
-                } else {
-                    showWorldView(map, animated = initialWorldFramed)
-                }
-                allMediaFramed = true
-            }
-        }
-    }
-
+    // Indexing updates data only. Camera state is saved and restored independently.
     DisposableEffect(Unit) {
         onDispose {
-            mapRef?.onPause()
-            mapRef?.onDetach()
+            mapRef?.let { map ->
+                persistPhotoMapCamera(context, map)
+                map.onPause()
+                map.onDetach()
+            }
             mapRef = null
         }
     }
@@ -331,7 +336,6 @@ fun PhotoMapScreen(
                 selectedMedia = selectedMapMedia,
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
                 onMapReady = { map -> mapRef = map },
-                onUserMapGesture = { userHasMovedMap = true },
                 onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
                 modifier = Modifier.weight(1f)
             )
