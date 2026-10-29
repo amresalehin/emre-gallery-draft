@@ -74,6 +74,8 @@ dependencies {
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
     // Native Tesseract engine and its JNI libraries are packaged in the APK.
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
+    // On-device Google ML Kit Text Recognition
+    implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment-ktx:1.8.5")

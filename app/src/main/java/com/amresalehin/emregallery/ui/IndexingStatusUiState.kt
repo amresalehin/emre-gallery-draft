@@ -13,7 +13,8 @@ data class OcrState(
     val isRunning: Boolean = false,
     val isPaused: Boolean = false,
     val itemsPerMinute: Int = 0,
-    val model: String = "fast"
+    val model: String = "fast",
+    val engine: String = "tesseract"
 )
 
 data class FaceFindingState(

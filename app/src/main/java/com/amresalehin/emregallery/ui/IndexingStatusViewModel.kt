@@ -67,6 +67,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     private var currentPhotoUris: List<String> = emptyList()
     private var currentOcrLanguages: Set<String> = emptySet()
     private var currentOcrModel: String = "fast"
+    private var currentOcrEngine: String = "tesseract"
 
     var rescanAllRequested: Boolean = false
         private set
@@ -85,21 +86,32 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         startServiceMonitoring()
     }
 
-    fun setMedia(media: List<MediaItem>, ocrLanguages: Set<String>, ocrModel: String = "fast") {
+    fun setMedia(
+        media: List<MediaItem>,
+        ocrLanguages: Set<String>,
+        ocrModel: String = "fast",
+        ocrEngine: String = "tesseract"
+    ) {
         val photos = media.filterNot { it.isVideo }
         val uris = photos.map { it.uri }
         currentPhotos = photos
         currentPhotoUris = uris
         currentOcrLanguages = ocrLanguages
         currentOcrModel = ocrModel
+        currentOcrEngine = ocrEngine
 
-        _uiState.update { it.copy(totalPhotos = photos.size, ocr = it.ocr.copy(model = ocrModel)) }
+        _uiState.update { it.copy(totalPhotos = photos.size, ocr = it.ocr.copy(model = ocrModel, engine = ocrEngine)) }
         refreshCounts()
     }
 
     fun setOcrModel(modelId: String) {
         currentOcrModel = modelId
         _uiState.update { it.copy(ocr = it.ocr.copy(model = modelId)) }
+    }
+
+    fun setOcrEngine(engineId: String) {
+        currentOcrEngine = engineId
+        _uiState.update { it.copy(ocr = it.ocr.copy(engine = engineId)) }
     }
 
     fun updateEngineState() {
@@ -925,7 +937,13 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         ocrStartTimeMillis = System.currentTimeMillis()
         ocrStartProcessed = state.ocr.processed
         _uiState.update { it.copy(ocr = it.ocr.copy(isRunning = true, isPaused = false)) }
-        IndexingForegroundService.startOcr(context, currentOcrLanguages.toList(), rescanAll = false, modelId = currentOcrModel)
+        IndexingForegroundService.startOcr(
+            context = context,
+            languages = currentOcrLanguages.toList(),
+            rescanAll = false,
+            modelId = currentOcrModel,
+            engineId = currentOcrEngine
+        )
     }
 
     fun stopOcr() {
@@ -937,6 +955,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         ocrStartTimeMillis = System.currentTimeMillis()
         ocrStartProcessed = 0
         _uiState.update { it.copy(ocr = it.ocr.copy(isRunning = true, isPaused = false, processed = 0)) }
-        IndexingForegroundService.startOcr(context, currentOcrLanguages.toList(), rescanAll = true, modelId = currentOcrModel)
+        IndexingForegroundService.startOcr(
+            context = context,
+            languages = currentOcrLanguages.toList(),
+            rescanAll = true,
+            modelId = currentOcrModel,
+            engineId = currentOcrEngine
+        )
     }
 }

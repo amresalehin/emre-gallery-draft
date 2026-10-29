@@ -1503,6 +1503,13 @@ fun ActionsTabContent(
                                 engineExpanded = false
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text("Google ML Kit") },
+                            onClick = {
+                                selectedEngine = "Google ML Kit"
+                                engineExpanded = false
+                            }
+                        )
                     }
                 }
 
@@ -1521,7 +1528,7 @@ fun ActionsTabContent(
                         modifier = Modifier.weight(1f)
                     ) {
                         OutlinedTextField(
-                            value = if (isBest) "Best" else "Fast",
+                            value = if (isTesseract) (if (isBest) "Best" else "Fast") else "On-Device",
                             onValueChange = {},
                             readOnly = true,
                             enabled = isTesseract,
@@ -1567,7 +1574,7 @@ fun ActionsTabContent(
                         modifier = Modifier.weight(1f)
                     ) {
                         OutlinedTextField(
-                            value = currentLangName,
+                            value = if (isTesseract) currentLangName else "Auto (Latin)",
                             onValueChange = {},
                             readOnly = true,
                             enabled = isTesseract,
@@ -1609,11 +1616,11 @@ fun ActionsTabContent(
                 ) {
                     Button(
                         onClick = {
-                            if (selectedEngine == "Tesseract") {
-                                coroutineScope.launch { detailsState.runOcr() }
+                            coroutineScope.launch {
+                                detailsState.runOcr(engine = if (selectedEngine == "Google ML Kit") "google_mlkit" else "tesseract")
                             }
                         },
-                        enabled = !item.isVideo && !detailsState.ocrBusy && selectedEngine == "Tesseract",
+                        enabled = !item.isVideo && !detailsState.ocrBusy,
                         shape = RoundedCornerShape(20.dp),
                         contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp)
                     ) {

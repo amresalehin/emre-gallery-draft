@@ -72,16 +72,21 @@ class ViewerDetailsState(
         }
     }
 
-    suspend fun runOcr() {
-        if (item.isVideo || ocrBusy || ocrLanguages.isEmpty()) return
+    suspend fun runOcr(engine: String = "tesseract") {
+        val isMlKit = engine.equals("google_mlkit", ignoreCase = true) || engine.equals("mlkit", ignoreCase = true)
+        if (item.isVideo || ocrBusy || (!isMlKit && ocrLanguages.isEmpty())) return
         ocrBusy = true
         ocrError = null
         ocrText = ""
         val result = withContext(Dispatchers.IO) {
             runCatching {
                 val mediaUri = Uri.parse(item.uri)
-                val model = com.amresalehin.emregallery.ocr.TesseractModel.fromId(ocrModel)
-                val recognized = TesseractOcr.recognize(context, mediaUri, ocrLanguages.toList(), model)
+                val recognized = if (isMlKit) {
+                    com.amresalehin.emregallery.ocr.MlKitOcr.recognize(context, mediaUri)
+                } else {
+                    val model = com.amresalehin.emregallery.ocr.TesseractModel.fromId(ocrModel)
+                    TesseractOcr.recognize(context, mediaUri, ocrLanguages.toList(), model)
+                }
                 runCatching { TesseractOcr.saveCachedResult(context, mediaUri, recognized) }
                 recognized
             }

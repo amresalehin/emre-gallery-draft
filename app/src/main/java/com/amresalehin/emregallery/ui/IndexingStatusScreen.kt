@@ -46,7 +46,9 @@ fun IndexingStatusScreen(
     media: List<MediaItem>,
     ocrLanguages: Set<String>,
     ocrModel: String = "fast",
+    ocrEngine: String = "tesseract",
     onModelChange: ((String) -> Unit)? = null,
+    onEngineChange: ((String) -> Unit)? = null,
     onToggleLanguage: ((String) -> Unit)? = null,
     onOpenMap: (() -> Unit)? = null,
     onBack: () -> Unit,
@@ -79,8 +81,8 @@ fun IndexingStatusScreen(
         }
     }
 
-    LaunchedEffect(media, ocrLanguages, ocrModel) {
-        viewModel.setMedia(media, ocrLanguages, ocrModel)
+    LaunchedEffect(media, ocrLanguages, ocrModel, ocrEngine) {
+        viewModel.setMedia(media, ocrLanguages, ocrModel, ocrEngine)
     }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
@@ -120,6 +122,10 @@ fun IndexingStatusScreen(
                 onToggleOcr = viewModel::toggleOcr,
                 onStopOcr = viewModel::stopOcr,
                 onReindexOcr = viewModel::clearAndReindexOcr,
+                onEngineChange = { newEngine ->
+                    viewModel.setOcrEngine(newEngine)
+                    onEngineChange?.invoke(newEngine)
+                },
                 onModelChange = { newModel ->
                     viewModel.setOcrModel(newModel)
                     onModelChange?.invoke(newModel)

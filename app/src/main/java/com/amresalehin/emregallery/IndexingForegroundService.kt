@@ -108,9 +108,10 @@ class IndexingForegroundService : Service() {
             try {
                 when (action) {
                     ACTION_START_OCR -> runOcr(
-                        intent?.getStringArrayListExtra(EXTRA_LANGUAGES)?.ifEmpty { arrayListOf("eng") } ?: arrayListOf("eng"),
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
-                        intent?.getStringExtra(EXTRA_MODEL) ?: "fast"
+                        languages = intent?.getStringArrayListExtra(EXTRA_LANGUAGES)?.ifEmpty { arrayListOf("eng") } ?: arrayListOf("eng"),
+                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
+                        modelId = intent?.getStringExtra(EXTRA_MODEL) ?: "fast",
+                        engineId = intent?.getStringExtra(EXTRA_ENGINE_ID) ?: "tesseract"
                     )
                     ACTION_START_FACE -> runFace(
                         rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
@@ -142,8 +143,14 @@ class IndexingForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    private suspend fun runOcr(languages: List<String>, rescanAll: Boolean, modelId: String = "fast") {
+    private suspend fun runOcr(
+        languages: List<String>,
+        rescanAll: Boolean,
+        modelId: String = "fast",
+        engineId: String = "tesseract"
+    ) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
+        val isMlKit = engineId.equals("google_mlkit", ignoreCase = true) || engineId.equals("mlkit", ignoreCase = true)
         val model = com.amresalehin.emregallery.ocr.TesseractModel.fromId(modelId)
         val photos = loadPhotos()
         if (rescanAll) withContext(Dispatchers.IO) { TesseractOcr.clearCachedResults(this@IndexingForegroundService) }
@@ -151,7 +158,8 @@ class IndexingForegroundService : Service() {
         val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
         pauseSignal.value = initialPaused
         updateState(task = TASK_OCR, running = true, paused = initialPaused, processed = photos.size - pending.size, total = photos.size, error = null)
-        postProgress("OCR indexing", "Preparing ${pending.size} images (${model.shortName})", photos.size - pending.size, photos.size)
+        val engineLabel = if (isMlKit) "Google ML Kit" else model.shortName
+        postProgress("OCR indexing", "Preparing ${pending.size} images ($engineLabel)", photos.size - pending.size, photos.size)
         var completed = photos.size - pending.size
         // Unconstrained operation: do not artificially clamp cooldown to at least 30ms.
         // Uses the configured throttle cooldown (0ms for unconstrained/turbo).
@@ -160,8 +168,13 @@ class IndexingForegroundService : Service() {
             awaitResume()
             currentCoroutineContext().ensureActive()
             try {
-                val text = TesseractOcr.recognize(this, Uri.parse(item.uri), languages, model)
-                TesseractOcr.saveCachedResult(this, Uri.parse(item.uri), text)
+                val mediaUri = Uri.parse(item.uri)
+                val text = if (isMlKit) {
+                    com.amresalehin.emregallery.ocr.MlKitOcr.recognize(this, mediaUri)
+                } else {
+                    TesseractOcr.recognize(this, mediaUri, languages, model)
+                }
+                TesseractOcr.saveCachedResult(this, mediaUri, text)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -170,7 +183,8 @@ class IndexingForegroundService : Service() {
             completed++
             updateState(processed = completed, total = photos.size)
             if (completed % 4 == 0 || completed == photos.size) {
-                postProgress("OCR indexing", "Processed $completed of ${photos.size} images (${model.title})", completed, photos.size)
+                val titleLabel = if (isMlKit) "Google ML Kit" else model.title
+                postProgress("OCR indexing", "Processed $completed of ${photos.size} images ($titleLabel)", completed, photos.size)
             }
             if (cooldown > 0L) {
                 delay(cooldown)
@@ -564,12 +578,14 @@ class IndexingForegroundService : Service() {
             context: Context,
             languages: List<String>,
             rescanAll: Boolean = false,
-            modelId: String = "fast"
+            modelId: String = "fast",
+            engineId: String = "tesseract"
         ) =
             command(context, ACTION_START_OCR) {
                 putStringArrayListExtra(EXTRA_LANGUAGES, ArrayList(languages))
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
                 putExtra(EXTRA_MODEL, modelId)
+                putExtra(EXTRA_ENGINE_ID, engineId)
             }
 
         fun startFace(

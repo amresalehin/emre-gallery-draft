@@ -34,6 +34,7 @@ fun OcrIndexingCard(
     onToggleOcr: () -> Unit,
     onStopOcr: () -> Unit,
     onReindexOcr: () -> Unit,
+    onEngineChange: (String) -> Unit = {},
     onModelChange: (String) -> Unit,
     onToggleLanguage: (String) -> Unit,
     onClearCache: () -> Unit,
@@ -191,7 +192,69 @@ fun OcrIndexingCard(
                 )
             }
 
-            // Row 1: Model
+            // Row 1: Engine selection (Tesseract vs Google ML Kit)
+            val isMlKit = ocrState.engine.equals("google_mlkit", ignoreCase = true) || ocrState.engine.equals("mlkit", ignoreCase = true)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Memory,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Engine",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        if (isMlKit) "Google ML Kit" else "Tesseract OCR",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier
+                        .height(38.dp)
+                ) {
+                    SegmentedButton(
+                        selected = !isMlKit,
+                        onClick = { onEngineChange("tesseract") },
+                        enabled = !ocrState.isRunning,
+                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                        icon = {}
+                    ) {
+                        Text(
+                            "Tesseract",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                    SegmentedButton(
+                        selected = isMlKit,
+                        onClick = { onEngineChange("google_mlkit") },
+                        enabled = !ocrState.isRunning,
+                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                        icon = {}
+                    ) {
+                        Text(
+                            "ML Kit",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+            // Row 2: Model
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -203,38 +266,75 @@ fun OcrIndexingCard(
                     modifier = Modifier.size(22.dp)
                 )
                 Spacer(Modifier.width(14.dp))
-                Text(
-                    "Model",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier.width(180.dp).height(38.dp)
-                ) {
-                    SegmentedButton(
-                        selected = !isBestModel,
-                        onClick = { onModelChange("fast") },
-                        enabled = !ocrState.isRunning,
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                        icon = {}
-                    ) {
-                        Text("Fast", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Model",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isMlKit) {
+                        Text(
+                            "On-Device Neural (Latin)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                    SegmentedButton(
-                        selected = isBestModel,
-                        onClick = { onModelChange("best") },
-                        enabled = !ocrState.isRunning,
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                        icon = {}
+                }
+
+                if (!isMlKit) {
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier.width(180.dp).height(38.dp)
                     ) {
-                        Text("Best", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        SegmentedButton(
+                            selected = !isBestModel,
+                            onClick = { onModelChange("fast") },
+                            enabled = !ocrState.isRunning,
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                            icon = {}
+                        ) {
+                            Text("Fast", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        }
+                        SegmentedButton(
+                            selected = isBestModel,
+                            onClick = { onModelChange("best") },
+                            enabled = !ocrState.isRunning,
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                            icon = {}
+                        ) {
+                            Text("Best", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                        modifier = Modifier.height(38.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Bolt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "On-Device",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
 
-            // Row 2: Language
+            // Row 3: Language
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -246,17 +346,112 @@ fun OcrIndexingCard(
                     modifier = Modifier.size(22.dp)
                 )
                 Spacer(Modifier.width(14.dp))
-                Text(
-                    "Language",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Language",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isMlKit) {
+                        Text(
+                            "English, Spanish, French, etc.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
-                Box {
+                if (!isMlKit) {
+                    Box {
+                        Surface(
+                            onClick = { languageMenuExpanded = true },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                            modifier = Modifier.height(38.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    displayLanguageLabel,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Select language",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = languageMenuExpanded,
+                            onDismissRequest = { languageMenuExpanded = false },
+                            modifier = Modifier.widthIn(min = 220.dp, max = 280.dp)
+                        ) {
+                            TesseractOcr.supportedLanguages.forEach { (name, code) ->
+                                val isSelected = code in ocrLanguages
+                                val isBundled = remember(code, activeModel) {
+                                    TesseractOcr.isLanguageBundledInAssets(context, code, activeModel)
+                                }
+                                val isInstalled = remember(code, activeModel, downloadingLanguageCode) {
+                                    TesseractOcr.isLanguageInstalled(context, code, activeModel)
+                                }
+                                val isDownloadingThis = downloadingLanguageCode == code
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                            Text(code, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    },
+                                    trailingIcon = {
+                                        when {
+                                            isDownloadingThis -> {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(18.dp),
+                                                    strokeWidth = 2.dp
+                                                )
+                                            }
+                                            isSelected -> {
+                                                Icon(
+                                                    Icons.Default.Check,
+                                                    contentDescription = "Selected",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                            !isBundled && !isInstalled -> {
+                                                Icon(
+                                                    Icons.Default.CloudDownload,
+                                                    contentDescription = "Download language",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        if (!isBundled && !isInstalled) {
+                                            downloadAndSelectLanguage(code)
+                                        } else {
+                                            onToggleLanguage(code)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                } else {
                     Surface(
-                        onClick = { languageMenuExpanded = true },
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
@@ -266,79 +461,46 @@ fun OcrIndexingCard(
                             modifier = Modifier.padding(horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
                             Text(
-                                displayLanguageLabel,
+                                "Auto Detect",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Icon(
-                                Icons.Default.KeyboardArrowDown,
-                                contentDescription = "Select language",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     }
+                }
+            }
 
-                    DropdownMenu(
-                        expanded = languageMenuExpanded,
-                        onDismissRequest = { languageMenuExpanded = false },
-                        modifier = Modifier.widthIn(min = 220.dp, max = 280.dp)
+            if (isMlKit) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TesseractOcr.supportedLanguages.forEach { (name, code) ->
-                            val isSelected = code in ocrLanguages
-                            val isBundled = remember(code, activeModel) {
-                                TesseractOcr.isLanguageBundledInAssets(context, code, activeModel)
-                            }
-                            val isInstalled = remember(code, activeModel, downloadingLanguageCode) {
-                                TesseractOcr.isLanguageInstalled(context, code, activeModel)
-                            }
-                            val isDownloadingThis = downloadingLanguageCode == code
-
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                                        Text(code, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                },
-                                trailingIcon = {
-                                    when {
-                                        isDownloadingThis -> {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(18.dp),
-                                                strokeWidth = 2.dp
-                                            )
-                                        }
-                                        isSelected -> {
-                                            Icon(
-                                                Icons.Default.Check,
-                                                contentDescription = "Selected",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                        !isBundled && !isInstalled -> {
-                                            Icon(
-                                                Icons.Default.CloudDownload,
-                                                contentDescription = "Download language",
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    if (!isBundled && !isInstalled) {
-                                        downloadAndSelectLanguage(code)
-                                    } else {
-                                        onToggleLanguage(code)
-                                    }
-                                }
-                            )
-                        }
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            "Google ML Kit runs entirely on-device with zero downloads required. Fast neural text recognition across Latin scripts.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }

@@ -35,6 +35,7 @@ class PreferencesRepository(private val context: Context) {
     private val gridStyleKey = stringPreferencesKey("grid_style")
     private val ocrLanguagesKey = stringSetPreferencesKey("ocr_languages")
     private val ocrModelKey = stringPreferencesKey("ocr_model")
+    private val ocrEngineKey = stringPreferencesKey("ocr_engine")
     private val mediaTagsKey = stringPreferencesKey("media_custom_tags")
     private val mediaPeopleKey = stringPreferencesKey("media_custom_people")
     private val homeScrollIndexKey = intPreferencesKey("home_scroll_index")
@@ -147,6 +148,10 @@ class PreferencesRepository(private val context: Context) {
 
     val ocrModel: Flow<String> = context.galleryDataStore.data.map {
         it[ocrModelKey] ?: "fast"
+    }.distinctUntilChanged()
+
+    val ocrEngine: Flow<String> = context.galleryDataStore.data.map {
+        it[ocrEngineKey] ?: "tesseract"
     }.distinctUntilChanged()
 
     val customAlbums: Flow<List<CustomAlbum>> = context.galleryDataStore.data.map { prefs ->
@@ -451,6 +456,10 @@ class PreferencesRepository(private val context: Context) {
 
     suspend fun setOcrModel(modelId: String) {
         context.galleryDataStore.edit { it[ocrModelKey] = modelId }
+    }
+
+    suspend fun setOcrEngine(engine: String) {
+        context.galleryDataStore.edit { it[ocrEngineKey] = engine }
     }
 
     suspend fun addTagForMedia(uri: String, tag: String) {

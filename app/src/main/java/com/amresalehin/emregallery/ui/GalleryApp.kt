@@ -113,6 +113,7 @@ fun GalleryApp() {
     val gridStylePref by prefs.gridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
     val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
     val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
+    val ocrEnginePref by prefs.ocrEngine.collectAsStateWithLifecycle(initialValue = "tesseract")
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -1098,7 +1099,9 @@ fun GalleryApp() {
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
                         ocrLanguages = ocrLanguagesPref,
                         ocrModel = ocrModelPref,
+                        ocrEngine = ocrEnginePref,
                         onModelChange = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
+                        onEngineChange = { newEngine -> scope.launch { prefs.setOcrEngine(newEngine) } },
                         onToggleLanguage = { code ->
                             val updated = ocrLanguagesPref.toMutableSet()
                             if (code in updated) {
