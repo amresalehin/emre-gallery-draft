@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.ui
 
 import android.net.Uri
+import com.amresalehin.emregallery.data.StoryGroup
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -258,7 +259,7 @@ fun HomeScreenSkeleton(
 }
 
 @Composable
-fun MemoriesStrip(media: List<MediaItem>, onOpenMemory: (title: String, items: List<MediaItem>) -> Unit) {
+fun MemoriesStrip(media: List<MediaItem>, onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit) {
     val today = remember { Calendar.getInstance() }
     val currentYear = today.get(Calendar.YEAR)
     val todayMonth = today.get(Calendar.MONTH)
@@ -335,7 +336,10 @@ fun MemoriesStrip(media: List<MediaItem>, onOpenMemory: (title: String, items: L
                         .clickable(
                             interactionSource = memInteractionSource,
                             indication = ripple(bounded = true),
-                            onClick = { onOpenMemory(title, storyMedia) }
+                            onClick = {
+                                val storyGroups = stories.map { StoryGroup(it.first, it.second) }
+                                onOpenMemory(storyGroups, index)
+                            }
                         )
                 ) {
                     val context = LocalContext.current

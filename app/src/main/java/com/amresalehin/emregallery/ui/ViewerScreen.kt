@@ -12,11 +12,13 @@ import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import com.amresalehin.emregallery.data.StoryGroup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -87,6 +89,8 @@ fun ViewerScreen(
     items: List<MediaItem>,
     customAlbums: List<CustomAlbum>,
     storyTitle: String? = null,
+    storyGroups: List<StoryGroup> = emptyList(),
+    initialStoryIndex: Int = 0,
     defaultOcrLanguages: Set<String> = setOf("eng"),
     defaultOcrModel: String = "fast",
     customTags: Set<String>,
@@ -180,54 +184,143 @@ fun ViewerScreen(
         dismissOffsetY.snapTo(0f)
     }
 
+    // Story mode state
+    val isStoryMode = storyTitle != null || storyGroups.isNotEmpty()
+    var activeStoryIndex by remember(storyGroups, initialStoryIndex) {
+        mutableIntStateOf(initialStoryIndex.coerceIn(0, (storyGroups.size - 1).coerceAtLeast(0)))
+    }
+
+    val currentStory = remember(storyGroups, activeStoryIndex, storyTitle, items) {
+        if (storyGroups.isNotEmpty()) {
+            storyGroups.getOrElse(activeStoryIndex.coerceIn(0, storyGroups.size - 1)) {
+                StoryGroup(storyTitle ?: "", items)
+            }
+        } else {
+            StoryGroup(storyTitle ?: "", items)
+        }
+    }
+    val currentStoryTitle = currentStory.title
+    val currentStoryItems = currentStory.items.ifEmpty { items }
+    val allStoryItems = remember(storyGroups, items) {
+        if (storyGroups.isNotEmpty()) storyGroups.flatMap { it.items }.ifEmpty { items } else items
+    }
+
     // Horizontal pager for media browsing
-    val initialIndex = remember(items, item.uri) {
-        val idx = items.indexOfFirst { it.uri == item.uri }
+    val initialIndex = remember(items, currentStoryItems, isStoryMode, item.uri) {
+        val list = if (isStoryMode) currentStoryItems else items
+        val idx = list.indexOfFirst { it.uri == item.uri }
         if (idx >= 0) idx else 0
     }
     val pagerState = rememberPagerState(
         initialPage = initialIndex,
-        pageCount = { items.size }
+        pageCount = { if (isStoryMode) currentStoryItems.size else items.size }
     )
 
-    // Synchronize pager page settlement with parent selected media
-    LaunchedEffect(pagerState.currentPage) {
-        val current = items.getOrNull(pagerState.currentPage)
-        if (current != null && current.uri != item.uri) {
-            onOpenNeighbor(current)
-            ThumbnailBoundsTracker.activeViewerUri = current.uri
-        }
-    }
-
-    // Story mode state
-    val isStoryMode = storyTitle != null
     var storyProgress by remember { mutableFloatStateOf(0f) }
     var isStoryHolding by remember { mutableStateOf(false) }
     var showEndOfStory by remember { mutableStateOf(false) }
 
-    // Reset story progress on page change
-    LaunchedEffect(pagerState.currentPage) {
-        storyProgress = 0f
-        showEndOfStory = false
+    // When moving between story groups, reset pager position and notify neighbor
+    LaunchedEffect(activeStoryIndex) {
+        if (isStoryMode) {
+            storyProgress = 0f
+            if (pagerState.currentPage != 0) {
+                pagerState.scrollToPage(0)
+            }
+            val first = currentStoryItems.firstOrNull()
+            if (first != null && first.uri != item.uri) {
+                onOpenNeighbor(first)
+                ThumbnailBoundsTracker.activeViewerUri = first.uri
+            }
+        }
+    }
+
+    // Synchronize pager page settlement with parent selected media only when page has completely settled
+    LaunchedEffect(pagerState, currentStoryItems) {
+        snapshotFlow { pagerState.settledPage }.collect { settledPage ->
+            storyProgress = 0f
+            val activeList = if (isStoryMode) currentStoryItems else items
+            val current = activeList.getOrNull(settledPage)
+            if (current != null && current.uri != item.uri) {
+                onOpenNeighbor(current)
+                ThumbnailBoundsTracker.activeViewerUri = current.uri
+            }
+        }
+    }
+
+    val stepNext: () -> Unit = {
+        if (!showEndOfStory && !isClosing && !pagerState.isScrollInProgress) {
+            val activeList = if (isStoryMode) currentStoryItems else items
+            if (pagerState.currentPage < activeList.size - 1) {
+                val targetPage = pagerState.currentPage + 1
+                storyProgress = 0f
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(
+                        page = targetPage,
+                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+                    )
+                }
+            } else {
+                // Reached last photo of current story. Check if more stories exist in sequence
+                if (isStoryMode && activeStoryIndex < storyGroups.size - 1) {
+                    activeStoryIndex++
+                } else {
+                    // All memories have finished playing
+                    showEndOfStory = true
+                }
+            }
+        }
+    }
+
+    val stepPrevious: () -> Unit = {
+        if (!showEndOfStory && !isClosing && !pagerState.isScrollInProgress) {
+            if (pagerState.currentPage > 0) {
+                val targetPage = pagerState.currentPage - 1
+                storyProgress = 0f
+                coroutineScope.launch {
+                    pagerState.animateScrollToPage(
+                        page = targetPage,
+                        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing)
+                    )
+                }
+            } else {
+                // At first photo of current story: return to previous story's last photo if available
+                if (isStoryMode && activeStoryIndex > 0) {
+                    val prevStoryIndex = activeStoryIndex - 1
+                    val prevStoryItems = storyGroups[prevStoryIndex].items
+                    activeStoryIndex = prevStoryIndex
+                    storyProgress = 0f
+                    coroutineScope.launch {
+                        pagerState.scrollToPage((prevStoryItems.size - 1).coerceAtLeast(0))
+                    }
+                }
+            }
+        }
     }
 
     // Auto-advance story timer (~4.5s per photo, synchronized with video playback for videos)
     if (isStoryMode) {
-        val isCurrentItemVideo = item.isVideo
+        val currentMediaList = currentStoryItems
+        val currentActiveItem = currentMediaList.getOrNull(pagerState.currentPage) ?: item
+        val isCurrentItemVideo = currentActiveItem.isVideo
         val isPaused = isStoryHolding || showDetails || showMore || confirmMoveToBin || confirmPermanentDelete || isCurrentZoomed || isClosing || showEndOfStory || (isCurrentItemVideo && !videoState.isPlaying)
 
-        LaunchedEffect(pagerState.currentPage, isPaused, isCurrentItemVideo, videoState.durationMs, videoState.positionMs) {
-            if (showEndOfStory || isClosing) return@LaunchedEffect
+        LaunchedEffect(
+            pagerState.settledPage,
+            activeStoryIndex,
+            isPaused,
+            isCurrentItemVideo,
+            videoState.durationMs,
+            videoState.positionMs,
+            videoState.isPlaying
+        ) {
+            if (showEndOfStory || isClosing || pagerState.isScrollInProgress) return@LaunchedEffect
 
             if (isCurrentItemVideo) {
                 if (videoState.durationMs > 0L) {
                     storyProgress = (videoState.positionMs.toFloat() / videoState.durationMs.toFloat()).coerceIn(0f, 1f)
                     if (videoState.positionMs >= videoState.durationMs - 150L && videoState.durationMs > 500L) {
-                        if (pagerState.currentPage < items.size - 1) {
-                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                        } else {
-                            showEndOfStory = true
-                        }
+                        stepNext()
                     }
                 }
             } else {
@@ -240,11 +333,7 @@ fun ViewerScreen(
                         val newProgress = (startProgress + elapsed / totalDurationMs).coerceIn(0f, 1f)
                         storyProgress = newProgress
                         if (newProgress >= 1f) {
-                            if (pagerState.currentPage < items.size - 1) {
-                                pagerState.animateScrollToPage(pagerState.currentPage + 1)
-                            } else {
-                                showEndOfStory = true
-                            }
+                            stepNext()
                             break
                         }
                         delay(16L)
@@ -254,32 +343,13 @@ fun ViewerScreen(
         }
     }
 
-    val stepPrevious: () -> Unit = {
-        showEndOfStory = false
-        storyProgress = 0f
-        if (pagerState.currentPage > 0) {
-            coroutineScope.launch {
-                pagerState.animateScrollToPage(pagerState.currentPage - 1)
-            }
-        }
-    }
-
-    val stepNext: () -> Unit = {
-        if (pagerState.currentPage < items.size - 1) {
-            storyProgress = 0f
-            coroutineScope.launch {
-                pagerState.animateScrollToPage(pagerState.currentPage + 1)
-            }
-        } else {
-            showEndOfStory = true
-        }
-    }
-
-    // Scroll to target page if parent changes selected media
+    // Scroll to target page if parent changes selected media (non-story mode only)
     LaunchedEffect(item.uri) {
-        val targetIndex = items.indexOfFirst { it.uri == item.uri }
-        if (targetIndex >= 0 && targetIndex != pagerState.currentPage) {
-            pagerState.scrollToPage(targetIndex)
+        if (!isStoryMode && !pagerState.isScrollInProgress) {
+            val targetIndex = items.indexOfFirst { it.uri == item.uri }
+            if (targetIndex >= 0 && targetIndex != pagerState.currentPage) {
+                pagerState.scrollToPage(targetIndex)
+            }
         }
     }
 
@@ -431,9 +501,14 @@ fun ViewerScreen(
                         clip = p < 0.99f || dismissFraction > 0.02f
                         shape = RoundedCornerShape(cornerRadius)
                     },
-                key = { pageIndex -> items.getOrNull(pageIndex)?.uri ?: pageIndex.toString() }
+                key = { pageIndex ->
+                    val activeList = if (isStoryMode) currentStoryItems else items
+                    val uri = activeList.getOrNull(pageIndex)?.uri ?: pageIndex.toString()
+                    if (isStoryMode) "${activeStoryIndex}_$uri" else uri
+                }
             ) { pageIndex ->
-                val currentItem = items.getOrNull(pageIndex) ?: item
+                val activeList = if (isStoryMode) currentStoryItems else items
+                val currentItem = activeList.getOrNull(pageIndex) ?: item
                 val isCurrent = pageIndex == pagerState.currentPage
 
                 ZoomableMediaItem(
@@ -531,9 +606,9 @@ fun ViewerScreen(
                         modifier = Modifier.align(Alignment.TopCenter)
                     ) {
                         ViewerStoryTopBar(
-                            storyTitle = storyTitle,
+                            storyTitle = currentStoryTitle,
                             currentIndex = pagerState.currentPage,
-                            itemCount = items.size,
+                            itemCount = currentStoryItems.size,
                             currentProgress = storyProgress,
                             isFavourite = favourite,
                             onBack = { initiateClose() },
@@ -654,13 +729,15 @@ fun ViewerScreen(
                 )
             }
 
-            // Soft "End of memory" overlay
+            // End-of-memory constellation screen
             if (isStoryMode && showEndOfStory && !isClosing) {
                 EndOfStoryOverlay(
-                    storyTitle = storyTitle,
-                    itemCount = items.size,
+                    storyItems = allStoryItems,
+                    storyTitle = currentStoryTitle,
+                    itemCount = allStoryItems.size,
                     onReplay = {
                         showEndOfStory = false
+                        activeStoryIndex = 0
                         storyProgress = 0f
                         coroutineScope.launch {
                             pagerState.scrollToPage(0)

@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import android.Manifest
 import android.os.Build
+import com.amresalehin.emregallery.data.StoryGroup
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,7 +65,7 @@ fun HomeScreen(
     onAddToAlbum: ((Set<String>) -> Unit)? = null,
     selectedUris: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
-    onOpenMemory: (title: String, items: List<MediaItem>) -> Unit = { _, _ -> },
+    onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current

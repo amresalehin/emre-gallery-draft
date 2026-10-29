@@ -55,12 +55,15 @@ import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
+import com.amresalehin.emregallery.data.StoryGroup
 
 data class NavBackStackEntry(
     val destination: Destination,
     val selectedMedia: MediaItem? = null,
     val viewerMediaList: List<MediaItem> = emptyList(),
     val viewerStoryTitle: String? = null,
+    val viewerStories: List<StoryGroup> = emptyList(),
+    val currentStoryIndex: Int = 0,
     val mapFocusItem: MediaItem? = null,
     val albumFilter: String? = null,
     val albumFilterReturnDestination: Destination = Destination.ALBUMS
@@ -85,6 +88,8 @@ fun GalleryApp() {
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
     var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var viewerStoryTitle by remember { mutableStateOf<String?>(null) }
+    var viewerStories by remember { mutableStateOf<List<StoryGroup>>(emptyList()) }
+    var currentStoryIndex by remember { mutableIntStateOf(0) }
     var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
     val backStack = remember { mutableStateListOf<NavBackStackEntry>() }
     val viewerTransitionProgress = remember { Animatable(0f) }
@@ -450,7 +455,9 @@ fun GalleryApp() {
         newSelectedMedia: MediaItem? = selectedMedia,
         newMapFocusItem: MediaItem? = mapFocusItem,
         newViewerMediaList: List<MediaItem> = viewerMediaList,
-        newViewerStoryTitle: String? = if (dest == Destination.VIEWER) viewerStoryTitle else null
+        newViewerStoryTitle: String? = if (dest == Destination.VIEWER) viewerStoryTitle else null,
+        newViewerStories: List<StoryGroup> = if (dest == Destination.VIEWER) viewerStories else emptyList(),
+        newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -464,6 +471,8 @@ fun GalleryApp() {
                     selectedMedia = selectedMedia,
                     viewerMediaList = viewerMediaList,
                     viewerStoryTitle = viewerStoryTitle,
+                    viewerStories = viewerStories,
+                    currentStoryIndex = currentStoryIndex,
                     mapFocusItem = mapFocusItem,
                     albumFilter = albumFilter,
                     albumFilterReturnDestination = albumFilterReturnDestination
@@ -476,6 +485,8 @@ fun GalleryApp() {
         mapFocusItem = newMapFocusItem
         viewerMediaList = newViewerMediaList
         viewerStoryTitle = newViewerStoryTitle
+        viewerStories = newViewerStories
+        currentStoryIndex = newCurrentStoryIndex
     }
 
     fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
@@ -483,6 +494,8 @@ fun GalleryApp() {
         selectedMedia = item
         viewerMediaList = safeList
         viewerStoryTitle = null
+        viewerStories = emptyList()
+        currentStoryIndex = 0
         showViewerControls = false
         showDetails = false
         scope.launch { viewerTransitionProgress.snapTo(0f) }
@@ -491,16 +504,22 @@ fun GalleryApp() {
             rememberPrevious = true,
             newSelectedMedia = item,
             newViewerMediaList = safeList,
-            newViewerStoryTitle = null
+            newViewerStoryTitle = null,
+            newViewerStories = emptyList(),
+            newCurrentStoryIndex = 0
         )
     }
 
-    fun openMemoryInViewer(title: String, items: List<MediaItem>) {
-        if (items.isEmpty()) return
-        val cover = items.first()
+    fun openMemoriesInViewer(stories: List<StoryGroup>, startIndex: Int) {
+        if (stories.isEmpty()) return
+        val initialStory = stories.getOrNull(startIndex) ?: stories.first()
+        if (initialStory.items.isEmpty()) return
+        val cover = initialStory.items.first()
         selectedMedia = cover
-        viewerMediaList = items
-        viewerStoryTitle = title
+        viewerMediaList = initialStory.items
+        viewerStoryTitle = initialStory.title
+        viewerStories = stories
+        currentStoryIndex = startIndex
         showViewerControls = true
         showDetails = false
         scope.launch { viewerTransitionProgress.snapTo(0f) }
@@ -508,9 +527,15 @@ fun GalleryApp() {
             dest = Destination.VIEWER,
             rememberPrevious = true,
             newSelectedMedia = cover,
-            newViewerMediaList = items,
-            newViewerStoryTitle = title
+            newViewerMediaList = initialStory.items,
+            newViewerStoryTitle = initialStory.title,
+            newViewerStories = stories,
+            newCurrentStoryIndex = startIndex
         )
+    }
+
+    fun openMemoryInViewer(title: String, items: List<MediaItem>) {
+        openMemoriesInViewer(listOf(StoryGroup(title, items)), 0)
     }
 
     fun performBackNavigation() {
@@ -536,6 +561,8 @@ fun GalleryApp() {
                 selectedMedia = entry.selectedMedia
                 viewerMediaList = entry.viewerMediaList
                 viewerStoryTitle = entry.viewerStoryTitle
+                viewerStories = entry.viewerStories
+                currentStoryIndex = entry.currentStoryIndex
                 mapFocusItem = entry.mapFocusItem
                 albumFilter = entry.albumFilter
                 albumFilterReturnDestination = entry.albumFilterReturnDestination
@@ -830,7 +857,7 @@ fun GalleryApp() {
                         },
                         selectedUris = homeSelectedUris,
                         onSelectionChange = { homeSelectedUris = it },
-                        onOpenMemory = { title, items -> openMemoryInViewer(title, items) },
+                        onOpenMemory = { stories, index -> openMemoriesInViewer(stories, index) },
                         onOpen = { openMediaInViewer(it, visibleMedia) }
                     )
                     Destination.ALBUMS -> AlbumsScreen(
@@ -1143,6 +1170,8 @@ fun GalleryApp() {
                 item = currentItem,
                 items = itemsForViewer,
                 storyTitle = viewerStoryTitle,
+                storyGroups = viewerStories,
+                initialStoryIndex = currentStoryIndex,
                 defaultOcrLanguages = ocrLanguagesPref,
                 defaultOcrModel = ocrModelPref,
                 favourite = currentItem.uri in favourites,
