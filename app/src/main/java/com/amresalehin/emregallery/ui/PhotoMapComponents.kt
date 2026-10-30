@@ -220,7 +220,6 @@ fun PhotoMapViewContainer(
 
             if (selectedMedia != null && showSelectedPlaceBar) {
                 Surface(
-                    onClick = onOpenSelected,
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -250,12 +249,17 @@ fun PhotoMapViewContainer(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Icon(
-                            Icons.Default.OpenInNew,
-                            contentDescription = "Open selected media",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        IconButton(
+                            onClick = onOpenSelected,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.OpenInNew,
+                                contentDescription = "Open selected media",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
