@@ -5,7 +5,6 @@ import android.os.StatFs
 import kotlinx.coroutines.CancellationException
 import java.io.BufferedInputStream
 import java.io.File
-import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
