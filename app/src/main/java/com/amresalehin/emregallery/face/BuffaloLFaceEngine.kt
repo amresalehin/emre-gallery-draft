@@ -476,21 +476,6 @@ class BuffaloLFaceEngine private constructor(
         return result.toFloatArray()
     }
 
-    private fun lastDim(shape: LongArray): Long = shape.lastOrNull() ?: -1L
-    private fun rowCount(shape: LongArray): Long {
-        if (shape.isEmpty()) return -1L
-        if (shape.size == 1) return shape[0]
-        val start = if (shape[0] <= 1L && shape.size > 1) 1 else 0
-        val end = if (shape.last() == 1L && shape.size > 1) shape.lastIndex else shape.size
-        if (start >= end) return 1L
-        var count = 1L
-        for (i in start until end) {
-            if (shape[i] <= 0L) return -1L
-            count *= shape[i]
-        }
-        return count
-    }
-
     private fun nonMaximumSuppression(input: List<FaceDetection>): List<FaceDetection> {
         val sorted = input.sortedByDescending { it.score }.toMutableList()
         val kept = mutableListOf<FaceDetection>()
