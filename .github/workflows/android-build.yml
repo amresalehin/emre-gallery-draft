@@ -41,10 +41,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Run debug unit tests
-        run: ./gradlew --no-daemon testDebugUnitTest
+        run: bash ./gradlew --no-daemon testDebugUnitTest
 
       - name: Assemble debug APK
-        run: ./gradlew --no-daemon assembleDebug
+        run: bash ./gradlew --no-daemon assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
