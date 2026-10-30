@@ -48,12 +48,6 @@ import java.text.NumberFormat
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private fun formatSpeed(bytesPerSec: Long): String {
-    if (bytesPerSec <= 0L) return "-- KB/s"
-    val mbps = bytesPerSec.toDouble() / (1024 * 1024)
-    return if (mbps >= 1.0) String.format(Locale.US, "%.1f MB/s", mbps)
-    else String.format(Locale.US, "%.0f KB/s", bytesPerSec.toDouble() / 1024)
-}
 
 private fun formatEta(seconds: Long): String {
     if (seconds <= 0L) return "--"
