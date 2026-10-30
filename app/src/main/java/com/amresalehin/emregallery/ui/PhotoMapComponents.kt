@@ -2,6 +2,7 @@ package com.amresalehin.emregallery.ui
 
 import android.content.Context
 import android.net.Uri
+import android.view.MotionEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -131,11 +132,13 @@ fun PhotoMapViewContainer(
     selectedMedia: Pair<MediaItem, GeoPoint>? = null,
     onOpenSelected: () -> Unit = {},
     onMapReady: (MapView) -> Unit,
+    onUserMapGesture: () -> Unit = {},
     onBoundsChanged: (BoundingBox?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val latestOnMapReady = rememberUpdatedState(onMapReady)
+    val latestOnUserMapGesture = rememberUpdatedState(onUserMapGesture)
     val latestOnBoundsChanged = rememberUpdatedState(onBoundsChanged)
     val heatmapPoints = remember(locatedMedia) { locatedMedia.map { it.second } }
     val heatmapOverlay = remember { PhotoHeatmapOverlay() }
@@ -156,6 +159,7 @@ fun PhotoMapViewContainer(
                     val savedCamera = loadSavedPhotoMapCamera(ctx)
                     MapView(ctx).apply {
                         var cameraInitialized = false
+                        var userHasInteracted = false
                         val cameraSaveRunnable = Runnable {
                             if (cameraInitialized) persistPhotoMapCamera(ctx, this@apply)
                         }
@@ -175,7 +179,7 @@ fun PhotoMapViewContainer(
                         val initialFitZoom = calculateWorldFitZoom(this)
                         minZoomLevel = initialFitZoom
                         controller.setZoom(initialFitZoom)
-                        controller.setCenter(WORLD_VIEW_CENTER)
+                        controller.setCenter(DEFAULT_MAP_CENTER)
 
                         // Initialize the camera once after measurement. Indexing never reframes it.
                         addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
@@ -192,7 +196,7 @@ fun PhotoMapViewContainer(
                                     controller.setCenter(GeoPoint(savedCamera.latitude, savedCamera.longitude))
                                     controller.setZoom(savedCamera.zoom)
                                 } else {
-                                    controller.setCenter(WORLD_VIEW_CENTER)
+                                    controller.setCenter(DEFAULT_MAP_CENTER)
                                     controller.setZoom(fitZoom)
                                 }
                                 cameraInitialized = true
@@ -202,15 +206,27 @@ fun PhotoMapViewContainer(
                             }
                         }
 
+                        setOnTouchListener { _, event ->
+                            if (
+                                event.actionMasked == MotionEvent.ACTION_MOVE ||
+                                event.actionMasked == MotionEvent.ACTION_POINTER_DOWN
+                            ) {
+                                userHasInteracted = true
+                                latestOnUserMapGesture.value()
+                            }
+                            // Observe user gestures without consuming normal MapView input.
+                            false
+                        }
+
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
                                 latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
-                                if (cameraInitialized) scheduleCameraPersistence()
+                                if (cameraInitialized && userHasInteracted) scheduleCameraPersistence()
                                 return true
                             }
                             override fun onZoom(event: ZoomEvent?): Boolean {
                                 latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
-                                if (cameraInitialized) scheduleCameraPersistence()
+                                if (cameraInitialized && userHasInteracted) scheduleCameraPersistence()
                                 return true
                             }
                         })
