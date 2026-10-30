@@ -243,10 +243,9 @@ fun PhotoMapScreen(
                 scanTotal = uiState.scanTotal,
                 dayGroups = uiState.dayGroups,
                 onPhotoClick = { photo, point ->
+                    // Selecting a thumbnail only selects its media and marker.
+                    // It must not move or zoom the map camera.
                     selectedMapMedia = photo to point
-                    // Selecting a thumbnail is a location lookup, not a zoom command.
-                    // Pan to its coordinates while preserving the user's current zoom.
-                    mapRef?.controller?.animateTo(point)
                 },
                 modifier = Modifier.weight(1f)
             )
