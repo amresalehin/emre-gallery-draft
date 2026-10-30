@@ -167,11 +167,11 @@ fun PhotoMapScreen(
 
     LaunchedEffect(selectedMapMedia?.second?.latitude, selectedMapMedia?.second?.longitude) {
         val point = selectedMapMedia?.second
-        selectedPlaceName = if (point == null) {
-            null
+        if (point == null) {
+            selectedPlaceName = null
         } else {
             selectedPlaceName = "Finding place…"
-            withContext(Dispatchers.IO) {
+            selectedPlaceName = withContext(Dispatchers.IO) {
                 reverseGeocodeLocation(context, point.latitude, point.longitude)
             } ?: "Place name unavailable"
         }
