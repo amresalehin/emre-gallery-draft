@@ -11,9 +11,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amresalehin.emregallery.data.MediaItem
@@ -28,29 +25,6 @@ const val WORLD_VIEW_LON_WEST = -180.0
 const val WORLD_VIEW_LON_EAST = 180.0
 
 val DEFAULT_MAP_CENTER = GeoPoint(12.5, 90.0)
-
-/** A camera snapshot saved independently of the photo-indexing lifecycle. */
-internal data class SavedPhotoMapCamera(
-    val latitude: Double,
-    val longitude: Double,
-    val zoom: Double
-)
-
-/** Process-local state: a cold app start intentionally begins with no restored camera. */
-internal object PhotoMapSessionCamera {
-    @Volatile
-    var snapshot: SavedPhotoMapCamera? = null
-
-    fun capture(map: MapView) {
-        if (map.width <= 0 || map.height <= 0) return
-        val center = map.mapCenter
-        val zoom = map.zoomLevelDouble
-        if (!center.latitude.isFinite() || !center.longitude.isFinite() ||
-            !zoom.isFinite() || zoom < 0.0
-        ) return
-        snapshot = SavedPhotoMapCamera(center.latitude, center.longitude, zoom)
-    }
-}
 
 /**
  * Calculates the lowest zoom at which the complete Mercator world fits inside the
@@ -165,8 +139,7 @@ fun PhotoMapScreen(
     focusItem: MediaItem? = null,
     onBack: () -> Unit,
     onOpen: (MediaItem) -> Unit,
-    viewModel: PhotoMapViewModel = viewModel(),
-    useAlbumMapSessionCamera: Boolean = false
+    viewModel: PhotoMapViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -214,29 +187,9 @@ fun PhotoMapScreen(
         }
     }
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-
-    // Preserve the camera in memory only for maps entered through the Albums map card.
-    // This survives navigation within the current app process, but not a cold app start.
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
-                mapRef?.let { map ->
-                    if (useAlbumMapSessionCamera) PhotoMapSessionCamera.capture(map)
-                }
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    // Capture the last camera when leaving the map, but only for the Albums map-card route.
     DisposableEffect(Unit) {
         onDispose {
             mapRef?.let { map ->
-                if (useAlbumMapSessionCamera) PhotoMapSessionCamera.capture(map)
                 map.onPause()
                 map.onDetach()
             }
@@ -278,7 +231,6 @@ fun PhotoMapScreen(
                 selectedMedia = selectedMapMedia,
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
                 onMapReady = { map -> mapRef = map },
-                useAlbumMapSessionCamera = useAlbumMapSessionCamera,
                 onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
                 modifier = Modifier.weight(1f)
             )
