@@ -42,6 +42,21 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * Resolves a human-readable place name for a selected map coordinate.
+     *
+     * The platform Geocoder call is synchronous on older Android APIs, so keep it
+     * off the main thread. Use the application context because this operation does
+     * not depend on a screen or Activity lifecycle.
+     */
+    suspend fun getPlaceName(point: GeoPoint): String? = withContext(Dispatchers.IO) {
+        reverseGeocodeLocation(
+            getApplication<Application>().applicationContext,
+            point.latitude,
+            point.longitude
+        )
+    }
+
     fun loadAndScanMedia(media: List<MediaItem>, forceRescan: Boolean = false) {
         indexingJob?.cancel()
         indexingJob = viewModelScope.launch {
