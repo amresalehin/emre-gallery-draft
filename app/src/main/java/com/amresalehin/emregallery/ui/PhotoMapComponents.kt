@@ -116,6 +116,7 @@ fun PhotoMapViewContainer(
     scanTotal: Int,
     selectedMedia: Pair<MediaItem, GeoPoint>? = null,
     selectedPlaceName: String = "Selected location",
+    showSelectedPlaceBar: Boolean = true,
     onOpenSelected: () -> Unit = {},
     onMapReady: (MapView) -> Unit,
     onBoundsChanged: (BoundingBox?) -> Unit,
@@ -217,7 +218,7 @@ fun PhotoMapViewContainer(
                 Text("© OpenStreetMap", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.85f), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
             }
 
-            if (selectedMedia != null) {
+            if (selectedMedia != null && showSelectedPlaceBar) {
                 Surface(
                     onClick = onOpenSelected,
                     shape = RoundedCornerShape(14.dp),
