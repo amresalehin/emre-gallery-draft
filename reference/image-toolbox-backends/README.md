@@ -13,7 +13,7 @@ Included areas:
 
 - Domain contracts for compression, scaling, and transformation.
 - Android image decode, scale, transform, metadata, and compression orchestration.
-- Format-specific WebP, AVIF, and JPEG XL encoder backends.
+- The format-specific compression backend set: AVIF, BMP, HEIC, ICO, JPEG 2000, Jpegli, JPEG, JPEG XL, MozJPEG, OxiPNG, PNG ImageQuant, lossless/lossy PNG, QOI, static GIF, TIFF, VVC, and WebP.
 - HEIF and animated JPEG XL Coil decoders.
 - Filter-provider and GPU shader execution.
 - Background-removal orchestration, backend factory, and generic / flavor backend.
