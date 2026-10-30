@@ -170,7 +170,7 @@ fun PhotoMapScreen(
         selectedPlaceName = if (point == null) {
             null
         } else {
-            "Finding place…"
+            selectedPlaceName = "Finding place…"
             withContext(Dispatchers.IO) {
                 reverseGeocodeLocation(context, point.latitude, point.longitude)
             } ?: "Place name unavailable"
