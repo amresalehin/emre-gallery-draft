@@ -49,10 +49,6 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 
-private fun formatEta(seconds: Long): String {
-    if (seconds <= 0L) return "--"
-    return if (seconds >= 60) "${seconds / 60}m ${seconds % 60}s" else "${seconds}s"
-}
 
 
 
