@@ -8,7 +8,7 @@ ImageToolbox source repository as a Git submodule.
 - Local path: `vendor/ImageToolbox`
 - Upstream license: Apache License 2.0 (see `vendor/ImageToolbox/LICENSE`)
 - Source tree at the pinned revision: 5,828 tracked files, including 4,076 Kotlin files,
-  68 feature modules, 10 core modules and 18 supporting libraries.
+  69 feature modules, 10 core modules and 18 supporting libraries.
 
 ## Why this is a submodule
 
