@@ -3,7 +3,6 @@ package com.amresalehin.emregallery
 import android.content.Context
 import android.graphics.RectF
 import androidx.test.core.app.ApplicationProvider
-import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.EmbeddingProvenance
 import com.amresalehin.emregallery.face.FaceClusterStore
 import org.junit.Assert.*

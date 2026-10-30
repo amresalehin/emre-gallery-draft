@@ -3,7 +3,6 @@ package com.amresalehin.emregallery
 import com.amresalehin.emregallery.ocr.OcrEngine
 import com.amresalehin.emregallery.ui.OcrState
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 

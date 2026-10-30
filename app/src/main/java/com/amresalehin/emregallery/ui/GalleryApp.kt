@@ -666,8 +666,7 @@ fun GalleryApp() {
                     }
                 }
             }
-            inScope && matchesCategory && (!searchVideosOnly || item.isVideo) &&
-                (searchStage != SearchStage.RESULTS || item.name.contains(submittedQuery, true) || item.relativePath.contains(submittedQuery, true))
+            inScope && matchesCategory
         }
     }
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -1134,26 +1133,43 @@ fun GalleryApp() {
                         onBack = { performBackNavigation() }
                     )
                     Destination.SEARCH -> {
-                        val searchResults = remember(media, hidden, inBin, searchVideosOnly, searchStage, submittedQuery) {
+                        val searchScopeMedia = remember(media, hidden, inBin, archive) {
                             media.filter {
-                                it.uri !in hidden && !it.isTrashed && it.uri !in inBin &&
-                                (!searchVideosOnly || it.isVideo) &&
-                                (searchStage != SearchStage.RESULTS || it.name.contains(submittedQuery, true) || it.relativePath.contains(submittedQuery, true))
+                                it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive
                             }
                         }
                         SearchScreen(
                             query = searchQuery,
                             stage = searchStage,
-                            results = searchResults,
+                            allMedia = searchScopeMedia,
                             recentSearches = recentSearches,
-                            onQuery = { searchQuery = it; searchStage = if (it.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING },
-                            onSubmit = { submittedQuery = it.trim(); searchQuery = it.trim(); searchStage = SearchStage.RESULTS; if (it.isNotBlank()) scope.launch { prefs.addRecentSearch(it.trim()) } },
-                            onRecent = { searchQuery = it; submittedQuery = it; searchStage = SearchStage.RESULTS },
+                            customAlbums = customAlbums,
+                            customTagsMap = customTagsMap,
+                            customPeopleMap = customPeopleMap,
+                            favourites = favourites,
+                            themePref = themePref,
+                            onQueryChange = { newQuery ->
+                                searchQuery = newQuery
+                                searchStage = if (newQuery.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING
+                            },
+                            onSubmitSearch = { submitted ->
+                                val clean = submitted.trim()
+                                searchQuery = clean
+                                submittedQuery = clean
+                                searchStage = SearchStage.RESULTS
+                                if (clean.isNotBlank()) {
+                                    scope.launch { prefs.addRecentSearch(clean) }
+                                }
+                            },
                             onClearRecent = { scope.launch { prefs.clearRecentSearches() } },
-                            onBack = { performBackNavigation() },
-                            onOpen = { openMediaInViewer(it, searchResults) },
-                            videosOnly = searchVideosOnly,
-                            onVideosOnly = { searchVideosOnly = it }
+                            onBack = {
+                                searchQuery = ""
+                                searchStage = SearchStage.DISCOVERY
+                                performBackNavigation()
+                            },
+                            onOpenMedia = { item, currentList ->
+                                openMediaInViewer(item, currentList)
+                            }
                         )
                     }
                     Destination.VIEWER -> {

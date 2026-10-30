@@ -18,6 +18,8 @@ import kotlinx.coroutines.yield
 import android.content.Context
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * ViewModel managing the photo GPS indexing, location cache, and UI state for the Photo Map screen.
@@ -25,6 +27,7 @@ import org.osmdroid.util.GeoPoint
 class PhotoMapViewModel(application: Application) : AndroidViewModel(application) {
 
     private val locationCache = PhotoMapLocationCache(application.applicationContext)
+    private val placeNameCache = ConcurrentHashMap<String, String>()
     private var indexingJob: Job? = null
 
     private val _uiState = MutableStateFlow(PhotoMapUiState())
@@ -50,11 +53,14 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
      * not depend on a screen or Activity lifecycle.
      */
     suspend fun getPlaceName(point: GeoPoint): String? = withContext(Dispatchers.IO) {
-        reverseGeocodeLocation(
-            getApplication<Application>().applicationContext,
-            point.latitude,
-            point.longitude
-        )
+        val cacheKey = String.format(Locale.US, "%.4f,%.4f", point.latitude, point.longitude)
+        placeNameCache[cacheKey]?.let { return@withContext it }
+
+        val resolved = getPlaceDisplayName(getApplication(), point.latitude, point.longitude)
+            ?: reverseGeocodeLocation(getApplication(), point.latitude, point.longitude)
+            ?: String.format(Locale.US, "%.3f°, %.3f°", point.latitude, point.longitude)
+        placeNameCache[cacheKey] = resolved
+        resolved
     }
 
     fun loadAndScanMedia(media: List<MediaItem>, forceRescan: Boolean = false) {

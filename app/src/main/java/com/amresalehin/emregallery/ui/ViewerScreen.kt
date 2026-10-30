@@ -63,9 +63,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import coil.compose.AsyncImage
-import coil.request.CachePolicy
-import coil.request.ImageRequest
-import coil.size.Precision
 import coil.size.Size
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
@@ -73,6 +70,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Fullscreen media viewer screen supporting:
@@ -165,7 +163,7 @@ fun ViewerScreen(
             targetValue = 1f,
             animationSpec = spring(
                 dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = 420f
+                stiffness = 500f
             )
         )
     }
@@ -374,7 +372,7 @@ fun ViewerScreen(
         val ReturnSpringSpec = remember {
             spring<Float>(
                 dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = 380f
+                stiffness = 650f
             )
         }
 
@@ -431,7 +429,7 @@ fun ViewerScreen(
             initiateClose()
         }
 
-        val targetBounds = remember(item.uri) { ThumbnailBoundsTracker.getBounds(item.uri) }
+        val targetBounds = ThumbnailBoundsTracker.getBounds(item.uri)
         val bgThemeColor = MaterialTheme.colorScheme.background
 
         Box(
@@ -455,52 +453,9 @@ fun ViewerScreen(
                 state = pagerState,
                 beyondViewportPageCount = 1,
                 flingBehavior = PagerDefaults.flingBehavior(state = pagerState),
-                userScrollEnabled = !isCurrentZoomed && !videoState.isFullscreen && !showDetails,
+                userScrollEnabled = !isCurrentZoomed && !videoState.isFullscreen && !showDetails && !isClosing && transitionProgress.value >= 0.99f,
                 pageSpacing = 16.dp,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val p = transitionProgress.value
-                        val currentDismissY = dismissOffsetY.value
-                        val dismissFraction = (abs(currentDismissY) / 540f).coerceIn(0f, 1f)
-                        val bounds = targetBounds ?: ThumbnailBoundsTracker.getBounds(item.uri)
-
-                        val destTransX: Float
-                        val destTransY: Float
-                        val destScaleX: Float
-                        val destScaleY: Float
-                        if (bounds != null && size.width > 0f && size.height > 0f) {
-                            val thumbW = bounds.width
-                            val thumbH = bounds.height
-                            val thumbCenterX = bounds.left + thumbW / 2f
-                            val thumbCenterY = bounds.top + thumbH / 2f
-                            val screenCenterX = size.width / 2f
-                            val screenCenterY = size.height / 2f
-                            destTransX = thumbCenterX - screenCenterX
-                            destTransY = thumbCenterY - screenCenterY
-                            destScaleX = (thumbW / size.width).coerceIn(0.01f, 1f)
-                            destScaleY = (thumbH / size.height).coerceIn(0.01f, 1f)
-                        } else {
-                            destTransX = 0f
-                            destTransY = 0f
-                            destScaleX = 0.85f
-                            destScaleY = 0.85f
-                        }
-
-                        val curScaleX = destScaleX + (1f - destScaleX) * p
-                        val curScaleY = destScaleY + (1f - destScaleY) * p
-                        val curTransX = destTransX * (1f - p)
-                        val curTransY = destTransY * (1f - p) + currentDismissY * p
-                        val cornerRadius = ((1f - p) * 10f).dp
-
-                        translationX = curTransX
-                        translationY = curTransY
-                        scaleX = curScaleX
-                        scaleY = curScaleY
-                        alpha = if (bounds == null && isClosing) p.coerceIn(0f, 1f) else 1f
-                        clip = p < 0.99f || dismissFraction > 0.02f
-                        shape = RoundedCornerShape(cornerRadius)
-                    },
+                modifier = Modifier.fillMaxSize(),
                 key = { pageIndex ->
                     val activeList = if (isStoryMode) currentStoryItems else items
                     val uri = activeList.getOrNull(pageIndex)?.uri ?: pageIndex.toString()
@@ -510,6 +465,7 @@ fun ViewerScreen(
                 val activeList = if (isStoryMode) currentStoryItems else items
                 val currentItem = activeList.getOrNull(pageIndex) ?: item
                 val isCurrent = pageIndex == pagerState.currentPage
+                val currentBounds = if (isCurrent) (targetBounds ?: ThumbnailBoundsTracker.getBounds(currentItem.uri)) else null
 
                 ZoomableMediaItem(
                     item = currentItem,
@@ -531,7 +487,7 @@ fun ViewerScreen(
                     },
                     onSwipeDownDelta = { deltaDown ->
                         // Downward gesture on media is strictly for media closing when details are closed
-                        if (!isCurrentZoomed && !showDetails && !videoState.isFullscreen) {
+                        if (!isCurrentZoomed && !showDetails && !videoState.isFullscreen && !isClosing) {
                             coroutineScope.launch {
                                 val next = (dismissOffsetY.value + deltaDown).coerceAtLeast(0f)
                                 dismissOffsetY.snapTo(next)
@@ -542,20 +498,23 @@ fun ViewerScreen(
                     },
                     onSwipeDownRelease = { velocityDown ->
                         // Media closer cannot activate while details are open
-                        if (!isCurrentZoomed && !showDetails && !videoState.isFullscreen) {
-                            val dismissDistanceThreshold = screenHeightPx * 0.15f
-                            if (dismissOffsetY.value > dismissDistanceThreshold || velocityDown > minFlingVelocity * 1.3f) {
+                        if (!isCurrentZoomed && !showDetails && !videoState.isFullscreen && !isClosing) {
+                            val dismissDistanceThreshold = screenHeightPx * 0.12f
+                            if (dismissOffsetY.value > dismissDistanceThreshold || velocityDown > minFlingVelocity * 1.2f) {
                                 coroutineScope.launch {
                                     isClosing = true
                                     ThumbnailBoundsTracker.activeViewerUri = item.uri
-                                    launch {
-                                        dismissOffsetY.animateTo(
-                                            targetValue = 0f,
-                                            animationSpec = ReturnSpringSpec
-                                        )
-                                    }
+                                    // The preparation drag has ended and the user committed the stroke.
+                                    // Do NOT animate dismissOffsetY back to 0 with a spring, which creates an
+                                    // opposing upward bounce that inhibits the closing stroke.
+                                    // Instead, allow transitionProgress to animate to 0f with the stroke velocity,
+                                    // seamlessly guiding the media directly into the target thumbnail.
+                                    val progressVelocity = if (screenHeightPx > 0f) {
+                                        -(velocityDown / (screenHeightPx * 0.45f)).coerceIn(0f, 15f)
+                                    } else 0f
                                     transitionProgress.animateTo(
                                         targetValue = 0f,
+                                        initialVelocity = progressVelocity,
                                         animationSpec = ReturnSpringSpec
                                     )
                                     ThumbnailBoundsTracker.activeViewerUri = null
@@ -586,7 +545,8 @@ fun ViewerScreen(
                     onStoryTapRight = stepNext,
                     onStoryHoldingChanged = { isStoryHolding = it },
                     transitionProgress = transitionProgress.value,
-                    hasTargetBounds = targetBounds != null
+                    targetBounds = currentBounds,
+                    dismissOffsetY = dismissOffsetY.value
                 )
             }
 
@@ -852,14 +812,18 @@ private fun ZoomableMediaItem(
     onStoryTapRight: () -> Unit = {},
     onStoryHoldingChanged: (Boolean) -> Unit = {},
     transitionProgress: Float = 1f,
-    hasTargetBounds: Boolean = false,
+    targetBounds: androidx.compose.ui.geometry.Rect? = null,
+    dismissOffsetY: Float = 0f,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
     var scale by remember(item.uri) { mutableFloatStateOf(1f) }
     var offsetX by remember(item.uri) { mutableFloatStateOf(0f) }
     var offsetY by remember(item.uri) { mutableFloatStateOf(0f) }
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    var intrinsicWidth by remember(item.uri) { mutableIntStateOf(item.width) }
+    var intrinsicHeight by remember(item.uri) { mutableIntStateOf(item.height) }
 
     // Keep video posters on the same cached MediaStore thumbnail used by the grid.
     // Decoding an independent video frame here can make the poster change before ExoPlayer's first frame.
@@ -882,224 +846,359 @@ private fun ZoomableMediaItem(
         onZoomChanged(scale > 1.05f)
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .pointerInput(item.uri, isVideo) {
-                containerSize = size
-                val width = size.width.toFloat()
-                val height = size.height.toFloat()
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        val containerWidth = constraints.maxWidth.toFloat()
+        val containerHeight = constraints.maxHeight.toFloat()
 
-                var lastTapTime = 0L
-                var lastTapPos = Offset.Zero
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(item.uri, isVideo) {
+                    val width = containerWidth
+                    val height = containerHeight
 
-                coroutineScope {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val velocityTracker = VelocityTracker()
-                        velocityTracker.addPosition(down.uptimeMillis, down.position)
+                    var lastTapTime = 0L
+                    var lastTapPos = Offset.Zero
 
-                        var isPinching = false
-                        var isDragging = false
-                        var isVerticalSwipe = false
-                        var isHorizontalBrowse = false
-                        var swipeDirection = 0 // 1 = down (dismiss), -1 = up (drawer)
-                        var totalMovementX = 0f
-                        var totalMovementY = 0f
-                        var longPressTriggered = false
+                    coroutineScope {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val velocityTracker = VelocityTracker()
+                            velocityTracker.addPosition(down.uptimeMillis, down.position)
 
-                        val longPressJob = launch {
-                            delay(if (isStoryMode) 180L else 500L)
-                            if (!isDragging && !isPinching && scale <= 1.02f) {
-                                if (isStoryMode) {
-                                    onStoryHoldingChanged(true)
-                                } else {
-                                    longPressTriggered = true
-                                    onLongPress()
+                            var isPinching = false
+                            var isDragging = false
+                            var isVerticalSwipe = false
+                            var isHorizontalBrowse = false
+                            var swipeDirection = 0 // 1 = down (dismiss), -1 = up (drawer)
+                            var totalMovementX = 0f
+                            var totalMovementY = 0f
+                            var longPressTriggered = false
+
+                            val longPressJob = launch {
+                                delay(if (isStoryMode) 180L else 500L)
+                                if (!isDragging && !isPinching && scale <= 1.02f) {
+                                    if (isStoryMode) {
+                                        onStoryHoldingChanged(true)
+                                    } else {
+                                        longPressTriggered = true
+                                        onLongPress()
+                                    }
                                 }
                             }
-                        }
 
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val pointerCount = event.changes.size
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val pointerCount = event.changes.size
 
-                            if (pointerCount >= 2 && !isVideo) {
-                                isPinching = true
-                                longPressJob.cancel()
-
-                                val zoomChange = event.calculateZoom()
-                                val panChange = event.calculatePan()
-                                val centroid = event.calculateCentroid()
-
-                                val oldScale = scale
-                                val newScale = (oldScale * zoomChange).coerceIn(1f, 4.5f)
-
-                                if (oldScale > 0f) {
-                                    val scaleRatio = newScale / oldScale
-                                    val focalX = centroid.x - width / 2f
-                                    val focalY = centroid.y - height / 2f
-                                    val newOffsetX = (offsetX - focalX) * scaleRatio + focalX + panChange.x
-                                    val newOffsetY = (offsetY - focalY) * scaleRatio + focalY + panChange.y
-
-                                    val maxX = (width * (newScale - 1f)) / 2f
-                                    val maxY = (height * (newScale - 1f)) / 2f
-
-                                    scale = newScale
-                                    offsetX = newOffsetX.coerceIn(-maxX, maxX)
-                                    offsetY = newOffsetY.coerceIn(-maxY, maxY)
-                                }
-
-                                event.changes.forEach { it.consume() }
-                            } else if (pointerCount == 1) {
-                                val change = event.changes.first()
-                                if (!change.pressed) break
-
-                                velocityTracker.addPosition(change.uptimeMillis, change.position)
-                                val posChange = change.positionChange()
-                                totalMovementX += abs(posChange.x)
-                                totalMovementY += abs(posChange.y)
-
-                                if (totalMovementX > touchSlop || totalMovementY > touchSlop) {
+                                if (pointerCount >= 2 && !isVideo) {
+                                    isPinching = true
                                     longPressJob.cancel()
-                                    if (isStoryMode) onStoryHoldingChanged(false)
-                                }
 
-                                if (scale > 1.02f && !isVideo) {
-                                    // Zero-Tolerance Zoom Lock:
-                                    // If underlying media is zoomed in beyond 1.0x scale, disable all sheet gestures.
-                                    // All drag touches must strictly belong to media panning.
-                                    val maxX = (width * (scale - 1f)) / 2f
-                                    val maxY = (height * (scale - 1f)) / 2f
+                                    val zoomChange = event.calculateZoom()
+                                    val panChange = event.calculatePan()
+                                    val centroid = event.calculateCentroid()
 
-                                    offsetX = (offsetX + posChange.x).coerceIn(-maxX, maxX)
-                                    offsetY = (offsetY + posChange.y).coerceIn(-maxY, maxY)
-                                    change.consume()
-                                } else {
-                                    // Directional Slop Disambiguation:
-                                    // If |dx| > |dy|, yield control to horizontal pager browsing.
-                                    // Lock into vertical sheet manipulation only when |dy| > |dx|.
-                                    if (!isVerticalSwipe && !isHorizontalBrowse) {
-                                        val dist = kotlin.math.hypot(totalMovementX, totalMovementY)
-                                        if (dist > touchSlop) {
-                                            if (totalMovementX >= totalMovementY) {
-                                                isHorizontalBrowse = true
-                                            } else {
-                                                isVerticalSwipe = true
-                                                swipeDirection = if (posChange.y < 0) -1 else 1
-                                            }
-                                        }
+                                    val oldScale = scale
+                                    val newScale = (oldScale * zoomChange).coerceIn(1f, 4.5f)
+
+                                    if (oldScale > 0f) {
+                                        val scaleRatio = newScale / oldScale
+                                        val focalX = centroid.x - width / 2f
+                                        val focalY = centroid.y - height / 2f
+                                        val newOffsetX = (offsetX - focalX) * scaleRatio + focalX + panChange.x
+                                        val newOffsetY = (offsetY - focalY) * scaleRatio + focalY + panChange.y
+
+                                        val maxX = (width * (newScale - 1f)) / 2f
+                                        val maxY = (height * (newScale - 1f)) / 2f
+
+                                        scale = newScale
+                                        offsetX = newOffsetX.coerceIn(-maxX, maxX)
+                                        offsetY = newOffsetY.coerceIn(-maxY, maxY)
                                     }
 
-                                    if (isVerticalSwipe) {
+                                    event.changes.forEach { it.consume() }
+                                } else if (pointerCount == 1) {
+                                    val change = event.changes.first()
+                                    if (!change.pressed) break
+
+                                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                    val posChange = change.positionChange()
+                                    totalMovementX += abs(posChange.x)
+                                    totalMovementY += abs(posChange.y)
+
+                                    if (totalMovementX > touchSlop || totalMovementY > touchSlop) {
+                                        longPressJob.cancel()
+                                        if (isStoryMode) onStoryHoldingChanged(false)
+                                    }
+
+                                    if (scale > 1.02f && !isVideo) {
+                                        // Zero-Tolerance Zoom Lock:
+                                        // If underlying media is zoomed in beyond 1.0x scale, disable all sheet gestures.
+                                        // All drag touches must strictly belong to media panning.
+                                        val maxX = (width * (scale - 1f)) / 2f
+                                        val maxY = (height * (scale - 1f)) / 2f
+
+                                        offsetX = (offsetX + posChange.x).coerceIn(-maxX, maxX)
+                                        offsetY = (offsetY + posChange.y).coerceIn(-maxY, maxY)
                                         change.consume()
-                                        if (posChange.y > 0) {
+                                    } else {
+                                        // Directional Slop Disambiguation:
+                                        // If |dx| > |dy|, yield control to horizontal pager browsing.
+                                        // Lock into vertical sheet manipulation only when |dy| > |dx|.
+                                        if (!isVerticalSwipe && !isHorizontalBrowse) {
+                                            val dist = kotlin.math.hypot(totalMovementX, totalMovementY)
+                                            if (dist > touchSlop) {
+                                                if (totalMovementX >= totalMovementY) {
+                                                    isHorizontalBrowse = true
+                                                } else {
+                                                    isVerticalSwipe = true
+                                                    swipeDirection = if (posChange.y < 0) -1 else 1
+                                                }
+                                            }
+                                        }
+
+                                        if (isVerticalSwipe) {
+                                            change.consume()
                                             onSwipeDownDelta(posChange.y)
                                         }
                                     }
-                                }
-                            } else {
-                                break
-                            }
-                        }
-
-                        longPressJob.cancel()
-                        if (isStoryMode) onStoryHoldingChanged(false)
-
-                        val velocityY = velocityTracker.calculateVelocity().y
-                        if (isVerticalSwipe) {
-                            if (swipeDirection < 0) {
-                                if (velocityY < -minFlingVelocity || totalMovementY > touchSlop * 2f) {
-                                    onSwipeUp()
-                                }
-                            } else {
-                                onSwipeDownRelease(velocityY)
-                            }
-                        } else if (!isPinching && !longPressTriggered && totalMovementX < touchSlop && totalMovementY < touchSlop) {
-                            if (isStoryMode) {
-                                if (down.position.x < width * 0.30f) {
-                                    onStoryTapLeft()
                                 } else {
-                                    onStoryTapRight()
+                                    break
                                 }
-                            } else {
-                                val now = System.currentTimeMillis()
-                                if (now - lastTapTime < 280L && (down.position - lastTapPos).getDistance() < touchSlop * 3f && !isVideo) {
-                                    lastTapTime = 0L
-                                    if (scale > 1.2f) {
-                                        launch {
-                                            val startScale = scale
-                                            val startX = offsetX
-                                            val startY = offsetY
-                                            animate(0f, 1f, animationSpec = tween(200)) { fraction, _ ->
-                                                scale = startScale + (1f - startScale) * fraction
-                                                offsetX = startX * (1f - fraction)
-                                                offsetY = startY * (1f - fraction)
+                            }
+
+                            longPressJob.cancel()
+                            if (isStoryMode) onStoryHoldingChanged(false)
+
+                            val velocityY = velocityTracker.calculateVelocity().y
+                            if (isVerticalSwipe) {
+                                if (swipeDirection < 0) {
+                                    if (velocityY < -minFlingVelocity || totalMovementY > touchSlop * 2f) {
+                                        onSwipeUp()
+                                    }
+                                } else {
+                                    onSwipeDownRelease(velocityY)
+                                }
+                            } else if (!isPinching && !longPressTriggered && totalMovementX < touchSlop && totalMovementY < touchSlop) {
+                                if (isStoryMode) {
+                                    if (down.position.x < width * 0.30f) {
+                                        onStoryTapLeft()
+                                    } else {
+                                        onStoryTapRight()
+                                    }
+                                } else {
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastTapTime < 280L && (down.position - lastTapPos).getDistance() < touchSlop * 3f && !isVideo) {
+                                        lastTapTime = 0L
+                                        if (scale > 1.2f) {
+                                            launch {
+                                                val startScale = scale
+                                                val startX = offsetX
+                                                val startY = offsetY
+                                                animate(0f, 1f, animationSpec = tween(200)) { fraction, _ ->
+                                                    scale = startScale + (1f - startScale) * fraction
+                                                    offsetX = startX * (1f - fraction)
+                                                    offsetY = startY * (1f - fraction)
+                                                }
+                                            }
+                                        } else {
+                                            launch {
+                                                val targetScale = 2.5f
+                                                val focalX = down.position.x - width / 2f
+                                                val focalY = down.position.y - height / 2f
+                                                val maxX = (width * (targetScale - 1f)) / 2f
+                                                val maxY = (height * (targetScale - 1f)) / 2f
+                                                val targetOffsetX = (-focalX * (targetScale - 1f)).coerceIn(-maxX, maxX)
+                                                val targetOffsetY = (-focalY * (targetScale - 1f)).coerceIn(-maxY, maxY)
+
+                                                val startScale = scale
+                                                val startX = offsetX
+                                                val startY = offsetY
+                                                animate(0f, 1f, animationSpec = tween(220)) { fraction, _ ->
+                                                    scale = startScale + (targetScale - startScale) * fraction
+                                                    offsetX = startX + (targetOffsetX - startX) * fraction
+                                                    offsetY = startY + (targetOffsetY - startY) * fraction
+                                                }
                                             }
                                         }
                                     } else {
+                                        lastTapTime = now
+                                        lastTapPos = down.position
                                         launch {
-                                            val targetScale = 2.5f
-                                            val focalX = down.position.x - width / 2f
-                                            val focalY = down.position.y - height / 2f
-                                            val maxX = (width * (targetScale - 1f)) / 2f
-                                            val maxY = (height * (targetScale - 1f)) / 2f
-                                            val targetOffsetX = (-focalX * (targetScale - 1f)).coerceIn(-maxX, maxX)
-                                            val targetOffsetY = (-focalY * (targetScale - 1f)).coerceIn(-maxY, maxY)
-
-                                            val startScale = scale
-                                            val startX = offsetX
-                                            val startY = offsetY
-                                            animate(0f, 1f, animationSpec = tween(220)) { fraction, _ ->
-                                                scale = startScale + (targetScale - startScale) * fraction
-                                                offsetX = startX + (targetOffsetX - startX) * fraction
-                                                offsetY = startY + (targetOffsetY - startY) * fraction
+                                            delay(280L)
+                                            if (lastTapTime == now) {
+                                                onToggleControls()
                                             }
-                                        }
-                                    }
-                                } else {
-                                    lastTapTime = now
-                                    lastTapPos = down.position
-                                    launch {
-                                        delay(280L)
-                                        if (lastTapTime == now) {
-                                            onToggleControls()
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    translationX = offsetX
-                    translationY = offsetY
                 },
             contentAlignment = Alignment.Center
         ) {
-            // Keep this poster in place throughout video preparation and the first-frame handoff.
-            AsyncImage(
-                model = imageRequest,
-                contentDescription = item.name,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = if (hasTargetBounds) {
-                    transitionContentScale(transitionProgress)
-                } else {
-                    ContentScale.Fit
-                }
-            )
+            val imgW = intrinsicWidth.toFloat()
+            val imgH = intrinsicHeight.toFloat()
+            val imageAspect = if (imgW > 0f && imgH > 0f) {
+                imgW / imgH
+            } else if (targetBounds != null && targetBounds.width > 0f && targetBounds.height > 0f) {
+                targetBounds.width / targetBounds.height
+            } else if (containerHeight > 0f) {
+                containerWidth / containerHeight
+            } else {
+                1f
+            }
+            val containerAspect = if (containerHeight > 0f) containerWidth / containerHeight else 1f
 
-            // Video Surface when current item is a video
-            if (isVideo && videoState != null) {
-                VideoPlayerSurface(videoState = videoState)
+            val fittedW: Float
+            val fittedH: Float
+            if (containerWidth > 0f && containerHeight > 0f) {
+                if (imageAspect >= containerAspect) {
+                    fittedW = containerWidth
+                    fittedH = if (imageAspect > 0f) containerWidth / imageAspect else containerHeight
+                } else {
+                    fittedH = containerHeight
+                    fittedW = containerHeight * imageAspect
+                }
+            } else {
+                fittedW = 0f
+                fittedH = 0f
+            }
+
+            val fittedWidthDp = if (fittedW > 0f) with(density) { fittedW.toDp() } else 0.dp
+            val fittedHeightDp = if (fittedH > 0f) with(density) { fittedH.toDp() } else 0.dp
+
+            // Outer container for user pinch-to-zoom and pan gestures
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offsetX
+                        translationY = offsetY
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                val fittedModifier = if (fittedW > 0f && fittedH > 0f) {
+                    Modifier.size(fittedWidthDp, fittedHeightDp)
+                } else {
+                    Modifier.fillMaxSize()
+                }
+
+                // Inner fitted container executing uniform shared-element scale, position, and crop to thumbnail
+                Box(
+                    modifier = fittedModifier
+                        .graphicsLayer {
+                            val p = transitionProgress.coerceIn(0f, 1f)
+                            val bounds = if (isCurrentPage) targetBounds else null
+
+                            if (bounds != null && fittedW > 0f && fittedH > 0f && containerWidth > 0f && containerHeight > 0f) {
+                                val thumbW = bounds.width
+                                val thumbH = bounds.height
+                                val thumbCenterX = bounds.left + thumbW / 2f
+                                val thumbCenterY = bounds.top + thumbH / 2f
+                                val screenCenterX = containerWidth / 2f
+                                val screenCenterY = containerHeight / 2f
+
+                                // Calculate uniform scale to cover the target thumbnail without aspect ratio distortion
+                                val sx = thumbW / fittedW
+                                val sy = thumbH / fittedH
+                                val targetScale = maxOf(sx, sy).coerceIn(0.001f, 10f)
+
+                                val currentScale = targetScale + (1f - targetScale) * p
+
+                                // Translate center to target thumbnail center
+                                val destTransX = thumbCenterX - screenCenterX
+                                val destTransY = thumbCenterY - screenCenterY
+                                val currentTransX = destTransX * (1f - p)
+                                val currentTransY = destTransY * (1f - p) + dismissOffsetY * p
+
+                                // Physical clip window on screen interpolating from fitted size down to thumbnail bounds
+                                val currentPhysClipW = thumbW + (fittedW - thumbW) * p
+                                val currentPhysClipH = thumbH + (fittedH - thumbH) * p
+
+                                // Local unscaled clip window within this Box
+                                val localClipW = (currentPhysClipW / currentScale).coerceIn(1f, fittedW)
+                                val localClipH = (currentPhysClipH / currentScale).coerceIn(1f, fittedH)
+
+                                // Local corner radius scaling to exactly 10.dp on screen at p = 0
+                                val targetLocalCornerRadiusPx = 10.dp.toPx() / targetScale
+                                val currentLocalCornerRadiusPx = targetLocalCornerRadiusPx * (1f - p)
+
+                                val clipLeft = (fittedW - localClipW) / 2f
+                                val clipTop = (fittedH - localClipH) / 2f
+                                val clipRect = androidx.compose.ui.geometry.Rect(
+                                    left = clipLeft,
+                                    top = clipTop,
+                                    right = clipLeft + localClipW,
+                                    bottom = clipTop + localClipH
+                                )
+
+                                translationX = currentTransX
+                                translationY = currentTransY
+                                scaleX = currentScale
+                                scaleY = currentScale
+
+                                clip = p < 0.999f
+                                shape = object : androidx.compose.ui.graphics.Shape {
+                                    override fun createOutline(
+                                        size: androidx.compose.ui.geometry.Size,
+                                        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+                                        density: androidx.compose.ui.unit.Density
+                                    ): androidx.compose.ui.graphics.Outline {
+                                        return androidx.compose.ui.graphics.Outline.Rounded(
+                                            androidx.compose.ui.geometry.RoundRect(
+                                                rect = clipRect,
+                                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(currentLocalCornerRadiusPx)
+                                            )
+                                        )
+                                    }
+                                }
+                            } else {
+                                val currentScale = 0.85f + 0.15f * p
+                                val exitY = if (dismissOffsetY > 0f) {
+                                    dismissOffsetY + (1f - p) * (containerHeight * 0.35f)
+                                } else {
+                                    0f
+                                }
+                                translationX = 0f
+                                translationY = exitY
+                                scaleX = currentScale
+                                scaleY = currentScale
+                                alpha = if (isCurrentPage) p.coerceIn(0f, 1f) else if (p < 0.99f) 0f else 1f
+                                clip = p < 0.999f
+                                shape = RoundedCornerShape(((1f - p) * 16f).dp)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = imageRequest,
+                        contentDescription = item.name,
+                        onSuccess = { state ->
+                            val d = state.result.drawable
+                            val w = if (d.intrinsicWidth > 0) d.intrinsicWidth.toFloat() else state.painter.intrinsicSize.width
+                            val h = if (d.intrinsicHeight > 0) d.intrinsicHeight.toFloat() else state.painter.intrinsicSize.height
+                            if (w > 0f && h > 0f && !w.isNaN() && !h.isNaN()) {
+                                intrinsicWidth = w.roundToInt()
+                                intrinsicHeight = h.roundToInt()
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit
+                    )
+
+                    // Video Surface when current item is a video
+                    if (isVideo && videoState != null) {
+                        VideoPlayerSurface(videoState = videoState)
+                    }
+                }
             }
         }
     }

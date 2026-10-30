@@ -86,6 +86,40 @@ fun reverseGeocodeLocation(context: Context, latitude: Double, longitude: Double
     }.getOrNull()
 }
 
+fun getPlaceDisplayName(context: Context, latitude: Double, longitude: Double): String? {
+    if (!Geocoder.isPresent()) return null
+    return runCatching {
+        @Suppress("DEPRECATION")
+        val addresses = Geocoder(context, Locale.getDefault()).getFromLocation(latitude, longitude, 1)
+        val address = addresses?.firstOrNull() ?: return null
+
+        val feature = address.featureName?.takeIf { name ->
+            name.isNotBlank() && !name.all { it.isDigit() || it == '-' || it == '/' || it == ' ' }
+        }
+        val locality = address.locality ?: address.subLocality ?: address.subAdminArea
+        val adminOrCountry = address.adminArea ?: address.countryName
+
+        val parts = listOfNotNull(
+            feature.takeIf { it != locality && it != adminOrCountry },
+            locality,
+            adminOrCountry.takeIf { it != locality }
+        ).distinct()
+
+        if (parts.isNotEmpty()) {
+            parts.joinToString(", ")
+        } else {
+            listOfNotNull(
+                address.subLocality,
+                address.locality,
+                address.subAdminArea,
+                address.adminArea,
+                address.countryName
+            ).map { it.trim() }.filter { it.isNotBlank() }.distinct().joinToString(", ")
+                .takeIf { it.isNotBlank() }
+        }
+    }.getOrNull()
+}
+
 fun readMediaMetadata(context: Context, item: MediaItem): Map<String, String> {
     val values = mutableMapOf<String, String>()
     val uri = Uri.parse(item.uri)
