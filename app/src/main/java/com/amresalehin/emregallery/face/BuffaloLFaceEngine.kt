@@ -437,10 +437,6 @@ class BuffaloLFaceEngine private constructor(
         }
     }
 
-    private fun alignFace(source: Bitmap, landmarks: FloatArray, bounds: RectF? = null): Bitmap {
-        return EnteFaceAligner.align(source, landmarks, bounds)
-    }
-
     /** Prepares CHW RGB float array tensor from bitmap pixels. */
     private fun imageTensorData(bitmap: Bitmap, size: Int, mean: Float, std: Float): FloatArray {
         val scaled = if (bitmap.width == size && bitmap.height == size) bitmap
