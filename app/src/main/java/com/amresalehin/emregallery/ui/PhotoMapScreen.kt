@@ -13,6 +13,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.amresalehin.emregallery.data.MediaItem
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
@@ -161,6 +163,19 @@ fun PhotoMapScreen(
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
+    var selectedPlaceName by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(selectedMapMedia?.second?.latitude, selectedMapMedia?.second?.longitude) {
+        val point = selectedMapMedia?.second
+        selectedPlaceName = if (point == null) {
+            null
+        } else {
+            "Finding place…"
+            withContext(Dispatchers.IO) {
+                reverseGeocodeLocation(context, point.latitude, point.longitude)
+            } ?: "Place name unavailable"
+        }
+    }
     var lastFocusedUri by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(media) {
@@ -229,6 +244,7 @@ fun PhotoMapScreen(
                 scanProgress = uiState.scanProgress,
                 scanTotal = uiState.scanTotal,
                 selectedMedia = selectedMapMedia,
+                selectedPlaceName = selectedPlaceName ?: "Finding place…",
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
                 onMapReady = { map -> mapRef = map },
                 onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
