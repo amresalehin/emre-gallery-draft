@@ -26,6 +26,7 @@ const val WORLD_VIEW_LON_WEST = -180.0
 const val WORLD_VIEW_LON_EAST = 180.0
 
 val WORLD_VIEW_CENTER = GeoPoint(0.0, 0.0)
+val DEFAULT_MAP_CENTER = GeoPoint(12.5, 90.0)
 val WORLD_VIEW_BOUNDS = BoundingBox(
     WORLD_VIEW_LAT_NORTH,
     WORLD_VIEW_LON_EAST,
@@ -60,6 +61,17 @@ internal fun loadSavedPhotoMapCamera(context: Context): SavedPhotoMapCamera? {
     if (!latitude.isFinite() || latitude !in -90.0..90.0) return null
     if (!longitude.isFinite() || longitude !in -180.0..180.0) return null
     if (!zoom.isFinite() || zoom <= 0.0 || zoom > 30.0) return null
+
+    // Previous versions saved the initial world camera as if it were a user-selected
+    // position. Discard that legacy snapshot so the map can frame real photo locations.
+    if (latitude == 0.0 && longitude == 0.0 && zoom <= 4.0) {
+        preferences.edit()
+            .remove(CAMERA_LATITUDE_KEY)
+            .remove(CAMERA_LONGITUDE_KEY)
+            .remove(CAMERA_ZOOM_KEY)
+            .apply()
+        return null
+    }
 
     return SavedPhotoMapCamera(latitude, longitude, zoom)
 }
@@ -110,6 +122,27 @@ fun showWorldView(map: MapView, animated: Boolean = false) {
         map.controller.setZoom(targetZoom)
     } else {
         map.controller.setCenter(WORLD_VIEW_CENTER)
+        map.controller.setZoom(targetZoom)
+    }
+    map.invalidate()
+}
+
+/**
+ * Shows a neutral Eastern Hemisphere starting view when the library has no usable GPS
+ * coordinates. The map should not imply that the media belongs at the null-island point.
+ */
+fun showDefaultMapView(map: MapView, animated: Boolean = false) {
+    if (map.width <= 0 || map.height <= 0) {
+        map.post { showDefaultMapView(map, animated) }
+        return
+    }
+    val targetZoom = calculateWorldFitZoom(map)
+    map.minZoomLevel = targetZoom
+    if (animated) {
+        map.controller.animateTo(DEFAULT_MAP_CENTER)
+        map.controller.setZoom(targetZoom)
+    } else {
+        map.controller.setCenter(DEFAULT_MAP_CENTER)
         map.controller.setZoom(targetZoom)
     }
     map.invalidate()
@@ -215,6 +248,11 @@ fun PhotoMapScreen(
         }
     }
 
+    val hasSavedCamera = remember(context) { loadSavedPhotoMapCamera(context) != null }
+    val initialCameraFramed = remember { mutableStateOf(hasSavedCamera) }
+    val userHasMovedMap = remember { mutableStateOf(false) }
+    val hasMeaningfulCameraPosition = remember { mutableStateOf(hasSavedCamera) }
+
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
     var lastFocusedUri by remember { mutableStateOf<String?>(null) }
@@ -233,6 +271,8 @@ fun PhotoMapScreen(
         if (point != null) {
             selectedMapMedia = requestedItem to point
             focusSinglePhoto(map, point, animated = true)
+            initialCameraFramed.value = true
+            hasMeaningfulCameraPosition.value = true
             lastFocusedUri = requestedItem.uri
         } else {
             lastFocusedUri = requestedItem.uri
@@ -243,11 +283,47 @@ fun PhotoMapScreen(
         }
     }
 
-    // Indexing updates data only. Camera state is saved and restored independently.
+    // On a fresh install or after clearing a legacy (0, 0) camera snapshot, frame the
+    // available GPS-tagged media once. Do not reframe as indexing adds more coordinates.
+    LaunchedEffect(mapRef, uiState.locatedMedia, uiState.loading, uiState.scanProgress, focusItem?.uri) {
+        val map = mapRef ?: return@LaunchedEffect
+        if (
+            hasSavedCamera ||
+            initialCameraFramed.value ||
+            userHasMovedMap.value ||
+            focusItem != null
+        ) return@LaunchedEffect
+
+        // Fit cached coordinates before a scan begins; otherwise wait until the scan completes.
+        if (uiState.locatedMedia.isEmpty() && uiState.loading) return@LaunchedEffect
+        if (uiState.locatedMedia.isNotEmpty() && uiState.loading && uiState.scanProgress > 0) {
+            return@LaunchedEffect
+        }
+
+        val points = uiState.locatedMedia.map { it.second }
+        when {
+            points.size == 1 -> {
+                focusSinglePhoto(map, points.first(), animated = false)
+                hasMeaningfulCameraPosition.value = true
+            }
+            points.size > 1 -> {
+                computeMediaBoundingBox(points)?.let { fitBounds(map, it, animated = false) }
+                    ?: showDefaultMapView(map, animated = false)
+                hasMeaningfulCameraPosition.value = true
+            }
+            else -> showDefaultMapView(map, animated = false)
+        }
+        initialCameraFramed.value = true
+    }
+
+    // Persist only a real restored, auto-framed, or user-selected camera; never persist
+    // the temporary starting camera as a false (0, 0) location.
     DisposableEffect(Unit) {
         onDispose {
             mapRef?.let { map ->
-                persistPhotoMapCamera(context, map)
+                if (hasMeaningfulCameraPosition.value) {
+                    persistPhotoMapCamera(context, map)
+                }
                 map.onPause()
                 map.onDetach()
             }
@@ -257,10 +333,12 @@ fun PhotoMapScreen(
 
     val onFitAllPhotos: () -> Unit = {
         selectedMapMedia = null
+        initialCameraFramed.value = true
         val map = mapRef
         if (map != null) {
             val geotaggedPoints = uiState.locatedMedia.map { it.second }
             if (geotaggedPoints.isNotEmpty()) {
+                hasMeaningfulCameraPosition.value = true
                 val allMediaBounds = computeMediaBoundingBox(geotaggedPoints)
                 if (allMediaBounds != null) {
                     if (geotaggedPoints.size == 1) {
@@ -269,10 +347,10 @@ fun PhotoMapScreen(
                         fitBounds(map, allMediaBounds, animated = true)
                     }
                 } else {
-                    showWorldView(map, animated = true)
+                    showDefaultMapView(map, animated = true)
                 }
             } else {
-                showWorldView(map, animated = true)
+                showDefaultMapView(map, animated = true)
             }
         }
     }
@@ -312,6 +390,11 @@ fun PhotoMapScreen(
                 selectedMedia = selectedMapMedia,
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
                 onMapReady = { map -> mapRef = map },
+                onUserMapGesture = {
+                    userHasMovedMap.value = true
+                    initialCameraFramed.value = true
+                    hasMeaningfulCameraPosition.value = true
+                },
                 onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
                 modifier = Modifier.weight(1f)
             )
@@ -325,6 +408,8 @@ fun PhotoMapScreen(
                 dayGroups = uiState.dayGroups,
                 onPhotoClick = { photo, point ->
                     selectedMapMedia = photo to point
+                    initialCameraFramed.value = true
+                    hasMeaningfulCameraPosition.value = true
                     mapRef?.let { focusSinglePhoto(it, point, animated = true) }
                 },
                 onFitAllPhotos = onFitAllPhotos,
