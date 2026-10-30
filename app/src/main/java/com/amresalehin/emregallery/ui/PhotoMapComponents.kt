@@ -53,7 +53,6 @@ fun PhotoMapTopBar(
     onOpenLayerMenu: () -> Unit,
     onDismissLayerMenu: () -> Unit,
     onSelectLayer: (String) -> Unit,
-    onFitAllPhotos: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -101,18 +100,6 @@ fun PhotoMapTopBar(
                     trailingIcon = { if (mapLayer == "Satellite") Icon(Icons.Default.Check, contentDescription = "Selected") },
                     onClick = { onSelectLayer("Satellite") }
                 )
-            }
-        }
-
-        Spacer(Modifier.width(8.dp))
-        Surface(
-            onClick = onFitAllPhotos,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.size(38.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.FilterCenterFocus, contentDescription = "Fit all media", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
             }
         }
 
@@ -344,7 +331,6 @@ fun PhotoMapDetailsCard(
     scanTotal: Int = 0,
     dayGroups: List<Pair<String, List<Pair<MediaItem, GeoPoint>>>>,
     onPhotoClick: (MediaItem, GeoPoint) -> Unit,
-    onFitAllPhotos: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -404,13 +390,7 @@ fun PhotoMapDetailsCard(
                     Spacer(Modifier.height(8.dp))
                     Text("No media in this area", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Pan or zoom out to see media, or tap below to frame all $locatedTotal items.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = onFitAllPhotos, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
-                        Icon(Icons.Default.FilterCenterFocus, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Fit all media", style = MaterialTheme.typography.labelMedium)
-                    }
+                    Text("Pan or zoom out to see media.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
             } else {
                 LazyVerticalGrid(
