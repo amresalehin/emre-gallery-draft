@@ -433,7 +433,9 @@ fun PhotoMapScreen(
                     selectedMapMedia = photo to point
                     initialCameraFramed.value = true
                     hasMeaningfulCameraPosition.value = true
-                    mapRef?.let { focusSinglePhoto(it, point, animated = true) }
+                    // Selecting a thumbnail is a location lookup, not a zoom command.
+                    // Pan to its coordinates while preserving the user's current zoom.
+                    mapRef?.controller?.animateTo(point)
                 },
                 onFitAllPhotos = onFitAllPhotos,
                 modifier = Modifier.weight(1f)
