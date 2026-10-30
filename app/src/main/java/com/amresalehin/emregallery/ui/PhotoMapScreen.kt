@@ -92,14 +92,15 @@ internal fun persistPhotoMapCamera(context: Context, map: MapView) {
 }
 
 /**
- * Calculates the zoom level required for a single Mercator world frame (256 * 2^z)
- * to cleanly cover the container without vertical or horizontal repeating.
- * Uses the nearest bounding constraint (whichever dimension—width or height—fits first without repeating).
+ * Calculates the lowest zoom at which the complete Mercator world fits inside the
+ * map viewport. The smaller viewport dimension is the limiting constraint; using
+ * the larger dimension would crop the world on the other axis.
  */
 fun calculateWorldFitZoom(map: MapView): Double {
-    if (map.width <= 0 || map.height <= 0) return 1.0
-    val maxDim = maxOf(map.width, map.height).toDouble()
-    return (kotlin.math.ln(maxDim / 256.0) / kotlin.math.ln(2.0)).coerceAtLeast(1.0)
+    if (map.width <= 0 || map.height <= 0) return 0.0
+    val limitingDimension = minOf(map.width, map.height).toDouble()
+    return (kotlin.math.ln(limitingDimension / 256.0) / kotlin.math.ln(2.0))
+        .coerceAtLeast(0.0)
 }
 
 /**
@@ -226,6 +227,7 @@ fun PhotoMapScreen(
     val hasSavedCamera = remember(context) { loadSavedPhotoMapCamera(context) != null }
     val initialCameraFramed = remember { mutableStateOf(hasSavedCamera) }
     val hasMeaningfulCameraPosition = remember { mutableStateOf(hasSavedCamera) }
+    val emptyResultCameraReset = remember { mutableStateOf(false) }
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
@@ -257,34 +259,38 @@ fun PhotoMapScreen(
         }
     }
 
-    // On a fresh install or after clearing a legacy (0, 0) camera snapshot, frame the
-    // available GPS-tagged media once. Do not reframe as indexing adds more coordinates.
+    // Preserve a saved/user camera when GPS-tagged media exists. If the completed
+    // scan finds no usable coordinates, deliberately reset to the widest world view
+    // instead of leaving a stale saved close-up on an empty map.
     LaunchedEffect(mapRef, uiState.locatedMedia, uiState.loading, uiState.scanProgress, focusItem?.uri) {
         val map = mapRef ?: return@LaunchedEffect
-        if (
-            hasSavedCamera ||
-            initialCameraFramed.value ||
-            focusItem != null
-        ) return@LaunchedEffect
+        if (focusItem != null) return@LaunchedEffect
 
-        // Fit cached coordinates before a scan begins; otherwise wait until the scan completes.
-        if (uiState.locatedMedia.isEmpty() && uiState.loading) return@LaunchedEffect
-        if (uiState.locatedMedia.isNotEmpty() && uiState.loading && uiState.scanProgress > 0) {
+        val points = uiState.locatedMedia.map { it.second }
+        if (points.isEmpty()) {
+            if (uiState.loading || emptyResultCameraReset.value) return@LaunchedEffect
+            showDefaultMapView(map, animated = false)
+            hasMeaningfulCameraPosition.value = false
+            initialCameraFramed.value = true
+            emptyResultCameraReset.value = true
             return@LaunchedEffect
         }
 
-        val points = uiState.locatedMedia.map { it.second }
+        // A saved camera or a camera already framed by the user takes precedence once
+        // actual photo locations are available. Never jump the user while indexing.
+        if (hasSavedCamera || initialCameraFramed.value) return@LaunchedEffect
+        if (uiState.loading && uiState.scanProgress > 0) return@LaunchedEffect
+
         when {
             points.size == 1 -> {
                 focusSinglePhoto(map, points.first(), animated = false)
                 hasMeaningfulCameraPosition.value = true
             }
-            points.size > 1 -> {
+            else -> {
                 computeMediaBoundingBox(points)?.let { fitBounds(map, it, animated = false) }
                     ?: showDefaultMapView(map, animated = false)
                 hasMeaningfulCameraPosition.value = true
             }
-            else -> showDefaultMapView(map, animated = false)
         }
         initialCameraFramed.value = true
     }
