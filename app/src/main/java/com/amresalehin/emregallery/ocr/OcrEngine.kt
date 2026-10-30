@@ -16,7 +16,7 @@ enum class OcrEngine(
         id = "google_mlkit",
         title = "Google ML Kit",
         shortName = "ML Kit",
-        description = "On-device neural text recognition by Google. Fast, zero-configuration Latin script detection."
+        description = "On-device neural text recognition by Google. Fast, offline multi-language support (Latin, Chinese, Devanagari, Japanese, Korean)."
     );
 
     companion object {

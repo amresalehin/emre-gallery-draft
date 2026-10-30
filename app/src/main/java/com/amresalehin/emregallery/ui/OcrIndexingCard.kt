@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.amresalehin.emregallery.ocr.MlKitLanguage
 import com.amresalehin.emregallery.ocr.TesseractModel
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +38,7 @@ fun OcrIndexingCard(
     onEngineChange: (String) -> Unit = {},
     onModelChange: (String) -> Unit,
     onToggleLanguage: (String) -> Unit,
+    onToggleMlKitLanguage: (String) -> Unit = {},
     onClearCache: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -48,6 +50,7 @@ fun OcrIndexingCard(
     val activeModel = if (isBestModel) TesseractModel.BEST else TesseractModel.FAST
 
     var languageMenuExpanded by remember { mutableStateOf(false) }
+    var mlKitMenuExpanded by remember { mutableStateOf(false) }
     var downloadingLanguageCode by remember { mutableStateOf<String?>(null) }
     var showClearCacheConfirm by remember { mutableStateOf(false) }
 
@@ -275,7 +278,7 @@ fun OcrIndexingCard(
                     )
                     if (isMlKit) {
                         Text(
-                            "On-Device Neural (Latin)",
+                            "On-Device Neural (Multi-Script)",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -324,7 +327,7 @@ fun OcrIndexingCard(
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "On-Device",
+                                "Multi-Script",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary
@@ -353,13 +356,16 @@ fun OcrIndexingCard(
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    if (isMlKit) {
-                        Text(
-                            "English, Spanish, French, etc.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Text(
+                        if (isMlKit) {
+                            val resolved = MlKitLanguage.resolveSelection(ocrState.mlKitLanguages)
+                            resolved.joinToString(", ") { it.title }
+                        } else {
+                            "Select Tesseract language packs"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 if (!isMlKit) {
@@ -451,29 +457,90 @@ fun OcrIndexingCard(
                         }
                     }
                 } else {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    val mlKitLabel = remember(ocrState.mlKitLanguages) {
+                        MlKitLanguage.getDisplayLabel(ocrState.mlKitLanguages)
+                    }
+
+                    Box {
+                        Surface(
+                            onClick = { mlKitMenuExpanded = true },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                            modifier = Modifier.height(38.dp)
                         ) {
-                            Icon(
-                                Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    mlKitLabel,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Select ML Kit language",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = mlKitMenuExpanded,
+                            onDismissRequest = { mlKitMenuExpanded = false },
+                            modifier = Modifier.widthIn(min = 250.dp, max = 320.dp)
+                        ) {
+                            val allSelected = ocrState.mlKitLanguages.containsAll(MlKitLanguage.ALL_CODES)
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text("All Scripts (${MlKitLanguage.entries.size})", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                        Text("Latin, Chinese, Devanagari, Japanese, Korean", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                },
+                                trailingIcon = {
+                                    if (allSelected) {
+                                        Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                    }
+                                },
+                                onClick = {
+                                    if (allSelected) {
+                                        onToggleMlKitLanguage("latin_only")
+                                    } else {
+                                        onToggleMlKitLanguage("all")
+                                    }
+                                    mlKitMenuExpanded = false
+                                }
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "Auto Detect",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            MlKitLanguage.entries.forEach { lang ->
+                                val isSelected = lang.code in ocrState.mlKitLanguages
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(lang.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("(${lang.sampleText})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                            }
+                                            Text(lang.nativeScript, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    },
+                                    trailingIcon = {
+                                        Checkbox(
+                                            checked = isSelected,
+                                            onCheckedChange = null
+                                        )
+                                    },
+                                    onClick = {
+                                        onToggleMlKitLanguage(lang.code)
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -497,7 +564,7 @@ fun OcrIndexingCard(
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
-                            "Google ML Kit runs entirely on-device with zero downloads required. Fast neural text recognition across Latin scripts.",
+                            "Google ML Kit runs entirely on-device with zero downloads required. Neural text recognition supporting Latin, Chinese, Devanagari, Japanese, and Korean scripts.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface
                         )

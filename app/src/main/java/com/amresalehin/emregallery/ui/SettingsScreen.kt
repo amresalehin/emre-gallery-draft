@@ -226,7 +226,7 @@ fun SettingsScreen(
                                 Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     when (label) {
-                                        "OCR Settings" -> "Tesseract model (fast / best) & language models"
+                                        "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"
                                         "About" -> "Emre Gallery · 0.1.0"
                                         else -> ""

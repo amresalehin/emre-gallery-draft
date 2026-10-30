@@ -91,6 +91,7 @@ fun ViewerScreen(
     initialStoryIndex: Int = 0,
     defaultOcrLanguages: Set<String> = setOf("eng"),
     defaultOcrModel: String = "fast",
+    defaultMlKitLanguages: Set<String> = setOf("latin"),
     customTags: Set<String>,
     customPeople: Set<String>,
     onAddTag: (String) -> Unit,
@@ -685,6 +686,7 @@ fun ViewerScreen(
                     isBin = isBin,
                     defaultOcrLanguages = defaultOcrLanguages,
                     defaultOcrModel = defaultOcrModel,
+                    defaultMlKitLanguages = defaultMlKitLanguages,
                     onOpenPerson = onOpenPerson
                 )
             }

@@ -555,6 +555,30 @@ class FaceClusterStore(context: Context) :
             .use { if (it.moveToFirst()) it.getInt(0) else 0 }
 
     @Synchronized
+    fun getMediaUrisWithFaces(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Set<String> {
+        val result = mutableSetOf<String>()
+        runCatching {
+            readableDatabase.rawQuery(
+                "SELECT DISTINCT media_uri FROM faces WHERE engine_id=?",
+                arrayOf(engineId)
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    result.add(cursor.getString(0))
+                }
+            }
+            readableDatabase.rawQuery(
+                "SELECT DISTINCT media_uri FROM indexed_media WHERE engine_id=? AND status='done' AND face_count > 0",
+                arrayOf(engineId)
+            ).use { cursor ->
+                while (cursor.moveToNext()) {
+                    result.add(cursor.getString(0))
+                }
+            }
+        }
+        return result
+    }
+
+    @Synchronized
     fun failedMediaCount(engineId: String = BuffaloLFaceEngine.ENGINE_ID): Int =
         readableDatabase.rawQuery(
             "SELECT COUNT(*) FROM indexed_media WHERE engine_id=? AND status='failed'",

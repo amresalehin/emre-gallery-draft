@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -241,8 +242,9 @@ fun SearchBarCapsule(
 
 /**
  * Horizontally scrollable quick-filter chips row.
- * Includes: Type, Time, and dynamic entity chips derived from matching results.
- * Strict rule: No "All" chip!
+ * Includes interactive toggle pills: Videos, Images, Gifs, GPS, No GPS,
+ * Text, Without Text, Face, No Face, Time, and dynamic entity chips.
+ * Tap to select, tap again to unselect.
  */
 @Composable
 fun SearchFilterChipsRow(
@@ -255,7 +257,6 @@ fun SearchFilterChipsRow(
     isDark: Boolean = false
 ) {
     val scrollState = rememberScrollState()
-    var showTypeMenu by remember { mutableStateOf(false) }
     var showTimeMenu by remember { mutableStateOf(false) }
 
     val textColor = searchPrimaryTextColor(isDark)
@@ -272,87 +273,235 @@ fun SearchFilterChipsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 1. TYPE Quick Filter Chip
-        val isTypeActive = filterState.mediaType != MediaTypeFilter.ALL
-        Box {
-            Surface(
-                modifier = Modifier
-                    .height(34.dp)
-                    .clip(CircleShape)
-                    .clickable { showTypeMenu = true }
-                    .testTag("filter_chip_type"),
-                shape = CircleShape,
-                color = if (isTypeActive) selectedSurface else cardSurface,
-                border = BorderStroke(1.dp, if (isTypeActive) textColor.copy(alpha = 0.4f) else dividerCol)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = when (filterState.mediaType) {
-                            MediaTypeFilter.PHOTOS -> Icons.Default.Image
-                            MediaTypeFilter.VIDEOS -> Icons.Default.Videocam
-                            MediaTypeFilter.ALL -> Icons.Default.PermMedia
-                        },
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (isTypeActive) textColor else secondaryText
+        // 1. VIDEOS Pill (Icon only)
+        val isVideosSelected = filterState.mediaType == MediaTypeFilter.VIDEOS
+        SearchFilterPill(
+            label = "Videos",
+            isSelected = isVideosSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        mediaType = if (isVideosSelected) MediaTypeFilter.ALL else MediaTypeFilter.VIDEOS
                     )
-                    Text(
-                        text = when (filterState.mediaType) {
-                            MediaTypeFilter.PHOTOS -> "Photos"
-                            MediaTypeFilter.VIDEOS -> "Videos"
-                            MediaTypeFilter.ALL -> "Type"
-                        },
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (isTypeActive) FontWeight.SemiBold else FontWeight.Medium
-                        ),
-                        color = textColor
-                    )
-                    Icon(
-                        imageVector = Icons.Default.ArrowDropDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = secondaryText
-                    )
-                }
-            }
+                )
+            },
+            icon = Icons.Default.Videocam,
+            contentDescription = "Videos",
+            showLabel = false,
+            testTag = "filter_pill_videos",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
 
-            DropdownMenu(
-                expanded = showTypeMenu,
-                onDismissRequest = { showTypeMenu = false },
-                modifier = Modifier.background(cardSurface)
-            ) {
-                DropdownMenuItem(
-                    text = { Text("All media", color = textColor) },
-                    onClick = {
-                        onFilterChange(filterState.copy(mediaType = MediaTypeFilter.ALL))
-                        showTypeMenu = false
-                    },
-                    leadingIcon = { Icon(Icons.Default.PermMedia, null, tint = secondaryText) }
+        // 2. IMAGES Pill (Icon only)
+        val isImagesSelected = filterState.mediaType == MediaTypeFilter.PHOTOS
+        SearchFilterPill(
+            label = "Images",
+            isSelected = isImagesSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        mediaType = if (isImagesSelected) MediaTypeFilter.ALL else MediaTypeFilter.PHOTOS
+                    )
                 )
-                DropdownMenuItem(
-                    text = { Text("Photos only", color = textColor) },
-                    onClick = {
-                        onFilterChange(filterState.copy(mediaType = MediaTypeFilter.PHOTOS))
-                        showTypeMenu = false
-                    },
-                    leadingIcon = { Icon(Icons.Default.Image, null, tint = secondaryText) }
-                )
-                DropdownMenuItem(
-                    text = { Text("Videos only", color = textColor) },
-                    onClick = {
-                        onFilterChange(filterState.copy(mediaType = MediaTypeFilter.VIDEOS))
-                        showTypeMenu = false
-                    },
-                    leadingIcon = { Icon(Icons.Default.Videocam, null, tint = secondaryText) }
-                )
-            }
-        }
+            },
+            icon = Icons.Default.Image,
+            contentDescription = "Images",
+            showLabel = false,
+            testTag = "filter_pill_images",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
 
-        // 2. TIME Quick Filter Chip
+        // 3. GIFS Pill (Icon only)
+        val isGifsSelected = filterState.mediaType == MediaTypeFilter.GIFS
+        SearchFilterPill(
+            label = "Gifs",
+            isSelected = isGifsSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        mediaType = if (isGifsSelected) MediaTypeFilter.ALL else MediaTypeFilter.GIFS
+                    )
+                )
+            },
+            icon = Icons.Default.Gif,
+            contentDescription = "Gifs",
+            showLabel = false,
+            testTag = "filter_pill_gifs",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
+        // 4. FAVOURITES Pill (Icon only)
+        val isFavSelected = filterState.favoritesOnly
+        SearchFilterPill(
+            label = "Favourites",
+            isSelected = isFavSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(favoritesOnly = !isFavSelected)
+                )
+            },
+            icon = if (isFavSelected) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            contentDescription = "Favourites",
+            showLabel = false,
+            testTag = "filter_pill_favourites",
+            textColor = if (isFavSelected) Color(0xFFE53935) else textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
+        // 5. GPS Pill (Icon only)
+        val isGpsSelected = filterState.gpsFilter == GpsFilter.HAS_GPS
+        SearchFilterPill(
+            label = "GPS",
+            isSelected = isGpsSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        gpsFilter = if (isGpsSelected) GpsFilter.ALL else GpsFilter.HAS_GPS
+                    )
+                )
+            },
+            icon = Icons.Default.LocationOn,
+            contentDescription = "GPS",
+            showLabel = false,
+            testTag = "filter_pill_gps",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
+        // 6. NO GPS Pill (Icon only)
+        val isNoGpsSelected = filterState.gpsFilter == GpsFilter.NO_GPS
+        SearchFilterPill(
+            label = "No GPS",
+            isSelected = isNoGpsSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        gpsFilter = if (isNoGpsSelected) GpsFilter.ALL else GpsFilter.NO_GPS
+                    )
+                )
+            },
+            icon = Icons.Default.LocationOff,
+            contentDescription = "No GPS",
+            showLabel = false,
+            testTag = "filter_pill_no_gps",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
+        // 7. WITH TEXT Pill (Icon only)
+        val isTextSelected = filterState.ocrTextFilter == OcrTextFilter.HAS_TEXT
+        SearchFilterPill(
+            label = "With Text",
+            isSelected = isTextSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        ocrTextFilter = if (isTextSelected) OcrTextFilter.ALL else OcrTextFilter.HAS_TEXT
+                    )
+                )
+            },
+            icon = Icons.Default.TextFields,
+            contentDescription = "With text",
+            showLabel = false,
+            testTag = "filter_pill_text",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
+        // 8. WITHOUT TEXT Pill (Icon only)
+        val isWithoutTextSelected = filterState.ocrTextFilter == OcrTextFilter.NO_TEXT
+        SearchFilterPill(
+            label = "Without Text",
+            isSelected = isWithoutTextSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        ocrTextFilter = if (isWithoutTextSelected) OcrTextFilter.ALL else OcrTextFilter.NO_TEXT
+                    )
+                )
+            },
+            icon = Icons.Default.FontDownloadOff,
+            contentDescription = "Without text",
+            showLabel = false,
+            testTag = "filter_pill_without_text",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
+        // 9. FACE Pill (Icon only)
+        val isFaceSelected = filterState.faceFilter == FaceFilter.HAS_FACE
+        SearchFilterPill(
+            label = "Face",
+            isSelected = isFaceSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        faceFilter = if (isFaceSelected) FaceFilter.ALL else FaceFilter.HAS_FACE
+                    )
+                )
+            },
+            icon = Icons.Default.Face,
+            contentDescription = "Face",
+            showLabel = false,
+            testTag = "filter_pill_face",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
+        // 10. NO FACE Pill (Icon only)
+        val isNoFaceSelected = filterState.faceFilter == FaceFilter.NO_FACE
+        SearchFilterPill(
+            label = "No Face",
+            isSelected = isNoFaceSelected,
+            onToggle = {
+                onFilterChange(
+                    filterState.copy(
+                        faceFilter = if (isNoFaceSelected) FaceFilter.ALL else FaceFilter.NO_FACE
+                    )
+                )
+            },
+            icon = Icons.Default.PersonOff,
+            contentDescription = "No face",
+            showLabel = false,
+            testTag = "filter_pill_no_face",
+            textColor = textColor,
+            secondaryText = secondaryText,
+            cardSurface = cardSurface,
+            selectedSurface = selectedSurface,
+            dividerCol = dividerCol
+        )
+
+        // 10. TIME Quick Filter Chip
         val isTimeActive = filterState.timeRange !is TimeRangeFilter.AllTime
         val timeLabel = when (filterState.timeRange) {
             is TimeRangeFilter.AllTime -> "Time"
@@ -435,7 +584,7 @@ fun SearchFilterChipsRow(
             }
         }
 
-        // 3. Dynamic Entity Chips (Strictly derived from matching results)
+        // 11. Dynamic Entity Chips (Strictly derived from matching results)
         dynamicChips.forEach { chip ->
             val isChipSelected = when (chip.kind) {
                 ChipKind.ALBUM -> filterState.selectedAlbumId == chip.value
@@ -482,6 +631,91 @@ fun SearchFilterChipsRow(
                         text = chip.count.toString(),
                         style = MaterialTheme.typography.labelSmall,
                         color = secondaryText
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Reusable filter pill with tap-to-select and tap-again-to-unselect behavior.
+ * Supports both icon-only mode (showLabel = false) and icon+text mode (showLabel = true).
+ */
+@Composable
+fun SearchFilterPill(
+    label: String = "",
+    isSelected: Boolean,
+    onToggle: () -> Unit,
+    icon: ImageVector? = null,
+    contentDescription: String = label,
+    showLabel: Boolean = true,
+    testTag: String = "",
+    textColor: Color,
+    secondaryText: Color,
+    cardSurface: Color,
+    selectedSurface: Color,
+    dividerCol: Color,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .height(34.dp)
+            .then(
+                if (!showLabel) Modifier.width(38.dp) else Modifier
+            )
+            .clip(CircleShape)
+            .clickable(onClick = onToggle)
+            .testTag(testTag),
+        shape = CircleShape,
+        color = if (isSelected) selectedSurface else cardSurface,
+        border = BorderStroke(
+            width = if (isSelected) 1.2.dp else 1.dp,
+            color = if (isSelected) textColor.copy(alpha = 0.55f) else dividerCol
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(horizontal = if (showLabel) 12.dp else 0.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (showLabel) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (icon != null) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = contentDescription,
+                            modifier = Modifier.size(15.dp),
+                            tint = if (isSelected) textColor else secondaryText
+                        )
+                    }
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                        ),
+                        color = textColor
+                    )
+                    if (isSelected) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear $label filter",
+                            modifier = Modifier.size(13.dp),
+                            tint = textColor.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            } else {
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = contentDescription,
+                        modifier = Modifier.size(18.dp),
+                        tint = if (isSelected) textColor else secondaryText
                     )
                 }
             }
@@ -813,7 +1047,8 @@ fun SearchAdvancedFilterSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp),
+                .padding(bottom = 32.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header
@@ -865,6 +1100,117 @@ fun SearchAdvancedFilterSheet(
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     text = type.label,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                    ),
+                                    color = textColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // GPS Location Filter
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "GPS Location",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = textColor
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    GpsFilter.entries.forEach { gpsOpt ->
+                        val selected = draftFilter.gpsFilter == gpsOpt
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { draftFilter = draftFilter.copy(gpsFilter = gpsOpt) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (selected) selectedSurface else barSurface,
+                            border = BorderStroke(1.dp, if (selected) textColor.copy(alpha = 0.4f) else Color.Transparent)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = gpsOpt.label,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                    ),
+                                    color = textColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // OCR Text Filter
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "OCR Text",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = textColor
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OcrTextFilter.entries.forEach { ocrOpt ->
+                        val selected = draftFilter.ocrTextFilter == ocrOpt
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { draftFilter = draftFilter.copy(ocrTextFilter = ocrOpt) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (selected) selectedSurface else barSurface,
+                            border = BorderStroke(1.dp, if (selected) textColor.copy(alpha = 0.4f) else Color.Transparent)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = ocrOpt.label,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                    ),
+                                    color = textColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Face Filter
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Faces",
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    color = textColor
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FaceFilter.entries.forEach { faceOpt ->
+                        val selected = draftFilter.faceFilter == faceOpt
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { draftFilter = draftFilter.copy(faceFilter = faceOpt) },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (selected) selectedSurface else barSurface,
+                            border = BorderStroke(1.dp, if (selected) textColor.copy(alpha = 0.4f) else Color.Transparent)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = faceOpt.label,
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
                                     ),

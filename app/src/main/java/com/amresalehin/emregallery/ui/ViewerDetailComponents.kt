@@ -1458,12 +1458,12 @@ fun ActionsTabContent(
                         modifier = Modifier.weight(1f)
                     ) {
                         OutlinedTextField(
-                            value = if (isTesseract) (if (isBest) "Best" else "Fast") else "On-Device",
+                            value = if (isTesseract) (if (isBest) "Best" else "Fast") else "Multi-Script",
                             onValueChange = {},
                             readOnly = true,
                             enabled = isTesseract,
                             label = { Text("Mode") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modeExpanded) },
+                            trailingIcon = { if (isTesseract) ExposedDropdownMenuDefaults.TrailingIcon(expanded = modeExpanded) },
                             modifier = Modifier
                                 .menuAnchor()
                                 .fillMaxWidth(),
@@ -1473,41 +1473,46 @@ fun ActionsTabContent(
                                 unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                             )
                         )
-                        ExposedDropdownMenu(
-                            expanded = modeExpanded,
-                            onDismissRequest = { modeExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Fast") },
-                                onClick = {
-                                    detailsState.ocrModel = "fast"
-                                    modeExpanded = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Best") },
-                                onClick = {
-                                    detailsState.ocrModel = "best"
-                                    modeExpanded = false
-                                }
-                            )
+                        if (isTesseract) {
+                            ExposedDropdownMenu(
+                                expanded = modeExpanded,
+                                onDismissRequest = { modeExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Fast") },
+                                    onClick = {
+                                        detailsState.ocrModel = "fast"
+                                        modeExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Best") },
+                                    onClick = {
+                                        detailsState.ocrModel = "best"
+                                        modeExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
 
                     // Language dropdown
                     val currentLangCode = detailsState.ocrLanguages.firstOrNull() ?: "eng"
                     val currentLangName = TesseractOcr.supportedLanguages.entries.firstOrNull { it.value == currentLangCode }?.key ?: "English"
+                    val currentMlKitLabel = remember(detailsState.mlKitLanguages.toList()) {
+                        com.amresalehin.emregallery.ocr.MlKitLanguage.getDisplayLabel(detailsState.mlKitLanguages)
+                    }
 
                     ExposedDropdownMenuBox(
                         expanded = langExpanded,
-                        onExpandedChange = { if (isTesseract) langExpanded = it },
+                        onExpandedChange = { langExpanded = it },
                         modifier = Modifier.weight(1f)
                     ) {
                         OutlinedTextField(
-                            value = if (isTesseract) currentLangName else "Auto (Latin)",
+                            value = if (isTesseract) currentLangName else currentMlKitLabel,
                             onValueChange = {},
                             readOnly = true,
-                            enabled = isTesseract,
+                            enabled = true,
                             label = { Text("Language") },
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = langExpanded) },
                             modifier = Modifier
@@ -1523,15 +1528,72 @@ fun ActionsTabContent(
                             expanded = langExpanded,
                             onDismissRequest = { langExpanded = false }
                         ) {
-                            TesseractOcr.supportedLanguages.forEach { (name, code) ->
+                            if (isTesseract) {
+                                TesseractOcr.supportedLanguages.forEach { (name, code) ->
+                                    DropdownMenuItem(
+                                        text = { Text(name) },
+                                        onClick = {
+                                            detailsState.ocrLanguages.clear()
+                                            detailsState.ocrLanguages.add(code)
+                                            langExpanded = false
+                                        }
+                                    )
+                                }
+                            } else {
+                                val allSelected = detailsState.mlKitLanguages.containsAll(com.amresalehin.emregallery.ocr.MlKitLanguage.ALL_CODES)
                                 DropdownMenuItem(
-                                    text = { Text(name) },
+                                    text = {
+                                        Column {
+                                            Text("All Scripts (${com.amresalehin.emregallery.ocr.MlKitLanguage.entries.size})", fontWeight = FontWeight.SemiBold)
+                                            Text("Latin, Chinese, Devanagari, Japanese, Korean", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    },
+                                    trailingIcon = {
+                                        if (allSelected) {
+                                            Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                        }
+                                    },
                                     onClick = {
-                                        detailsState.ocrLanguages.clear()
-                                        detailsState.ocrLanguages.add(code)
+                                        detailsState.mlKitLanguages.clear()
+                                        if (allSelected) {
+                                            detailsState.mlKitLanguages.add("latin")
+                                        } else {
+                                            detailsState.mlKitLanguages.addAll(com.amresalehin.emregallery.ocr.MlKitLanguage.ALL_CODES)
+                                        }
                                         langExpanded = false
                                     }
                                 )
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                                com.amresalehin.emregallery.ocr.MlKitLanguage.entries.forEach { lang ->
+                                    val isSelected = lang.code in detailsState.mlKitLanguages
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(lang.title, fontWeight = FontWeight.SemiBold)
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("(${lang.sampleText})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                                }
+                                                Text(lang.nativeScript, style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        },
+                                        trailingIcon = {
+                                            Checkbox(
+                                                checked = isSelected,
+                                                onCheckedChange = null
+                                            )
+                                        },
+                                        onClick = {
+                                            if (isSelected) {
+                                                if (detailsState.mlKitLanguages.size > 1) {
+                                                    detailsState.mlKitLanguages.remove(lang.code)
+                                                }
+                                            } else {
+                                                detailsState.mlKitLanguages.add(lang.code)
+                                            }
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

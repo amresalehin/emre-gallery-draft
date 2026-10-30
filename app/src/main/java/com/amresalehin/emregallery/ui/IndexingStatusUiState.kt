@@ -14,7 +14,8 @@ data class OcrState(
     val isPaused: Boolean = false,
     val itemsPerMinute: Int = 0,
     val model: String = "fast",
-    val engine: String = "tesseract"
+    val engine: String = "tesseract",
+    val mlKitLanguages: Set<String> = setOf("latin")
 )
 
 data class FaceFindingState(

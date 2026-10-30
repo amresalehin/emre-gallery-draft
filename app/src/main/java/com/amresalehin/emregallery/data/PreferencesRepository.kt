@@ -34,6 +34,7 @@ class PreferencesRepository(private val context: Context) {
     private val gridColumnsKey = stringPreferencesKey("grid_columns")
     private val gridStyleKey = stringPreferencesKey("grid_style")
     private val ocrLanguagesKey = stringSetPreferencesKey("ocr_languages")
+    private val mlKitLanguagesKey = stringSetPreferencesKey("mlkit_languages")
     private val ocrModelKey = stringPreferencesKey("ocr_model")
     private val ocrEngineKey = stringPreferencesKey("ocr_engine")
     private val mediaTagsKey = stringPreferencesKey("media_custom_tags")
@@ -144,6 +145,10 @@ class PreferencesRepository(private val context: Context) {
 
     val ocrLanguages: Flow<Set<String>> = context.galleryDataStore.data.map {
         it[ocrLanguagesKey] ?: setOf("eng")
+    }.distinctUntilChanged()
+
+    val mlKitLanguages: Flow<Set<String>> = context.galleryDataStore.data.map {
+        it[mlKitLanguagesKey] ?: setOf("latin")
     }.distinctUntilChanged()
 
     val ocrModel: Flow<String> = context.galleryDataStore.data.map {
@@ -452,6 +457,10 @@ class PreferencesRepository(private val context: Context) {
 
     suspend fun setOcrLanguages(languages: Set<String>) {
         context.galleryDataStore.edit { it[ocrLanguagesKey] = languages }
+    }
+
+    suspend fun setMlKitLanguages(languages: Set<String>) {
+        context.galleryDataStore.edit { it[mlKitLanguagesKey] = languages }
     }
 
     suspend fun setOcrModel(modelId: String) {

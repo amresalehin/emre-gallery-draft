@@ -1,12 +1,15 @@
 package com.amresalehin.emregallery
 
 import android.content.Context
+import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.data.*
+import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import org.osmdroid.util.GeoPoint
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -56,6 +59,19 @@ class SearchEngineTest {
             width = 1080,
             height = 1920,
             relativePath = "Pictures/Vacation",
+            isVideo = false
+        ),
+        MediaItem(
+            id = 4L,
+            uri = "content://media/external/images/media/4",
+            name = "Party_Animation.gif",
+            mimeType = "image/gif",
+            dateAddedSeconds = 1715000000L,
+            dateTakenMillis = 1715000000000L,
+            sizeBytes = 204800L,
+            width = 500,
+            height = 500,
+            relativePath = "Pictures/Gifs",
             isVideo = false
         )
     )
@@ -181,5 +197,145 @@ class SearchEngineTest {
         assertTrue(discovery.albums.any { it.title == "Mountains Trip" })
         assertTrue(discovery.tags.any { it.title == "trekking" })
         assertTrue(discovery.people.any { it.title == "John Doe" })
+    }
+
+    @Test
+    fun testSearchMedia_mediaTypeFilters_imagesVideosGifs() = runBlocking {
+        // 1. Photos / Images filter
+        val imageResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(mediaType = MediaTypeFilter.PHOTOS),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = emptyMap(),
+            favourites = emptySet()
+        )
+        // Mount_Everest.jpg and Beach_Day.jpg (Party_Animation.gif and Mountain_Sunset.mp4 excluded)
+        assertEquals(2, imageResults.items.size)
+        assertTrue(imageResults.items.all { !it.isVideo && it.name.endsWith(".jpg") })
+
+        // 2. Videos filter
+        val videoResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(mediaType = MediaTypeFilter.VIDEOS),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = emptyMap(),
+            favourites = emptySet()
+        )
+        assertEquals(1, videoResults.items.size)
+        assertEquals("Mountain_Sunset.mp4", videoResults.items.first().name)
+
+        // 3. Gifs filter
+        val gifResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(mediaType = MediaTypeFilter.GIFS),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = emptyMap(),
+            favourites = emptySet()
+        )
+        assertEquals(1, gifResults.items.size)
+        assertEquals("Party_Animation.gif", gifResults.items.first().name)
+    }
+
+    @Test
+    fun testSearchMedia_gpsFilters() = runBlocking {
+        val locationCache = PhotoMapLocationCache(context)
+        locationCache.save("content://media/external/images/media/1", GeoPoint(27.9881, 86.9250))
+        locationCache.save("content://media/external/images/media/3", null)
+
+        val gpsResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(gpsFilter = GpsFilter.HAS_GPS),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = emptyMap(),
+            favourites = emptySet()
+        )
+        assertTrue(gpsResults.items.any { it.uri == "content://media/external/images/media/1" })
+        assertFalse(gpsResults.items.any { it.uri == "content://media/external/images/media/3" })
+
+        val noGpsResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(gpsFilter = GpsFilter.NO_GPS),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = emptyMap(),
+            favourites = emptySet()
+        )
+        assertTrue(noGpsResults.items.any { it.uri == "content://media/external/images/media/3" })
+        assertFalse(noGpsResults.items.any { it.uri == "content://media/external/images/media/1" })
+    }
+
+    @Test
+    fun testSearchMedia_ocrTextFilters() = runBlocking {
+        TesseractOcr.saveCachedResult(context, Uri.parse("content://media/external/images/media/1"), "Welcome to Everest Base Camp")
+
+        val textResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(ocrTextFilter = OcrTextFilter.HAS_TEXT),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = emptyMap(),
+            favourites = emptySet()
+        )
+        assertTrue(textResults.items.any { it.uri == "content://media/external/images/media/1" })
+        assertFalse(textResults.items.any { it.uri == "content://media/external/images/media/3" })
+
+        val withoutTextResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(ocrTextFilter = OcrTextFilter.NO_TEXT),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = emptyMap(),
+            favourites = emptySet()
+        )
+        assertTrue(withoutTextResults.items.any { it.uri == "content://media/external/images/media/3" })
+        assertFalse(withoutTextResults.items.any { it.uri == "content://media/external/images/media/1" })
+    }
+
+    @Test
+    fun testSearchMedia_faceFilters() = runBlocking {
+        // media/1 has John Doe in samplePeople
+        val faceResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(faceFilter = FaceFilter.HAS_FACE),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = samplePeople,
+            favourites = emptySet()
+        )
+        assertTrue(faceResults.items.any { it.uri == "content://media/external/images/media/1" })
+        assertFalse(faceResults.items.any { it.uri == "content://media/external/images/media/3" })
+
+        val noFaceResults = searchEngine.searchMedia(
+            query = "",
+            media = sampleMedia,
+            filter = SearchFilterState(faceFilter = FaceFilter.NO_FACE),
+            sortMode = SearchSortMode.RELEVANCE,
+            customAlbums = emptyList(),
+            customTagsMap = emptyMap(),
+            customPeopleMap = samplePeople,
+            favourites = emptySet()
+        )
+        assertTrue(noFaceResults.items.any { it.uri == "content://media/external/images/media/3" })
+        assertFalse(noFaceResults.items.any { it.uri == "content://media/external/images/media/1" })
     }
 }

@@ -47,9 +47,11 @@ fun IndexingStatusScreen(
     ocrLanguages: Set<String>,
     ocrModel: String = "fast",
     ocrEngine: String = "tesseract",
+    mlKitLanguages: Set<String> = setOf("latin"),
     onModelChange: ((String) -> Unit)? = null,
     onEngineChange: ((String) -> Unit)? = null,
     onToggleLanguage: ((String) -> Unit)? = null,
+    onToggleMlKitLanguage: ((String) -> Unit)? = null,
     onOpenMap: (() -> Unit)? = null,
     onBack: () -> Unit,
     viewModel: IndexingStatusViewModel = viewModel()
@@ -81,8 +83,8 @@ fun IndexingStatusScreen(
         }
     }
 
-    LaunchedEffect(media, ocrLanguages, ocrModel, ocrEngine) {
-        viewModel.setMedia(media, ocrLanguages, ocrModel, ocrEngine)
+    LaunchedEffect(media, ocrLanguages, ocrModel, ocrEngine, mlKitLanguages) {
+        viewModel.setMedia(media, ocrLanguages, ocrModel, ocrEngine, mlKitLanguages)
     }
 
     val lightAppearance = MaterialTheme.colorScheme.background.luminance() > 0.5f
@@ -132,6 +134,9 @@ fun IndexingStatusScreen(
                 },
                 onToggleLanguage = { code ->
                     onToggleLanguage?.invoke(code)
+                },
+                onToggleMlKitLanguage = { code ->
+                    onToggleMlKitLanguage?.invoke(code)
                 },
                 onClearCache = {
                     scope.launch(Dispatchers.IO) {

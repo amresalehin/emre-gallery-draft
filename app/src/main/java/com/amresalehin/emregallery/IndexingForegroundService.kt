@@ -109,6 +109,7 @@ class IndexingForegroundService : Service() {
                 when (action) {
                     ACTION_START_OCR -> runOcr(
                         languages = intent?.getStringArrayListExtra(EXTRA_LANGUAGES)?.ifEmpty { arrayListOf("eng") } ?: arrayListOf("eng"),
+                        mlKitLanguages = intent?.getStringArrayListExtra(EXTRA_MLKIT_LANGUAGES)?.ifEmpty { arrayListOf("latin") } ?: arrayListOf("latin"),
                         rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
                         modelId = intent?.getStringExtra(EXTRA_MODEL) ?: "fast",
                         engineId = intent?.getStringExtra(EXTRA_ENGINE_ID) ?: "tesseract"
@@ -145,6 +146,7 @@ class IndexingForegroundService : Service() {
 
     private suspend fun runOcr(
         languages: List<String>,
+        mlKitLanguages: List<String> = listOf("latin"),
         rescanAll: Boolean,
         modelId: String = "fast",
         engineId: String = "tesseract"
@@ -158,7 +160,9 @@ class IndexingForegroundService : Service() {
         val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
         pauseSignal.value = initialPaused
         updateState(task = TASK_OCR, running = true, paused = initialPaused, processed = photos.size - pending.size, total = photos.size, error = null)
-        val engineLabel = if (isMlKit) "Google ML Kit" else model.shortName
+        val engineLabel = if (isMlKit) {
+            "Google ML Kit (${com.amresalehin.emregallery.ocr.MlKitLanguage.getDisplayLabel(mlKitLanguages)})"
+        } else model.shortName
         postProgress("OCR indexing", "Preparing ${pending.size} images ($engineLabel)", photos.size - pending.size, photos.size)
         var completed = photos.size - pending.size
         // Unconstrained operation: do not artificially clamp cooldown to at least 30ms.
@@ -170,7 +174,7 @@ class IndexingForegroundService : Service() {
             try {
                 val mediaUri = Uri.parse(item.uri)
                 val text = if (isMlKit) {
-                    com.amresalehin.emregallery.ocr.MlKitOcr.recognize(this, mediaUri)
+                    com.amresalehin.emregallery.ocr.MlKitOcr.recognize(this, mediaUri, mlKitLanguages)
                 } else {
                     TesseractOcr.recognize(this, mediaUri, languages, model)
                 }
@@ -559,6 +563,7 @@ class IndexingForegroundService : Service() {
         private const val ACTION_CANCEL = "com.amresalehin.emregallery.indexing.CANCEL"
         private const val ACTION_STATUS = "com.amresalehin.emregallery.indexing.STATUS"
         private const val EXTRA_LANGUAGES = "languages"
+        private const val EXTRA_MLKIT_LANGUAGES = "mlkit_languages"
         private const val EXTRA_RESCAN_ALL = "rescan_all"
         private const val EXTRA_MODEL = "ocr_model"
         private const val EXTRA_FORCE = "force"
@@ -579,10 +584,12 @@ class IndexingForegroundService : Service() {
             languages: List<String>,
             rescanAll: Boolean = false,
             modelId: String = "fast",
-            engineId: String = "tesseract"
+            engineId: String = "tesseract",
+            mlKitLanguages: List<String> = listOf("latin")
         ) =
             command(context, ACTION_START_OCR) {
                 putStringArrayListExtra(EXTRA_LANGUAGES, ArrayList(languages))
+                putStringArrayListExtra(EXTRA_MLKIT_LANGUAGES, ArrayList(mlKitLanguages))
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
                 putExtra(EXTRA_MODEL, modelId)
                 putExtra(EXTRA_ENGINE_ID, engineId)

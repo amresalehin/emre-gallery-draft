@@ -66,6 +66,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     private var currentPhotos: List<MediaItem> = emptyList()
     private var currentPhotoUris: List<String> = emptyList()
     private var currentOcrLanguages: Set<String> = emptySet()
+    private var currentMlKitLanguages: Set<String> = setOf("latin")
     private var currentOcrModel: String = "fast"
     private var currentOcrEngine: String = "tesseract"
 
@@ -90,17 +91,19 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         media: List<MediaItem>,
         ocrLanguages: Set<String>,
         ocrModel: String = "fast",
-        ocrEngine: String = "tesseract"
+        ocrEngine: String = "tesseract",
+        mlKitLanguages: Set<String> = setOf("latin")
     ) {
         val photos = media.filterNot { it.isVideo }
         val uris = photos.map { it.uri }
         currentPhotos = photos
         currentPhotoUris = uris
         currentOcrLanguages = ocrLanguages
+        currentMlKitLanguages = mlKitLanguages
         currentOcrModel = ocrModel
         currentOcrEngine = ocrEngine
 
-        _uiState.update { it.copy(totalPhotos = photos.size, ocr = it.ocr.copy(model = ocrModel, engine = ocrEngine)) }
+        _uiState.update { it.copy(totalPhotos = photos.size, ocr = it.ocr.copy(model = ocrModel, engine = ocrEngine, mlKitLanguages = mlKitLanguages)) }
         refreshCounts()
     }
 
@@ -112,6 +115,11 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
     fun setOcrEngine(engineId: String) {
         currentOcrEngine = engineId
         _uiState.update { it.copy(ocr = it.ocr.copy(engine = engineId)) }
+    }
+
+    fun setMlKitLanguages(languages: Set<String>) {
+        currentMlKitLanguages = languages
+        _uiState.update { it.copy(ocr = it.ocr.copy(mlKitLanguages = languages)) }
     }
 
     fun updateEngineState() {
@@ -942,7 +950,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             languages = currentOcrLanguages.toList(),
             rescanAll = false,
             modelId = currentOcrModel,
-            engineId = currentOcrEngine
+            engineId = currentOcrEngine,
+            mlKitLanguages = currentMlKitLanguages.toList()
         )
     }
 
@@ -960,7 +969,8 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             languages = currentOcrLanguages.toList(),
             rescanAll = true,
             modelId = currentOcrModel,
-            engineId = currentOcrEngine
+            engineId = currentOcrEngine,
+            mlKitLanguages = currentMlKitLanguages.toList()
         )
     }
 }

@@ -42,7 +42,8 @@ class ViewerDetailsState(
     val context: Context,
     val item: MediaItem,
     defaultOcrLanguages: Set<String>,
-    initialOcrModel: String = "fast"
+    initialOcrModel: String = "fast",
+    defaultMlKitLanguages: Set<String> = setOf("latin")
 ) {
     var metadata by mutableStateOf<Map<String, String>>(emptyMap())
     var ocrText by mutableStateOf("")
@@ -51,6 +52,10 @@ class ViewerDetailsState(
     var ocrModel by mutableStateOf(initialOcrModel)
     val ocrLanguages = mutableStateListOf<String>().apply {
         val initial = if (defaultOcrLanguages.isNotEmpty()) defaultOcrLanguages else setOf("eng")
+        addAll(initial)
+    }
+    val mlKitLanguages = mutableStateListOf<String>().apply {
+        val initial = if (defaultMlKitLanguages.isNotEmpty()) defaultMlKitLanguages else setOf("latin")
         addAll(initial)
     }
 
@@ -67,7 +72,7 @@ class ViewerDetailsState(
 
     suspend fun runOcr(engine: String = "tesseract") {
         val isMlKit = engine.equals("google_mlkit", ignoreCase = true) || engine.equals("mlkit", ignoreCase = true)
-        if (item.isVideo || ocrBusy || (!isMlKit && ocrLanguages.isEmpty())) return
+        if (item.isVideo || ocrBusy || (!isMlKit && ocrLanguages.isEmpty()) || (isMlKit && mlKitLanguages.isEmpty())) return
         ocrBusy = true
         ocrError = null
         ocrText = ""
@@ -75,7 +80,7 @@ class ViewerDetailsState(
             runCatching {
                 val mediaUri = Uri.parse(item.uri)
                 val recognized = if (isMlKit) {
-                    com.amresalehin.emregallery.ocr.MlKitOcr.recognize(context, mediaUri)
+                    com.amresalehin.emregallery.ocr.MlKitOcr.recognize(context, mediaUri, mlKitLanguages)
                 } else {
                     val model = com.amresalehin.emregallery.ocr.TesseractModel.fromId(ocrModel)
                     TesseractOcr.recognize(context, mediaUri, ocrLanguages.toList(), model)
@@ -104,14 +109,15 @@ class ViewerDetailsState(
 fun rememberViewerDetailsState(
     item: MediaItem,
     defaultOcrLanguages: Set<String>,
-    defaultOcrModel: String = "fast"
+    defaultOcrModel: String = "fast",
+    defaultMlKitLanguages: Set<String> = setOf("latin")
 ): ViewerDetailsState {
     val context = LocalContext.current
-    val state = remember(item.uri, defaultOcrLanguages, defaultOcrModel) {
-        ViewerDetailsState(context, item, defaultOcrLanguages, defaultOcrModel)
+    val state = remember(item.uri, defaultOcrLanguages, defaultOcrModel, defaultMlKitLanguages) {
+        ViewerDetailsState(context, item, defaultOcrLanguages, defaultOcrModel, defaultMlKitLanguages)
     }
 
-    LaunchedEffect(item.uri, defaultOcrLanguages, defaultOcrModel) {
+    LaunchedEffect(item.uri, defaultOcrLanguages, defaultOcrModel, defaultMlKitLanguages) {
         state.loadData()
     }
 
@@ -147,12 +153,13 @@ fun ViewerDetailsDrawer(
     isBin: Boolean,
     defaultOcrLanguages: Set<String> = setOf("eng"),
     defaultOcrModel: String = "fast",
+    defaultMlKitLanguages: Set<String> = setOf("latin"),
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val detailsState = rememberViewerDetailsState(item, defaultOcrLanguages, defaultOcrModel)
+    val detailsState = rememberViewerDetailsState(item, defaultOcrLanguages, defaultOcrModel, defaultMlKitLanguages)
 
     var selectedTab by remember { mutableStateOf(DetailDrawerTab.OVERVIEW) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }

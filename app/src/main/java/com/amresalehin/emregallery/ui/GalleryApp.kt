@@ -112,6 +112,7 @@ fun GalleryApp() {
     val gridColumnsPref by prefs.gridColumns.collectAsStateWithLifecycle(initialValue = 3)
     val gridStylePref by prefs.gridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
     val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
+    val mlKitLanguagesPref by prefs.mlKitLanguages.collectAsStateWithLifecycle(initialValue = setOf("latin"))
     val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
     val ocrEnginePref by prefs.ocrEngine.collectAsStateWithLifecycle(initialValue = "tesseract")
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
@@ -1098,6 +1099,7 @@ fun GalleryApp() {
                         ocrLanguages = ocrLanguagesPref,
                         ocrModel = ocrModelPref,
                         ocrEngine = ocrEnginePref,
+                        mlKitLanguages = mlKitLanguagesPref,
                         onModelChange = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
                         onEngineChange = { newEngine -> scope.launch { prefs.setOcrEngine(newEngine) } },
                         onToggleLanguage = { code ->
@@ -1109,14 +1111,35 @@ fun GalleryApp() {
                             }
                             scope.launch { prefs.setOcrLanguages(updated) }
                         },
+                        onToggleMlKitLanguage = { code ->
+                            val updated = mlKitLanguagesPref.toMutableSet()
+                            when (code) {
+                                "all" -> updated.addAll(com.amresalehin.emregallery.ocr.MlKitLanguage.ALL_CODES)
+                                "latin_only" -> {
+                                    updated.clear()
+                                    updated.add("latin")
+                                }
+                                else -> {
+                                    if (code in updated) {
+                                        if (updated.size > 1) updated.remove(code)
+                                    } else {
+                                        updated.add(code)
+                                    }
+                                }
+                            }
+                            scope.launch { prefs.setMlKitLanguages(updated) }
+                        },
                         onOpenMap = {
                             navigateTo(Destination.MAP)
                         },
                         onBack = { performBackNavigation() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
+                        currentEngine = ocrEnginePref,
                         currentModel = ocrModelPref,
                         ocrLanguages = ocrLanguagesPref,
+                        mlKitLanguages = mlKitLanguagesPref,
+                        onSelectEngine = { newEngine -> scope.launch { prefs.setOcrEngine(newEngine) } },
                         onSelectModel = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
                         onToggleLanguage = { code ->
                             val updated = ocrLanguagesPref.toMutableSet()
@@ -1126,6 +1149,24 @@ fun GalleryApp() {
                                 updated.add(code)
                             }
                             scope.launch { prefs.setOcrLanguages(updated) }
+                        },
+                        onToggleMlKitLanguage = { code ->
+                            val updated = mlKitLanguagesPref.toMutableSet()
+                            when (code) {
+                                "all" -> updated.addAll(com.amresalehin.emregallery.ocr.MlKitLanguage.ALL_CODES)
+                                "latin_only" -> {
+                                    updated.clear()
+                                    updated.add("latin")
+                                }
+                                else -> {
+                                    if (code in updated) {
+                                        if (updated.size > 1) updated.remove(code)
+                                    } else {
+                                        updated.add(code)
+                                    }
+                                }
+                            }
+                            scope.launch { prefs.setMlKitLanguages(updated) }
                         },
                         onBack = { performBackNavigation() }
                     )
@@ -1194,6 +1235,7 @@ fun GalleryApp() {
                 initialStoryIndex = currentStoryIndex,
                 defaultOcrLanguages = ocrLanguagesPref,
                 defaultOcrModel = ocrModelPref,
+                defaultMlKitLanguages = mlKitLanguagesPref,
                 favourite = currentItem.uri in favourites,
                 isHidden = currentItem.uri in hidden,
                 isBin = isItemBinned,

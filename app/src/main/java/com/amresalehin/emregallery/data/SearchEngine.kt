@@ -61,8 +61,31 @@ data class DiscoveryEntityItem(
 
 enum class MediaTypeFilter(val label: String) {
     ALL("All media"),
-    PHOTOS("Photos"),
-    VIDEOS("Videos")
+    PHOTOS("Images"),
+    VIDEOS("Videos"),
+    GIFS("Gifs");
+
+    companion object {
+        val IMAGES = PHOTOS
+    }
+}
+
+enum class GpsFilter(val label: String) {
+    ALL("All"),
+    HAS_GPS("GPS"),
+    NO_GPS("No GPS")
+}
+
+enum class OcrTextFilter(val label: String) {
+    ALL("All"),
+    HAS_TEXT("Text"),
+    NO_TEXT("Without Text")
+}
+
+enum class FaceFilter(val label: String) {
+    ALL("All"),
+    HAS_FACE("Face"),
+    NO_FACE("No Face")
 }
 
 sealed class TimeRangeFilter(val label: String) {
@@ -93,7 +116,10 @@ data class SearchFilterState(
     val selectedAlbumId: String? = null,
     val selectedPersonId: String? = null,
     val selectedPlace: String? = null,
-    val selectedTag: String? = null
+    val selectedTag: String? = null,
+    val gpsFilter: GpsFilter = GpsFilter.ALL,
+    val ocrTextFilter: OcrTextFilter = OcrTextFilter.ALL,
+    val faceFilter: FaceFilter = FaceFilter.ALL
 ) {
     val isDefault: Boolean
         get() = mediaType == MediaTypeFilter.ALL &&
@@ -102,7 +128,10 @@ data class SearchFilterState(
                 selectedAlbumId == null &&
                 selectedPersonId == null &&
                 selectedPlace == null &&
-                selectedTag == null
+                selectedTag == null &&
+                gpsFilter == GpsFilter.ALL &&
+                ocrTextFilter == OcrTextFilter.ALL &&
+                faceFilter == FaceFilter.ALL
 
     val activeFilterCount: Int
         get() {
@@ -114,6 +143,9 @@ data class SearchFilterState(
             if (selectedPersonId != null) count++
             if (selectedPlace != null) count++
             if (selectedTag != null) count++
+            if (gpsFilter != GpsFilter.ALL) count++
+            if (ocrTextFilter != OcrTextFilter.ALL) count++
+            if (faceFilter != FaceFilter.ALL) count++
             return count
         }
 }
@@ -569,8 +601,9 @@ class SearchEngine(private val context: Context) {
         // Filter by media type
         var candidateList = when (filter.mediaType) {
             MediaTypeFilter.ALL -> nonTrash
-            MediaTypeFilter.PHOTOS -> nonTrash.filterNot { it.isVideo }
+            MediaTypeFilter.PHOTOS -> nonTrash.filterNot { it.isVideo || isGif(it) }
             MediaTypeFilter.VIDEOS -> nonTrash.filter { it.isVideo }
+            MediaTypeFilter.GIFS -> nonTrash.filter { isGif(it) }
         }
 
         // Filter by favorites
@@ -633,6 +666,71 @@ class SearchEngine(private val context: Context) {
         // Filter by Tag
         if (filter.selectedTag != null) {
             candidateList = candidateList.filter { customTagsMap[it.uri]?.contains(filter.selectedTag) == true }
+        }
+
+        // Filter by GPS
+        candidateList = when (filter.gpsFilter) {
+            GpsFilter.ALL -> candidateList
+            GpsFilter.HAS_GPS -> {
+                val cachedLocations = runCatching { locationCache.loadAll() }.getOrDefault(emptyMap())
+                candidateList.filter { item ->
+                    val cached = cachedLocations[item.uri]
+                    if (cached != null) {
+                        cached.point != null
+                    } else {
+                        val pt = PhotoMapLocationCache.extractLocation(context, item.uri, isVideo = item.isVideo)
+                        runCatching { locationCache.save(item.uri, pt) }
+                        pt != null
+                    }
+                }
+            }
+            GpsFilter.NO_GPS -> {
+                val cachedLocations = runCatching { locationCache.loadAll() }.getOrDefault(emptyMap())
+                candidateList.filter { item ->
+                    val cached = cachedLocations[item.uri]
+                    if (cached != null) {
+                        cached.point == null
+                    } else {
+                        val pt = PhotoMapLocationCache.extractLocation(context, item.uri, isVideo = item.isVideo)
+                        runCatching { locationCache.save(item.uri, pt) }
+                        pt == null
+                    }
+                }
+            }
+        }
+
+        // Filter by OCR Text
+        candidateList = when (filter.ocrTextFilter) {
+            OcrTextFilter.ALL -> candidateList
+            OcrTextFilter.HAS_TEXT -> candidateList.filter { item ->
+                if (item.isVideo) false else {
+                    val ocrText = TesseractOcr.readCachedResult(context, Uri.parse(item.uri))
+                    !ocrText.isNullOrBlank()
+                }
+            }
+            OcrTextFilter.NO_TEXT -> candidateList.filter { item ->
+                if (item.isVideo) false else {
+                    val ocrText = TesseractOcr.readCachedResult(context, Uri.parse(item.uri))
+                    ocrText.isNullOrBlank()
+                }
+            }
+        }
+
+        // Filter by Face
+        candidateList = when (filter.faceFilter) {
+            FaceFilter.ALL -> candidateList
+            FaceFilter.HAS_FACE -> {
+                val mediaWithFaces = runCatching { faceStore.getMediaUrisWithFaces() }.getOrDefault(emptySet())
+                candidateList.filter { item ->
+                    item.uri in mediaWithFaces || customPeopleMap[item.uri]?.isNotEmpty() == true
+                }
+            }
+            FaceFilter.NO_FACE -> {
+                val mediaWithFaces = runCatching { faceStore.getMediaUrisWithFaces() }.getOrDefault(emptySet())
+                candidateList.filter { item ->
+                    item.uri !in mediaWithFaces && customPeopleMap[item.uri].isNullOrEmpty()
+                }
+            }
         }
 
         // Match query against fields
@@ -785,6 +883,12 @@ class SearchEngine(private val context: Context) {
         if (t <= 0) return ""
         val fmt = SimpleDateFormat("MMM yyyy", Locale.getDefault())
         return fmt.format(Date(t))
+    }
+
+    companion object {
+        fun isGif(item: MediaItem): Boolean =
+            item.mimeType.equals("image/gif", ignoreCase = true) ||
+            item.name.endsWith(".gif", ignoreCase = true)
     }
 }
 
