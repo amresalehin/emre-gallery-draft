@@ -1,0 +1,3 @@
+[submodule "vendor/ImageToolbox"]
+	path = vendor/ImageToolbox
+	url = https://github.com/T8RIN/ImageToolbox.git
