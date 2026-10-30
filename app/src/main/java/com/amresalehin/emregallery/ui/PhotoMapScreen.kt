@@ -28,14 +28,7 @@ const val WORLD_VIEW_LAT_SOUTH = -85.0511
 const val WORLD_VIEW_LON_WEST = -180.0
 const val WORLD_VIEW_LON_EAST = 180.0
 
-val WORLD_VIEW_CENTER = GeoPoint(0.0, 0.0)
 val DEFAULT_MAP_CENTER = GeoPoint(12.5, 90.0)
-val WORLD_VIEW_BOUNDS = BoundingBox(
-    WORLD_VIEW_LAT_NORTH,
-    WORLD_VIEW_LON_EAST,
-    WORLD_VIEW_LAT_SOUTH,
-    WORLD_VIEW_LON_WEST
-)
 
 private const val PHOTO_MAP_CAMERA_PREFERENCES = "photo_map_camera"
 private const val CAMERA_LATITUDE_KEY = "latitude"
@@ -107,27 +100,6 @@ fun calculateWorldFitZoom(map: MapView): Double {
     if (map.width <= 0 || map.height <= 0) return 1.0
     val maxDim = maxOf(map.width, map.height).toDouble()
     return (kotlin.math.ln(maxDim / 256.0) / kotlin.math.ln(2.0)).coerceAtLeast(1.0)
-}
-
-/**
- * Fits the entire world view automatically, framing the viewport cleanly to fill
- * the container using the nearest bounding constraint without repeating.
- */
-fun showWorldView(map: MapView, animated: Boolean = false) {
-    if (map.width <= 0 || map.height <= 0) {
-        map.post { showWorldView(map, animated) }
-        return
-    }
-    val targetZoom = calculateWorldFitZoom(map)
-    map.minZoomLevel = targetZoom
-    if (animated) {
-        map.controller.animateTo(WORLD_VIEW_CENTER)
-        map.controller.setZoom(targetZoom)
-    } else {
-        map.controller.setCenter(WORLD_VIEW_CENTER)
-        map.controller.setZoom(targetZoom)
-    }
-    map.invalidate()
 }
 
 /**
@@ -253,7 +225,6 @@ fun PhotoMapScreen(
 
     val hasSavedCamera = remember(context) { loadSavedPhotoMapCamera(context) != null }
     val initialCameraFramed = remember { mutableStateOf(hasSavedCamera) }
-    val userHasMovedMap = remember { mutableStateOf(false) }
     val hasMeaningfulCameraPosition = remember { mutableStateOf(hasSavedCamera) }
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
@@ -293,7 +264,6 @@ fun PhotoMapScreen(
         if (
             hasSavedCamera ||
             initialCameraFramed.value ||
-            userHasMovedMap.value ||
             focusItem != null
         ) return@LaunchedEffect
 
@@ -414,7 +384,6 @@ fun PhotoMapScreen(
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
                 onMapReady = { map -> mapRef = map },
                 onUserMapGesture = {
-                    userHasMovedMap.value = true
                     initialCameraFramed.value = true
                     hasMeaningfulCameraPosition.value = true
                 },
