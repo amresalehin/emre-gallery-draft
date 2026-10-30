@@ -1,7 +1,6 @@
 package com.amresalehin.emregallery.ui
 
 import android.content.Context
-import android.view.MotionEvent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -117,7 +116,6 @@ fun PhotoMapViewContainer(
     selectedMedia: Pair<MediaItem, GeoPoint>? = null,
     onOpenSelected: () -> Unit = {},
     onMapReady: (MapView) -> Unit,
-    useAlbumMapSessionCamera: Boolean = false,
     onBoundsChanged: (BoundingBox?) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -140,18 +138,8 @@ fun PhotoMapViewContainer(
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)),
                 factory = { ctx ->
                     Configuration.getInstance().userAgentValue = ctx.packageName
-                    val savedCamera = if (useAlbumMapSessionCamera) PhotoMapSessionCamera.snapshot else null
                     MapView(ctx).apply {
                         var cameraInitialized = false
-                        var userHasInteracted = false
-                        val cameraSaveRunnable = Runnable {
-                            if (cameraInitialized && useAlbumMapSessionCamera) PhotoMapSessionCamera.capture(this@apply)
-                        }
-                        fun scheduleCameraPersistence() {
-                            removeCallbacks(cameraSaveRunnable)
-                            postDelayed(cameraSaveRunnable, 350L)
-                        }
-
                         clipToOutline = true
                         outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
                         setTileSource(if (mapLayer == "Satellite") PhotoMapTiles.satelliteTileSource() else TileSourceFactory.MAPNIK)
@@ -171,16 +159,9 @@ fun PhotoMapViewContainer(
                             val newH = bottom - top
                             if (newW > 0 && newH > 0 && !cameraInitialized) {
                                 val fitZoom = calculateWorldFitZoom(this)
-                                // Always permit the widest world view. A restored session
-                                // camera may start closer, but never raises the minimum zoom.
                                 minZoomLevel = fitZoom
-                                if (savedCamera != null) {
-                                    controller.setCenter(GeoPoint(savedCamera.latitude, savedCamera.longitude))
-                                    controller.setZoom(savedCamera.zoom)
-                                } else {
-                                    controller.setCenter(DEFAULT_MAP_CENTER)
-                                    controller.setZoom(fitZoom)
-                                }
+                                controller.setCenter(DEFAULT_MAP_CENTER)
+                                controller.setZoom(fitZoom)
                                 cameraInitialized = true
                                 latestOnMapReady.value(this)
                                 latestOnBoundsChanged.value(calculateMapBounds(this, ctx))
@@ -188,39 +169,13 @@ fun PhotoMapViewContainer(
                             }
                         }
 
-                        var gestureMoved = false
-                        setOnTouchListener { _, event ->
-                            when (event.actionMasked) {
-                                MotionEvent.ACTION_DOWN -> gestureMoved = false
-                                MotionEvent.ACTION_MOVE,
-                                MotionEvent.ACTION_POINTER_DOWN -> {
-                                    gestureMoved = true
-                                    userHasInteracted = true
-                                }
-                                MotionEvent.ACTION_UP,
-                                MotionEvent.ACTION_CANCEL -> {
-                                    // The touch listener runs before MapView consumes ACTION_UP.
-                                    // Defer the final snapshot so the projection reflects the
-                                    // completed pan/pinch rather than the previous frame.
-                                    if (gestureMoved && cameraInitialized) {
-                                        scheduleCameraPersistence()
-                                    }
-                                    gestureMoved = false
-                                }
-                            }
-                            // Observe user gestures without consuming normal MapView input.
-                            false
-                        }
-
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
                                 latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
-                                if (cameraInitialized && userHasInteracted) scheduleCameraPersistence()
                                 return true
                             }
                             override fun onZoom(event: ZoomEvent?): Boolean {
                                 latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
-                                if (cameraInitialized && userHasInteracted) scheduleCameraPersistence()
                                 return true
                             }
                         })
