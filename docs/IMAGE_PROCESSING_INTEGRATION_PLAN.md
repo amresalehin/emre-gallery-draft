@@ -24,7 +24,7 @@ Instead:
 - Keep every upstream-derived portion compliant with Apache-2.0 and all applicable transitive library/model licences.
 - Do not mark a feature complete merely because its source file or dependency has been added. It is complete when users can discover it, run it, cancel it, preview it, export its result and pass its acceptance tests.
 
-**No feature module is intentionally omitted.** The parity matrix classifies all 68 upstream feature modules into Emre feature groups, including which upstream app-shell modules should be represented by existing Emre infrastructure rather than transplanted.
+**No feature module is intentionally omitted.** The parity matrix classifies all 69 upstream feature modules into Emre feature groups, including which upstream app-shell modules should be represented by existing Emre infrastructure rather than transplanted.
 
 ## 2. Existing Emre baseline to protect
 
@@ -211,7 +211,7 @@ The work is divided into vertical slices. Each slice must produce usable UI, bac
 - Fetch submodule recursively in CI and developer setup; verify the pinned SHA.
 - Record the exact Emre base commit and current build output.
 - Run the existing unit-test and debug-assemble workflow.
-- Audit all 68 upstream feature modules, 10 core modules and 18 support libraries.
+- Audit all 69 upstream feature modules, 10 core modules and 18 support libraries.
 - Inventory native ABIs, model assets, licenses, manifest entries and dependency versions.
 - Identify existing Emre overlaps for decoder, metadata, OCR, ONNX, media selection, storage and image loading.
 - Establish APK size, build time, memory, scroll frame-time, viewer open-time and face-index throughput baselines.
