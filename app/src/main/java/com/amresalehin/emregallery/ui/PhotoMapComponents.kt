@@ -117,13 +117,12 @@ fun PhotoMapViewContainer(
     selectedMedia: Pair<MediaItem, GeoPoint>? = null,
     onOpenSelected: () -> Unit = {},
     onMapReady: (MapView) -> Unit,
-    onUserMapGesture: () -> Unit = {},
+    useAlbumMapSessionCamera: Boolean = false,
     onBoundsChanged: (BoundingBox?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val latestOnMapReady = rememberUpdatedState(onMapReady)
-    val latestOnUserMapGesture = rememberUpdatedState(onUserMapGesture)
     val latestOnBoundsChanged = rememberUpdatedState(onBoundsChanged)
     val heatmapPoints = remember(locatedMedia) { locatedMedia.map { it.second } }
     val heatmapOverlay = remember { PhotoHeatmapOverlay() }
@@ -141,12 +140,12 @@ fun PhotoMapViewContainer(
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)),
                 factory = { ctx ->
                     Configuration.getInstance().userAgentValue = ctx.packageName
-                    val savedCamera = loadSavedPhotoMapCamera(ctx)
+                    val savedCamera = if (useAlbumMapSessionCamera) PhotoMapSessionCamera.snapshot else null
                     MapView(ctx).apply {
                         var cameraInitialized = false
                         var userHasInteracted = false
                         val cameraSaveRunnable = Runnable {
-                            if (cameraInitialized) persistPhotoMapCamera(ctx, this@apply)
+                            if (cameraInitialized && useAlbumMapSessionCamera) PhotoMapSessionCamera.capture(this@apply)
                         }
                         fun scheduleCameraPersistence() {
                             removeCallbacks(cameraSaveRunnable)
@@ -172,11 +171,9 @@ fun PhotoMapViewContainer(
                             val newH = bottom - top
                             if (newW > 0 && newH > 0 && !cameraInitialized) {
                                 val fitZoom = calculateWorldFitZoom(this)
-                                minZoomLevel = if (savedCamera != null) {
-                                    minOf(fitZoom, savedCamera.zoom)
-                                } else {
-                                    fitZoom
-                                }
+                                // Always permit the widest world view. A restored session
+                                // camera may start closer, but never raises the minimum zoom.
+                                minZoomLevel = fitZoom
                                 if (savedCamera != null) {
                                     controller.setCenter(GeoPoint(savedCamera.latitude, savedCamera.longitude))
                                     controller.setZoom(savedCamera.zoom)
@@ -199,7 +196,6 @@ fun PhotoMapViewContainer(
                                 MotionEvent.ACTION_POINTER_DOWN -> {
                                     gestureMoved = true
                                     userHasInteracted = true
-                                    latestOnUserMapGesture.value()
                                 }
                                 MotionEvent.ACTION_UP,
                                 MotionEvent.ACTION_CANCEL -> {
