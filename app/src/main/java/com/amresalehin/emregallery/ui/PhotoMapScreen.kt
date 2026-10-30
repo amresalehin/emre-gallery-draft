@@ -330,30 +330,6 @@ fun PhotoMapScreen(
         }
     }
 
-    val onFitAllPhotos: () -> Unit = {
-        selectedMapMedia = null
-        initialCameraFramed.value = true
-        val map = mapRef
-        if (map != null) {
-            val geotaggedPoints = uiState.locatedMedia.map { it.second }
-            if (geotaggedPoints.isNotEmpty()) {
-                hasMeaningfulCameraPosition.value = true
-                val allMediaBounds = computeMediaBoundingBox(geotaggedPoints)
-                if (allMediaBounds != null) {
-                    if (geotaggedPoints.size == 1) {
-                        focusSinglePhoto(map, geotaggedPoints.first(), animated = true)
-                    } else {
-                        fitBounds(map, allMediaBounds, animated = true)
-                    }
-                } else {
-                    showDefaultMapView(map, animated = true)
-                }
-            } else {
-                showDefaultMapView(map, animated = true)
-            }
-        }
-    }
-
     Box(
         Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
@@ -377,7 +353,6 @@ fun PhotoMapScreen(
                         map.invalidate()
                     }
                 },
-                onFitAllPhotos = onFitAllPhotos
             )
 
             PhotoMapViewContainer(
@@ -412,7 +387,6 @@ fun PhotoMapScreen(
                     // Pan to its coordinates while preserving the user's current zoom.
                     mapRef?.controller?.animateTo(point)
                 },
-                onFitAllPhotos = onFitAllPhotos,
                 modifier = Modifier.weight(1f)
             )
         }
