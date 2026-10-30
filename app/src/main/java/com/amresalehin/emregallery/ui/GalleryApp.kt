@@ -685,7 +685,7 @@ fun GalleryApp() {
     val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm) && hasAllFilesPerm
     if (!hasCompletedWelcome || !allRequiredPermissions) {
         WelcomeScreen(
-            initialStep = if (hasCompletedWelcome) 1 else 0,
+            initialStep = if (hasCompletedWelcome) 2 else 0,
             onComplete = {
                 scope.launch {
                     prefs.setCompletedWelcome(true)
