@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
@@ -13,9 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import com.amresalehin.emregallery.data.MediaItem
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
@@ -27,12 +25,69 @@ const val WORLD_VIEW_LAT_SOUTH = -85.0511
 const val WORLD_VIEW_LON_WEST = -180.0
 const val WORLD_VIEW_LON_EAST = 180.0
 
-val DEFAULT_MAP_CENTER = GeoPoint(12.5, 90.0)
+/** Center of the full-world view used when there is no saved camera. */
+val WORLD_VIEW_CENTER = GeoPoint(0.0, 0.0)
+val WORLD_VIEW_BOUNDS = BoundingBox(
+    WORLD_VIEW_LAT_NORTH,
+    WORLD_VIEW_LON_EAST,
+    WORLD_VIEW_LAT_SOUTH,
+    WORLD_VIEW_LON_WEST
+)
+
+private const val PHOTO_MAP_CAMERA_PREFERENCES = "photo_map_camera"
+private const val CAMERA_LATITUDE_KEY = "latitude"
+private const val CAMERA_LONGITUDE_KEY = "longitude"
+private const val CAMERA_ZOOM_KEY = "zoom"
+
+/** A camera snapshot saved independently of the photo-indexing lifecycle. */
+internal data class SavedPhotoMapCamera(
+    val latitude: Double,
+    val longitude: Double,
+    val zoom: Double
+)
+
+internal fun loadSavedPhotoMapCamera(context: Context): SavedPhotoMapCamera? {
+    val preferences = context.getSharedPreferences(
+        PHOTO_MAP_CAMERA_PREFERENCES,
+        Context.MODE_PRIVATE
+    )
+    val latitude = preferences.getString(CAMERA_LATITUDE_KEY, null)?.toDoubleOrNull()
+        ?: return null
+    val longitude = preferences.getString(CAMERA_LONGITUDE_KEY, null)?.toDoubleOrNull()
+        ?: return null
+    val zoom = preferences.getString(CAMERA_ZOOM_KEY, null)?.toDoubleOrNull()
+        ?: return null
+
+    if (!latitude.isFinite() || latitude !in -90.0..90.0) return null
+    if (!longitude.isFinite() || longitude !in -180.0..180.0) return null
+    if (!zoom.isFinite() || zoom <= 0.0 || zoom > 30.0) return null
+
+    return SavedPhotoMapCamera(latitude, longitude, zoom)
+}
+
+internal fun persistPhotoMapCamera(context: Context, map: MapView) {
+    runCatching {
+        if (map.width <= 0 || map.height <= 0) return
+
+        val center = map.mapCenter
+        val zoom = map.zoomLevelDouble
+        if (!center.latitude.isFinite() || !center.longitude.isFinite() ||
+            !zoom.isFinite() || zoom <= 0.0
+        ) return
+
+        context.getSharedPreferences(PHOTO_MAP_CAMERA_PREFERENCES, Context.MODE_PRIVATE)
+            .edit()
+            .putString(CAMERA_LATITUDE_KEY, center.latitude.toString())
+            .putString(CAMERA_LONGITUDE_KEY, center.longitude.toString())
+            .putString(CAMERA_ZOOM_KEY, zoom.toString())
+            .apply()
+    }
+}
 
 /**
- * Calculates the lowest zoom at which the complete Mercator world fits inside the
- * map viewport. The smaller viewport dimension is the limiting constraint; using
- * the larger dimension would crop the world on the other axis.
+ * Calculates the lowest zoom at which the complete Mercator world (256 * 2^z square)
+ * is fully visible inside the map viewport. The smaller viewport dimension is the
+ * limiting constraint; using the larger one would crop the world on the other axis.
  */
 fun calculateWorldFitZoom(map: MapView): Double {
     if (map.width <= 0 || map.height <= 0) return 0.0
@@ -42,21 +97,20 @@ fun calculateWorldFitZoom(map: MapView): Double {
 }
 
 /**
- * Shows a neutral Eastern Hemisphere starting view when the library has no usable GPS
- * coordinates. The map should not imply that the media belongs at the null-island point.
+ * Frames the entire world, centered, so any geotagged media is visible at a glance.
  */
-fun showDefaultMapView(map: MapView, animated: Boolean = false) {
+fun showWorldView(map: MapView, animated: Boolean = false) {
     if (map.width <= 0 || map.height <= 0) {
-        map.post { showDefaultMapView(map, animated) }
+        map.post { showWorldView(map, animated) }
         return
     }
     val targetZoom = calculateWorldFitZoom(map)
     map.minZoomLevel = targetZoom
     if (animated) {
-        map.controller.animateTo(DEFAULT_MAP_CENTER)
+        map.controller.animateTo(WORLD_VIEW_CENTER)
         map.controller.setZoom(targetZoom)
     } else {
-        map.controller.setCenter(DEFAULT_MAP_CENTER)
+        map.controller.setCenter(WORLD_VIEW_CENTER)
         map.controller.setZoom(targetZoom)
     }
     map.invalidate()
@@ -136,6 +190,32 @@ fun fitBounds(
     }
 }
 
+/**
+ * Fits a list of coordinates on the map.
+ * When empty, falls back to the full world view.
+ */
+fun fitPointsToMap(
+    map: MapView,
+    points: List<GeoPoint>,
+    animated: Boolean = true,
+    paddingDp: Int = 48
+) {
+    if (points.isEmpty()) {
+        showWorldView(map, animated)
+        return
+    }
+    if (points.size == 1) {
+        focusSinglePhoto(map, points.first(), animated)
+        return
+    }
+    val bounds = computeMediaBoundingBox(points)
+    if (bounds != null) {
+        fitBounds(map, bounds, animated, paddingDp)
+    } else {
+        showWorldView(map, animated)
+    }
+}
+
 @Composable
 fun PhotoMapScreen(
     media: List<MediaItem>,
@@ -164,34 +244,20 @@ fun PhotoMapScreen(
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
+    // null means "still resolving"; the bar shows its placeholder text until this is set.
     var selectedPlaceName by remember { mutableStateOf<String?>(null) }
-    var showSelectedPlaceBar by remember { mutableStateOf(false) }
-
-    // Show the redirect bar for three seconds after each selection. A new selection
-    // restarts the timer without clearing the selected marker or media.
-    LaunchedEffect(selectedMapMedia) {
-        showSelectedPlaceBar = selectedMapMedia != null
-        if (selectedMapMedia != null) {
-            delay(3_000)
-            showSelectedPlaceBar = false
-        }
-    }
-
-    LaunchedEffect(selectedMapMedia?.second?.latitude, selectedMapMedia?.second?.longitude) {
-        val point = selectedMapMedia?.second
-        if (point == null) {
-            selectedPlaceName = null
-        } else {
-            selectedPlaceName = "Finding place…"
-            selectedPlaceName = withContext(Dispatchers.IO) {
-                reverseGeocodeLocation(context, point.latitude, point.longitude)
-            } ?: "Place name unavailable"
-        }
-    }
     var lastFocusedUri by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(media) {
         viewModel.loadAndScanMedia(media)
+    }
+
+    LaunchedEffect(selectedMapMedia) {
+        val selected = selectedMapMedia
+        selectedPlaceName = null
+        if (selected != null) {
+            selectedPlaceName = viewModel.getPlaceName(selected.second) ?: "Place name unavailable"
+        }
     }
 
     // A requested photo is an explicit navigation action, so it may move the camera.
@@ -214,13 +280,22 @@ fun PhotoMapScreen(
         }
     }
 
+    // Indexing updates data only. Camera state is saved and restored independently.
     DisposableEffect(Unit) {
         onDispose {
             mapRef?.let { map ->
+                persistPhotoMapCamera(context, map)
                 map.onPause()
                 map.onDetach()
             }
             mapRef = null
+        }
+    }
+
+    val onFitAllPhotos: () -> Unit = {
+        selectedMapMedia = null
+        mapRef?.let { map ->
+            fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
         }
     }
 
@@ -247,6 +322,7 @@ fun PhotoMapScreen(
                         map.invalidate()
                     }
                 },
+                onFitAllPhotos = onFitAllPhotos
             )
 
             PhotoMapViewContainer(
@@ -256,9 +332,10 @@ fun PhotoMapScreen(
                 scanProgress = uiState.scanProgress,
                 scanTotal = uiState.scanTotal,
                 selectedMedia = selectedMapMedia,
-                selectedPlaceName = selectedPlaceName ?: "Finding place…",
-                showSelectedPlaceBar = showSelectedPlaceBar,
+                selectedPlaceName = selectedPlaceName,
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
+                // Swiping the bar away clears the selection, which also removes the pin.
+                onDismissSelected = { selectedMapMedia = null },
                 onMapReady = { map -> mapRef = map },
                 onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
                 modifier = Modifier.weight(1f)
