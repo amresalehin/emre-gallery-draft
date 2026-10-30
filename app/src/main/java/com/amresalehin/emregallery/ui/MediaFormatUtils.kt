@@ -11,7 +11,6 @@ import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import com.amresalehin.emregallery.data.MediaItem
 import java.io.ByteArrayOutputStream
-import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
