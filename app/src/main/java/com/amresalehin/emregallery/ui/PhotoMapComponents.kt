@@ -206,13 +206,26 @@ fun PhotoMapViewContainer(
                             }
                         }
 
+                        var gestureMoved = false
                         setOnTouchListener { _, event ->
-                            if (
-                                event.actionMasked == MotionEvent.ACTION_MOVE ||
-                                event.actionMasked == MotionEvent.ACTION_POINTER_DOWN
-                            ) {
-                                userHasInteracted = true
-                                latestOnUserMapGesture.value()
+                            when (event.actionMasked) {
+                                MotionEvent.ACTION_DOWN -> gestureMoved = false
+                                MotionEvent.ACTION_MOVE,
+                                MotionEvent.ACTION_POINTER_DOWN -> {
+                                    gestureMoved = true
+                                    userHasInteracted = true
+                                    latestOnUserMapGesture.value()
+                                }
+                                MotionEvent.ACTION_UP,
+                                MotionEvent.ACTION_CANCEL -> {
+                                    // The touch listener runs before MapView consumes ACTION_UP.
+                                    // Defer the final snapshot so the projection reflects the
+                                    // completed pan/pinch rather than the previous frame.
+                                    if (gestureMoved && cameraInitialized) {
+                                        scheduleCameraPersistence()
+                                    }
+                                    gestureMoved = false
+                                }
                             }
                             // Observe user gestures without consuming normal MapView input.
                             false
