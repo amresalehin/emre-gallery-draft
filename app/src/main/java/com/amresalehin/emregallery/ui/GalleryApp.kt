@@ -535,9 +535,6 @@ fun GalleryApp() {
         )
     }
 
-    fun openMemoryInViewer(title: String, items: List<MediaItem>) {
-        openMemoriesInViewer(listOf(StoryGroup(title, items)), 0)
-    }
 
     fun performBackNavigation() {
         if (homeSelectedUris.isNotEmpty()) {
