@@ -64,13 +64,6 @@ class ViewerDetailsState(
         ocrError = null
     }
 
-    fun toggleOcrLanguage(code: String) {
-        if (code in ocrLanguages) {
-            if (ocrLanguages.size > 1) ocrLanguages.remove(code)
-        } else {
-            ocrLanguages.add(code)
-        }
-    }
 
     suspend fun runOcr(engine: String = "tesseract") {
         val isMlKit = engine.equals("google_mlkit", ignoreCase = true) || engine.equals("mlkit", ignoreCase = true)
