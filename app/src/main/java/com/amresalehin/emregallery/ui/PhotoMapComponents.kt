@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -114,6 +115,8 @@ fun PhotoMapViewContainer(
     scanProgress: Int,
     scanTotal: Int,
     selectedMedia: Pair<MediaItem, GeoPoint>? = null,
+    selectedPlaceName: String = "Selected location",
+    showSelectedPlaceBar: Boolean = true,
     onOpenSelected: () -> Unit = {},
     onMapReady: (MapView) -> Unit,
     onBoundsChanged: (BoundingBox?) -> Unit,
@@ -215,22 +218,48 @@ fun PhotoMapViewContainer(
                 Text("© OpenStreetMap", style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.85f), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
             }
 
-            if (selectedMedia != null) {
+            if (selectedMedia != null && showSelectedPlaceBar) {
                 Surface(
-                    onClick = onOpenSelected,
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     shadowElevation = 4.dp,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(10.dp).size(44.dp)
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                         Icon(
-                            Icons.Default.OpenInNew,
-                            contentDescription = "Open selected media",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(20.dp)
+                            Icons.Default.Place,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp)
                         )
+                        Text(
+                            selectedPlaceName,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        IconButton(
+                            onClick = onOpenSelected,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.OpenInNew,
+                                contentDescription = "Open selected media",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }

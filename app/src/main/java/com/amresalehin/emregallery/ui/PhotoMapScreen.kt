@@ -13,6 +13,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import com.amresalehin.emregallery.data.MediaItem
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
@@ -161,6 +164,30 @@ fun PhotoMapScreen(
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
+    var selectedPlaceName by remember { mutableStateOf<String?>(null) }
+    var showSelectedPlaceBar by remember { mutableStateOf(false) }
+
+    // Show the redirect bar for three seconds after each selection. A new selection
+    // restarts the timer without clearing the selected marker or media.
+    LaunchedEffect(selectedMapMedia) {
+        showSelectedPlaceBar = selectedMapMedia != null
+        if (selectedMapMedia != null) {
+            delay(3_000)
+            showSelectedPlaceBar = false
+        }
+    }
+
+    LaunchedEffect(selectedMapMedia?.second?.latitude, selectedMapMedia?.second?.longitude) {
+        val point = selectedMapMedia?.second
+        if (point == null) {
+            selectedPlaceName = null
+        } else {
+            selectedPlaceName = "Finding place…"
+            selectedPlaceName = withContext(Dispatchers.IO) {
+                reverseGeocodeLocation(context, point.latitude, point.longitude)
+            } ?: "Place name unavailable"
+        }
+    }
     var lastFocusedUri by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(media) {
@@ -229,6 +256,8 @@ fun PhotoMapScreen(
                 scanProgress = uiState.scanProgress,
                 scanTotal = uiState.scanTotal,
                 selectedMedia = selectedMapMedia,
+                selectedPlaceName = selectedPlaceName ?: "Finding place…",
+                showSelectedPlaceBar = showSelectedPlaceBar,
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
                 onMapReady = { map -> mapRef = map },
                 onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
