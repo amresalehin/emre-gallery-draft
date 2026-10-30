@@ -91,7 +91,6 @@ fun GalleryApp() {
     var viewerStories by remember { mutableStateOf<List<StoryGroup>>(emptyList()) }
     var currentStoryIndex by remember { mutableIntStateOf(0) }
     var mapFocusItem by remember { mutableStateOf<MediaItem?>(null) }
-    var mapOpenedFromAlbumCard by remember { mutableStateOf(false) }
     val backStack = remember { mutableStateListOf<NavBackStackEntry>() }
     val viewerTransitionProgress = remember { Animatable(0f) }
     var showViewerControls by remember { mutableStateOf(false) }
@@ -869,7 +868,6 @@ fun GalleryApp() {
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
                         onFilter = { when (it) { "Map" -> {
-                            mapOpenedFromAlbumCard = true
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
                         }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
@@ -1049,7 +1047,6 @@ fun GalleryApp() {
                         PhotoMapScreen(
                             media = mapMedia,
                             focusItem = mapFocusItem,
-                            useAlbumMapSessionCamera = mapOpenedFromAlbumCard,
                             onBack = { performBackNavigation() },
                             onOpen = { photo ->
                                 openMediaInViewer(photo, mapMedia)
@@ -1114,7 +1111,6 @@ fun GalleryApp() {
                             scope.launch { prefs.setOcrLanguages(updated) }
                         },
                         onOpenMap = {
-                            mapOpenedFromAlbumCard = false
                             navigateTo(Destination.MAP)
                         },
                         onBack = { performBackNavigation() }
@@ -1264,7 +1260,6 @@ fun GalleryApp() {
                 onOpenNeighbor = { selectedMedia = it; showDetails = false },
                 onOpenMap = {
                     showDetails = false
-                    mapOpenedFromAlbumCard = false
                     navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = currentItem)
                 },
                 onOpenPerson = { personId, engineId ->
