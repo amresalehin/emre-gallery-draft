@@ -1308,78 +1308,7 @@ fun OverviewFacePortrait(
 /**
  * Stylized cartoon avatar portrait matching reference screenshot.
  */
-@Composable
-fun FaceAvatarIllustration(modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        // Dark background circle
-        drawCircle(color = Color(0xFF2C3238))
 
-        // Dark hair/hood
-        drawCircle(
-            color = Color(0xFF4C5259),
-            radius = w * 0.38f,
-            center = Offset(w * 0.5f, h * 0.52f)
-        )
-
-        // Face oval
-        drawOval(
-            color = Color(0xFFD4AA85),
-            topLeft = Offset(w * 0.26f, h * 0.28f),
-            size = Size(w * 0.48f, h * 0.48f)
-        )
-
-        // Smile and eyes
-        val eyeColor = Color(0xFF382A20)
-        val strokeWidth = (w * 0.035f).coerceAtLeast(1.5f)
-
-        // Left eye
-        drawArc(
-            color = eyeColor,
-            startAngle = 190f,
-            sweepAngle = 160f,
-            useCenter = false,
-            topLeft = Offset(w * 0.35f, h * 0.44f),
-            size = Size(w * 0.10f, h * 0.08f),
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-        )
-
-        // Right eye
-        drawArc(
-            color = eyeColor,
-            startAngle = 190f,
-            sweepAngle = 160f,
-            useCenter = false,
-            topLeft = Offset(w * 0.55f, h * 0.44f),
-            size = Size(w * 0.10f, h * 0.08f),
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-        )
-
-        // Smile
-        drawArc(
-            color = eyeColor,
-            startAngle = 20f,
-            sweepAngle = 140f,
-            useCenter = false,
-            topLeft = Offset(w * 0.42f, h * 0.56f),
-            size = Size(w * 0.16f, h * 0.10f),
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-        )
-    }
-}
-
-/**
- * Actions Tab Content:
- * 1. Media Actions:
- *    - Add to album (always visible)
- *    - Add location (only if media has no saved location)
- *    - Add tags (only if media has no assigned tags)
- *    Rows with label on left and small pencil button on right, thin dividers.
- * 2. People (same detected faces, smaller portraits, muted visual treatment, pencil directly beneath).
- * 3. OCR (Extract text heading, full-width Engine dropdown, Mode and Language side-by-side, compact Run OCR right-aligned).
- */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActionsTabContent(
     item: MediaItem,
