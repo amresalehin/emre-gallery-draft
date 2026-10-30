@@ -189,32 +189,6 @@ fun fitBounds(
     }
 }
 
-/**
- * Fits a list of coordinates on the map.
- * When empty, falls back gracefully to single world fit.
- */
-fun fitPointsToMap(
-    map: MapView,
-    points: List<GeoPoint>,
-    animated: Boolean = true,
-    paddingDp: Int = 48
-) {
-    if (points.isEmpty()) {
-        showWorldView(map, animated)
-        return
-    }
-    if (points.size == 1) {
-        focusSinglePhoto(map, points.first(), animated)
-        return
-    }
-    val bounds = computeMediaBoundingBox(points)
-    if (bounds != null) {
-        fitBounds(map, bounds, animated, paddingDp)
-    } else {
-        showWorldView(map, animated)
-    }
-}
-
 @Composable
 fun PhotoMapScreen(
     media: List<MediaItem>,
