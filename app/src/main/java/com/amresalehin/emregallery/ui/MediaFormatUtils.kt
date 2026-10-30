@@ -11,7 +11,6 @@ import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
 import com.amresalehin.emregallery.data.MediaItem
 import java.io.ByteArrayOutputStream
-import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -226,20 +225,7 @@ fun readMediaMetadata(context: Context, item: MediaItem): Map<String, String> {
     return values
 }
 
-fun formatDate(takenMillis: Long, addedSeconds: Long): String {
-    val millis = takenMillis.takeIf { it > 0 } ?: (addedSeconds * 1000)
-    if (millis <= 0) return "Date unavailable"
-    return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
-}
 
-fun formatMediaDateTime(takenMillis: Long, addedSeconds: Long): String {
-    val millis = takenMillis.takeIf { it > 0 } ?: (addedSeconds * 1000L)
-    if (millis <= 0) return "Date unavailable"
-    val date = Date(millis)
-    val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
-    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
-    return "${dateFormat.format(date)}  •  ${timeFormat.format(date)}"
-}
 
 fun formatMediaSubtitle(item: MediaItem): String {
     val millis = item.dateTakenMillis.takeIf { it > 0 } ?: (item.dateAddedSeconds * 1000L)
@@ -253,12 +239,6 @@ fun formatMediaSubtitle(item: MediaItem): String {
     return listOfNotNull(datePart, sizePart).joinToString(" · ")
 }
 
-fun formatIsoDate(takenMillis: Long, addedSeconds: Long): String {
-    val millis = takenMillis.takeIf { it > 0 } ?: (addedSeconds * 1000L)
-    if (millis <= 0) return "2024-10-23T17:42:35+05:30"
-    val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.getDefault())
-    return runCatching { isoFormat.format(Date(millis)) }.getOrDefault("2024-10-23T17:42:35+05:30")
-}
 
 fun formatBytes(bytes: Long): String = when {
     bytes <= 0 -> "Not available"

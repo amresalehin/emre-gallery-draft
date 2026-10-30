@@ -1,7 +1,6 @@
 package com.amresalehin.emregallery.ui
 
 import android.content.Context
-import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -32,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import com.amresalehin.emregallery.R
 import com.amresalehin.emregallery.data.MediaItem
 import org.osmdroid.config.Configuration
@@ -54,7 +52,6 @@ fun PhotoMapTopBar(
     onOpenLayerMenu: () -> Unit,
     onDismissLayerMenu: () -> Unit,
     onSelectLayer: (String) -> Unit,
-    onFitAllPhotos: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -105,18 +102,6 @@ fun PhotoMapTopBar(
             }
         }
 
-        Spacer(Modifier.width(8.dp))
-        Surface(
-            onClick = onFitAllPhotos,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-            modifier = Modifier.size(38.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.FilterCenterFocus, contentDescription = "Fit all media", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
-            }
-        }
-
     }
 }
 
@@ -153,17 +138,8 @@ fun PhotoMapViewContainer(
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)),
                 factory = { ctx ->
                     Configuration.getInstance().userAgentValue = ctx.packageName
-                    val savedCamera = loadSavedPhotoMapCamera(ctx)
                     MapView(ctx).apply {
                         var cameraInitialized = false
-                        val cameraSaveRunnable = Runnable {
-                            if (cameraInitialized) persistPhotoMapCamera(ctx, this@apply)
-                        }
-                        fun scheduleCameraPersistence() {
-                            removeCallbacks(cameraSaveRunnable)
-                            postDelayed(cameraSaveRunnable, 350L)
-                        }
-
                         clipToOutline = true
                         outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
                         setTileSource(if (mapLayer == "Satellite") PhotoMapTiles.satelliteTileSource() else TileSourceFactory.MAPNIK)
@@ -175,7 +151,7 @@ fun PhotoMapViewContainer(
                         val initialFitZoom = calculateWorldFitZoom(this)
                         minZoomLevel = initialFitZoom
                         controller.setZoom(initialFitZoom)
-                        controller.setCenter(WORLD_VIEW_CENTER)
+                        controller.setCenter(DEFAULT_MAP_CENTER)
 
                         // Initialize the camera once after measurement. Indexing never reframes it.
                         addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
@@ -183,18 +159,9 @@ fun PhotoMapViewContainer(
                             val newH = bottom - top
                             if (newW > 0 && newH > 0 && !cameraInitialized) {
                                 val fitZoom = calculateWorldFitZoom(this)
-                                minZoomLevel = if (savedCamera != null) {
-                                    minOf(fitZoom, savedCamera.zoom)
-                                } else {
-                                    fitZoom
-                                }
-                                if (savedCamera != null) {
-                                    controller.setCenter(GeoPoint(savedCamera.latitude, savedCamera.longitude))
-                                    controller.setZoom(savedCamera.zoom)
-                                } else {
-                                    controller.setCenter(WORLD_VIEW_CENTER)
-                                    controller.setZoom(fitZoom)
-                                }
+                                minZoomLevel = fitZoom
+                                controller.setCenter(DEFAULT_MAP_CENTER)
+                                controller.setZoom(fitZoom)
                                 cameraInitialized = true
                                 latestOnMapReady.value(this)
                                 latestOnBoundsChanged.value(calculateMapBounds(this, ctx))
@@ -205,12 +172,10 @@ fun PhotoMapViewContainer(
                         addMapListener(object : MapListener {
                             override fun onScroll(event: ScrollEvent?): Boolean {
                                 latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
-                                if (cameraInitialized) scheduleCameraPersistence()
                                 return true
                             }
                             override fun onZoom(event: ZoomEvent?): Boolean {
                                 latestOnBoundsChanged.value(calculateMapBounds(this@apply, ctx))
-                                if (cameraInitialized) scheduleCameraPersistence()
                                 return true
                             }
                         })
@@ -317,7 +282,6 @@ fun PhotoMapDetailsCard(
     scanTotal: Int = 0,
     dayGroups: List<Pair<String, List<Pair<MediaItem, GeoPoint>>>>,
     onPhotoClick: (MediaItem, GeoPoint) -> Unit,
-    onFitAllPhotos: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -377,13 +341,7 @@ fun PhotoMapDetailsCard(
                     Spacer(Modifier.height(8.dp))
                     Text("No media in this area", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Pan or zoom out to see media, or tap below to frame all $locatedTotal items.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = onFitAllPhotos, contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)) {
-                        Icon(Icons.Default.FilterCenterFocus, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Fit all media", style = MaterialTheme.typography.labelMedium)
-                    }
+                    Text("Pan or zoom out to see media.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
             } else {
                 LazyVerticalGrid(

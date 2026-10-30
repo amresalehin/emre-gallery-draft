@@ -2,7 +2,6 @@ package com.amresalehin.emregallery.face
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
@@ -438,10 +437,6 @@ class BuffaloLFaceEngine private constructor(
         }
     }
 
-    private fun alignFace(source: Bitmap, landmarks: FloatArray, bounds: RectF? = null): Bitmap {
-        return EnteFaceAligner.align(source, landmarks, bounds)
-    }
-
     /** Prepares CHW RGB float array tensor from bitmap pixels. */
     private fun imageTensorData(bitmap: Bitmap, size: Int, mean: Float, std: Float): FloatArray {
         val scaled = if (bitmap.width == size && bitmap.height == size) bitmap
@@ -479,21 +474,6 @@ class BuffaloLFaceEngine private constructor(
         }
         visit(value)
         return result.toFloatArray()
-    }
-
-    private fun lastDim(shape: LongArray): Long = shape.lastOrNull() ?: -1L
-    private fun rowCount(shape: LongArray): Long {
-        if (shape.isEmpty()) return -1L
-        if (shape.size == 1) return shape[0]
-        val start = if (shape[0] <= 1L && shape.size > 1) 1 else 0
-        val end = if (shape.last() == 1L && shape.size > 1) shape.lastIndex else shape.size
-        if (start >= end) return 1L
-        var count = 1L
-        for (i in start until end) {
-            if (shape[i] <= 0L) return -1L
-            count *= shape[i]
-        }
-        return count
     }
 
     private fun nonMaximumSuppression(input: List<FaceDetection>): List<FaceDetection> {

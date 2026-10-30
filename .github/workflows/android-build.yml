@@ -2,9 +2,17 @@ name: Android build
 
 on:
   push:
-    branches: [Develop, 'integration/**', 'fix/**']
+    branches:
+      - Develop
+      - 'integration/**'
+      - 'fix/**'
+      - 'chore/**'
   pull_request:
-    branches: [Develop, 'integration/**']
+    branches:
+      - Develop
+      - 'integration/**'
+      - 'fix/**'
+      - 'chore/**'
   workflow_dispatch:
 
 permissions:
@@ -16,8 +24,9 @@ concurrency:
 
 jobs:
   assemble-debug:
+    name: Unit tests and debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -30,19 +39,17 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 'current'
 
-      - name: Run unit tests
-        run: gradle --no-daemon testDebugUnitTest
+      - name: Run debug unit tests
+        run: bash ./gradlew --no-daemon testDebugUnitTest
 
       - name: Assemble debug APK
-        run: gradle --no-daemon assembleDebug
+        run: bash ./gradlew --no-daemon assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: emre-gallery-debug
+          name: emre-gallery-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14

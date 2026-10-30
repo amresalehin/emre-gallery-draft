@@ -535,9 +535,6 @@ fun GalleryApp() {
         )
     }
 
-    fun openMemoryInViewer(title: String, items: List<MediaItem>) {
-        openMemoriesInViewer(listOf(StoryGroup(title, items)), 0)
-    }
 
     fun performBackNavigation() {
         if (homeSelectedUris.isNotEmpty()) {
@@ -870,7 +867,9 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null); "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        onFilter = { when (it) { "Map" -> {
+                            navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
@@ -1111,7 +1110,9 @@ fun GalleryApp() {
                             }
                             scope.launch { prefs.setOcrLanguages(updated) }
                         },
-                        onOpenMap = { navigateTo(Destination.MAP) },
+                        onOpenMap = {
+                            navigateTo(Destination.MAP)
+                        },
                         onBack = { performBackNavigation() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(

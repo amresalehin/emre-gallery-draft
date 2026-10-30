@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery.data
 
-import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
