@@ -1309,6 +1309,7 @@ fun OverviewFacePortrait(
  * Stylized cartoon avatar portrait matching reference screenshot.
  */
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActionsTabContent(
     item: MediaItem,
