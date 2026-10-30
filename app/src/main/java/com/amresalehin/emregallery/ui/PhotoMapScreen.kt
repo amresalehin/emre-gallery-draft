@@ -30,11 +30,6 @@ const val WORLD_VIEW_LON_EAST = 180.0
 
 val DEFAULT_MAP_CENTER = GeoPoint(12.5, 90.0)
 
-private const val PHOTO_MAP_CAMERA_PREFERENCES = "photo_map_camera"
-private const val CAMERA_LATITUDE_KEY = "latitude"
-private const val CAMERA_LONGITUDE_KEY = "longitude"
-private const val CAMERA_ZOOM_KEY = "zoom"
-
 /** A camera snapshot saved independently of the photo-indexing lifecycle. */
 internal data class SavedPhotoMapCamera(
     val latitude: Double,
@@ -55,55 +50,6 @@ internal object PhotoMapSessionCamera {
             !zoom.isFinite() || zoom < 0.0
         ) return
         snapshot = SavedPhotoMapCamera(center.latitude, center.longitude, zoom)
-    }
-}
-
-internal fun loadSavedPhotoMapCamera(context: Context): SavedPhotoMapCamera? {
-    val preferences = context.getSharedPreferences(
-        PHOTO_MAP_CAMERA_PREFERENCES,
-        Context.MODE_PRIVATE
-    )
-    val latitude = preferences.getString(CAMERA_LATITUDE_KEY, null)?.toDoubleOrNull()
-        ?: return null
-    val longitude = preferences.getString(CAMERA_LONGITUDE_KEY, null)?.toDoubleOrNull()
-        ?: return null
-    val zoom = preferences.getString(CAMERA_ZOOM_KEY, null)?.toDoubleOrNull()
-        ?: return null
-
-    if (!latitude.isFinite() || latitude !in -90.0..90.0) return null
-    if (!longitude.isFinite() || longitude !in -180.0..180.0) return null
-    if (!zoom.isFinite() || zoom <= 0.0 || zoom > 30.0) return null
-
-    // Previous versions saved the initial world camera as if it were a user-selected
-    // position. Discard that legacy snapshot so the map can frame real photo locations.
-    if (latitude == 0.0 && longitude == 0.0 && zoom <= 4.0) {
-        preferences.edit()
-            .remove(CAMERA_LATITUDE_KEY)
-            .remove(CAMERA_LONGITUDE_KEY)
-            .remove(CAMERA_ZOOM_KEY)
-            .apply()
-        return null
-    }
-
-    return SavedPhotoMapCamera(latitude, longitude, zoom)
-}
-
-internal fun persistPhotoMapCamera(context: Context, map: MapView) {
-    runCatching {
-        if (map.width <= 0 || map.height <= 0) return
-
-        val center = map.mapCenter
-        val zoom = map.zoomLevelDouble
-        if (!center.latitude.isFinite() || !center.longitude.isFinite() ||
-            !zoom.isFinite() || zoom <= 0.0
-        ) return
-
-        context.getSharedPreferences(PHOTO_MAP_CAMERA_PREFERENCES, Context.MODE_PRIVATE)
-            .edit()
-            .putString(CAMERA_LATITUDE_KEY, center.latitude.toString())
-            .putString(CAMERA_LONGITUDE_KEY, center.longitude.toString())
-            .putString(CAMERA_ZOOM_KEY, zoom.toString())
-            .apply()
     }
 }
 
@@ -240,8 +186,6 @@ fun PhotoMapScreen(
             locationPermLauncher.launch(android.Manifest.permission.ACCESS_MEDIA_LOCATION)
         }
     }
-
-    val sessionCamera = if (useAlbumMapSessionCamera) PhotoMapSessionCamera.snapshot else null
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
