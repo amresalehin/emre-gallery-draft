@@ -12,6 +12,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amresalehin.emregallery.data.MediaItem
@@ -314,6 +317,26 @@ fun PhotoMapScreen(
             else -> showDefaultMapView(map, animated = false)
         }
         initialCameraFramed.value = true
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Persist the latest camera before the activity is backgrounded. A map can remain
+    // composed while its Activity pauses, so disposal alone is not a reliable save point.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                mapRef?.let { map ->
+                    if (hasMeaningfulCameraPosition.value) {
+                        persistPhotoMapCamera(context, map)
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     // Persist only a real restored, auto-framed, or user-selected camera; never persist
