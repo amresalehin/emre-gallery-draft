@@ -252,12 +252,11 @@ fun SearchFilterChipsRow(
     onFilterChange: (SearchFilterState) -> Unit,
     dynamicChips: List<DynamicEntityChip>,
     onToggleDynamicChip: (DynamicEntityChip) -> Unit,
-    onRequestCustomDatePicker: () -> Unit,
+    onRequestCustomDatePicker: () -> Unit = {},
     modifier: Modifier = Modifier,
     isDark: Boolean = false
 ) {
     val scrollState = rememberScrollState()
-    var showTimeMenu by remember { mutableStateOf(false) }
 
     val textColor = searchPrimaryTextColor(isDark)
     val secondaryText = searchSecondaryTextColor(isDark)
@@ -500,89 +499,6 @@ fun SearchFilterChipsRow(
             selectedSurface = selectedSurface,
             dividerCol = dividerCol
         )
-
-        // 10. TIME Quick Filter Chip
-        val isTimeActive = filterState.timeRange !is TimeRangeFilter.AllTime
-        val timeLabel = when (filterState.timeRange) {
-            is TimeRangeFilter.AllTime -> "Time"
-            is TimeRangeFilter.Last30Days -> "Last 30 days"
-            is TimeRangeFilter.Last90Days -> "Last 90 days"
-            is TimeRangeFilter.Custom -> "Custom date"
-        }
-
-        Box {
-            Surface(
-                modifier = Modifier
-                    .height(34.dp)
-                    .clip(CircleShape)
-                    .clickable { showTimeMenu = true }
-                    .testTag("filter_chip_time"),
-                shape = CircleShape,
-                color = if (isTimeActive) selectedSurface else cardSurface,
-                border = BorderStroke(1.dp, if (isTimeActive) textColor.copy(alpha = 0.4f) else dividerCol)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DateRange,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (isTimeActive) textColor else secondaryText
-                    )
-                    Text(
-                        text = timeLabel,
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontWeight = if (isTimeActive) FontWeight.SemiBold else FontWeight.Medium
-                        ),
-                        color = textColor
-                    )
-                    Icon(
-                        imageVector = Icons.Default.ArrowDropDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = secondaryText
-                    )
-                }
-            }
-
-            DropdownMenu(
-                expanded = showTimeMenu,
-                onDismissRequest = { showTimeMenu = false },
-                modifier = Modifier.background(cardSurface)
-            ) {
-                DropdownMenuItem(
-                    text = { Text("All time", color = textColor) },
-                    onClick = {
-                        onFilterChange(filterState.copy(timeRange = TimeRangeFilter.AllTime))
-                        showTimeMenu = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Last 30 days", color = textColor) },
-                    onClick = {
-                        onFilterChange(filterState.copy(timeRange = TimeRangeFilter.Last30Days))
-                        showTimeMenu = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Last 90 days", color = textColor) },
-                    onClick = {
-                        onFilterChange(filterState.copy(timeRange = TimeRangeFilter.Last90Days))
-                        showTimeMenu = false
-                    }
-                )
-                DropdownMenuItem(
-                    text = { Text("Custom date range…", color = textColor) },
-                    onClick = {
-                        showTimeMenu = false
-                        onRequestCustomDatePicker()
-                    }
-                )
-            }
-        }
 
         // 11. Dynamic Entity Chips (Strictly derived from matching results)
         dynamicChips.forEach { chip ->
