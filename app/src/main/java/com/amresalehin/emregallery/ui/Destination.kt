@@ -15,6 +15,7 @@ enum class Destination {
     ALBUM_CATALOG,
     SETTINGS,
     TOOLS,
+    PDF_DOCUMENT_TOOL,
     LIBRARY_OVERVIEW,
     INDEXING_STATUS,
     OCR_SETTINGS,
