@@ -35,7 +35,7 @@ fun PhotoEditorTopBar(
     onEditWithAi: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var moreExpanded by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val moreExpanded = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -62,17 +62,17 @@ fun PhotoEditorTopBar(
                 Icon(Icons.Default.SaveAlt, contentDescription = "Save copy to device", tint = Color.White, modifier = Modifier.size(21.dp))
             }
             Box {
-                IconButton(onClick = { moreExpanded = true }, modifier = Modifier.size(40.dp).testTag("editor_more_button")) {
+                IconButton(onClick = { moreExpanded.value = true }, modifier = Modifier.size(40.dp).testTag("editor_more_button")) {
                     Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = Color.White, modifier = Modifier.size(22.dp))
                 }
-                DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
+                DropdownMenu(expanded = moreExpanded.value, onDismissRequest = { moreExpanded.value = false }) {
                     DropdownMenuItem(
                         text = { Text("Edit with AI") },
-                        onClick = { moreExpanded = false; onEditWithAi() }
+                        onClick = { moreExpanded.value = false; onEditWithAi() }
                     )
                     DropdownMenuItem(
                         text = { Text("Export settings") },
-                        onClick = { moreExpanded = false; onContinueExport() }
+                        onClick = { moreExpanded.value = false; onContinueExport() }
                     )
                 }
             }
