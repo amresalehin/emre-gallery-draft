@@ -195,6 +195,7 @@ fun PhotoEditorScreen(
                         AdjustmentsPanel(
                             activeProperty = activeAdjustment,
                             currentValue = currentAdjValue,
+                            category = activeAdjustCategory,
                             onSelectProperty = { viewModel.setActiveAdjustment(it) },
                             onValueChange = { viewModel.updateAdjustmentValue(activeAdjustment, it) },
                             onValueChangeFinished = { viewModel.commitSliderChange() }
