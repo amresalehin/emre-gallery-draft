@@ -6,6 +6,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -37,9 +39,15 @@ fun PhotoEditorScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var lightcraftToolSelected by remember(item.uri) { mutableStateOf(false) }
+    var activeAdjustCategory by remember(item.uri) { mutableStateOf("Light") }
 
     LaunchedEffect(item.uri) {
+        lightcraftToolSelected = false
+        activeAdjustCategory = "Light"
         viewModel.initialize(context, item)
+        viewModel.setActiveTool(EditorTool.ADJUST)
+        viewModel.setActiveAdjustment("Exposure")
     }
 
     val previewBitmap by viewModel.previewBitmap.collectAsStateWithLifecycle()
@@ -98,50 +106,15 @@ fun PhotoEditorScreen(
             showStickerSheet -> showStickerSheet = false
             showExportSheet -> showExportSheet = false
             activeSubItem != null -> viewModel.setActiveSubItem(null)
-            canUndo -> showDiscardDialog = true
-            else -> onBack()
-        }
-    }
+            lightcraftToolSelected -> { lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) }
+          Surface(Modifier.fillMaxSize(), color = Color.Black) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val landscape = maxWidth > maxHeight
+            val sectionVisible = lightcraftToolSelected && activeTool == EditorTool.ADJUST
+            val cropMode = lightcraftToolSelected && (activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP)
 
-    val doSave: (Boolean, Int) -> Unit = { isPng, quality ->
-        scope.launch {
-            val saved = viewModel.saveResult(context, mediaRepository, isPng, quality)
-            if (saved != null) {
-                Toast.makeText(context, "Saved photo to gallery", Toast.LENGTH_SHORT).show()
-                onSaved(saved)
-            } else {
-                Toast.makeText(context, "Failed to save photo", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Top Bar
-                PhotoEditorTopBar(
-                    canUndo = canUndo && !isReplaying,
-                    canRedo = canRedo && !isReplaying,
-                    onClose = {
-                        if (canUndo) showDiscardDialog = true else onBack()
-                    },
-                    onUndo = { viewModel.undo() },
-                    onRedo = { viewModel.redo() },
-                    onQuickSave = { doSave(false, 95) },
-                    onContinueExport = { showExportSheet = true },
-                    onEditWithAi = { showAiSheet = true }
-                )
-
-                // Main Photo Canvas
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
+            val photoStage: @Composable (Modifier) -> Unit = { stageModifier ->
+                Box(stageModifier.background(Color.Black), contentAlignment = Alignment.Center) {
                     PhotoEditorCanvas(
                         bitmap = previewBitmap,
                         activeTool = activeTool,
@@ -155,261 +128,270 @@ fun PhotoEditorScreen(
                         onCropRectPreview = { viewModel.updateCropPreview(it) },
                         onCropRectChanged = { viewModel.commitCrop(it) }
                     )
-
-                    // Replay Progress Indicator Banner
                     if (isReplaying) {
                         Surface(
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .padding(top = 16.dp),
+                            Modifier.align(Alignment.TopCenter).padding(top = 62.dp),
                             shape = RoundedCornerShape(20.dp),
                             color = Color.Black.copy(alpha = 0.75f)
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                CircularProgressIndicator(
-                                    progress = { replayProgress },
-                                    modifier = Modifier.size(16.dp),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    strokeWidth = 2.dp
-                                )
+                            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(progress = { replayProgress }, modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "Replaying edit history...",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
+                                Text("Replaying edit history…", color = Color.White, style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
-                }
-
-                // Contextual Tool Panels above Bottom Bar
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP || activeSubItem == ToolSheetSubItem.CROP,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    CropControlsPanel(
-                        selectedPreset = selectedCropPreset,
-                        straightenAngle = sessionState.transform.straightenAngle,
-                        onSelectPreset = { selectedCropPreset = it },
-                        onRotate90 = { viewModel.rotate90() },
-                        onFlipH = { viewModel.flipHorizontal() },
-                        onFlipV = { viewModel.flipVertical() },
-                        onStraightenChange = { viewModel.setStraighten(it) },
-                        onStraightenFinished = { viewModel.commitSliderChange() },
-                        onApply = { viewModel.setActiveSubItem(null) }
+                    PhotoEditorTopBar(
+                        canUndo = canUndo && !isReplaying,
+                        canRedo = canRedo && !isReplaying,
+                        onClose = { if (canUndo) showDiscardDialog = true else onBack() },
+                        onUndo = { viewModel.undo() },
+                        onRedo = { viewModel.redo() },
+                        onQuickSave = { doSave(false, 95) },
+                        onContinueExport = { showExportSheet = true },
+                        onEditWithAi = { showAiSheet = true },
+                        modifier = Modifier.align(Alignment.TopCenter)
                     )
                 }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.ADJUST,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    AdjustmentsPanel(
-                        activeProperty = activeAdjustment,
-                        currentValue = currentAdjValue,
-                        onSelectProperty = { viewModel.setActiveAdjustment(it) },
-                        onValueChange = { viewModel.updateAdjustmentValue(activeAdjustment, it) },
-                        onValueChangeFinished = { viewModel.commitSliderChange() }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.EFFECTS,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    EffectsFiltersPanel(
-                        selectedFilter = sessionState.filter,
-                        filterIntensity = sessionState.filterIntensity,
-                        onSelectFilter = { viewModel.setFilter(it) },
-                        onIntensityChange = { viewModel.updateFilterIntensity(it) },
-                        onIntensityChangeFinished = { viewModel.commitSliderChange() }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.RETOUCH || activeTool == EditorTool.REMOVE || activeTool == EditorTool.CLONE,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    RetouchPanel(
-                        activeType = activeRetouchType,
-                        brushRadius = brushWidth * 1.5f,
-                        onSelectType = { activeRetouchType = it },
-                        onRadiusChange = { brushWidth = it / 1.5f }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.REMOVE_BG || activeTool == EditorTool.CUTOUT,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    RemoveBgPanel(
-                        currentMode = sessionState.background.mode,
-                        blurRadius = sessionState.background.blurRadius,
-                        onSelectMode = { viewModel.setBackgroundMode(it) },
-                        onBlurRadiusChange = { viewModel.setBackgroundBlur(it) },
-                        onBlurRadiusChangeFinished = { viewModel.commitSliderChange() },
-                        onSelectColor = { viewModel.setBackgroundSolidColor(it) }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.BRUSHES || activeTool == EditorTool.DRAW,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    BrushesPanel(
-                        selectedBrush = selectedBrushType,
-                        brushColor = selectedBrushColor,
-                        brushWidth = brushWidth,
-                        onSelectBrush = { selectedBrushType = it },
-                        onColorSelect = { selectedBrushColor = it },
-                        onWidthChange = { brushWidth = it }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.TOOLS,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    ToolsGridSheet(
-                        onSelectSubItem = { subItem ->
-                            when (subItem) {
-                                ToolSheetSubItem.AUTO_LEVEL -> viewModel.autoLevelStraighten()
-                                ToolSheetSubItem.SHAPE_CROP -> {
-                                    val shapes = ShapeCropType.entries
-                                    val cur = sessionState.transform.shapeCrop
-                                    val next = if (cur != null) shapes[(shapes.indexOf(cur) + 1) % shapes.size] else ShapeCropType.CIRCLE
-                                    viewModel.setShapeCrop(next)
-                                }
-                                ToolSheetSubItem.CORNER_PIN -> {
-                                    viewModel.setCornerPins(
-                                        listOf(
-                                            CornerPinPoint(0.04f, 0.04f),
-                                            CornerPinPoint(0.96f, 0.08f),
-                                            CornerPinPoint(0.92f, 0.96f),
-                                            CornerPinPoint(0.06f, 0.92f)
-                                        )
-                                    )
-                                }
-                                ToolSheetSubItem.LIQUIFY -> {
-                                    viewModel.addLiquifyPoint(LiquifyPoint(0.5f, 0.5f, mode = LiquifyMode.EXPAND))
-                                }
-                                ToolSheetSubItem.SMUDGE -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.SMUDGE_BRUSH
-                                }
-                                ToolSheetSubItem.PATCH -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.PATCH_HEALING
-                                }
-                                ToolSheetSubItem.CLONE -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.CLONE_STAMP
-                                }
-                                ToolSheetSubItem.DISPERSION -> {
-                                    val cur = sessionState.transform.dispersionAmount
-                                    viewModel.setDispersion(if (cur > 0f) 0f else 50f)
-                                }
-                                ToolSheetSubItem.STRETCH -> {
-                                    viewModel.setPerspective(20f, 0f)
-                                }
-                                ToolSheetSubItem.MOTION -> {
-                                    val cur = sessionState.transform.motionAmount
-                                    viewModel.setMotion(if (cur > 0f) 0f else 45f, 45f)
-                                }
-                                ToolSheetSubItem.ROTATE -> viewModel.rotate90()
-                                ToolSheetSubItem.FLIP -> viewModel.flipHorizontal()
-                                ToolSheetSubItem.STRAIGHTEN, ToolSheetSubItem.CROP, ToolSheetSubItem.PERSPECTIVE -> {
-                                    viewModel.setActiveTool(EditorTool.CROP)
-                                }
-                                else -> {}
-                            }
-                        }
-                    )
-                }
-
-                // Bottom Tools Bar
-                PhotoEditorBottomBar(
-                    activeTool = activeTool,
-                    onSelectTool = { tool ->
-                        viewModel.setActiveTool(tool)
-                        when (tool) {
-                            EditorTool.CROP -> {
-                                viewModel.setActiveSubItem(ToolSheetSubItem.CROP)
-                                selectedCropPreset = AspectRatioPreset.FREE
-                            }
-                            EditorTool.TOOLS -> {
-                                // Tools grid panel displays
-                            }
-                            EditorTool.ADJUST -> {
-                                viewModel.setActiveAdjustment("Brightness")
-                            }
-                            EditorTool.EFFECTS -> {
-                                // Effects panel displays
-                            }
-                            EditorTool.RETOUCH -> {
-                                activeRetouchType = RetouchType.BLEMISH
-                            }
-                            EditorTool.REMOVE_BG -> {
-                                // Background panel displays
-                            }
-                            EditorTool.BRUSHES -> {
-                                selectedBrushType = BrushType.PEN
-                            }
-                            EditorTool.TEXT -> showTextDialog = true
-                            EditorTool.STICKER -> showStickerSheet = true
-                            EditorTool.SHAPE -> {
-                                val types = ShapeType.entries
-                                val currentType = sessionState.shapes.lastOrNull()?.shapeType
-                                val nextIndex = if (currentType != null) (types.indexOf(currentType) + 1) % types.size else 0
-                                viewModel.addShape(types[nextIndex], strokeColor = Color.White)
-                            }
-                            EditorTool.FRAME -> {
-                                val frames = FrameStyle.entries
-                                val curIdx = frames.indexOf(sessionState.frame)
-                                val nextFrame = frames[(curIdx + 1) % frames.size]
-                                viewModel.setFrame(nextFrame)
-                            }
-                            EditorTool.CALLOUT -> showCalloutDialog = true
-                            EditorTool.LENS_FLARE -> {
-                                val flareTypes = LensFlareType.entries
-                                val currentFlare = sessionState.lensFlares.lastOrNull()?.flareType
-                                val nextIndex = if (currentFlare != null) (flareTypes.indexOf(currentFlare) + 1) % flareTypes.size else 0
-                                viewModel.addLensFlare(flareTypes[nextIndex])
-                            }
-                            EditorTool.AI_TOOLS, EditorTool.AI_TRY_ON, EditorTool.AI_REPLACE, EditorTool.AI_EXPAND -> {
-                                showAiSheet = true
-                            }
-                            EditorTool.REPLAY -> viewModel.startReplay()
-                            else -> {}
-                        }
-                    }
-                )
             }
 
-            // Processing overlay dialog
+            val editingPanel: @Composable () -> Unit = {
+                Column(Modifier.fillMaxWidth()) {
+                    // Contextual Tool Panels above Bottom Bar
+                    AnimatedVisibility(
+                        visible = activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP || activeSubItem == ToolSheetSubItem.CROP,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        CropControlsPanel(
+                            selectedPreset = selectedCropPreset,
+                            straightenAngle = sessionState.transform.straightenAngle,
+                            onSelectPreset = { selectedCropPreset = it },
+                            onRotate90 = { viewModel.rotate90() },
+                            onFlipH = { viewModel.flipHorizontal() },
+                            onFlipV = { viewModel.flipVertical() },
+                            onStraightenChange = { viewModel.setStraighten(it) },
+                            onStraightenFinished = { viewModel.commitSliderChange() },
+                            onApply = { viewModel.setActiveSubItem(null) }
+                        )
+                    }
+    
+                    AnimatedVisibility(
+                        visible = activeTool == EditorTool.ADJUST,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        AdjustmentsPanel(
+                            activeProperty = activeAdjustment,
+                            currentValue = currentAdjValue,
+                            onSelectProperty = { viewModel.setActiveAdjustment(it) },
+                            onValueChange = { viewModel.updateAdjustmentValue(activeAdjustment, it) },
+                            onValueChangeFinished = { viewModel.commitSliderChange() }
+                        )
+                    }
+    
+                    AnimatedVisibility(
+                        visible = activeTool == EditorTool.EFFECTS,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        EffectsFiltersPanel(
+                            selectedFilter = sessionState.filter,
+                            filterIntensity = sessionState.filterIntensity,
+                            onSelectFilter = { viewModel.setFilter(it) },
+                            onIntensityChange = { viewModel.updateFilterIntensity(it) },
+                            onIntensityChangeFinished = { viewModel.commitSliderChange() }
+                        )
+                    }
+    
+                    AnimatedVisibility(
+                        visible = activeTool == EditorTool.RETOUCH || activeTool == EditorTool.REMOVE || activeTool == EditorTool.CLONE,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        RetouchPanel(
+                            activeType = activeRetouchType,
+                            brushRadius = brushWidth * 1.5f,
+                            onSelectType = { activeRetouchType = it },
+                            onRadiusChange = { brushWidth = it / 1.5f }
+                        )
+                    }
+    
+                    AnimatedVisibility(
+                        visible = activeTool == EditorTool.REMOVE_BG || activeTool == EditorTool.CUTOUT,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        RemoveBgPanel(
+                            currentMode = sessionState.background.mode,
+                            blurRadius = sessionState.background.blurRadius,
+                            onSelectMode = { viewModel.setBackgroundMode(it) },
+                            onBlurRadiusChange = { viewModel.setBackgroundBlur(it) },
+                            onBlurRadiusChangeFinished = { viewModel.commitSliderChange() },
+                            onSelectColor = { viewModel.setBackgroundSolidColor(it) }
+                        )
+                    }
+    
+                    AnimatedVisibility(
+                        visible = activeTool == EditorTool.BRUSHES || activeTool == EditorTool.DRAW,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        BrushesPanel(
+                            selectedBrush = selectedBrushType,
+                            brushColor = selectedBrushColor,
+                            brushWidth = brushWidth,
+                            onSelectBrush = { selectedBrushType = it },
+                            onColorSelect = { selectedBrushColor = it },
+                            onWidthChange = { brushWidth = it }
+                        )
+                    }
+    
+                    AnimatedVisibility(
+                        visible = activeTool == EditorTool.TOOLS,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        ToolsGridSheet(
+                            onSelectSubItem = { subItem ->
+                                when (subItem) {
+                                    ToolSheetSubItem.AUTO_LEVEL -> viewModel.autoLevelStraighten()
+                                    ToolSheetSubItem.SHAPE_CROP -> {
+                                        val options = ShapeCropType.entries
+                                        val current = sessionState.transform.shapeCrop
+                                        val next = if (current != null) options[(options.indexOf(current) + 1) % options.size] else ShapeCropType.CIRCLE
+                                        viewModel.setShapeCrop(next)
+                                    }
+                                    ToolSheetSubItem.CORNER_PIN -> viewModel.setCornerPins(
+                                        listOf(CornerPinPoint(0.04f, 0.04f), CornerPinPoint(0.96f, 0.08f),
+                                            CornerPinPoint(0.92f, 0.96f), CornerPinPoint(0.06f, 0.92f))
+                                    )
+                                    ToolSheetSubItem.LIQUIFY -> viewModel.addLiquifyPoint(LiquifyPoint(0.5f, 0.5f, mode = LiquifyMode.EXPAND))
+                                    ToolSheetSubItem.SMUDGE -> { viewModel.setActiveTool(EditorTool.RETOUCH); activeRetouchType = RetouchType.SMUDGE_BRUSH }
+                                    ToolSheetSubItem.PATCH -> { viewModel.setActiveTool(EditorTool.RETOUCH); activeRetouchType = RetouchType.PATCH_HEALING }
+                                    ToolSheetSubItem.CLONE -> { viewModel.setActiveTool(EditorTool.RETOUCH); activeRetouchType = RetouchType.CLONE_STAMP }
+                                    ToolSheetSubItem.DISPERSION -> {
+                                        val current = sessionState.transform.dispersionAmount
+                                        viewModel.setDispersion(if (current > 0f) 0f else 50f)
+                                    }
+                                    ToolSheetSubItem.STRETCH -> viewModel.setPerspective(20f, 0f)
+                                    ToolSheetSubItem.MOTION -> {
+                                        val current = sessionState.transform.motionAmount
+                                        viewModel.setMotion(if (current > 0f) 0f else 45f, 45f)
+                                    }
+                                    ToolSheetSubItem.ROTATE -> viewModel.rotate90()
+                                    ToolSheetSubItem.FLIP -> viewModel.flipHorizontal()
+                                    ToolSheetSubItem.STRAIGHTEN, ToolSheetSubItem.CROP, ToolSheetSubItem.PERSPECTIVE -> viewModel.setActiveTool(EditorTool.CROP)
+                                    else -> {}
+                                }
+                            }
+                        )
+                    }
+                }
+    
+                }
+            }
+
+            val selectEditorTool: (EditorTool) -> Unit = { tool ->
+                lightcraftToolSelected = true
+                viewModel.setActiveTool(tool)
+                when (tool) {
+                    EditorTool.ADJUST -> viewModel.setActiveAdjustment(lightcraftDefaultAdjustment(activeAdjustCategory))
+                    EditorTool.CROP -> { viewModel.setActiveSubItem(ToolSheetSubItem.CROP); selectedCropPreset = AspectRatioPreset.FREE }
+                    EditorTool.RETOUCH -> activeRetouchType = RetouchType.BLEMISH
+                    EditorTool.BRUSHES -> selectedBrushType = BrushType.PEN
+                    else -> {}
+                }
+            }
+
+            if (landscape) {
+                val sideWidth = when {
+                    !lightcraftToolSelected -> 54.dp
+                    activeTool == EditorTool.ADJUST -> 430.dp
+                    cropMode -> 369.dp
+                    else -> 374.dp
+                }
+                Row(Modifier.fillMaxSize()) {
+                    photoStage(Modifier.weight(1f).fillMaxHeight())
+                    Row(Modifier.width(sideWidth).fillMaxHeight()) {
+                        if (lightcraftToolSelected) {
+                            LightcraftPanelSurface(Modifier.weight(1f).fillMaxHeight()) {
+                                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { editingPanel() }
+                            }
+                        }
+                        if (sectionVisible) {
+                            LightcraftSectionNavigation(
+                                activeSection = activeAdjustCategory,
+                                onSelectSection = { section ->
+                                    activeAdjustCategory = section
+                                    viewModel.setActiveAdjustment(lightcraftDefaultAdjustment(section))
+                                },
+                                vertical = true
+                            )
+                        }
+                        if (cropMode) {
+                            LightcraftModeRail(
+                                onCancel = { viewModel.setActiveSubItem(null); lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) },
+                                onApply = { viewModel.commitSliderChange(); viewModel.setActiveSubItem(null); lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) }
+                            )
+                        } else {
+                            LightcraftToolNavigation(activeTool, lightcraftToolSelected, ::selectEditorTool, vertical = true)
+                        }
+                    }
+                }
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    photoStage(Modifier.fillMaxWidth().weight(1f))
+                    if (lightcraftToolSelected) {
+                        val panelHeight = when {
+                            cropMode -> 232.dp
+                            activeTool == EditorTool.ADJUST -> 184.dp
+                            activeTool == EditorTool.EFFECTS -> 229.dp
+                            activeTool == EditorTool.TOOLS -> 306.dp
+                            else -> 184.dp
+                        }
+                        LightcraftPanelSurface(Modifier.fillMaxWidth().heightIn(max = panelHeight)) {
+                            Box(Modifier.fillMaxWidth().heightIn(max = panelHeight).verticalScroll(rememberScrollState())) { editingPanel() }
+                        }
+                    }
+                    if (sectionVisible) {
+                        LightcraftSectionNavigation(
+                            activeSection = activeAdjustCategory,
+                            onSelectSection = { section ->
+                                activeAdjustCategory = section
+                                viewModel.setActiveAdjustment(lightcraftDefaultAdjustment(section))
+                            }
+                        )
+                    }
+                    if (cropMode) {
+                        LightcraftModeBar(
+                            "Crop",
+                            onCancel = { viewModel.setActiveSubItem(null); lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) },
+                            onApply = { viewModel.commitSliderChange(); viewModel.setActiveSubItem(null); lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) }
+                        )
+                    } else {
+                        LightcraftToolNavigation(activeTool, lightcraftToolSelected, ::selectEditorTool)
+                    }
+                }
+            }
+
             if (isProcessing) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color.Black.copy(alpha = 0.45f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            shape = RoundedCornerShape(16.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(24.dp),
+                Surface(Modifier.fillMaxSize(), color = Color.Black.copy(alpha = 0.55f)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF292929)), shape = RoundedCornerShape(4.dp)) {
+                            Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(14.dp))
+                                Text(processingMessage.ifBlank { "Processing…" }, color = Color.White, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+                            modifier = Modifier.padding(24.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
