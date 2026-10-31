@@ -41,6 +41,22 @@ fun PhotoEditorScreen(
     val scope = rememberCoroutineScope()
     var lightcraftToolSelected by remember(item.uri) { mutableStateOf(false) }
     var activeAdjustCategory by remember(item.uri) { mutableStateOf("Light") }
+    var cropEntryTransform by remember(item.uri) { mutableStateOf<TransformParams?>(null) }
+
+    val cancelCropMode = {
+        cropEntryTransform?.let(viewModel::restoreTransform)
+        cropEntryTransform = null
+        viewModel.setActiveSubItem(null)
+        lightcraftToolSelected = false
+        viewModel.setActiveTool(EditorTool.ADJUST)
+    }
+    val applyCropMode = {
+        viewModel.commitSliderChange()
+        cropEntryTransform = null
+        viewModel.setActiveSubItem(null)
+        lightcraftToolSelected = false
+        viewModel.setActiveTool(EditorTool.ADJUST)
+    }
 
     LaunchedEffect(item.uri) {
         lightcraftToolSelected = false
@@ -105,6 +121,7 @@ fun PhotoEditorScreen(
             showAiSheet -> showAiSheet = false
             showStickerSheet -> showStickerSheet = false
             showExportSheet -> showExportSheet = false
+            activeTool == EditorTool.CROP && lightcraftToolSelected -> cancelCropMode()
             activeSubItem != null -> viewModel.setActiveSubItem(null)
             lightcraftToolSelected -> { lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) }
             canUndo -> showDiscardDialog = true
@@ -329,7 +346,11 @@ fun PhotoEditorScreen(
                 viewModel.setActiveTool(tool)
                 when (tool) {
                     EditorTool.ADJUST -> viewModel.setActiveAdjustment(lightcraftDefaultAdjustment(activeAdjustCategory))
-                    EditorTool.CROP -> { viewModel.setActiveSubItem(ToolSheetSubItem.CROP); selectedCropPreset = AspectRatioPreset.FREE }
+                    EditorTool.CROP -> {
+                        cropEntryTransform = sessionState.transform
+                        viewModel.setActiveSubItem(ToolSheetSubItem.CROP)
+                        selectedCropPreset = AspectRatioPreset.FREE
+                    }
                     EditorTool.RETOUCH -> activeRetouchType = RetouchType.BLEMISH
                     EditorTool.BRUSHES -> selectedBrushType = BrushType.PEN
                     else -> {}
@@ -362,8 +383,8 @@ fun PhotoEditorScreen(
                         }
                         if (cropMode) {
                             LightcraftModeRail(
-                                onCancel = { viewModel.setActiveSubItem(null); lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) },
-                                onApply = { viewModel.commitSliderChange(); viewModel.setActiveSubItem(null); lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) }
+                                onCancel = cancelCropMode,
+                                onApply = applyCropMode
                             )
                         } else {
                             LightcraftToolNavigation(activeTool, lightcraftToolSelected, ::selectEditorTool, vertical = true)
@@ -397,8 +418,8 @@ fun PhotoEditorScreen(
                     if (cropMode) {
                         LightcraftModeBar(
                             "Crop",
-                            onCancel = { viewModel.setActiveSubItem(null); lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) },
-                            onApply = { viewModel.commitSliderChange(); viewModel.setActiveSubItem(null); lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) }
+                            onCancel = cancelCropMode,
+                            onApply = applyCropMode
                         )
                     } else {
                         LightcraftToolNavigation(activeTool, lightcraftToolSelected, ::selectEditorTool)
