@@ -113,7 +113,7 @@ object PdfDocumentEngine {
     fun pageCount(context: Context, uri: Uri): Int {
         val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
             ?: error("Cannot open the selected PDF.")
-        descriptor.use { PdfRenderer(it).use { renderer -> renderer.pageCount } }
+        return descriptor.use { PdfRenderer(it).use { renderer -> renderer.pageCount } }
     }
 
     fun process(
