@@ -206,4 +206,62 @@ class PhotoEditorTest {
         assertNotNull(result)
         assertEquals(30, result.width)
     }
+
+    @Test
+    fun testEditorMode_cancelRevertsToBaseline() {
+        val vm = PhotoEditorViewModel()
+        assertEquals(EditorMode.NONE, vm.currentMode.value)
+        assertEquals(0, vm.sessionState.value.transform.rotationDegrees)
+
+        // Enter Crop mode
+        vm.enterMode(EditorMode.CROP)
+        assertEquals(EditorMode.CROP, vm.currentMode.value)
+
+        // Rotate in mode
+        vm.rotate90()
+        assertEquals(90, vm.sessionState.value.transform.rotationDegrees)
+        assertTrue(vm.hasModeChanges())
+
+        // Cancel mode - must roll back to 0 degrees and exit to NONE
+        vm.cancelModeChanges()
+        assertEquals(EditorMode.NONE, vm.currentMode.value)
+        assertEquals(0, vm.sessionState.value.transform.rotationDegrees)
+        assertFalse(vm.hasModeChanges())
+    }
+
+    @Test
+    fun testEditorMode_applyCommitsChanges() {
+        val vm = PhotoEditorViewModel()
+        vm.enterMode(EditorMode.CROP)
+        vm.rotate90()
+        assertEquals(90, vm.sessionState.value.transform.rotationDegrees)
+
+        // Apply mode - must keep 90 degrees and commit to history
+        vm.applyModeChanges("Crop Applied")
+        assertEquals(EditorMode.NONE, vm.currentMode.value)
+        assertEquals(90, vm.sessionState.value.transform.rotationDegrees)
+        assertTrue(vm.canUndo.value)
+
+        // Undo should bring it back to before mode entry (0 degrees)
+        vm.undo()
+        assertEquals(0, vm.sessionState.value.transform.rotationDegrees)
+    }
+
+    @Test
+    fun testEditorMode_resets() {
+        val vm = PhotoEditorViewModel()
+        vm.rotate90()
+        assertEquals(90, vm.sessionState.value.transform.rotationDegrees)
+
+        vm.resetCrop()
+        assertEquals(0, vm.sessionState.value.transform.rotationDegrees)
+        assertNull(vm.sessionState.value.transform.cropRect)
+
+        vm.setHslAdjustment(ColorBand.BLUE, HslBandAdjustment(hueShift = 20f))
+        assertNotNull(vm.sessionState.value.adjustments.hslAdjustments[ColorBand.BLUE])
+
+        vm.resetColorMix()
+        assertTrue(vm.sessionState.value.adjustments.hslAdjustments.isEmpty())
+    }
 }
+

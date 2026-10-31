@@ -171,11 +171,24 @@ object PhotoProcessor {
         ))
         cm.postConcat(toneMatrix)
 
-        // Saturation
-        val sat = (1f + (adj.saturation / 100f)).coerceIn(0f, 3.0f)
+        // Saturation & B&W
+        val effectiveSat = if (adj.isBlackAndWhite) 0f else (1f + (adj.saturation / 100f)).coerceIn(0f, 3.0f)
         val satMatrix = ColorMatrix()
-        satMatrix.setSaturation(sat)
+        satMatrix.setSaturation(effectiveSat)
         cm.postConcat(satMatrix)
+
+        // Whites and Blacks tone shifts
+        val whitesShift = adj.whites * 0.6f
+        val blacksShift = adj.blacks * 0.6f
+        if (whitesShift != 0f || blacksShift != 0f) {
+            val wbMatrix = ColorMatrix(floatArrayOf(
+                1f, 0f, 0f, 0f, whitesShift + blacksShift,
+                0f, 1f, 0f, 0f, whitesShift + blacksShift,
+                0f, 0f, 1f, 0f, whitesShift + blacksShift,
+                0f, 0f, 0f, 1f, 0f
+            ))
+            cm.postConcat(wbMatrix)
+        }
 
         // Preset filter matrix
         val filterMatrix = getFilterMatrix(filter)
@@ -191,10 +204,11 @@ object PhotoProcessor {
         paint.colorFilter = ColorMatrixColorFilter(cm)
         canvas.drawBitmap(src, 0f, 0f, paint)
 
-        // Sharpness (Unsharp mask)
+        // Sharpness & Texture
         var result = out
-        if (adj.sharpness > 2f) {
-            result = applySharpness(result, adj.sharpness / 100f)
+        val totalSharp = (adj.sharpness + adj.texture * 0.4f).coerceAtLeast(0f)
+        if (totalSharp > 2f) {
+            result = applySharpness(result, (totalSharp / 100f) * adj.sharpnessRadius)
         }
 
         // Blur

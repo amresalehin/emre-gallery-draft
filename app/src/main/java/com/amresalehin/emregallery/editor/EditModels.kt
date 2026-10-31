@@ -4,6 +4,18 @@ import android.graphics.RectF
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 
+enum class EditorMode(val displayName: String) {
+    NONE("Inspect"),
+    ADJUST("Adjust"),
+    CURVES("Tone Curves"),
+    COLOR_MIX("Color Mix"),
+    COLOR_GRADING("Color Grading"),
+    CROP("Crop & Rotate"),
+    PRESETS("Presets & Profiles"),
+    BRUSHES("Masking & Draw"),
+    RETOUCH("Healing & Retouch")
+}
+
 enum class EditorTool(val label: String) {
     CROP("Crop"),
     TOOLS("Tools"),
@@ -228,17 +240,36 @@ data class AdjustmentParams(
     val exposure: Float = 0f,   // -100..100
     val highlights: Float = 0f, // -100..100
     val shadows: Float = 0f,    // -100..100
+    val whites: Float = 0f,     // -100..100
+    val blacks: Float = 0f,     // -100..100
     val temperature: Float = 0f,// -100..100 (warm/cool)
     val tint: Float = 0f,       // -100..100 (green/magenta)
+    val texture: Float = 0f,    // -100..100
+    val clarity: Float = 0f,    // -100..100
     val sharpness: Float = 0f,  // 0..100
+    val sharpnessRadius: Float = 1.0f,
+    val sharpnessDetail: Float = 25f,
     val blur: Float = 0f,       // 0..100
     val vignette: Float = 0f,   // 0..100
+    val vignetteMidpoint: Float = 50f,
+    val vignetteFeather: Float = 50f,
+    val vignetteRoundness: Float = 0f,
     val grain: Float = 0f,      // 0..100
+    val grainSize: Float = 25f,
+    val grainRoughness: Float = 50f,
     val vibrance: Float = 0f,   // -100..100
     val dehaze: Float = 0f,     // 0..100
     val dodge: Float = 0f,      // 0..100
     val burn: Float = 0f,       // 0..100
+    val noiseReduction: Float = 0f, // 0..100
+    val colorNoiseReduction: Float = 0f, // 0..100
+    val removeChromaticAberration: Boolean = false,
+    val enableLensCorrections: Boolean = false,
+    val distortionCorrection: Float = 100f,
+    val vignettingCorrection: Float = 100f,
     val whiteBalanceKelvin: Float = 5500f, // 2000K to 10000K
+    val whiteBalancePreset: String = "As Shot",
+    val isBlackAndWhite: Boolean = false,
     val hslAdjustments: Map<ColorBand, HslBandAdjustment> = emptyMap(),
     val curves: RgbCurves = RgbCurves(),
     val levels: LevelsParams = LevelsParams(),
@@ -248,6 +279,24 @@ data class AdjustmentParams(
     val duotone: DuotoneParams = DuotoneParams(),
     val colorReplace: ColorReplaceParams = ColorReplaceParams(),
     val colorSplash: ColorSplashParams = ColorSplashParams()
+)
+
+enum class CurveChannel {
+    RGB, RED, GREEN, BLUE
+}
+
+data class ProfilePreset(
+    val id: String,
+    val name: String,
+    val category: String,
+    val filterType: FilterType,
+    val isFavorite: Boolean = false,
+    val exposureOffset: Float = 0f,
+    val contrastOffset: Float = 0f,
+    val tempOffset: Float = 0f,
+    val tintOffset: Float = 0f,
+    val vibranceOffset: Float = 0f,
+    val saturationOffset: Float = 0f
 )
 
 enum class FilterType(val displayName: String) {

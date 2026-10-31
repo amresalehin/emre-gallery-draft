@@ -1,31 +1,56 @@
 package com.amresalehin.emregallery.editor.ui
 
+import android.content.Intent
+import android.content.res.Configuration
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.editor.*
 import kotlinx.coroutines.launch
+import java.util.Locale
 
+/**
+ * Main Photo Editor screen for Emre Gallery.
+ * Features:
+ * - Proper editing modes (Crop & Rotate, Tone Curves, Color Mix, Color Grading, Presets, Brushes, Retouch)
+ * - Consistent Cancel / Apply behavior across all modes
+ * - Context-sensitive tool navigation
+ * - Adaptive editing panels
+ * - Professional canvas gestures (pinch-to-zoom 1x..5x, two-finger pan, double-tap zoom/fit, 8-handle crop box)
+ * - Landscape-specific layout (side-by-side inspector pane)
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PhotoEditorScreen(
@@ -37,16 +62,18 @@ fun PhotoEditorScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     LaunchedEffect(item.uri) {
         viewModel.initialize(context, item)
     }
 
     val previewBitmap by viewModel.previewBitmap.collectAsStateWithLifecycle()
+    val originalBitmap by viewModel.originalBitmap.collectAsStateWithLifecycle()
     val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
     val activeTool by viewModel.activeTool.collectAsStateWithLifecycle()
-    val activeSubItem by viewModel.activeSubItem.collectAsStateWithLifecycle()
-    val activeAdjustment by viewModel.activeAdjustment.collectAsStateWithLifecycle()
+    val currentMode by viewModel.currentMode.collectAsStateWithLifecycle()
     val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
     val canRedo by viewModel.canRedo.collectAsStateWithLifecycle()
     val isProcessing by viewModel.isProcessing.collectAsStateWithLifecycle()
@@ -54,50 +81,40 @@ fun PhotoEditorScreen(
     val isReplaying by viewModel.isReplaying.collectAsStateWithLifecycle()
     val replayProgress by viewModel.replayProgress.collectAsStateWithLifecycle()
 
-    var showAiSheet by remember { mutableStateOf(false) }
-    var showStickerSheet by remember { mutableStateOf(false) }
-    var showExportSheet by remember { mutableStateOf(false) }
-    var showDiscardDialog by remember { mutableStateOf(false) }
-    var showTextDialog by remember { mutableStateOf(false) }
-    var showCalloutDialog by remember { mutableStateOf(false) }
+    // Navigation & Tool State
+    var currentBottomTab by remember { mutableStateOf(MainBottomTab.ADJUST) }
+    var activeAdjustCategory by remember { mutableStateOf(AdjustCategory.LIGHT) }
+    var activeCurveChannel by remember { mutableStateOf(CurveChannel.RGB) }
+    var selectedProfileCategory by remember { mutableStateOf("Favorites") }
+    var selectedColorMixBand by remember { mutableStateOf(ColorBand.RED) }
 
-    // Interactive parameters
+    // Floating HUD slider state for interactive drag feedback
+    var activeDraggingSliderName by remember { mutableStateOf<String?>(null) }
+    var activeDraggingSliderValue by remember { mutableStateOf("") }
+    var activeDraggingSliderCurrentValue by remember { mutableFloatStateOf(0f) }
+
+    // Secondary editing tools state
     var selectedCropPreset by remember { mutableStateOf(AspectRatioPreset.FREE) }
     var selectedBrushType by remember { mutableStateOf(BrushType.PEN) }
     var selectedBrushColor by remember { mutableStateOf(Color.White) }
     var brushWidth by remember { mutableFloatStateOf(10f) }
     var activeRetouchType by remember { mutableStateOf(RetouchType.BLEMISH) }
 
-    val currentAdjValue = remember(sessionState.adjustments, activeAdjustment) {
-        when (activeAdjustment) {
-            "Brightness" -> sessionState.adjustments.brightness
-            "Contrast" -> sessionState.adjustments.contrast
-            "Saturation" -> sessionState.adjustments.saturation
-            "Exposure" -> sessionState.adjustments.exposure
-            "Highlights" -> sessionState.adjustments.highlights
-            "Shadows" -> sessionState.adjustments.shadows
-            "Temperature" -> sessionState.adjustments.temperature
-            "Tint" -> sessionState.adjustments.tint
-            "Sharpness" -> sessionState.adjustments.sharpness
-            "Blur" -> sessionState.adjustments.blur
-            "Vignette" -> sessionState.adjustments.vignette
-            "Grain" -> sessionState.adjustments.grain
-            "Vibrance" -> sessionState.adjustments.vibrance
-            "Dehaze" -> sessionState.adjustments.dehaze
-            "Dodge" -> sessionState.adjustments.dodge
-            "Burn" -> sessionState.adjustments.burn
-            "White Balance" -> sessionState.adjustments.whiteBalanceKelvin
-            else -> 0f
-        }
-    }
+    // Dialogs & Sheets
+    var showAiSheet by remember { mutableStateOf(false) }
+    var showExportSheet by remember { mutableStateOf(false) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    var numericInputTarget by remember { mutableStateOf<NumericInputTarget?>(null) }
 
-    // Android Back Handler
+    // Back Handler: Respects numeric dialog, active mode Cancel first, then discard confirmation
     BackHandler {
         when {
+            numericInputTarget != null -> numericInputTarget = null
+            currentMode != EditorMode.NONE -> viewModel.cancelModeChanges()
             showAiSheet -> showAiSheet = false
-            showStickerSheet -> showStickerSheet = false
             showExportSheet -> showExportSheet = false
-            activeSubItem != null -> viewModel.setActiveSubItem(null)
+            currentBottomTab == MainBottomTab.PRESETS -> currentBottomTab = MainBottomTab.ADJUST
+            currentBottomTab != MainBottomTab.ADJUST -> currentBottomTab = MainBottomTab.ADJUST
             canUndo -> showDiscardDialog = true
             else -> onBack()
         }
@@ -115,306 +132,863 @@ fun PhotoEditorScreen(
         }
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Top Bar
-                PhotoEditorTopBar(
-                    canUndo = canUndo && !isReplaying,
-                    canRedo = canRedo && !isReplaying,
-                    onClose = {
-                        if (canUndo) showDiscardDialog = true else onBack()
-                    },
-                    onUndo = { viewModel.undo() },
-                    onRedo = { viewModel.redo() },
-                    onQuickSave = { doSave(false, 95) },
-                    onContinueExport = { showExportSheet = true },
-                    onEditWithAi = { showAiSheet = true }
-                )
+    val sharePhoto: () -> Unit = {
+        try {
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "image/*"
+                putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(shareIntent, "Share Photo"))
+        } catch (e: Exception) {
+            Toast.makeText(context, "Cannot share photo", Toast.LENGTH_SHORT).show()
+        }
+    }
 
-                // Main Photo Canvas
+    fun startSliderDrag(name: String, formattedVal: String, initialVal: Float) {
+        activeDraggingSliderName = name
+        activeDraggingSliderValue = formattedVal
+        activeDraggingSliderCurrentValue = initialVal
+    }
+
+    // Adaptive Panel Content Composable used in both Portrait & Landscape
+    @Composable
+    fun PanelContent(modifier: Modifier = Modifier) {
+        Column(modifier = modifier.fillMaxWidth()) {
+            if (activeDraggingSliderName != null) {
+                // Minimal single slider row while actively scrubbing
+                val name = activeDraggingSliderName!!
+                val range = when (name) {
+                    "Radius" -> 0.5f..3.0f
+                    "Sharpening" -> 0f..150f
+                    "Grain", "Noise Reduction", "Color Noise" -> 0f..100f
+                    "Distortion" -> 0f..200f
+                    else -> -100f..100f
+                }
+                val gradient = when (name) {
+                    "Temp" -> Brush.horizontalGradient(listOf(Color(0xFF2979FF), Color(0xFF90CAF9), Color(0xFFFFD54F), Color(0xFFFF9100)))
+                    "Tint" -> Brush.horizontalGradient(listOf(Color(0xFF00E676), Color(0xFFA5D6A7), Color(0xFFF48FB1), Color(0xFFE040FB)))
+                    else -> null
+                }
+
+                MinimalSingleSliderRow(
+                    value = activeDraggingSliderCurrentValue,
+                    onValueChange = { newVal ->
+                        activeDraggingSliderCurrentValue = newVal
+                        activeDraggingSliderValue = formatSliderValue(name, newVal)
+                        viewModel.updateAdjustmentValue(name, newVal)
+                    },
+                    onValueChangeFinished = {
+                        activeDraggingSliderName = null
+                        viewModel.commitSliderChange()
+                    },
+                    valueRange = range,
+                    gradientBrush = gradient,
+                    activeColor = Color.White,
+                    isEv = name == "Exposure",
+                    minLabel = when (name) {
+                        "Exposure" -> "−5.00"
+                        "Temp" -> "2000K"
+                        "Radius" -> "0.50"
+                        "Distortion" -> "0"
+                        "Sharpening" -> "0"
+                        "Grain", "Noise Reduction", "Color Noise" -> "0"
+                        else -> "−100"
+                    },
+                    maxLabel = when (name) {
+                        "Exposure" -> "+5.00"
+                        "Temp" -> "9500K"
+                        "Radius" -> "3.00"
+                        "Distortion" -> "+200"
+                        "Sharpening" -> "+150"
+                        "Grain", "Noise Reduction", "Color Noise" -> "+100"
+                        else -> "+100"
+                    }
+                )
+            } else if (currentMode != EditorMode.NONE) {
+                // Proper Editing Mode Container: Pinned Cancel / Title / Apply Header + Scrollable Tools
+                when (currentMode) {
+                    EditorMode.CROP -> {
+                        EditorModeHeader(
+                            title = "Crop & Geometry",
+                            onCancel = { viewModel.cancelModeChanges() },
+                            onApply = { viewModel.applyModeChanges("Crop & Geometry") },
+                            onReset = { viewModel.resetCrop() }
+                        )
+                    }
+                    EditorMode.CURVES -> {
+                        EditorModeHeader(
+                            title = "Tone Curves",
+                            onCancel = { viewModel.cancelModeChanges() },
+                            onApply = { viewModel.applyModeChanges("Tone Curves") },
+                            onReset = { viewModel.resetCurves() }
+                        )
+                    }
+                    EditorMode.COLOR_MIX -> {
+                        EditorModeHeader(
+                            title = "Color Mix (HSL)",
+                            onCancel = { viewModel.cancelModeChanges() },
+                            onApply = { viewModel.applyModeChanges("Color Mix") },
+                            onReset = { viewModel.resetColorMix() }
+                        )
+                    }
+                    EditorMode.COLOR_GRADING -> {
+                        EditorModeHeader(
+                            title = "Color Grading",
+                            onCancel = { viewModel.cancelModeChanges() },
+                            onApply = { viewModel.applyModeChanges("Color Grading") },
+                            onReset = {
+                                viewModel.setSplitToning(SplitToningParams())
+                            }
+                        )
+                    }
+                    EditorMode.PRESETS -> {
+                        EditorModeHeader(
+                            title = "Presets & Profiles",
+                            onCancel = { viewModel.cancelModeChanges() },
+                            onApply = { viewModel.applyModeChanges("Preset Applied") }
+                        )
+                    }
+                    EditorMode.BRUSHES -> {
+                        EditorModeHeader(
+                            title = "Masking & Draw",
+                            onCancel = { viewModel.cancelModeChanges() },
+                            onApply = { viewModel.applyModeChanges("Brush Strokes") },
+                            onReset = { viewModel.clearDrawingStrokes() }
+                        )
+                    }
+                    EditorMode.RETOUCH -> {
+                        EditorModeHeader(
+                            title = "Healing & Retouch",
+                            onCancel = { viewModel.cancelModeChanges() },
+                            onApply = { viewModel.applyModeChanges("Healing Retouch") },
+                            onReset = { viewModel.clearRetouchStrokes() }
+                        )
+                    }
+                    else -> {}
+                }
+
+                // Scrollable content area for mode controls
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    PhotoEditorCanvas(
-                        bitmap = previewBitmap,
-                        activeTool = activeTool,
-                        brushType = selectedBrushType,
-                        brushColor = selectedBrushColor,
-                        brushWidth = brushWidth,
-                        activeRetouchType = activeRetouchType,
-                        cropAspectRatio = if (activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP || activeSubItem == ToolSheetSubItem.CROP) selectedCropPreset.ratio else null,
-                        onDrawingStrokeFinished = { viewModel.addDrawingStroke(it) },
-                        onRetouchStrokeFinished = { viewModel.addRetouchStroke(it) },
-                        onCropRectPreview = { viewModel.updateCropPreview(it) },
-                        onCropRectChanged = { viewModel.commitCrop(it) }
-                    )
-
-                    // Replay Progress Indicator Banner
-                    if (isReplaying) {
-                        Surface(
-                            modifier = Modifier
-                                .align(Alignment.TopCenter)
-                                .padding(top = 16.dp),
-                            shape = RoundedCornerShape(20.dp),
-                            color = Color.Black.copy(alpha = 0.75f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                    when (currentMode) {
+                        EditorMode.CROP -> {
+                            CropControlsPanel(
+                                selectedPreset = selectedCropPreset,
+                                straightenAngle = sessionState.transform.straightenAngle,
+                                onSelectPreset = { selectedCropPreset = it },
+                                onRotate90 = { viewModel.rotate90() },
+                                onFlipH = { viewModel.flipHorizontal() },
+                                onFlipV = { viewModel.flipVertical() },
+                                onStraightenChange = { viewModel.setStraighten(it) },
+                                onStraightenFinished = { viewModel.commitSliderChange() },
+                                onApply = { viewModel.applyModeChanges("Crop & Geometry") },
+                                onAutoLevel = { viewModel.autoLevelStraighten() },
+                                onResetCrop = { viewModel.resetCrop() }
+                            )
+                        }
+                        EditorMode.CURVES -> {
+                            CurveControlsBar(
+                                activeChannel = activeCurveChannel,
+                                onSelectChannel = { activeCurveChannel = it },
+                                onResetCurve = { viewModel.resetCurve(activeCurveChannel) },
+                                onDone = { viewModel.applyModeChanges("Tone Curves") }
+                            )
+                        }
+                        EditorMode.COLOR_MIX -> {
+                            val currentHsl = sessionState.adjustments.hslAdjustments[selectedColorMixBand] ?: HslBandAdjustment()
+                            ColorMixPanel(
+                                selectedBand = selectedColorMixBand,
+                                onSelectBand = { selectedColorMixBand = it },
+                                hslAdjustment = currentHsl,
+                                onHueChange = {
+                                    viewModel.setHslAdjustment(selectedColorMixBand, currentHsl.copy(hueShift = it))
+                                },
+                                onSatChange = {
+                                    viewModel.setHslAdjustment(selectedColorMixBand, currentHsl.copy(satShift = it))
+                                },
+                                onLumChange = {
+                                    viewModel.setHslAdjustment(selectedColorMixBand, currentHsl.copy(lumShift = it))
+                                },
+                                onResetBand = {
+                                    viewModel.resetColorBand(selectedColorMixBand)
+                                }
+                            )
+                        }
+                        EditorMode.COLOR_GRADING -> {
+                            val split = sessionState.adjustments.splitToning
+                            ColorGradingPanel(
+                                splitToning = split,
+                                onShadowHueChange = { viewModel.setSplitToning(split.copy(shadowHue = it)) },
+                                onShadowSatChange = { viewModel.setSplitToning(split.copy(shadowSat = it)) },
+                                onHighlightHueChange = { viewModel.setSplitToning(split.copy(highlightHue = it)) },
+                                onHighlightSatChange = { viewModel.setSplitToning(split.copy(highlightSat = it)) },
+                                onBalanceChange = { viewModel.setSplitToning(split.copy(balance = it)) },
+                                onReset = { viewModel.setSplitToning(SplitToningParams()) }
+                            )
+                        }
+                        EditorMode.PRESETS -> {
+                            ProfilesPanel(
+                                selectedCategory = selectedProfileCategory,
+                                onSelectCategory = { selectedProfileCategory = it },
+                                onApplyProfile = { viewModel.applyProfile(it) },
+                                onClose = { viewModel.cancelModeChanges() },
+                                onConfirm = { viewModel.applyModeChanges("Preset Applied") }
+                            )
+                        }
+                        EditorMode.BRUSHES -> {
+                            BrushesPanel(
+                                selectedBrush = selectedBrushType,
+                                brushColor = selectedBrushColor,
+                                brushWidth = brushWidth,
+                                onSelectBrush = { selectedBrushType = it },
+                                onColorSelect = { selectedBrushColor = it },
+                                onWidthChange = { brushWidth = it }
+                            )
+                        }
+                        EditorMode.RETOUCH -> {
+                            RetouchPanel(
+                                activeType = activeRetouchType,
+                                brushRadius = brushWidth * 1.5f,
+                                onSelectType = { activeRetouchType = it },
+                                onRadiusChange = { brushWidth = it / 1.5f }
+                            )
+                        }
+                        else -> {}
+                    }
+                }
+            } else {
+                // Root view: Adjustment Panels inside content-sized scrolling container
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    when (activeAdjustCategory) {
+                        AdjustCategory.LIGHT -> {
+                            val adj = sessionState.adjustments
+                            LightPanel(
+                                exposure = adj.exposure,
+                                contrast = adj.contrast,
+                                highlights = adj.highlights,
+                                shadows = adj.shadows,
+                                whites = adj.whites,
+                                blacks = adj.blacks,
+                                onOpenCurve = { viewModel.enterMode(EditorMode.CURVES) },
+                                onSliderDragStart = { name, formatted ->
+                                    val initVal = when (name) {
+                                        "Exposure" -> adj.exposure
+                                        "Contrast" -> adj.contrast
+                                        "Highlights" -> adj.highlights
+                                        "Shadows" -> adj.shadows
+                                        "Whites" -> adj.whites
+                                        else -> adj.blacks
+                                    }
+                                    startSliderDrag(name, formatted, initVal)
+                                },
+                                onSliderChange = { prop, val_ ->
+                                    viewModel.updateAdjustmentValue(prop, val_)
+                                },
+                                onSliderChangeFinished = { viewModel.commitSliderChange() }
+                            )
+                        }
+                        AdjustCategory.COLOR -> {
+                            val adj = sessionState.adjustments
+                            ColorPanel(
+                                isBlackAndWhite = adj.isBlackAndWhite,
+                                whiteBalancePreset = adj.whiteBalancePreset,
+                                temperature = adj.temperature,
+                                tint = adj.tint,
+                                vibrance = adj.vibrance,
+                                saturation = adj.saturation,
+                                onToggleBw = { viewModel.toggleBlackAndWhite() },
+                                onOpenGrading = { viewModel.enterMode(EditorMode.COLOR_GRADING) },
+                                onOpenMix = { viewModel.enterMode(EditorMode.COLOR_MIX) },
+                                onSelectWbPreset = { viewModel.setWhiteBalancePreset(it) },
+                                onSliderDragStart = { name, formatted ->
+                                    val initVal = when (name) {
+                                        "Temp" -> adj.temperature
+                                        "Tint" -> adj.tint
+                                        "Vibrance" -> adj.vibrance
+                                        else -> adj.saturation
+                                    }
+                                    startSliderDrag(name, formatted, initVal)
+                                },
+                                onSliderChange = { prop, val_ ->
+                                    viewModel.updateAdjustmentValue(prop, val_)
+                                },
+                                onSliderChangeFinished = { viewModel.commitSliderChange() }
+                            )
+                        }
+                        AdjustCategory.EFFECTS -> {
+                            val adj = sessionState.adjustments
+                            EffectsPanel(
+                                texture = adj.texture,
+                                clarity = adj.clarity,
+                                dehaze = adj.dehaze,
+                                vignette = adj.vignette,
+                                grain = adj.grain,
+                                onSliderDragStart = { name, formatted ->
+                                    val initVal = when (name) {
+                                        "Texture" -> adj.texture
+                                        "Clarity" -> adj.clarity
+                                        "Dehaze" -> adj.dehaze
+                                        "Vignette" -> adj.vignette
+                                        else -> adj.grain
+                                    }
+                                    startSliderDrag(name, formatted, initVal)
+                                },
+                                onSliderChange = { prop, val_ ->
+                                    viewModel.updateAdjustmentValue(prop, val_)
+                                },
+                                onSliderChangeFinished = { viewModel.commitSliderChange() }
+                            )
+                        }
+                        AdjustCategory.DETAIL -> {
+                            val adj = sessionState.adjustments
+                            DetailPanel(
+                                sharpness = adj.sharpness,
+                                radius = adj.sharpnessRadius,
+                                detail = adj.sharpnessDetail,
+                                noiseReduction = adj.noiseReduction,
+                                colorNoiseReduction = adj.colorNoiseReduction,
+                                onSliderDragStart = { name, formatted ->
+                                    val initVal = when (name) {
+                                        "Sharpening" -> adj.sharpness
+                                        "Radius" -> adj.sharpnessRadius
+                                        "Detail" -> adj.sharpnessDetail
+                                        "Noise Reduction" -> adj.noiseReduction
+                                        else -> adj.colorNoiseReduction
+                                    }
+                                    startSliderDrag(name, formatted, initVal)
+                                },
+                                onSliderChange = { prop, val_ ->
+                                    viewModel.updateAdjustmentValue(prop, val_)
+                                },
+                                onSliderChangeFinished = { viewModel.commitSliderChange() }
+                            )
+                        }
+                        AdjustCategory.OPTICS -> {
+                            val adj = sessionState.adjustments
+                            OpticsPanel(
+                                removeChromaticAberration = adj.removeChromaticAberration,
+                                enableLensCorrections = adj.enableLensCorrections,
+                                distortionCorrection = adj.distortionCorrection,
+                                onToggleChromaticAberration = { viewModel.setRemoveChromaticAberration(it) },
+                                onToggleLensCorrections = { viewModel.setEnableLensCorrections(it) },
+                                onSliderDragStart = { name, formatted ->
+                                    startSliderDrag(name, formatted, adj.distortionCorrection)
+                                },
+                                onSliderChange = { prop, val_ ->
+                                    viewModel.updateAdjustmentValue(prop, val_)
+                                },
+                                onSliderChangeFinished = { viewModel.commitSliderChange() }
+                            )
+                        }
+                        AdjustCategory.BLUR -> {
+                            val adj = sessionState.adjustments
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF141414))
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
-                                CircularProgressIndicator(
-                                    progress = { replayProgress },
-                                    modifier = Modifier.size(16.dp),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "Replaying edit history...",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.labelMedium
+                                val blurStr = "${adj.blur.toInt()}"
+                                LrSliderRow(
+                                    title = "Blur Amount",
+                                    value = adj.blur,
+                                    displayValue = blurStr,
+                                    valueRange = 0f..100f,
+                                    minLabel = "0",
+                                    maxLabel = "+100",
+                                    onDragStart = { startSliderDrag("Blur", blurStr, adj.blur) },
+                                    onValueChange = { viewModel.updateAdjustmentValue("Blur", it) },
+                                    onValueChangeFinished = { viewModel.commitSliderChange() }
                                 )
                             }
                         }
+                        AdjustCategory.PROFILES -> {
+                            ProfilesPanel(
+                                selectedCategory = selectedProfileCategory,
+                                onSelectCategory = { selectedProfileCategory = it },
+                                onApplyProfile = { viewModel.applyProfile(it) },
+                                onClose = { activeAdjustCategory = AdjustCategory.LIGHT },
+                                onConfirm = { activeAdjustCategory = AdjustCategory.LIGHT }
+                            )
+                        }
+                        else -> {}
                     }
                 }
 
-                // Contextual Tool Panels above Bottom Bar
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP || activeSubItem == ToolSheetSubItem.CROP,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    CropControlsPanel(
-                        selectedPreset = selectedCropPreset,
-                        straightenAngle = sessionState.transform.straightenAngle,
-                        onSelectPreset = { selectedCropPreset = it },
-                        onRotate90 = { viewModel.rotate90() },
-                        onFlipH = { viewModel.flipHorizontal() },
-                        onFlipV = { viewModel.flipVertical() },
-                        onStraightenChange = { viewModel.setStraighten(it) },
-                        onStraightenFinished = { viewModel.commitSliderChange() },
-                        onApply = { viewModel.setActiveSubItem(null) }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.ADJUST,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    AdjustmentsPanel(
-                        activeProperty = activeAdjustment,
-                        currentValue = currentAdjValue,
-                        onSelectProperty = { viewModel.setActiveAdjustment(it) },
-                        onValueChange = { viewModel.updateAdjustmentValue(activeAdjustment, it) },
-                        onValueChangeFinished = { viewModel.commitSliderChange() }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.EFFECTS,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    EffectsFiltersPanel(
-                        selectedFilter = sessionState.filter,
-                        filterIntensity = sessionState.filterIntensity,
-                        onSelectFilter = { viewModel.setFilter(it) },
-                        onIntensityChange = { viewModel.updateFilterIntensity(it) },
-                        onIntensityChangeFinished = { viewModel.commitSliderChange() }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.RETOUCH || activeTool == EditorTool.REMOVE || activeTool == EditorTool.CLONE,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    RetouchPanel(
-                        activeType = activeRetouchType,
-                        brushRadius = brushWidth * 1.5f,
-                        onSelectType = { activeRetouchType = it },
-                        onRadiusChange = { brushWidth = it / 1.5f }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.REMOVE_BG || activeTool == EditorTool.CUTOUT,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    RemoveBgPanel(
-                        currentMode = sessionState.background.mode,
-                        blurRadius = sessionState.background.blurRadius,
-                        onSelectMode = { viewModel.setBackgroundMode(it) },
-                        onBlurRadiusChange = { viewModel.setBackgroundBlur(it) },
-                        onBlurRadiusChangeFinished = { viewModel.commitSliderChange() },
-                        onSelectColor = { viewModel.setBackgroundSolidColor(it) }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.BRUSHES || activeTool == EditorTool.DRAW,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    BrushesPanel(
-                        selectedBrush = selectedBrushType,
-                        brushColor = selectedBrushColor,
-                        brushWidth = brushWidth,
-                        onSelectBrush = { selectedBrushType = it },
-                        onColorSelect = { selectedBrushColor = it },
-                        onWidthChange = { brushWidth = it }
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = activeTool == EditorTool.TOOLS,
-                    enter = expandVertically(),
-                    exit = shrinkVertically()
-                ) {
-                    ToolsGridSheet(
-                        onSelectSubItem = { subItem ->
-                            when (subItem) {
-                                ToolSheetSubItem.AUTO_LEVEL -> viewModel.autoLevelStraighten()
-                                ToolSheetSubItem.SHAPE_CROP -> {
-                                    val shapes = ShapeCropType.entries
-                                    val cur = sessionState.transform.shapeCrop
-                                    val next = if (cur != null) shapes[(shapes.indexOf(cur) + 1) % shapes.size] else ShapeCropType.CIRCLE
-                                    viewModel.setShapeCrop(next)
-                                }
-                                ToolSheetSubItem.CORNER_PIN -> {
-                                    viewModel.setCornerPins(
-                                        listOf(
-                                            CornerPinPoint(0.04f, 0.04f),
-                                            CornerPinPoint(0.96f, 0.08f),
-                                            CornerPinPoint(0.92f, 0.96f),
-                                            CornerPinPoint(0.06f, 0.92f)
-                                        )
-                                    )
-                                }
-                                ToolSheetSubItem.LIQUIFY -> {
-                                    viewModel.addLiquifyPoint(LiquifyPoint(0.5f, 0.5f, mode = LiquifyMode.EXPAND))
-                                }
-                                ToolSheetSubItem.SMUDGE -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.SMUDGE_BRUSH
-                                }
-                                ToolSheetSubItem.PATCH -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.PATCH_HEALING
-                                }
-                                ToolSheetSubItem.CLONE -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.CLONE_STAMP
-                                }
-                                ToolSheetSubItem.DISPERSION -> {
-                                    val cur = sessionState.transform.dispersionAmount
-                                    viewModel.setDispersion(if (cur > 0f) 0f else 50f)
-                                }
-                                ToolSheetSubItem.STRETCH -> {
-                                    viewModel.setPerspective(20f, 0f)
-                                }
-                                ToolSheetSubItem.MOTION -> {
-                                    val cur = sessionState.transform.motionAmount
-                                    viewModel.setMotion(if (cur > 0f) 0f else 45f, 45f)
-                                }
-                                ToolSheetSubItem.ROTATE -> viewModel.rotate90()
-                                ToolSheetSubItem.FLIP -> viewModel.flipHorizontal()
-                                ToolSheetSubItem.STRAIGHTEN, ToolSheetSubItem.CROP, ToolSheetSubItem.PERSPECTIVE -> {
-                                    viewModel.setActiveTool(EditorTool.CROP)
-                                }
-                                else -> {}
-                            }
-                        }
-                    )
-                }
-
-                // Bottom Tools Bar
-                PhotoEditorBottomBar(
-                    activeTool = activeTool,
-                    onSelectTool = { tool ->
-                        viewModel.setActiveTool(tool)
-                        when (tool) {
-                            EditorTool.CROP -> {
-                                viewModel.setActiveSubItem(ToolSheetSubItem.CROP)
-                                selectedCropPreset = AspectRatioPreset.FREE
-                            }
-                            EditorTool.TOOLS -> {
-                                // Tools grid panel displays
-                            }
-                            EditorTool.ADJUST -> {
-                                viewModel.setActiveAdjustment("Brightness")
-                            }
-                            EditorTool.EFFECTS -> {
-                                // Effects panel displays
-                            }
-                            EditorTool.RETOUCH -> {
-                                activeRetouchType = RetouchType.BLEMISH
-                            }
-                            EditorTool.REMOVE_BG -> {
-                                // Background panel displays
-                            }
-                            EditorTool.BRUSHES -> {
-                                selectedBrushType = BrushType.PEN
-                            }
-                            EditorTool.TEXT -> showTextDialog = true
-                            EditorTool.STICKER -> showStickerSheet = true
-                            EditorTool.SHAPE -> {
-                                val types = ShapeType.entries
-                                val currentType = sessionState.shapes.lastOrNull()?.shapeType
-                                val nextIndex = if (currentType != null) (types.indexOf(currentType) + 1) % types.size else 0
-                                viewModel.addShape(types[nextIndex], strokeColor = Color.White)
-                            }
-                            EditorTool.FRAME -> {
-                                val frames = FrameStyle.entries
-                                val curIdx = frames.indexOf(sessionState.frame)
-                                val nextFrame = frames[(curIdx + 1) % frames.size]
-                                viewModel.setFrame(nextFrame)
-                            }
-                            EditorTool.CALLOUT -> showCalloutDialog = true
-                            EditorTool.LENS_FLARE -> {
-                                val flareTypes = LensFlareType.entries
-                                val currentFlare = sessionState.lensFlares.lastOrNull()?.flareType
-                                val nextIndex = if (currentFlare != null) (flareTypes.indexOf(currentFlare) + 1) % flareTypes.size else 0
-                                viewModel.addLensFlare(flareTypes[nextIndex])
-                            }
-                            EditorTool.AI_TOOLS, EditorTool.AI_TRY_ON, EditorTool.AI_REPLACE, EditorTool.AI_EXPAND -> {
-                                showAiSheet = true
-                            }
-                            EditorTool.REPLAY -> viewModel.startReplay()
-                            else -> {}
+                // Category Strip under Adjust (docked above bottom dock)
+                AdjustCategoryStrip(
+                    activeCategory = activeAdjustCategory,
+                    onSelectCategory = { cat ->
+                        if (cat == AdjustCategory.AUTO) {
+                            viewModel.applyAutoTone()
+                            Toast.makeText(context, "Auto Tone Applied", Toast.LENGTH_SHORT).show()
+                        } else {
+                            activeAdjustCategory = cat
                         }
                     }
                 )
+            }
+        }
+    }
+
+    CompositionLocalProvider(LocalNumericInputRequester provides { numericInputTarget = it }) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color(0xFF000000)
+        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (isLandscape) {
+                // ==========================================
+                // LANDSCAPE-SPECIFIC TWO-COLUMN LAYOUT
+                // ==========================================
+                Row(modifier = Modifier.fillMaxSize()) {
+                    // Left Side: Maximized Canvas Area
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        PhotoEditorCanvas(
+                            bitmap = previewBitmap,
+                            originalBitmap = originalBitmap,
+                            activeTool = activeTool,
+                            brushType = selectedBrushType,
+                            brushColor = selectedBrushColor,
+                            brushWidth = brushWidth,
+                            activeRetouchType = activeRetouchType,
+                            cropAspectRatio = if (currentMode == EditorMode.CROP) selectedCropPreset.ratio else null,
+                            isCurveMode = currentMode == EditorMode.CURVES,
+                            activeCurveChannel = activeCurveChannel,
+                            curvePoints = when (activeCurveChannel) {
+                                CurveChannel.RGB -> sessionState.adjustments.curves.master
+                                CurveChannel.RED -> sessionState.adjustments.curves.red
+                                CurveChannel.GREEN -> sessionState.adjustments.curves.green
+                                CurveChannel.BLUE -> sessionState.adjustments.curves.blue
+                            },
+                            onCurvePointChanged = { channel, idx, inVal, outVal ->
+                                viewModel.updateCurvePoint(channel, idx, inVal, outVal)
+                            },
+                            onCurvePointAdded = { channel, inVal, outVal ->
+                                viewModel.addCurvePoint(channel, inVal, outVal)
+                            },
+                            onDrawingStrokeFinished = { viewModel.addDrawingStroke(it) },
+                            onRetouchStrokeFinished = { viewModel.addRetouchStroke(it) },
+                            onCropRectPreview = { viewModel.updateCropPreview(it) },
+                            onCropRectChanged = { viewModel.commitCrop(it) }
+                        )
+
+                        // Top-Left floating overlay action bar in landscape
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .statusBarsPadding()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xCC161616),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        if (currentMode != EditorMode.NONE) {
+                                            viewModel.cancelModeChanges()
+                                        } else if (canUndo) {
+                                            showDiscardDialog = true
+                                        } else {
+                                            onBack()
+                                        }
+                                    },
+                                    modifier = Modifier.size(40.dp).testTag("editor_close_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xCC161616),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Row(modifier = Modifier.padding(horizontal = 4.dp)) {
+                                    IconButton(
+                                        onClick = { viewModel.undo() },
+                                        enabled = canUndo && !isReplaying,
+                                        modifier = Modifier.size(40.dp).testTag("editor_undo_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Undo,
+                                            contentDescription = "Undo",
+                                            tint = if (canUndo) Color.White else Color.White.copy(alpha = 0.28f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.redo() },
+                                        enabled = canRedo && !isReplaying,
+                                        modifier = Modifier.size(40.dp).testTag("editor_redo_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.Redo,
+                                            contentDescription = "Redo",
+                                            tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.28f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Floating HUD Slider Banner at Top
+                        if (activeDraggingSliderName != null) {
+                            SliderHudBanner(
+                                sliderName = activeDraggingSliderName!!,
+                                sliderValue = activeDraggingSliderValue,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 16.dp)
+                            )
+                        }
+
+                        // Replay progress indicator
+                        if (isReplaying) {
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 16.dp),
+                                shape = CircleShape,
+                                color = Color(0xDD181818),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        progress = { replayProgress },
+                                        modifier = Modifier.size(16.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "Replaying edit history...",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Right Side: Dedicated Inspector Pane
+                    Surface(
+                        modifier = Modifier
+                            .widthIn(min = 340.dp, max = 420.dp)
+                            .fillMaxHeight(),
+                        color = Color(0xF4141414),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .statusBarsPadding()
+                                .navigationBarsPadding()
+                        ) {
+                            // Top action icons in landscape sidebar
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (currentMode != EditorMode.NONE) currentMode.displayName else "Develop",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = sharePhoto,
+                                        modifier = Modifier.size(36.dp).testTag("editor_share_button")
+                                    ) {
+                                        Icon(Icons.Default.Share, "Share", tint = Color.White, modifier = Modifier.size(18.dp))
+                                    }
+                                    Surface(
+                                        onClick = { doSave(false, 95) },
+                                        shape = CircleShape,
+                                        color = Color.White,
+                                        contentColor = Color.Black,
+                                        modifier = Modifier.size(36.dp).testTag("editor_save_button")
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.Check, "Save", tint = Color.Black, modifier = Modifier.size(20.dp))
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+                            // Scrollable Tool Inspector Pane
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                            ) {
+                                PanelContent(modifier = Modifier.fillMaxSize())
+                            }
+
+                            if (currentMode == EditorMode.NONE) {
+                                // Bottom Mode Selectors in Landscape
+                                MainBottomTierBar(
+                                    currentTab = currentBottomTab,
+                                    onSelectTab = { tab ->
+                                        when (tab) {
+                                            MainBottomTab.AUTO -> {
+                                                viewModel.applyAutoTone()
+                                                Toast.makeText(context, "Auto-enhanced", Toast.LENGTH_SHORT).show()
+                                            }
+                                            MainBottomTab.PRESETS -> {
+                                                viewModel.enterMode(EditorMode.PRESETS)
+                                            }
+                                            MainBottomTab.CROP -> {
+                                                viewModel.enterMode(EditorMode.CROP)
+                                            }
+                                            MainBottomTab.ADJUST -> {
+                                                currentBottomTab = MainBottomTab.ADJUST
+                                            }
+                                            MainBottomTab.MASKING -> {
+                                                viewModel.enterMode(EditorMode.BRUSHES)
+                                            }
+                                            MainBottomTab.HEALING -> {
+                                                viewModel.enterMode(EditorMode.RETOUCH)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                // ==========================================
+                // PORTRAIT LAYOUT
+                // ==========================================
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Minimal Top Bar (No unnecessary headers, monochrome icons)
+                    PhotoEditorTopBar(
+                        canUndo = canUndo && !isReplaying,
+                        canRedo = canRedo && !isReplaying,
+                        onClose = {
+                            if (currentMode != EditorMode.NONE) {
+                                viewModel.cancelModeChanges()
+                            } else if (canUndo) {
+                                showDiscardDialog = true
+                            } else {
+                                onBack()
+                            }
+                        },
+                        onUndo = { viewModel.undo() },
+                        onRedo = { viewModel.redo() },
+                        onQuickSave = { doSave(false, 95) },
+                        onShare = sharePhoto,
+                        onRevert = {
+                            viewModel.revertToOriginal()
+                            Toast.makeText(context, "Reverted to original", Toast.LENGTH_SHORT).show()
+                        },
+                        onCopySettings = {
+                            viewModel.copySettings()
+                            Toast.makeText(context, "Settings copied to clipboard", Toast.LENGTH_SHORT).show()
+                        },
+                        onPasteSettings = {
+                            if (viewModel.pasteSettings()) {
+                                Toast.makeText(context, "Settings applied", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        canPasteSettings = viewModel.hasCopiedSettings(),
+                        onContinueExport = { showExportSheet = true },
+                        onEditWithAi = { showAiSheet = true }
+                    )
+
+                    // Main Photo Canvas with Professional multi-touch gestures
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        PhotoEditorCanvas(
+                            bitmap = previewBitmap,
+                            originalBitmap = originalBitmap,
+                            activeTool = activeTool,
+                            brushType = selectedBrushType,
+                            brushColor = selectedBrushColor,
+                            brushWidth = brushWidth,
+                            activeRetouchType = activeRetouchType,
+                            cropAspectRatio = if (currentMode == EditorMode.CROP) selectedCropPreset.ratio else null,
+                            isCurveMode = currentMode == EditorMode.CURVES,
+                            activeCurveChannel = activeCurveChannel,
+                            curvePoints = when (activeCurveChannel) {
+                                CurveChannel.RGB -> sessionState.adjustments.curves.master
+                                CurveChannel.RED -> sessionState.adjustments.curves.red
+                                CurveChannel.GREEN -> sessionState.adjustments.curves.green
+                                CurveChannel.BLUE -> sessionState.adjustments.curves.blue
+                            },
+                            onCurvePointChanged = { channel, idx, inVal, outVal ->
+                                viewModel.updateCurvePoint(channel, idx, inVal, outVal)
+                            },
+                            onCurvePointAdded = { channel, inVal, outVal ->
+                                viewModel.addCurvePoint(channel, inVal, outVal)
+                            },
+                            onDrawingStrokeFinished = { viewModel.addDrawingStroke(it) },
+                            onRetouchStrokeFinished = { viewModel.addRetouchStroke(it) },
+                            onCropRectPreview = { viewModel.updateCropPreview(it) },
+                            onCropRectChanged = { viewModel.commitCrop(it) }
+                        )
+
+                        // Floating Slider HUD Banner at Top
+                        if (activeDraggingSliderName != null) {
+                            SliderHudBanner(
+                                sliderName = activeDraggingSliderName!!,
+                                sliderValue = activeDraggingSliderValue,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 16.dp)
+                            )
+                        }
+
+                        // Replay Progress Indicator Banner
+                        if (isReplaying) {
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 16.dp),
+                                shape = CircleShape,
+                                color = Color(0xDD181818),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        progress = { replayProgress },
+                                        modifier = Modifier.size(16.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "Replaying edit history...",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Contextual Tool Panels Container (Content-sized sheet with maximum height)
+                    val configuration = LocalConfiguration.current
+                    val maxSheetHeight = (configuration.screenHeightDp * 0.44f).dp.coerceIn(240.dp, 360.dp)
+
+                    Surface(
+                        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+                        color = Color(0xF7141414),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = maxSheetHeight)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            PanelContent(modifier = Modifier.weight(1f, fill = false))
+
+                            if (currentMode == EditorMode.NONE) {
+                                // Clean Floating Navigation Dock
+                                MainBottomTierBar(
+                                    currentTab = currentBottomTab,
+                                    onSelectTab = { tab ->
+                                        when (tab) {
+                                            MainBottomTab.AUTO -> {
+                                                viewModel.applyAutoTone()
+                                                Toast.makeText(context, "Auto-enhanced", Toast.LENGTH_SHORT).show()
+                                            }
+                                            MainBottomTab.PRESETS -> {
+                                                viewModel.enterMode(EditorMode.PRESETS)
+                                            }
+                                            MainBottomTab.CROP -> {
+                                                viewModel.enterMode(EditorMode.CROP)
+                                            }
+                                            MainBottomTab.ADJUST -> {
+                                                currentBottomTab = MainBottomTab.ADJUST
+                                            }
+                                            MainBottomTab.MASKING -> {
+                                                viewModel.enterMode(EditorMode.BRUSHES)
+                                            }
+                                            MainBottomTab.HEALING -> {
+                                                viewModel.enterMode(EditorMode.RETOUCH)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // Processing overlay dialog
             if (isProcessing) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color.Black.copy(alpha = 0.45f)
+                    color = Color.Black.copy(alpha = 0.65f)
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            shape = RoundedCornerShape(16.dp)
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color(0xFF1E1E1E),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                            tonalElevation = 8.dp
                         ) {
-                            Row(
-                                modifier = Modifier.padding(24.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Column(
+                                modifier = Modifier.padding(28.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                                Spacer(Modifier.width(16.dp))
-                                Text(processingMessage.ifBlank { "Processing..." }, fontWeight = FontWeight.SemiBold)
+                                CircularProgressIndicator(color = Color.White, strokeWidth = 3.dp)
+                                Spacer(Modifier.height(16.dp))
+                                Text(
+                                    text = processingMessage.ifEmpty { "Processing..." },
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                             }
                         }
                     }
@@ -423,137 +997,162 @@ fun PhotoEditorScreen(
         }
     }
 
-    // AI Tools Sheet
-    if (showAiSheet) {
-        ModalBottomSheet(onDismissRequest = { showAiSheet = false }) {
-            AiToolsSheet(
-                aiSettings = sessionState.aiSettings,
-                onToggleAutoEnhance = { viewModel.toggleAiAutoEnhance(it) },
-                onSelectStyle = { viewModel.setAiStyleTransfer(it) },
-                onSelectTryOn = { viewModel.setAiTryOn(it) },
-                onExpandChange = { viewModel.updateAiExpand(it) },
-                onExpandChangeFinished = { viewModel.commitSliderChange() },
-                onDismiss = { showAiSheet = false }
-            )
-        }
-    }
-
-    // Sticker Picker Sheet
-    if (showStickerSheet) {
-        ModalBottomSheet(onDismissRequest = { showStickerSheet = false }) {
-            StickerPickerSheet(
-                onSelectSticker = { emoji ->
-                    viewModel.addSticker(emoji)
-                },
-                onDismiss = { showStickerSheet = false }
-            )
-        }
-    }
-
-    // Export Options Sheet
-    if (showExportSheet) {
-        ExportBottomSheet(
-            onConfirmSave = { isPng, quality ->
-                doSave(isPng, quality)
-            },
-            onDismiss = { showExportSheet = false }
-        )
-    }
-
-    // Text Input Dialog
-    if (showTextDialog) {
-        var input by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showTextDialog = false },
-            title = { Text("Add Text Overlay") },
-            text = {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    placeholder = { Text("Enter caption...") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (input.isNotBlank()) {
-                            viewModel.addTextOverlay(input.trim())
-                        }
-                        showTextDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text("Add")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showTextDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    // Callout Input Dialog
-    if (showCalloutDialog) {
-        var input by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showCalloutDialog = false },
-            title = { Text("Add Speech Callout") },
-            text = {
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    placeholder = { Text("Enter speech text...") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (input.isNotBlank()) {
-                            viewModel.addCallout(input.trim())
-                        }
-                        showCalloutDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text("Add Callout")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCalloutDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    // Discard Changes Confirmation Dialog
+    // Discard Confirmation Dialog
     if (showDiscardDialog) {
         AlertDialog(
             onDismissRequest = { showDiscardDialog = false },
-            title = { Text("Discard Edits?") },
-            text = { Text("You have unsaved edits. Are you sure you want to discard them and exit?") },
+            title = { Text("Discard changes?", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to discard your photo edits?", color = Color(0xFFCCCCCC)) },
             confirmButton = {
-                Button(
+                TextButton(
                     onClick = {
                         showDiscardDialog = false
                         onBack()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    }
                 ) {
-                    Text("Discard", color = MaterialTheme.colorScheme.onError)
+                    Text("Discard", color = Color(0xFFCF6679), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showDiscardDialog = false }) {
-                    Text("Keep Editing")
+                    Text("Keep Editing", color = Color.White)
                 }
-            }
+            },
+            containerColor = Color(0xFF1E1E1E),
+            shape = RoundedCornerShape(20.dp)
         )
+    }
+
+    // Export Sheet
+    if (showExportSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showExportSheet = false },
+            containerColor = Color(0xFF181818),
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Text("Export Photo", style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(20.dp))
+                Button(
+                    onClick = {
+                        showExportSheet = false
+                        doSave(false, 95)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = Color.Black
+                    )
+                ) {
+                    Text("Save high-quality JPEG (95%)", fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = {
+                        showExportSheet = false
+                        doSave(true, 100)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Text("Save lossless PNG", color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+
+    // AI Magic Sheet
+    if (showAiSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showAiSheet = false },
+            containerColor = Color(0xFF181818),
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Text("AI Magic Tools", style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(20.dp))
+
+                Button(
+                    onClick = {
+                        viewModel.toggleAiAutoEnhance(true)
+                        viewModel.applyAutoTone()
+                        showAiSheet = false
+                        Toast.makeText(context, "AI Auto Enhancement applied", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White,
+                        contentColor = Color.Black
+                    ),
+                    shape = CircleShape,
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("AI Neural Auto-Enhance", fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = {
+                        viewModel.setAiExpand(0.25f)
+                        showAiSheet = false
+                        Toast.makeText(context, "Generative Expand Preview enabled", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Text("Generative Outpainting / Expand", color = Color.White, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+        }
+    }
+
+    if (numericInputTarget != null) {
+        NumericInputDialog(
+            target = numericInputTarget!!,
+            onDismiss = { numericInputTarget = null }
+        )
+    }
+}
+}
+
+private fun formatSliderValue(prop: String, value: Float): String {
+    return when (prop) {
+        "Exposure" -> {
+            val ev = value / 20f
+            val sign = if (ev > 0.001f) "+" else if (ev < -0.001f) "−" else ""
+            val formatted = String.format(Locale.US, "%.2f", kotlin.math.abs(ev))
+            "$sign$formatted EV"
+        }
+        "Temp" -> {
+            val rounded = value.toInt()
+            val kelvin = (5500 + (value * 40f)).toInt().coerceIn(2000, 9500)
+            val sign = if (rounded > 0) "+$rounded" else if (rounded < 0) "−${kotlin.math.abs(rounded)}" else "0"
+            "$sign (${kelvin}K)"
+        }
+        "Radius" -> {
+            String.format(Locale.US, "%.2f px", value)
+        }
+        "Straighten" -> {
+            val sign = if (value > 0.05f) "+" else if (value < -0.05f) "−" else ""
+            val formatted = String.format(Locale.US, "%.1f°", kotlin.math.abs(value))
+            "$sign$formatted"
+        }
+        else -> {
+            val rounded = value.toInt()
+            if (rounded > 0) "+$rounded"
+            else if (rounded < 0) "−${kotlin.math.abs(rounded)}"
+            else "0"
+        }
     }
 }

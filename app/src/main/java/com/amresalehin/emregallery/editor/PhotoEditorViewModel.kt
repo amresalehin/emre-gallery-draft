@@ -35,6 +35,11 @@ class PhotoEditorViewModel : ViewModel() {
     private val _activeTool = MutableStateFlow(EditorTool.CROP)
     val activeTool: StateFlow<EditorTool> = _activeTool.asStateFlow()
 
+    private val _currentMode = MutableStateFlow(EditorMode.NONE)
+    val currentMode: StateFlow<EditorMode> = _currentMode.asStateFlow()
+
+    private var modeBaselineState: EditSessionState? = null
+
     private val _activeSubItem = MutableStateFlow<ToolSheetSubItem?>(ToolSheetSubItem.CROP)
     val activeSubItem: StateFlow<ToolSheetSubItem?> = _activeSubItem.asStateFlow()
 
@@ -149,6 +154,118 @@ class PhotoEditorViewModel : ViewModel() {
     fun setActiveAdjustment(prop: String) {
         commitSliderChange()
         _activeAdjustment.value = prop
+    }
+
+    // --- Mode Lifecycle (Cancel / Apply Behavior) ---
+    fun enterMode(mode: EditorMode) {
+        commitSliderChange()
+        modeBaselineState = _sessionState.value
+        _currentMode.value = mode
+        when (mode) {
+            EditorMode.CROP -> _activeTool.value = EditorTool.CROP
+            EditorMode.ADJUST -> _activeTool.value = EditorTool.ADJUST
+            EditorMode.CURVES -> _activeTool.value = EditorTool.CURVES
+            EditorMode.COLOR_MIX -> _activeTool.value = EditorTool.ADJUST
+            EditorMode.COLOR_GRADING -> _activeTool.value = EditorTool.ADJUST
+            EditorMode.BRUSHES -> _activeTool.value = EditorTool.BRUSHES
+            EditorMode.RETOUCH -> _activeTool.value = EditorTool.RETOUCH
+            EditorMode.PRESETS -> _activeTool.value = EditorTool.EFFECTS
+            EditorMode.NONE -> _activeTool.value = EditorTool.ADJUST
+        }
+    }
+
+    fun applyModeChanges(description: String = "") {
+        commitSliderChange()
+        val baseline = modeBaselineState
+        modeBaselineState = null
+        val current = _sessionState.value
+        if (baseline != null && baseline != current) {
+            undoStack.add(baseline)
+            redoStack.clear()
+            _canUndo.value = true
+            _canRedo.value = false
+            val desc = if (description.isNotEmpty()) description else "${_currentMode.value.displayName} applied"
+            _sessionState.value = current.copy(description = desc)
+        }
+        _currentMode.value = EditorMode.NONE
+        _activeTool.value = EditorTool.ADJUST
+    }
+
+    fun cancelModeChanges() {
+        sliderBaselineState = null
+        val baseline = modeBaselineState
+        modeBaselineState = null
+        if (baseline != null) {
+            _sessionState.value = baseline
+            updateLivePreview()
+        }
+        _currentMode.value = EditorMode.NONE
+        _activeTool.value = EditorTool.ADJUST
+    }
+
+    fun hasModeChanges(): Boolean {
+        val baseline = modeBaselineState ?: return false
+        return baseline != _sessionState.value
+    }
+
+    fun resetCrop() {
+        _sessionState.value = _sessionState.value.copy(
+            transform = _sessionState.value.transform.copy(
+                cropRect = null,
+                straightenAngle = 0f,
+                rotationDegrees = 0,
+                flipHorizontal = false,
+                flipVertical = false
+            )
+        )
+        updateLivePreview()
+    }
+
+    fun resetCurves() {
+        val defaultPts = listOf(CurvePoint(0f, 0f), CurvePoint(1f, 1f))
+        val emptyCurves = RgbCurves(
+            master = defaultPts,
+            red = defaultPts,
+            green = defaultPts,
+            blue = defaultPts
+        )
+        _sessionState.value = _sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(curves = emptyCurves)
+        )
+        updateLivePreview()
+    }
+
+    fun resetColorMix() {
+        _sessionState.value = _sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(hslAdjustments = emptyMap())
+        )
+        updateLivePreview()
+    }
+
+    fun resetColorBand(band: ColorBand) {
+        val updated = _sessionState.value.adjustments.hslAdjustments.toMutableMap()
+        updated.remove(band)
+        _sessionState.value = _sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(hslAdjustments = updated)
+        )
+        updateLivePreview()
+    }
+
+    fun resetAdjustments() {
+        _sessionState.value = _sessionState.value.copy(
+            adjustments = AdjustmentParams()
+        )
+        updateLivePreview()
+    }
+
+    fun clearDrawingStrokes() {
+        _sessionState.value = _sessionState.value.copy(drawingStrokes = emptyList())
+        updateLivePreview()
+    }
+
+    fun clearRetouchStrokes() {
+        _sessionState.value = _sessionState.value.copy(retouchStrokes = emptyList())
+        updateLivePreview()
     }
 
     // --- Transformations ---
@@ -340,6 +457,182 @@ class PhotoEditorViewModel : ViewModel() {
         ))
     }
 
+    // Copy / Paste Settings cache
+    private var copiedSettingsState: EditSessionState? = null
+
+    fun copySettings(): Boolean {
+        copiedSettingsState = _sessionState.value
+        return true
+    }
+
+    fun hasCopiedSettings(): Boolean = copiedSettingsState != null
+
+    fun pasteSettings(): Boolean {
+        val copied = copiedSettingsState ?: return false
+        pushState(copied.copy(description = "Paste settings"))
+        return true
+    }
+
+    fun revertToOriginal() {
+        pushState(EditSessionState(description = "Revert to original"))
+    }
+
+    fun applyAutoTone() {
+        val cur = _sessionState.value.adjustments
+        val updated = cur.copy(
+            exposure = if (cur.exposure == 0f) 12f else cur.exposure,
+            contrast = if (cur.contrast == 0f) 16f else cur.contrast,
+            highlights = if (cur.highlights == 0f) -15f else cur.highlights,
+            shadows = if (cur.shadows == 0f) 20f else cur.shadows,
+            whites = if (cur.whites == 0f) 10f else cur.whites,
+            blacks = if (cur.blacks == 0f) -8f else cur.blacks,
+            vibrance = if (cur.vibrance == 0f) 15f else cur.vibrance
+        )
+        pushState(_sessionState.value.copy(
+            adjustments = updated,
+            description = "Auto Tone"
+        ))
+    }
+
+    fun toggleBlackAndWhite() {
+        val cur = _sessionState.value.adjustments
+        val isBw = !cur.isBlackAndWhite
+        pushState(_sessionState.value.copy(
+            adjustments = cur.copy(isBlackAndWhite = isBw),
+            description = if (isBw) "Black & White" else "Color"
+        ))
+    }
+
+    fun setWhiteBalancePreset(preset: String) {
+        val kelvin = when (preset) {
+            "Daylight" -> 5500f
+            "Cloudy" -> 6500f
+            "Shade" -> 7500f
+            "Tungsten" -> 3200f
+            "Fluorescent" -> 4000f
+            "Flash" -> 5500f
+            "Custom" -> _sessionState.value.adjustments.whiteBalanceKelvin
+            else -> 5500f // "As Shot"
+        }
+        val temp = when (preset) {
+            "Daylight" -> 0f
+            "Cloudy" -> 15f
+            "Shade" -> 25f
+            "Tungsten" -> -30f
+            "Fluorescent" -> -10f
+            "Flash" -> 5f
+            "Custom" -> _sessionState.value.adjustments.temperature
+            else -> 0f
+        }
+        val cur = _sessionState.value.adjustments
+        pushState(_sessionState.value.copy(
+            adjustments = cur.copy(
+                whiteBalancePreset = preset,
+                whiteBalanceKelvin = kelvin,
+                temperature = temp
+            ),
+            description = "WB: $preset"
+        ))
+    }
+
+    fun setRemoveChromaticAberration(enabled: Boolean) {
+        val cur = _sessionState.value.adjustments
+        pushState(_sessionState.value.copy(
+            adjustments = cur.copy(removeChromaticAberration = enabled),
+            description = "Chromatic Aberration"
+        ))
+    }
+
+    fun setEnableLensCorrections(enabled: Boolean) {
+        val cur = _sessionState.value.adjustments
+        pushState(_sessionState.value.copy(
+            adjustments = cur.copy(enableLensCorrections = enabled),
+            description = "Lens Corrections"
+        ))
+    }
+
+    // --- Curve Manipulation ---
+    fun updateCurvePoint(channel: CurveChannel, index: Int, inVal: Float, outVal: Float) {
+        val cur = _sessionState.value.adjustments.curves
+        val pts = when (channel) {
+            CurveChannel.RGB -> cur.master.toMutableList()
+            CurveChannel.RED -> cur.red.toMutableList()
+            CurveChannel.GREEN -> cur.green.toMutableList()
+            CurveChannel.BLUE -> cur.blue.toMutableList()
+        }
+        if (index in pts.indices) {
+            pts[index] = CurvePoint(inVal.coerceIn(0f, 1f), outVal.coerceIn(0f, 1f))
+            pts.sortBy { it.inVal }
+            val updatedCurves = when (channel) {
+                CurveChannel.RGB -> cur.copy(master = pts)
+                CurveChannel.RED -> cur.copy(red = pts)
+                CurveChannel.GREEN -> cur.copy(green = pts)
+                CurveChannel.BLUE -> cur.copy(blue = pts)
+            }
+            _sessionState.value = _sessionState.value.copy(
+                adjustments = _sessionState.value.adjustments.copy(curves = updatedCurves)
+            )
+            updateLivePreview()
+        }
+    }
+
+    fun addCurvePoint(channel: CurveChannel, inVal: Float, outVal: Float) {
+        val cur = _sessionState.value.adjustments.curves
+        val pts = when (channel) {
+            CurveChannel.RGB -> cur.master.toMutableList()
+            CurveChannel.RED -> cur.red.toMutableList()
+            CurveChannel.GREEN -> cur.green.toMutableList()
+            CurveChannel.BLUE -> cur.blue.toMutableList()
+        }
+        pts.add(CurvePoint(inVal.coerceIn(0f, 1f), outVal.coerceIn(0f, 1f)))
+        pts.sortBy { it.inVal }
+        val updatedCurves = when (channel) {
+            CurveChannel.RGB -> cur.copy(master = pts)
+            CurveChannel.RED -> cur.copy(red = pts)
+            CurveChannel.GREEN -> cur.copy(green = pts)
+            CurveChannel.BLUE -> cur.copy(blue = pts)
+        }
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(curves = updatedCurves),
+            description = "Curve point"
+        ))
+    }
+
+    fun resetCurve(channel: CurveChannel) {
+        val cur = _sessionState.value.adjustments.curves
+        val defaultPts = listOf(CurvePoint(0f, 0f), CurvePoint(1f, 1f))
+        val updatedCurves = when (channel) {
+            CurveChannel.RGB -> cur.copy(master = defaultPts)
+            CurveChannel.RED -> cur.copy(red = defaultPts)
+            CurveChannel.GREEN -> cur.copy(green = defaultPts)
+            CurveChannel.BLUE -> cur.copy(blue = defaultPts)
+        }
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(curves = updatedCurves),
+            description = "Reset curve"
+        ))
+    }
+
+    // --- Profile Presets ---
+    fun applyProfile(profile: ProfilePreset) {
+        commitSliderChange()
+        val cur = _sessionState.value.adjustments
+        val updated = cur.copy(
+            exposure = cur.exposure + profile.exposureOffset,
+            contrast = cur.contrast + profile.contrastOffset,
+            temperature = cur.temperature + profile.tempOffset,
+            tint = cur.tint + profile.tintOffset,
+            vibrance = cur.vibrance + profile.vibranceOffset,
+            saturation = cur.saturation + profile.saturationOffset
+        )
+        pushState(_sessionState.value.copy(
+            adjustments = updated,
+            filter = profile.filterType,
+            filterIntensity = 1.0f,
+            description = "Profile ${profile.name}"
+        ))
+    }
+
     // --- Adjustments ---
     fun updateAdjustmentValue(prop: String, value: Float) {
         if (sliderBaselineState == null) {
@@ -353,9 +646,17 @@ class PhotoEditorViewModel : ViewModel() {
             "Exposure" -> cur.copy(exposure = value)
             "Highlights" -> cur.copy(highlights = value)
             "Shadows" -> cur.copy(shadows = value)
-            "Temperature" -> cur.copy(temperature = value)
+            "Whites" -> cur.copy(whites = value)
+            "Blacks" -> cur.copy(blacks = value)
+            "Temperature", "Temp" -> cur.copy(temperature = value)
             "Tint" -> cur.copy(tint = value)
-            "Sharpness" -> cur.copy(sharpness = value)
+            "Texture" -> cur.copy(texture = value)
+            "Clarity" -> cur.copy(clarity = value)
+            "Sharpness", "Sharpening", "Amount" -> cur.copy(sharpness = value)
+            "Radius" -> cur.copy(sharpnessRadius = value)
+            "Detail" -> cur.copy(sharpnessDetail = value)
+            "Noise Reduction", "Noise" -> cur.copy(noiseReduction = value)
+            "Color Noise Reduction", "Color noise" -> cur.copy(colorNoiseReduction = value)
             "Blur" -> cur.copy(blur = value)
             "Vignette" -> cur.copy(vignette = value)
             "Grain" -> cur.copy(grain = value)
@@ -363,6 +664,8 @@ class PhotoEditorViewModel : ViewModel() {
             "Dehaze" -> cur.copy(dehaze = value)
             "Dodge" -> cur.copy(dodge = value)
             "Burn" -> cur.copy(burn = value)
+            "Distortion Correction" -> cur.copy(distortionCorrection = value)
+            "Vignetting Correction" -> cur.copy(vignettingCorrection = value)
             "White Balance" -> cur.copy(whiteBalanceKelvin = value)
             else -> cur
         }

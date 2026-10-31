@@ -1,0 +1,6 @@
+{
+  "name": "Emre Gallery",
+  "description": "Smart gallery with advanced photo editor, albums, and on-device intelligent search",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
