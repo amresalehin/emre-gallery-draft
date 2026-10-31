@@ -85,6 +85,7 @@ private val toolGroups = listOf(
         "AI tools",
         Icons.Default.AutoAwesome,
         listOf(
+            "100+ AI models across image, segmentation and depth workflows",
             "AI upscaling",
             "Background removal",
             "JPEG artifact reduction (DeJPEG)",
@@ -121,7 +122,7 @@ private val toolGroups = listOf(
             "Privacy blur and pixelation painting",
             "Spot healing",
             "AI-assisted generative inpainting",
-            "Automatic face detection and masking",
+            "Automatic face detection with YuNet and UltraFace, plus face masking",
             "Arrows, lines and double arrows",
             "Rectangles, circles, triangles and polygons",
             "Stars and lasso selection",
@@ -141,7 +142,7 @@ private val toolGroups = listOf(
             "Face masking",
             "Privacy blur",
             "Pixelation-based censorship",
-            "File encryption and decryption"
+            "File encryption and decryption with 100+ algorithms"
         )
     ),
     ToolGroup(
