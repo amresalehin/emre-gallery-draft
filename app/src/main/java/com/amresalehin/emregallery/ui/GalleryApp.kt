@@ -56,6 +56,8 @@ import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.data.StoryGroup
+import com.amresalehin.emregallery.documents.PdfDocumentTool
+import com.amresalehin.emregallery.documents.PdfDocumentToolScreen
 
 data class NavBackStackEntry(
     val destination: Destination,
@@ -80,6 +82,7 @@ fun GalleryApp() {
     val mediaRepository = remember { MediaRepository(context.contentResolver) }
     val lockedVaultManager = remember { LockedVaultManager(context.applicationContext) }
     var destination by remember { mutableStateOf(Destination.HOME) }
+    var selectedPdfTool by remember { mutableStateOf(PdfDocumentTool.SCAN) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -586,6 +589,10 @@ fun GalleryApp() {
             ) -> {
                 destination = Destination.ALBUMS
                 mapFocusItem = null
+                viewerStoryTitle = null
+            }
+            destination == Destination.PDF_DOCUMENT_TOOL -> {
+                destination = Destination.TOOLS
                 viewerStoryTitle = null
             }
             destination in listOf(
@@ -1176,6 +1183,14 @@ fun GalleryApp() {
                         onBack = { performBackNavigation() }
                     )
                     Destination.TOOLS -> ToolsScreen(
+                        onBack = { performBackNavigation() },
+                        onOpenPdfTool = { tool ->
+                            selectedPdfTool = tool
+                            navigateTo(Destination.PDF_DOCUMENT_TOOL, rememberPrevious = true)
+                        }
+                    )
+                    Destination.PDF_DOCUMENT_TOOL -> PdfDocumentToolScreen(
+                        tool = selectedPdfTool,
                         onBack = { performBackNavigation() }
                     )
                     Destination.SEARCH -> {
