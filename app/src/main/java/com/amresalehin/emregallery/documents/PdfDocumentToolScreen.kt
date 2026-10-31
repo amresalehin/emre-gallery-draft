@@ -55,7 +55,8 @@ fun PdfDocumentToolScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var operation by remember(tool) { mutableStateOf(tool.initialOperation) }
-    var pageSelection by remember(tool) { mutableStateOf("2") }
+    var pageSelection by remember(tool) { mutableStateOf("") }
+    var cropMarginPercent by remember(tool) { mutableStateOf("3.5") }
     var password by remember(tool) { mutableStateOf("") }
     var ownerPassword by remember(tool) { mutableStateOf("") }
     var watermarkText by remember(tool) { mutableStateOf("Emre Gallery") }
@@ -112,7 +113,8 @@ fun PdfDocumentToolScreen(
             signatureText = signatureText,
             title = metadataTitle,
             author = metadataAuthor,
-            subject = metadataSubject
+            subject = metadataSubject,
+            cropMarginPercent = cropMarginPercent.toFloatOrNull() ?: 3.5f
         )
         scope.launch {
             isProcessing = true
@@ -353,6 +355,22 @@ fun PdfDocumentToolScreen(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
+            PdfOperation.REARRANGE_PDF -> OutlinedTextField(
+                value = pageSelection,
+                onValueChange = { pageSelection = it },
+                label = { Text("New page order") },
+                supportingText = { Text("Enter every page number once, in the desired order. Example for a 3-page PDF: 3,1,2.") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            PdfOperation.CROP_PAGES -> OutlinedTextField(
+                value = cropMarginPercent,
+                onValueChange = { cropMarginPercent = it },
+                label = { Text("Crop each edge (%)") },
+                supportingText = { Text("Enter a value from 0 to 20. The same margin is cropped from all four edges.") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
             PdfOperation.PROTECT -> {
                 OutlinedTextField(
                     value = password,
@@ -398,6 +416,14 @@ fun PdfDocumentToolScreen(
             else -> Unit
         }
 
+        if (operation == PdfOperation.OCR_PDF) {
+            Text(
+                "OCR is performed on-device with Emre ML Kit. The current searchable PDF text layer uses a basic Latin font; non-Latin recognition may not be embedded correctly in the searchable layer.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
         if (tool == PdfDocumentTool.SCAN) {
             Text(
                 "Uses Google Play services' on-device document scanner. If it is unavailable on this device, use PDF / image conversion to create a PDF from captured images.",
@@ -409,7 +435,8 @@ fun PdfDocumentToolScreen(
         if (operation == PdfOperation.COMPRESS || operation == PdfOperation.GRAYSCALE ||
             operation == PdfOperation.RESIZE_PAGES || operation == PdfOperation.FLATTEN) {
             Text(
-                "This operation rasterises pages. It can reduce editability, vector quality, selectable text or form behaviour. Keep the original if you need those features.",
+                if (operation == PdfOperation.RESIZE_PAGES) "This fits rasterised pages onto A4 paper. It can remove vector quality, selectable text and form behaviour. Keep the original if you need those features."
+                else "This operation rasterises pages. It can reduce editability, vector quality, selectable text or form behaviour. Keep the original if you need those features.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -576,7 +603,7 @@ private fun PdfOperation.displayName(): String = when (this) {
     PdfOperation.MERGE_PDFS -> "Merge PDFs"
     PdfOperation.SPLIT_PDF -> "Split into single-page PDFs"
     PdfOperation.ROTATE_PDF -> "Rotate all pages 90°"
-    PdfOperation.REARRANGE_PDF -> "Reverse page order"
+    PdfOperation.REARRANGE_PDF -> "Set custom page order"
     PdfOperation.PAGE_NUMBERS -> "Add page numbers"
     PdfOperation.WATERMARK -> "Add watermark"
     PdfOperation.SIGNATURE -> "Add text signature"
