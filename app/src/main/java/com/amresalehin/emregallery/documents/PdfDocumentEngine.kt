@@ -80,7 +80,8 @@ data class PdfOperationOptions(
     val title: String = "",
     val author: String = "",
     val subject: String = "",
-    val ocrLanguages: List<String> = listOf("latin", "devanagari")
+    val ocrLanguages: List<String> = listOf("latin", "devanagari"),
+    val cropMarginPercent: Float = 3.5f
 )
 
 object PdfDocumentEngine {
@@ -124,6 +125,9 @@ object PdfDocumentEngine {
     ): File {
         initialise(context)
         require(inputUris.isNotEmpty()) { "Select the required source file(s)." }
+        if (operation == PdfOperation.COMPARE_PDFS) {
+            require(inputUris.size == 2) { "Select exactly two PDFs to compare." }
+        }
         return when (operation) {
             PdfOperation.PDF_TO_IMAGES -> pdfToImages(context, inputUris.first())
             PdfOperation.IMAGES_TO_PDF -> imagesToPdf(context, inputUris)
@@ -132,7 +136,7 @@ object PdfDocumentEngine {
             PdfOperation.ROTATE_PDF -> mutatePdf(context, inputUris.first(), options.password, "rotated") { document ->
                 document.pages.forEach { page -> page.rotation = (page.rotation + 90) % 360 }
             }
-            PdfOperation.REARRANGE_PDF -> rearrangePdf(context, inputUris.first(), options.password)
+            PdfOperation.REARRANGE_PDF -> rearrangePdf(context, inputUris.first(), options.password, options.pages)
             PdfOperation.PAGE_NUMBERS -> mutatePdf(context, inputUris.first(), options.password, "numbered") { document ->
                 document.pages.forEachIndexed { index, page ->
                     PDPageContentStream(document, page, PDPageContentStream.AppendMode.APPEND, true, true).use { stream ->
@@ -203,12 +207,15 @@ object PdfDocumentEngine {
             PdfOperation.CROP_PAGES -> mutatePdf(context, inputUris.first(), options.password, "cropped") { document ->
                 document.pages.forEach { page ->
                     val box = page.cropBox
-                    val mx = box.width * 0.035f
-                    val my = box.height * 0.035f
+                    val margin = (options.cropMarginPercent.coerceIn(0f, 20f) / 100f)
+                    val mx = box.width * margin
+                    val my = box.height * margin
                     page.cropBox = PDRectangle(box.lowerLeftX + mx, box.lowerLeftY + my, box.width - 2 * mx, box.height - 2 * my)
                 }
             }
-            PdfOperation.RESIZE_PAGES -> rasterizePdf(context, inputUris.first(), 130, 0.82f, false, "a4")
+            PdfOperation.RESIZE_PAGES -> rasterizePdf(
+                context, inputUris.first(), 130, 0.82f, false, "a4", standardPageSize = true
+            )
             PdfOperation.FLATTEN -> rasterizePdf(context, inputUris.first(), 160, 0.90f, false, "flattened")
             PdfOperation.EXTRACT_IMAGES -> extractImages(context, inputUris.first(), options.password)
             PdfOperation.ZIP_PDFS -> zipPdfs(context, inputUris)
@@ -273,17 +280,25 @@ object PdfDocumentEngine {
         output
     }
 
+    private fun importPageSafely(target: PDDocument, source: PDPage) {
+        val imported = target.importPage(source)
+        if (source.resources != null && !source.cosObject.containsKey(COSName.RESOURCES)) {
+            imported.resources = source.resources
+        }
+    }
+
     private fun mergePdfs(context: Context, uris: List<Uri>): File {
         require(uris.size >= 2) { "Select at least two PDF files to merge." }
         val output = PDDocument()
         val sources = mutableListOf<PDDocument>()
+        val temporaryFiles = mutableListOf<File>()
         try {
             uris.forEach { uri ->
                 val sourceFile = copyUriToFile(context, uri)
+                temporaryFiles += sourceFile
                 val source = PDDocument.load(sourceFile)
-                sources.add(source)
-                for (page in source.pages) output.importPage(page)
-                sourceFile.deleteOnExit()
+                sources += source
+                source.pages.forEach { page -> importPageSafely(output, page) }
             }
             val target = outputFile(context, "merged", "pdf")
             output.save(target)
@@ -291,6 +306,7 @@ object PdfDocumentEngine {
         } finally {
             sources.forEach { runCatching { it.close() } }
             output.close()
+            temporaryFiles.forEach { runCatching { it.delete() } }
         }
     }
 
@@ -301,7 +317,7 @@ object PdfDocumentEngine {
             for (index in 0 until source.numberOfPages) {
                 val pageDoc = PDDocument()
                 try {
-                    pageDoc.importPage(source.getPage(index))
+                    importPageSafely(pageDoc, source.getPage(index))
                     zip.putNextEntry(ZipEntry("page_${(index + 1).toString().padStart(3, '0')}.pdf"))
                     pageDoc.save(zip)
                     zip.closeEntry()
@@ -313,16 +329,34 @@ object PdfDocumentEngine {
         target
     }
 
-    private fun rearrangePdf(context: Context, uri: Uri, password: String): File = withPdf(context, uri, password) { source ->
+    private fun rearrangePdf(
+        context: Context,
+        uri: Uri,
+        password: String,
+        orderText: String
+    ): File = withPdf(context, uri, password) { source ->
+        val order = parsePageOrder(orderText, source.numberOfPages)
         val output = PDDocument()
         try {
-            for (index in source.numberOfPages - 1 downTo 0) output.importPage(source.getPage(index))
-            val target = outputFile(context, "reversed", "pdf")
+            order.forEach { pageNumber -> importPageSafely(output, source.getPage(pageNumber - 1)) }
+            val target = outputFile(context, "reordered", "pdf")
             output.save(target)
             target
         } finally {
             output.close()
         }
+    }
+
+    private fun parsePageOrder(value: String, pageCount: Int): List<Int> {
+        require(value.isNotBlank()) { "Enter the new page order, for example 3,1,2." }
+        val order = value.split(',').map { part ->
+            part.trim().toIntOrNull() ?: error("Invalid page number: $part")
+        }
+        require(order.size == pageCount) { "Enter all $pageCount page numbers exactly once." }
+        require(order.toSet().size == pageCount && order.toSet() == (1..pageCount).toSet()) {
+            "The new order must contain every page number from 1 to $pageCount exactly once."
+        }
+        return order
     }
 
     private fun protectPdf(context: Context, uri: Uri, options: PdfOperationOptions): File =
@@ -458,7 +492,8 @@ object PdfDocumentEngine {
         dpi: Int,
         jpegQuality: Float,
         grayscale: Boolean,
-        prefix: String
+        prefix: String,
+        standardPageSize: Boolean = false
     ): File {
         val sourceFile = copyUriToFile(context, uri)
         try {
@@ -486,13 +521,20 @@ object PdfDocumentEngine {
                             bitmap = gray
                         }
                         try {
-                            val pageWidth = bitmap.width * 72f / dpi
-                            val pageHeight = bitmap.height * 72f / dpi
+                            val sourcePageWidth = bitmap.width * 72f / dpi
+                            val sourcePageHeight = bitmap.height * 72f / dpi
+                            val pageWidth = if (standardPageSize) 595.28f else sourcePageWidth
+                            val pageHeight = if (standardPageSize) 841.89f else sourcePageHeight
                             val page = PDPage(PDRectangle(pageWidth, pageHeight))
                             output.addPage(page)
                             val image: PDImageXObject = JPEGFactory.createFromImage(output, bitmap, jpegQuality.coerceIn(0.1f, 1f))
+                            val fit = min(pageWidth / sourcePageWidth, pageHeight / sourcePageHeight)
+                            val drawWidth = sourcePageWidth * fit
+                            val drawHeight = sourcePageHeight * fit
+                            val drawX = (pageWidth - drawWidth) / 2f
+                            val drawY = (pageHeight - drawHeight) / 2f
                             PDPageContentStream(output, page).use { stream ->
-                                stream.drawImage(image, 0f, 0f, pageWidth, pageHeight)
+                                stream.drawImage(image, drawX, drawY, drawWidth, drawHeight)
                             }
                         } finally {
                             bitmap.recycle()
