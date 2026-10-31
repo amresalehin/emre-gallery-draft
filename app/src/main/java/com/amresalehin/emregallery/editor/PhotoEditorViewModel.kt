@@ -173,6 +173,17 @@ class PhotoEditorViewModel : ViewModel() {
         }
     }
 
+    /** Restore the transform captured when Crop mode was opened. */
+    fun restoreTransform(transform: TransformParams) {
+        commitSliderChange()
+        if (_sessionState.value.transform != transform) {
+            pushState(_sessionState.value.copy(
+                transform = transform,
+                description = "Cancel crop"
+            ))
+        }
+    }
+
     fun rotate90() {
         val current = _sessionState.value.transform.rotationDegrees
         val next = (current + 90) % 360
