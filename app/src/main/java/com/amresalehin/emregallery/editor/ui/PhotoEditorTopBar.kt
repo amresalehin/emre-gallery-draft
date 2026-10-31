@@ -31,9 +31,11 @@ fun PhotoEditorTopBar(
     onRedo: () -> Unit,
     onQuickSave: () -> Unit,
     onContinueExport: () -> Unit,
+    onShare: () -> Unit = {},
     onEditWithAi: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var moreExpanded by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -53,14 +55,26 @@ fun PhotoEditorTopBar(
             IconButton(onClick = onRedo, enabled = canRedo, modifier = Modifier.size(40.dp).testTag("editor_redo_button")) {
                 Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo", tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.32f), modifier = Modifier.size(21.dp))
             }
-            IconButton(onClick = onContinueExport, modifier = Modifier.size(40.dp).testTag("editor_share_button")) {
-                Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White, modifier = Modifier.size(21.dp))
+            IconButton(onClick = onShare, modifier = Modifier.size(40.dp).testTag("editor_share_button")) {
+                Icon(Icons.Default.Share, contentDescription = "Share edited photo", tint = Color.White, modifier = Modifier.size(21.dp))
             }
             IconButton(onClick = onQuickSave, modifier = Modifier.size(40.dp).testTag("editor_save_button")) {
                 Icon(Icons.Default.SaveAlt, contentDescription = "Save copy to device", tint = Color.White, modifier = Modifier.size(21.dp))
             }
-            IconButton(onClick = onEditWithAi, modifier = Modifier.size(40.dp).testTag("editor_more_button")) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = Color.White, modifier = Modifier.size(22.dp))
+            Box {
+                IconButton(onClick = { moreExpanded = true }, modifier = Modifier.size(40.dp).testTag("editor_more_button")) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = Color.White, modifier = Modifier.size(22.dp))
+                }
+                DropdownMenu(expanded = moreExpanded, onDismissRequest = { moreExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Edit with AI") },
+                        onClick = { moreExpanded = false; onEditWithAi() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Export settings") },
+                        onClick = { moreExpanded = false; onContinueExport() }
+                    )
+                }
             }
         }
     }
