@@ -36,7 +36,7 @@ enum class PdfDocumentTool(
     ),
     ROTATE_REORDER(
         "Rotate / rearrange pages",
-        "Rotate all pages or reverse page order",
+        "Rotate all pages or set a custom page order",
         Icons.Default.RotateRight,
         listOf(PdfOperation.ROTATE_PDF, PdfOperation.REARRANGE_PDF)
     ),
