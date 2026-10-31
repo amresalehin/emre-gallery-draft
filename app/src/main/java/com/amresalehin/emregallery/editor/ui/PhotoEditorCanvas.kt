@@ -34,6 +34,7 @@ import kotlin.math.min
 @Composable
 fun PhotoEditorCanvas(
     bitmap: Bitmap?,
+    originalBitmap: Bitmap? = null,
     activeTool: EditorTool,
     brushType: BrushType,
     brushColor: Color,
@@ -44,12 +45,14 @@ fun PhotoEditorCanvas(
     onRetouchStrokeFinished: (RetouchStroke) -> Unit,
     onCropRectPreview: (android.graphics.RectF?) -> Unit = {},
     onCropRectChanged: (android.graphics.RectF?) -> Unit,
+    onBeforeChanged: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
     var cropDragHandle by remember { mutableStateOf("NONE") }
+    var showingBefore by remember { mutableStateOf(false) }
 
     // Live drawing points for active in-flight gesture
     val livePoints = remember { mutableStateListOf<Offset>() }
@@ -91,9 +94,22 @@ fun PhotoEditorCanvas(
         modifier = modifier
             .fillMaxSize()
             .onSizeChanged { containerSize = it }
-            .pointerInput(isDrawingMode, isRetouchMode, isCropMode) {
+            .pointerInput(isDrawingMode, isRetouchMode, isCropMode, originalBitmap) {
                 if (!isDrawingMode && !isRetouchMode && !isCropMode) {
                     detectTapGestures(
+                        onPress = {
+                            tryAwaitRelease()
+                            if (showingBefore) {
+                                showingBefore = false
+                                onBeforeChanged(false)
+                            }
+                        },
+                        onLongPress = {
+                            if (originalBitmap != null) {
+                                showingBefore = true
+                                onBeforeChanged(true)
+                            }
+                        },
                         onDoubleTap = { tap ->
                             val target = if (zoomScale > 1.05f) 1f else 2.25f
                             if (target == 1f) {
@@ -247,14 +263,15 @@ fun PhotoEditorCanvas(
             )
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (bitmap == null || bitmap.isRecycled) return@Canvas
+            val renderBitmap = if (showingBefore) originalBitmap ?: bitmap else bitmap
+            if (renderBitmap == null || renderBitmap.isRecycled) return@Canvas
 
             val cWidth = size.width
             val cHeight = size.height
 
             // Calculate destination rect to aspect-fit bitmap inside canvas
-            val bWidth = bitmap.width.toFloat()
-            val bHeight = bitmap.height.toFloat()
+            val bWidth = renderBitmap.width.toFloat()
+            val bHeight = renderBitmap.height.toFloat()
             val scale = min(cWidth / bWidth, cHeight / bHeight) * 0.94f * zoomScale
 
             val drawW = bWidth * scale
@@ -264,7 +281,7 @@ fun PhotoEditorCanvas(
 
             // Draw image
             drawImage(
-                image = bitmap.asImageBitmap(),
+                image = renderBitmap.asImageBitmap(),
                 dstOffset = IntOffset(left.toInt(), top.toInt()),
                 dstSize = IntSize(drawW.toInt(), drawH.toInt())
             )
