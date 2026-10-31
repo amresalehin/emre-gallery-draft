@@ -155,6 +155,7 @@ fun PhotoEditorScreen(
                 }
                 runCatching {
                     context.startActivity(Intent.createChooser(intent, "Share edited photo"))
+                    onSaved(shared)
                 }.onFailure {
                     Toast.makeText(context, "No app available to share this photo", Toast.LENGTH_SHORT).show()
                 }
