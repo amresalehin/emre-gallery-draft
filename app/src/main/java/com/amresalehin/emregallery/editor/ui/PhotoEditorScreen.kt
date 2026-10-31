@@ -415,37 +415,39 @@ fun PhotoEditorScreen(
                     }
                 }
             } else {
-                Column(Modifier.fillMaxSize()) {
-                    photoStage(Modifier.fillMaxWidth().weight(1f))
-                    if (lightcraftToolSelected) {
-                        val panelHeight = when {
-                            cropMode -> 232.dp
-                            activeTool == EditorTool.ADJUST -> 184.dp
-                            activeTool == EditorTool.EFFECTS -> 229.dp
-                            activeTool == EditorTool.TOOLS -> 306.dp
-                            else -> 184.dp
-                        }
-                        LightcraftPanelSurface(Modifier.fillMaxWidth().heightIn(max = panelHeight)) {
-                            Box(Modifier.fillMaxWidth().heightIn(max = panelHeight).verticalScroll(rememberScrollState())) { editingPanel() }
-                        }
-                    }
-                    if (sectionVisible) {
-                        LightcraftSectionNavigation(
-                            activeSection = activeAdjustCategory,
-                            onSelectSection = { section ->
-                                activeAdjustCategory = section
-                                viewModel.setActiveAdjustment(lightcraftDefaultAdjustment(section))
+                Box(Modifier.fillMaxSize()) {
+                    photoStage(Modifier.fillMaxSize())
+                    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                        if (lightcraftToolSelected) {
+                            val panelHeight = when {
+                                cropMode -> 232.dp
+                                activeTool == EditorTool.ADJUST -> 184.dp
+                                activeTool == EditorTool.EFFECTS -> 229.dp
+                                activeTool == EditorTool.TOOLS -> 306.dp
+                                else -> 184.dp
                             }
-                        )
-                    }
-                    if (cropMode) {
-                        LightcraftModeBar(
-                            "Crop",
-                            onCancel = cancelCropMode,
-                            onApply = applyCropMode
-                        )
-                    } else {
-                        LightcraftToolNavigation(activeTool, lightcraftToolSelected, ::selectEditorTool)
+                            LightcraftPanelSurface(Modifier.fillMaxWidth().heightIn(max = panelHeight)) {
+                                Box(Modifier.fillMaxWidth().heightIn(max = panelHeight).verticalScroll(rememberScrollState())) { editingPanel() }
+                            }
+                        }
+                        if (sectionVisible) {
+                            LightcraftSectionNavigation(
+                                activeSection = activeAdjustCategory,
+                                onSelectSection = { section ->
+                                    activeAdjustCategory = section
+                                    viewModel.setActiveAdjustment(lightcraftDefaultAdjustment(section))
+                                }
+                            )
+                        }
+                        if (cropMode) {
+                            LightcraftModeBar(
+                                "Crop",
+                                onCancel = cancelCropMode,
+                                onApply = applyCropMode
+                            )
+                        } else {
+                            LightcraftToolNavigation(activeTool, lightcraftToolSelected, ::selectEditorTool)
+                        }
                     }
                 }
             }
