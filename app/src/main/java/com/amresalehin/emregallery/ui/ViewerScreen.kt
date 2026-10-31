@@ -111,6 +111,7 @@ fun ViewerScreen(
     onToggleArchive: () -> Unit,
     onDeletePermanently: (() -> Unit)? = null,
     onAddTo: () -> Unit,
+    onEdit: () -> Unit = {},
     onOpenNeighbor: (MediaItem) -> Unit,
     onOpenMap: () -> Unit,
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
@@ -357,13 +358,7 @@ fun ViewerScreen(
     }
 
     val launchEdit: () -> Unit = {
-        runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_EDIT)
-                    .setDataAndType(Uri.parse(item.uri), item.mimeType ?: "image/*")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            )
-        }
+        onEdit()
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {

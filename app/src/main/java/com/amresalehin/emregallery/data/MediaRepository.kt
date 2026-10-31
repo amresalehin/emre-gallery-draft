@@ -97,4 +97,62 @@ class MediaRepository(private val resolver: ContentResolver) {
             }
         }
     }
+
+    fun saveEditedBitmap(
+        bitmap: android.graphics.Bitmap,
+        isPng: Boolean,
+        quality: Int = 95,
+        baseName: String = "IMG_EDITED"
+    ): MediaItem? {
+        val extension = if (isPng) "png" else "jpg"
+        val mimeType = if (isPng) "image/png" else "image/jpeg"
+        val compressFormat = if (isPng) android.graphics.Bitmap.CompressFormat.PNG else android.graphics.Bitmap.CompressFormat.JPEG
+        val fileName = "${baseName}_${System.currentTimeMillis()}.$extension"
+        val nowSeconds = System.currentTimeMillis() / 1000L
+        val nowMillis = System.currentTimeMillis()
+
+        val values = android.content.ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.DATE_ADDED, nowSeconds)
+            put(MediaStore.MediaColumns.DATE_MODIFIED, nowSeconds)
+            put(MediaStore.MediaColumns.DATE_TAKEN, nowMillis)
+            put(MediaStore.MediaColumns.WIDTH, bitmap.width)
+            put(MediaStore.MediaColumns.HEIGHT, bitmap.height)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/EmreGallery")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        }
+
+        val itemUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        return try {
+            resolver.openOutputStream(itemUri)?.use { out ->
+                bitmap.compress(compressFormat, quality, out)
+                out.flush()
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(itemUri, values, null, null)
+            }
+            val id = ContentUris.parseId(itemUri)
+            MediaItem(
+                id = id,
+                uri = itemUri.toString(),
+                name = fileName,
+                mimeType = mimeType,
+                dateAddedSeconds = nowSeconds,
+                dateTakenMillis = nowMillis,
+                sizeBytes = 0L,
+                width = bitmap.width,
+                height = bitmap.height,
+                relativePath = "Pictures/EmreGallery/",
+                isVideo = false
+            )
+        } catch (e: Exception) {
+            resolver.delete(itemUri, null, null)
+            null
+        }
+    }
 }
