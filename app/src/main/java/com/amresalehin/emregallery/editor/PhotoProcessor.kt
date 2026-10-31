@@ -68,7 +68,17 @@ object PhotoProcessor {
             }
         }
 
-        // 2. Matrix transformations: rotation, flips, straighten, perspective
+        // 2. Shape Crop if specified
+        params.shapeCrop?.let { shape ->
+            bmp = PhotoTransformEngine.applyShapeCrop(bmp, shape)
+        }
+
+        // 3. Corner Pin Perspective Warp if 4 points provided
+        if (!params.cornerPins.isNullOrEmpty() && params.cornerPins.size == 4) {
+            bmp = PhotoTransformEngine.applyCornerPinPerspective(bmp, params.cornerPins)
+        }
+
+        // 4. Matrix transformations: rotation, flips, straighten, perspective
         val matrix = Matrix()
         val totalRotation = (params.rotationDegrees.toFloat() + params.straightenAngle)
         if (totalRotation != 0f) {
@@ -93,6 +103,21 @@ object PhotoProcessor {
 
         if (!matrix.isIdentity) {
             bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+        }
+
+        // 5. Liquify
+        if (params.liquifyPoints.isNotEmpty()) {
+            bmp = PhotoTransformEngine.applyLiquify(bmp, params.liquifyPoints)
+        }
+
+        // 6. Dispersion fragments
+        if (params.dispersionAmount > 0f) {
+            bmp = PhotoTransformEngine.applyDispersion(bmp, params.dispersionAmount)
+        }
+
+        // 7. Motion streaks
+        if (params.motionAmount > 0f) {
+            bmp = PhotoTransformEngine.applyMotion(bmp, params.motionAmount, params.motionAngle)
         }
 
         return bmp
@@ -187,6 +212,12 @@ object PhotoProcessor {
             applyFilmGrain(result, adj.grain / 100f)
         }
 
+        // 20 Artistic Effects
+        result = PhotoEffectsEngine.applyArtisticEffect(result, filter, filterIntensity)
+
+        // Extended Adjustments (Vibrance, HSL, Curves, Levels, White Balance, Color Balance, Split Toning, Gradient Map, Duotone, Dehaze, Dodge, Burn, Color Replace, Color Splash)
+        result = PhotoAdjustEngine.applyExtendedAdjustments(result, adj)
+
         return result
     }
 
@@ -259,6 +290,7 @@ object PhotoProcessor {
             0.10f, 0.15f, 1.28f, 0f, 32f,
             0f, 0f, 0f, 1f, 0f
         ))
+        else -> null
     }
 
     private fun blendColorMatrix(a: ColorMatrix, b: ColorMatrix, weight: Float): ColorMatrix {
@@ -405,61 +437,10 @@ object PhotoProcessor {
     }
 
     /**
-     * Retouching engine: blemish removal, object eraser (inpainting), skin smoothing, red-eye correction, selective brush.
+     * Retouching engine: delegating to PhotoRetouchEngine.
      */
     fun applyRetouch(src: Bitmap, strokes: List<RetouchStroke>): Bitmap {
-        if (strokes.isEmpty()) return src
-        val out = src.copy(Bitmap.Config.ARGB_8888, true)
-        val canvas = Canvas(out)
-
-        for (stroke in strokes) {
-            when (stroke.type) {
-                RetouchType.BLEMISH, RetouchType.OBJECT_REMOVAL -> {
-                    // Local inpainting / patch clone healing
-                    for (pt in stroke.points) {
-                        val cx = pt.x.toInt().coerceIn(0, out.width - 1)
-                        val cy = pt.y.toInt().coerceIn(0, out.height - 1)
-                        val r = stroke.radius.toInt().coerceIn(6, 120)
-
-                        healPatch(out, cx, cy, r)
-                    }
-                }
-                RetouchType.SKIN_SMOOTH -> {
-                    // Surface edge-preserving smooth on stroke path
-                    for (pt in stroke.points) {
-                        val cx = pt.x.toInt().coerceIn(0, out.width - 1)
-                        val cy = pt.y.toInt().coerceIn(0, out.height - 1)
-                        val r = stroke.radius.toInt().coerceIn(10, 150)
-                        smoothSkinCircle(out, cx, cy, r)
-                    }
-                }
-                RetouchType.RED_EYE -> {
-                    // Detect and fix red pupil pixels in the circle
-                    for (pt in stroke.points) {
-                        val cx = pt.x.toInt().coerceIn(0, out.width - 1)
-                        val cy = pt.y.toInt().coerceIn(0, out.height - 1)
-                        val r = stroke.radius.toInt().coerceIn(8, 80)
-                        fixRedEyeCircle(out, cx, cy, r)
-                    }
-                }
-                RetouchType.SELECTIVE_BRUSH -> {
-                    // Highlight/boost saturation on brushed path
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = Color.argb(40, 255, 255, 255)
-                        strokeWidth = stroke.radius * 2
-                        strokeCap = Paint.Cap.ROUND
-                        strokeJoin = Paint.Join.ROUND
-                        style = Paint.Style.STROKE
-                    }
-                    val path = Path()
-                    stroke.points.forEachIndexed { i, p ->
-                        if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
-                    }
-                    canvas.drawPath(path, paint)
-                }
-            }
-        }
-        return out
+        return PhotoRetouchEngine.applyRetouch(src, strokes)
     }
 
     private fun healPatch(bmp: Bitmap, cx: Int, cy: Int, r: Int) {
@@ -664,69 +645,10 @@ object PhotoProcessor {
     }
 
     /**
-     * Background cutout and replacement (Transparent, Blur, Solid, Gradient, Studio Stage).
+     * Background cutout and replacement delegating to PhotoCutoutEngine.
      */
     fun applyBackgroundCutout(src: Bitmap, settings: BackgroundSettings): Bitmap {
-        if (settings.mode == BackgroundMode.ORIGINAL && !settings.isCutoutActive) return src
-
-        val w = src.width
-        val h = src.height
-        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(out)
-
-        // 1. Draw new background
-        when (settings.mode) {
-            BackgroundMode.ORIGINAL -> {
-                canvas.drawBitmap(src, 0f, 0f, null)
-            }
-            BackgroundMode.TRANSPARENT -> {
-                // Keep transparent base
-            }
-            BackgroundMode.BLUR -> {
-                val blurred = applyGaussianBlur(src, settings.blurRadius.toInt().coerceAtLeast(10))
-                canvas.drawBitmap(blurred, 0f, 0f, null)
-            }
-            BackgroundMode.SOLID -> {
-                canvas.drawColor(settings.solidColor.toArgb())
-            }
-            BackgroundMode.GRADIENT -> {
-                val shader = LinearGradient(
-                    0f, 0f, w.toFloat(), h.toFloat(),
-                    settings.gradientColors.map { it.toArgb() }.toIntArray(),
-                    null,
-                    Shader.TileMode.CLAMP
-                )
-                val p = Paint().apply { this.shader = shader }
-                canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
-            }
-            BackgroundMode.STAGE -> {
-                // Clean studio stage backdrop with radial soft floor spotlight
-                canvas.drawColor(android.graphics.Color.rgb(28, 28, 32))
-                val spot = RadialGradient(
-                    w / 2f, h * 0.7f, w * 0.65f,
-                    intArrayOf(android.graphics.Color.argb(160, 255, 255, 255), android.graphics.Color.TRANSPARENT),
-                    floatArrayOf(0f, 1f),
-                    Shader.TileMode.CLAMP
-                )
-                val spotPaint = Paint().apply { this.shader = spot }
-                canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), spotPaint)
-            }
-        }
-
-        // 2. Draw Subject on top using oval mask or extracted mask
-        val subjectBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val subCanvas = Canvas(subjectBitmap)
-        val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-        // Draw soft vignette feathered oval for the subject
-        val rect = RectF(w * 0.12f, h * 0.08f, w * 0.88f, h * 0.95f)
-        subCanvas.drawOval(rect, maskPaint)
-
-        maskPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-        subCanvas.drawBitmap(src, 0f, 0f, maskPaint)
-
-        canvas.drawBitmap(subjectBitmap, 0f, 0f, null)
-        return out
+        return PhotoCutoutEngine.applyBackgroundCutout(src, settings)
     }
 
     /**
@@ -808,410 +730,11 @@ object PhotoProcessor {
     }
 
     /**
-     * Renders overlays: borders, frames, shapes, drawings, stickers, text, callouts, and lens flares.
+     * Renders overlays: borders, frames, shapes, drawings, stickers, text, callouts, and lens flares
+     * delegating to PhotoOverlayRenderer.
      */
     fun renderOverlays(canvas: Canvas, width: Float, height: Float, state: EditSessionState, density: Float) {
-        // 1. Borders
-        if (state.border.widthRatio > 0f) {
-            val borderWidth = state.border.widthRatio * min(width, height)
-            val padding = state.border.paddingRatio * min(width, height)
-            val radius = state.border.cornerRadiusRatio * min(width, height)
-            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = state.border.color.toArgb()
-                style = Paint.Style.STROKE
-                strokeWidth = borderWidth
-            }
-            val inset = padding + borderWidth / 2f
-            val rect = RectF(inset, inset, width - inset, height - inset)
-            canvas.drawRoundRect(rect, radius, radius, borderPaint)
-        }
-
-        // 2. Frames
-        when (state.frame) {
-            FrameStyle.NONE -> {}
-            FrameStyle.POLAROID -> {
-                val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = android.graphics.Color.WHITE
-                    style = Paint.Style.FILL
-                }
-                val borderSide = width * 0.06f
-                val borderTop = height * 0.06f
-                val borderBottom = height * 0.18f
-
-                // Draw polaroid white frame around canvas edges
-                canvas.drawRect(0f, 0f, width, borderTop, cardPaint)
-                canvas.drawRect(0f, 0f, borderSide, height, cardPaint)
-                canvas.drawRect(width - borderSide, 0f, width, height, cardPaint)
-                canvas.drawRect(0f, height - borderBottom, width, height, cardPaint)
-            }
-            FrameStyle.FILM_STRIP -> {
-                val filmPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = android.graphics.Color.BLACK
-                    style = Paint.Style.FILL
-                }
-                val holePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = android.graphics.Color.WHITE
-                    style = Paint.Style.FILL
-                }
-                val barW = width * 0.08f
-                canvas.drawRect(0f, 0f, barW, height, filmPaint)
-                canvas.drawRect(width - barW, 0f, width, height, filmPaint)
-
-                // Sprocket holes
-                val holeH = 18f * density
-                val holeW = barW * 0.5f
-                var y = 16f * density
-                while (y < height - holeH) {
-                    canvas.drawRoundRect(RectF(barW * 0.25f, y, barW * 0.25f + holeW, y + holeH), 4f, 4f, holePaint)
-                    canvas.drawRoundRect(RectF(width - barW + barW * 0.25f, y, width - barW * 0.25f, y + holeH), 4f, 4f, holePaint)
-                    y += holeH + 14f * density
-                }
-            }
-            FrameStyle.MODERN_WHITE -> {
-                val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = android.graphics.Color.WHITE
-                    style = Paint.Style.STROKE
-                    strokeWidth = min(width, height) * 0.05f
-                }
-                val inset = p.strokeWidth / 2f
-                canvas.drawRect(inset, inset, width - inset, height - inset, p)
-            }
-            FrameStyle.DOUBLE_BORDER -> {
-                val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = android.graphics.Color.WHITE
-                    style = Paint.Style.STROKE
-                    strokeWidth = 3f * density
-                }
-                canvas.drawRect(12f * density, 12f * density, width - 12f * density, height - 12f * density, p)
-                canvas.drawRect(22f * density, 22f * density, width - 22f * density, height - 22f * density, p)
-            }
-            FrameStyle.VINTAGE_FADED, FrameStyle.MINIMAL_BLACK -> {
-                val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = if (state.frame == FrameStyle.MINIMAL_BLACK) android.graphics.Color.BLACK else android.graphics.Color.DKGRAY
-                    style = Paint.Style.STROKE
-                    strokeWidth = min(width, height) * 0.04f
-                }
-                val inset = p.strokeWidth / 2f
-                canvas.drawRect(inset, inset, width - inset, height - inset, p)
-            }
-        }
-
-        // 3. Shapes
-        for (shape in state.shapes) {
-            val cx = shape.xRatio * width
-            val cy = shape.yRatio * height
-            val sw = shape.widthRatio * width
-            val sh = shape.heightRatio * height
-
-            val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = shape.fillColor.toArgb()
-                style = Paint.Style.FILL
-            }
-            val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = shape.strokeColor.toArgb()
-                style = Paint.Style.STROKE
-                strokeWidth = shape.strokeWidth * density
-            }
-
-            canvas.save()
-            canvas.rotate(shape.rotation, cx, cy)
-            when (shape.shapeType) {
-                ShapeType.RECTANGLE -> {
-                    val rect = RectF(cx - sw / 2f, cy - sh / 2f, cx + sw / 2f, cy + sh / 2f)
-                    if (shape.fillColor != androidx.compose.ui.graphics.Color.Transparent) canvas.drawRoundRect(rect, 16f, 16f, fillPaint)
-                    canvas.drawRoundRect(rect, 16f, 16f, strokePaint)
-                }
-                ShapeType.CIRCLE -> {
-                    val r = min(sw, sh) / 2f
-                    if (shape.fillColor != androidx.compose.ui.graphics.Color.Transparent) canvas.drawCircle(cx, cy, r, fillPaint)
-                    canvas.drawCircle(cx, cy, r, strokePaint)
-                }
-                ShapeType.HEART -> {
-                    val path = Path().apply {
-                        val hw = sw / 2f
-                        val hh = sh / 2f
-                        moveTo(cx, cy + hh * 0.6f)
-                        cubicTo(cx - hw, cy, cx - hw, cy - hh, cx, cy - hh * 0.4f)
-                        cubicTo(cx + hw, cy - hh, cx + hw, cy, cx, cy + hh * 0.6f)
-                        close()
-                    }
-                    if (shape.fillColor != androidx.compose.ui.graphics.Color.Transparent) canvas.drawPath(path, fillPaint)
-                    canvas.drawPath(path, strokePaint)
-                }
-                ShapeType.STAR -> {
-                    val path = Path()
-                    val rOuter = min(sw, sh) / 2f
-                    val rInner = rOuter * 0.45f
-                    for (i in 0 until 10) {
-                        val angle = (i * 36 - 90) * Math.PI / 180.0
-                        val r = if (i % 2 == 0) rOuter else rInner
-                        val x = (cx + r * cos(angle)).toFloat()
-                        val y = (cy + r * sin(angle)).toFloat()
-                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-                    path.close()
-                    if (shape.fillColor != androidx.compose.ui.graphics.Color.Transparent) canvas.drawPath(path, fillPaint)
-                    canvas.drawPath(path, strokePaint)
-                }
-                ShapeType.HEXAGON -> {
-                    val path = Path()
-                    val r = min(sw, sh) / 2f
-                    for (i in 0 until 6) {
-                        val angle = (i * 60) * Math.PI / 180.0
-                        val x = (cx + r * cos(angle)).toFloat()
-                        val y = (cy + r * sin(angle)).toFloat()
-                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-                    path.close()
-                    if (shape.fillColor != androidx.compose.ui.graphics.Color.Transparent) canvas.drawPath(path, fillPaint)
-                    canvas.drawPath(path, strokePaint)
-                }
-                ShapeType.ARROW -> {
-                    val path = Path().apply {
-                        moveTo(cx - sw / 2f, cy - sh * 0.15f)
-                        lineTo(cx + sw * 0.1f, cy - sh * 0.15f)
-                        lineTo(cx + sw * 0.1f, cy - sh * 0.45f)
-                        lineTo(cx + sw / 2f, cy)
-                        lineTo(cx + sw * 0.1f, cy + sh * 0.45f)
-                        lineTo(cx + sw * 0.1f, cy + sh * 0.15f)
-                        lineTo(cx - sw / 2f, cy + sh * 0.15f)
-                        close()
-                    }
-                    if (shape.fillColor != androidx.compose.ui.graphics.Color.Transparent) canvas.drawPath(path, fillPaint)
-                    canvas.drawPath(path, strokePaint)
-                }
-            }
-            canvas.restore()
-        }
-
-        // 4. Drawing strokes
-        for (stroke in state.drawingStrokes) {
-            if (stroke.points.size < 2) continue
-            val path = Path()
-            stroke.points.forEachIndexed { i, p ->
-                if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
-            }
-            when (stroke.brushType) {
-                BrushType.PEN -> {
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = stroke.color.toArgb()
-                        strokeWidth = stroke.width * density
-                        style = Paint.Style.STROKE
-                        strokeCap = Paint.Cap.ROUND
-                        strokeJoin = Paint.Join.ROUND
-                    }
-                    canvas.drawPath(path, paint)
-                }
-                BrushType.GLOW -> {
-                    // Outer neon glow
-                    val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = stroke.color.copy(alpha = 0.5f).toArgb()
-                        strokeWidth = (stroke.width * 2.8f) * density
-                        style = Paint.Style.STROKE
-                        strokeCap = Paint.Cap.ROUND
-                        strokeJoin = Paint.Join.ROUND
-                    }
-                    canvas.drawPath(path, glowPaint)
-                    // Inner bright core
-                    val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = android.graphics.Color.WHITE
-                        strokeWidth = (stroke.width * 0.8f) * density
-                        style = Paint.Style.STROKE
-                        strokeCap = Paint.Cap.ROUND
-                        strokeJoin = Paint.Join.ROUND
-                    }
-                    canvas.drawPath(path, corePaint)
-                }
-                BrushType.HIGHLIGHTER -> {
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = stroke.color.copy(alpha = 0.45f).toArgb()
-                        strokeWidth = (stroke.width * 2.2f) * density
-                        style = Paint.Style.STROKE
-                        strokeCap = Paint.Cap.SQUARE
-                        strokeJoin = Paint.Join.ROUND
-                    }
-                    canvas.drawPath(path, paint)
-                }
-                BrushType.DOTTED -> {
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = stroke.color.toArgb()
-                        strokeWidth = stroke.width * density
-                        style = Paint.Style.STROKE
-                        strokeCap = Paint.Cap.ROUND
-                        pathEffect = DashPathEffect(floatArrayOf(10f, 14f), 0f)
-                    }
-                    canvas.drawPath(path, paint)
-                }
-                BrushType.ERASER -> {
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-                        strokeWidth = (stroke.width * 2f) * density
-                        style = Paint.Style.STROKE
-                        strokeCap = Paint.Cap.ROUND
-                    }
-                    canvas.drawPath(path, paint)
-                }
-            }
-        }
-
-        // 5. Text Overlays
-        for (item in state.textOverlays) {
-            val cx = item.xRatio * width
-            val cy = item.yRatio * height
-
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = item.color.toArgb()
-                textSize = item.fontSizeSp * density * item.scale
-                typeface = if (item.isBold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
-                textAlign = Paint.Align.CENTER
-            }
-            val textBounds = Rect()
-            textPaint.getTextBounds(item.text, 0, item.text.length, textBounds)
-
-            canvas.save()
-            canvas.rotate(item.rotation, cx, cy)
-
-            // Background pill
-            val padX = 14f * density * item.scale
-            val padY = 8f * density * item.scale
-            val bgRect = RectF(
-                cx - textBounds.width() / 2f - padX,
-                cy - textBounds.height() / 2f - padY,
-                cx + textBounds.width() / 2f + padX,
-                cy + textBounds.height() / 2f + padY
-            )
-            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = item.backgroundColor.toArgb()
-                style = Paint.Style.FILL
-            }
-            canvas.drawRoundRect(bgRect, 12f * density, 12f * density, bgPaint)
-
-            canvas.drawText(item.text, cx, cy + textBounds.height() / 3f, textPaint)
-            canvas.restore()
-        }
-
-        // 6. Stickers
-        for (stk in state.stickers) {
-            val cx = stk.xRatio * width
-            val cy = stk.yRatio * height
-            val size = stk.sizeDp * density * stk.scale
-
-            val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                textSize = size
-                textAlign = Paint.Align.CENTER
-            }
-            canvas.save()
-            canvas.rotate(stk.rotation, cx, cy)
-            canvas.drawText(stk.emojiOrRes, cx, cy + size * 0.35f, emojiPaint)
-            canvas.restore()
-        }
-
-        // 7. Callouts (Speech / Thought balloons)
-        for (callout in state.callouts) {
-            val cx = callout.xRatio * width
-            val cy = callout.yRatio * height
-            val tailX = callout.tailPointRatio.x * width
-            val tailY = callout.tailPointRatio.y * height
-
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = callout.textColor.toArgb()
-                textSize = 18f * density
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                textAlign = Paint.Align.CENTER
-            }
-            val bounds = Rect()
-            textPaint.getTextBounds(callout.text, 0, callout.text.length, bounds)
-
-            val bubbleW = bounds.width() + 32f * density
-            val bubbleH = bounds.height() + 24f * density
-            val rect = RectF(cx - bubbleW / 2f, cy - bubbleH / 2f, cx + bubbleW / 2f, cy + bubbleH / 2f)
-
-            val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = callout.backgroundColor.toArgb()
-                style = Paint.Style.FILL
-            }
-            canvas.drawRoundRect(rect, 20f * density, 20f * density, bubblePaint)
-
-            // Triangle tail
-            val tailPath = Path().apply {
-                moveTo(cx - 10f * density, cy + bubbleH / 2f - 2f)
-                lineTo(cx + 10f * density, cy + bubbleH / 2f - 2f)
-                lineTo(tailX, tailY)
-                close()
-            }
-            canvas.drawPath(tailPath, bubblePaint)
-            canvas.drawText(callout.text, cx, cy + bounds.height() / 3f, textPaint)
-        }
-
-        // 8. Lens Flares
-        for (flare in state.lensFlares) {
-            val fx = flare.xRatio * width
-            val fy = flare.yRatio * height
-            val intensity = flare.intensity
-
-            canvas.save()
-            val flarePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-            when (flare.flareType) {
-                LensFlareType.SUNBURST -> {
-                    // Central bright core
-                    flarePaint.shader = RadialGradient(
-                        fx, fy, 120f * density * intensity,
-                        intArrayOf(android.graphics.Color.WHITE, android.graphics.Color.argb((intensity * 180).toInt(), 255, 230, 150), android.graphics.Color.TRANSPARENT),
-                        floatArrayOf(0f, 0.35f, 1f),
-                        Shader.TileMode.CLAMP
-                    )
-                    canvas.drawCircle(fx, fy, 120f * density * intensity, flarePaint)
-
-                    // Sunburst rays
-                    val rayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = android.graphics.Color.argb((intensity * 120).toInt(), 255, 240, 200)
-                        strokeWidth = 2.5f * density
-                        style = Paint.Style.STROKE
-                    }
-                    for (deg in 0 until 360 step 30) {
-                        val rad = deg * Math.PI / 180.0
-                        val len = (90f + (deg % 60) * 2f) * density * intensity
-                        canvas.drawLine(fx, fy, (fx + len * cos(rad)).toFloat(), (fy + len * sin(rad)).toFloat(), rayPaint)
-                    }
-                }
-                LensFlareType.ANAMORPHIC -> {
-                    // Horizontal cinematic blue streak
-                    val streakPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        shader = LinearGradient(
-                            fx - width * 0.45f, fy, fx + width * 0.45f, fy,
-                            intArrayOf(android.graphics.Color.TRANSPARENT, android.graphics.Color.argb((intensity * 220).toInt(), 100, 200, 255), android.graphics.Color.WHITE, android.graphics.Color.argb((intensity * 220).toInt(), 100, 200, 255), android.graphics.Color.TRANSPARENT),
-                            floatArrayOf(0f, 0.4f, 0.5f, 0.6f, 1f),
-                            Shader.TileMode.CLAMP
-                        )
-                        strokeWidth = 14f * density * intensity
-                    }
-                    canvas.drawLine(fx - width * 0.45f, fy, fx + width * 0.45f, fy, streakPaint)
-                }
-                LensFlareType.GOLDEN_HALO -> {
-                    val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = android.graphics.Color.argb((intensity * 160).toInt(), 255, 190, 80)
-                        style = Paint.Style.STROKE
-                        strokeWidth = 5f * density
-                    }
-                    canvas.drawCircle(fx, fy, 80f * density * intensity, haloPaint)
-                    canvas.drawCircle(fx, fy, 140f * density * intensity, haloPaint)
-                }
-                LensFlareType.RAINBOW_RING -> {
-                    val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        shader = SweepGradient(
-                            fx, fy,
-                            intArrayOf(android.graphics.Color.RED, android.graphics.Color.YELLOW, android.graphics.Color.GREEN, android.graphics.Color.CYAN, android.graphics.Color.MAGENTA, android.graphics.Color.RED),
-                            null
-                        )
-                        style = Paint.Style.STROKE
-                        strokeWidth = 8f * density * intensity
-                        alpha = (intensity * 140).toInt()
-                    }
-                    canvas.drawCircle(fx, fy, 100f * density * intensity, ringPaint)
-                }
-            }
-            canvas.restore()
-        }
+        PhotoOverlayRenderer.renderAll(canvas, width, height, state, density)
     }
 
     /**

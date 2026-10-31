@@ -82,6 +82,11 @@ fun PhotoEditorScreen(
             "Blur" -> sessionState.adjustments.blur
             "Vignette" -> sessionState.adjustments.vignette
             "Grain" -> sessionState.adjustments.grain
+            "Vibrance" -> sessionState.adjustments.vibrance
+            "Dehaze" -> sessionState.adjustments.dehaze
+            "Dodge" -> sessionState.adjustments.dodge
+            "Burn" -> sessionState.adjustments.burn
+            "White Balance" -> sessionState.adjustments.whiteBalanceKelvin
             else -> 0f
         }
     }
@@ -271,6 +276,68 @@ fun PhotoEditorScreen(
                     )
                 }
 
+                AnimatedVisibility(
+                    visible = activeTool == EditorTool.TOOLS,
+                    enter = expandVertically(),
+                    exit = shrinkVertically()
+                ) {
+                    ToolsGridSheet(
+                        onSelectSubItem = { subItem ->
+                            when (subItem) {
+                                ToolSheetSubItem.AUTO_LEVEL -> viewModel.autoLevelStraighten()
+                                ToolSheetSubItem.SHAPE_CROP -> {
+                                    val shapes = ShapeCropType.entries
+                                    val cur = sessionState.transform.shapeCrop
+                                    val next = if (cur != null) shapes[(shapes.indexOf(cur) + 1) % shapes.size] else ShapeCropType.CIRCLE
+                                    viewModel.setShapeCrop(next)
+                                }
+                                ToolSheetSubItem.CORNER_PIN -> {
+                                    viewModel.setCornerPins(
+                                        listOf(
+                                            CornerPinPoint(0.04f, 0.04f),
+                                            CornerPinPoint(0.96f, 0.08f),
+                                            CornerPinPoint(0.92f, 0.96f),
+                                            CornerPinPoint(0.06f, 0.92f)
+                                        )
+                                    )
+                                }
+                                ToolSheetSubItem.LIQUIFY -> {
+                                    viewModel.addLiquifyPoint(LiquifyPoint(0.5f, 0.5f, mode = LiquifyMode.EXPAND))
+                                }
+                                ToolSheetSubItem.SMUDGE -> {
+                                    viewModel.setActiveTool(EditorTool.RETOUCH)
+                                    activeRetouchType = RetouchType.SMUDGE_BRUSH
+                                }
+                                ToolSheetSubItem.PATCH -> {
+                                    viewModel.setActiveTool(EditorTool.RETOUCH)
+                                    activeRetouchType = RetouchType.PATCH_HEALING
+                                }
+                                ToolSheetSubItem.CLONE -> {
+                                    viewModel.setActiveTool(EditorTool.RETOUCH)
+                                    activeRetouchType = RetouchType.CLONE_STAMP
+                                }
+                                ToolSheetSubItem.DISPERSION -> {
+                                    val cur = sessionState.transform.dispersionAmount
+                                    viewModel.setDispersion(if (cur > 0f) 0f else 50f)
+                                }
+                                ToolSheetSubItem.STRETCH -> {
+                                    viewModel.setPerspective(20f, 0f)
+                                }
+                                ToolSheetSubItem.MOTION -> {
+                                    val cur = sessionState.transform.motionAmount
+                                    viewModel.setMotion(if (cur > 0f) 0f else 45f, 45f)
+                                }
+                                ToolSheetSubItem.ROTATE -> viewModel.rotate90()
+                                ToolSheetSubItem.FLIP -> viewModel.flipHorizontal()
+                                ToolSheetSubItem.STRAIGHTEN, ToolSheetSubItem.CROP, ToolSheetSubItem.PERSPECTIVE -> {
+                                    viewModel.setActiveTool(EditorTool.CROP)
+                                }
+                                else -> {}
+                            }
+                        }
+                    )
+                }
+
                 // Bottom Tools Bar
                 PhotoEditorBottomBar(
                     activeTool = activeTool,
@@ -280,6 +347,9 @@ fun PhotoEditorScreen(
                             EditorTool.CROP -> {
                                 viewModel.setActiveSubItem(ToolSheetSubItem.CROP)
                                 selectedCropPreset = AspectRatioPreset.FREE
+                            }
+                            EditorTool.TOOLS -> {
+                                // Tools grid panel displays
                             }
                             EditorTool.ADJUST -> {
                                 viewModel.setActiveAdjustment("Brightness")
@@ -305,15 +375,9 @@ fun PhotoEditorScreen(
                                 viewModel.addShape(types[nextIndex], strokeColor = Color.White)
                             }
                             EditorTool.FRAME -> {
-                                val nextFrame = when (sessionState.frame) {
-                                    FrameStyle.NONE -> FrameStyle.POLAROID
-                                    FrameStyle.POLAROID -> FrameStyle.FILM_STRIP
-                                    FrameStyle.FILM_STRIP -> FrameStyle.MODERN_WHITE
-                                    FrameStyle.MODERN_WHITE -> FrameStyle.DOUBLE_BORDER
-                                    FrameStyle.DOUBLE_BORDER -> FrameStyle.VINTAGE_FADED
-                                    FrameStyle.VINTAGE_FADED -> FrameStyle.MINIMAL_BLACK
-                                    FrameStyle.MINIMAL_BLACK -> FrameStyle.NONE
-                                }
+                                val frames = FrameStyle.entries
+                                val curIdx = frames.indexOf(sessionState.frame)
+                                val nextFrame = frames[(curIdx + 1) % frames.size]
                                 viewModel.setFrame(nextFrame)
                             }
                             EditorTool.CALLOUT -> showCalloutDialog = true

@@ -47,6 +47,7 @@ data class ToolBarItem(
 
 val EditorToolBarItems = listOf(
     ToolBarItem(EditorTool.CROP, Icons.Default.Crop, "Crop"),
+    ToolBarItem(EditorTool.TOOLS, Icons.Default.Construction, "Tools"),
     ToolBarItem(EditorTool.ADJUST, Icons.Default.Tune, "Adjust"),
     ToolBarItem(EditorTool.EFFECTS, Icons.Default.AutoFixHigh, "Effects"),
     ToolBarItem(EditorTool.RETOUCH, Icons.Default.Face, "Retouch"),
@@ -155,22 +156,25 @@ fun ToolsGridSheet(
 ) {
     val items = listOf(
         Pair(ToolSheetSubItem.CROP, Icons.Default.Crop),
-        Pair(ToolSheetSubItem.FREE_CROP, Icons.Default.CropFree),
         Pair(ToolSheetSubItem.SHAPE_CROP, Icons.Default.Category),
-        Pair(ToolSheetSubItem.DISPERSION, Icons.Default.BlurOn),
+        Pair(ToolSheetSubItem.AUTO_LEVEL, Icons.Default.AutoMode),
+        Pair(ToolSheetSubItem.STRAIGHTEN, Icons.Default.RotateRight),
+        Pair(ToolSheetSubItem.ROTATE, Icons.Default.Rotate90DegreesCw),
+        Pair(ToolSheetSubItem.FLIP, Icons.Default.Flip),
+        Pair(ToolSheetSubItem.CORNER_PIN, Icons.Default.Transform),
+        Pair(ToolSheetSubItem.PERSPECTIVE, Icons.Default.OpenInFull),
+        Pair(ToolSheetSubItem.LIQUIFY, Icons.Default.Waves),
+        Pair(ToolSheetSubItem.SMUDGE, Icons.Default.Brush),
+        Pair(ToolSheetSubItem.PATCH, Icons.Default.Healing),
         Pair(ToolSheetSubItem.CLONE, Icons.Default.ContentCopy),
-        Pair(ToolSheetSubItem.AI_REPLACE, Icons.Default.AutoFixHigh),
-        Pair(ToolSheetSubItem.STRETCH, Icons.Default.OpenInFull),
+        Pair(ToolSheetSubItem.DISPERSION, Icons.Default.BlurOn),
+        Pair(ToolSheetSubItem.STRETCH, Icons.Default.AspectRatio),
         Pair(ToolSheetSubItem.MOTION, Icons.Default.FastForward),
-        Pair(ToolSheetSubItem.SELECTION, Icons.Default.SelectAll),
-        Pair(ToolSheetSubItem.CURVES, Icons.Default.ShowChart),
-        Pair(ToolSheetSubItem.ADJUST, Icons.Default.Tune),
-        Pair(ToolSheetSubItem.ENHANCE, Icons.Default.AutoAwesome),
-        Pair(ToolSheetSubItem.TILT_SHIFT, Icons.Default.Camera),
-        Pair(ToolSheetSubItem.PERSPECTIVE, Icons.Default.Transform),
-        Pair(ToolSheetSubItem.RESIZE, Icons.Default.PhotoSizeSelectLarge),
-        Pair(ToolSheetSubItem.ROTATE, Icons.Default.RotateRight),
-        Pair(ToolSheetSubItem.AI_EXPAND, Icons.Default.AspectRatio)
+        Pair(ToolSheetSubItem.LASSO_SELECT, Icons.Default.Gesture),
+        Pair(ToolSheetSubItem.POLYGON_SELECT, Icons.Default.Polyline),
+        Pair(ToolSheetSubItem.ELLIPSE_SELECT, Icons.Default.RadioButtonUnchecked),
+        Pair(ToolSheetSubItem.MAGIC_WAND, Icons.Default.AutoFixHigh),
+        Pair(ToolSheetSubItem.OBJECT_SELECT, Icons.Default.CenterFocusStrong)
     )
 
     Column(
@@ -328,7 +332,8 @@ fun AdjustmentsPanel(
     val properties = listOf(
         "Brightness", "Contrast", "Saturation", "Exposure",
         "Highlights", "Shadows", "Temperature", "Tint",
-        "Sharpness", "Blur", "Vignette", "Grain"
+        "Sharpness", "Blur", "Vignette", "Grain",
+        "Vibrance", "Dehaze", "Dodge", "Burn", "White Balance"
     )
 
     Column(
@@ -347,7 +352,11 @@ fun AdjustmentsPanel(
                 value = currentValue,
                 onValueChange = onValueChange,
                 onValueChangeFinished = onValueChangeFinished,
-                valueRange = if (activeProperty in listOf("Sharpness", "Blur", "Vignette", "Grain")) 0f..100f else -100f..100f,
+                valueRange = when (activeProperty) {
+                    "White Balance" -> 2500f..9500f
+                    in listOf("Sharpness", "Blur", "Vignette", "Grain", "Dehaze", "Dodge", "Burn") -> 0f..100f
+                    else -> -100f..100f
+                },
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary,
                     activeTrackColor = MaterialTheme.colorScheme.primary
@@ -449,6 +458,7 @@ fun EffectsFiltersPanel(
                                     FilterType.PASTEL -> Color(0xFFB0B0B0)
                                     FilterType.EMERALD -> Color(0xFF484848)
                                     FilterType.COLD_MIST -> Color(0xFF9E9E9E)
+                                    else -> Color(0xFF555555)
                                 }
                             )
                             .border(

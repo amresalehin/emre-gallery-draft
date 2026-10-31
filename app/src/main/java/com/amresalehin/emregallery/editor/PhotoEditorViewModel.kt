@@ -219,6 +219,127 @@ class PhotoEditorViewModel : ViewModel() {
         updateLivePreview()
     }
 
+    fun autoLevelStraighten() {
+        val bmp = _originalBitmap.value ?: return
+        viewModelScope.launch(Dispatchers.Default) {
+            val angle = PhotoTransformEngine.detectHorizonAngle(bmp)
+            withContext(Dispatchers.Main) {
+                pushState(_sessionState.value.copy(
+                    transform = _sessionState.value.transform.copy(straightenAngle = angle),
+                    description = "Auto-Level (${angle.toInt()}°)"
+                ))
+            }
+        }
+    }
+
+    fun setShapeCrop(shape: ShapeCropType?) {
+        pushState(_sessionState.value.copy(
+            transform = _sessionState.value.transform.copy(shapeCrop = shape),
+            description = "Shape Crop ${shape?.label ?: "None"}"
+        ))
+    }
+
+    fun setCornerPins(pins: List<CornerPinPoint>?) {
+        pushState(_sessionState.value.copy(
+            transform = _sessionState.value.transform.copy(cornerPins = pins),
+            description = "Corner Pin Perspective"
+        ))
+    }
+
+    fun addLiquifyPoint(point: LiquifyPoint) {
+        val list = _sessionState.value.transform.liquifyPoints + point
+        pushState(_sessionState.value.copy(
+            transform = _sessionState.value.transform.copy(liquifyPoints = list),
+            description = "Liquify ${point.mode.label}"
+        ))
+    }
+
+    fun setDispersion(amount: Float) {
+        pushState(_sessionState.value.copy(
+            transform = _sessionState.value.transform.copy(dispersionAmount = amount),
+            description = "Dispersion"
+        ))
+    }
+
+    fun setMotion(amount: Float, angle: Float) {
+        pushState(_sessionState.value.copy(
+            transform = _sessionState.value.transform.copy(motionAmount = amount, motionAngle = angle),
+            description = "Motion Blur"
+        ))
+    }
+
+    fun setHslAdjustment(band: ColorBand, adj: HslBandAdjustment) {
+        val updatedMap = _sessionState.value.adjustments.hslAdjustments.toMutableMap()
+        updatedMap[band] = adj
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(hslAdjustments = updatedMap),
+            description = "HSL ${band.label}"
+        ))
+    }
+
+    fun setCurves(curves: RgbCurves) {
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(curves = curves),
+            description = "RGB Curves"
+        ))
+    }
+
+    fun setLevels(levels: LevelsParams) {
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(levels = levels),
+            description = "Levels"
+        ))
+    }
+
+    fun setColorBalance(balance: ColorBalanceParams) {
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(colorBalance = balance),
+            description = "Color Balance"
+        ))
+    }
+
+    fun setSplitToning(split: SplitToningParams) {
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(splitToning = split),
+            description = "Split Toning"
+        ))
+    }
+
+    fun setGradientMap(gradMap: GradientMapType) {
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(gradientMap = gradMap),
+            description = "Gradient Map ${gradMap.label}"
+        ))
+    }
+
+    fun setDuotone(duotone: DuotoneParams) {
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(duotone = duotone),
+            description = "Duotone"
+        ))
+    }
+
+    fun setColorReplace(replace: ColorReplaceParams) {
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(colorReplace = replace),
+            description = "Color Replace"
+        ))
+    }
+
+    fun setColorSplash(splash: ColorSplashParams) {
+        pushState(_sessionState.value.copy(
+            adjustments = _sessionState.value.adjustments.copy(colorSplash = splash),
+            description = "Color Splash"
+        ))
+    }
+
+    fun setBackgroundSettings(settings: BackgroundSettings) {
+        pushState(_sessionState.value.copy(
+            background = settings,
+            description = "Cutout & Background"
+        ))
+    }
+
     // --- Adjustments ---
     fun updateAdjustmentValue(prop: String, value: Float) {
         if (sliderBaselineState == null) {
@@ -238,6 +359,11 @@ class PhotoEditorViewModel : ViewModel() {
             "Blur" -> cur.copy(blur = value)
             "Vignette" -> cur.copy(vignette = value)
             "Grain" -> cur.copy(grain = value)
+            "Vibrance" -> cur.copy(vibrance = value)
+            "Dehaze" -> cur.copy(dehaze = value)
+            "Dodge" -> cur.copy(dodge = value)
+            "Burn" -> cur.copy(burn = value)
+            "White Balance" -> cur.copy(whiteBalanceKelvin = value)
             else -> cur
         }
         _sessionState.value = _sessionState.value.copy(adjustments = updated)

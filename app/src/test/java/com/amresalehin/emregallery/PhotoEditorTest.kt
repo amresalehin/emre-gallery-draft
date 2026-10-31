@@ -130,4 +130,80 @@ class PhotoEditorTest {
         vm.redo()
         assertEquals(FilterType.VIVID, vm.sessionState.value.filter)
     }
+
+    @Test
+    fun testArtisticEffects_renderWithoutCrash() {
+        val src = Bitmap.createBitmap(40, 40, Bitmap.Config.ARGB_8888)
+        // Verify artistic effects
+        val oil = PhotoEffectsEngine.applyOilPainting(src, 0.7f)
+        assertNotNull(oil)
+        val cartoon = PhotoEffectsEngine.applyCartoon(src, 0.8f)
+        assertNotNull(cartoon)
+        val kaleidoscope = PhotoEffectsEngine.applyKaleidoscope(src, 0.5f)
+        assertNotNull(kaleidoscope)
+        val glitch = PhotoEffectsEngine.applyRgbGlitch(src, 0.6f)
+        assertNotNull(glitch)
+    }
+
+    @Test
+    fun testExtendedAdjustments_pipeline() {
+        val src = Bitmap.createBitmap(30, 30, Bitmap.Config.ARGB_8888)
+        val adj = AdjustmentParams(
+            vibrance = 25f,
+            dehaze = 15f,
+            dodge = 10f,
+            burn = 5f,
+            whiteBalanceKelvin = 6500f,
+            levels = LevelsParams(blackPoint = 10f, whitePoint = 240f),
+            colorBalance = ColorBalanceParams(shadowRed = 5f, highlightBlue = 10f),
+            gradientMap = GradientMapType.SEPIA_GOLD,
+            duotone = DuotoneParams(enabled = false)
+        )
+        val result = PhotoAdjustEngine.applyExtendedAdjustments(src, adj)
+        assertNotNull(result)
+        assertEquals(30, result.width)
+        assertEquals(30, result.height)
+    }
+
+    @Test
+    fun testRetouch_teethWhiteningAndSmudge() {
+        val src = Bitmap.createBitmap(40, 40, Bitmap.Config.ARGB_8888)
+        val strokes = listOf(
+            RetouchStroke(type = RetouchType.TEETH_WHITENING, points = listOf(androidx.compose.ui.geometry.Offset(20f, 20f)), radius = 10f),
+            RetouchStroke(type = RetouchType.EYE_ENHANCEMENT, points = listOf(androidx.compose.ui.geometry.Offset(15f, 15f)), radius = 8f),
+            RetouchStroke(type = RetouchType.SMUDGE_BRUSH, points = listOf(androidx.compose.ui.geometry.Offset(10f, 10f), androidx.compose.ui.geometry.Offset(25f, 25f)), radius = 12f)
+        )
+        val result = PhotoRetouchEngine.applyRetouch(src, strokes)
+        assertNotNull(result)
+        assertEquals(40, result.width)
+    }
+
+    @Test
+    fun testTransform_cornerPinAndShapeCropAndAutoLevel() {
+        val src = Bitmap.createBitmap(50, 50, Bitmap.Config.ARGB_8888)
+        val shapeCropped = PhotoTransformEngine.applyShapeCrop(src, ShapeCropType.HEART)
+        assertNotNull(shapeCropped)
+
+        val pinned = PhotoTransformEngine.applyCornerPinPerspective(
+            src,
+            listOf(CornerPinPoint(0f, 0f), CornerPinPoint(1f, 0.1f), CornerPinPoint(0.9f, 1f), CornerPinPoint(0.1f, 0.9f))
+        )
+        assertNotNull(pinned)
+
+        val angle = PhotoTransformEngine.detectHorizonAngle(src)
+        assertTrue(angle in -45f..45f)
+    }
+
+    @Test
+    fun testCutout_backgroundModes() {
+        val src = Bitmap.createBitmap(30, 30, Bitmap.Config.ARGB_8888)
+        val bg = BackgroundSettings(
+            mode = BackgroundMode.SOLID,
+            solidColor = androidx.compose.ui.graphics.Color.Black,
+            subjectShadow = true
+        )
+        val result = PhotoCutoutEngine.applyBackgroundCutout(src, bg)
+        assertNotNull(result)
+        assertEquals(30, result.width)
+    }
 }
