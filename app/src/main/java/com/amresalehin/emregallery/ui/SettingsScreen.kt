@@ -35,6 +35,7 @@ fun SettingsScreen(
     var query by remember { mutableStateOf("") }
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
+        "Tools" to Icons.Default.Build,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
@@ -229,6 +230,7 @@ fun SettingsScreen(
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"
                                         "About" -> "Emre Gallery · 0.1.0"
+                                        "Tools" -> "Edit, enhance, convert and create"
                                         else -> ""
                                     },
                                     style = MaterialTheme.typography.bodySmall,

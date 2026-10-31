@@ -14,6 +14,7 @@ enum class Destination {
     DEVICE_FOLDERS,
     ALBUM_CATALOG,
     SETTINGS,
+    TOOLS,
     LIBRARY_OVERVIEW,
     INDEXING_STATUS,
     OCR_SETTINGS,

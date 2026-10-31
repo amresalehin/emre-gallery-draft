@@ -592,7 +592,8 @@ fun GalleryApp() {
                 Destination.LIBRARY_OVERVIEW,
                 Destination.INDEXING_STATUS,
                 Destination.OCR_SETTINGS,
-                Destination.ABOUT
+                Destination.ABOUT,
+                Destination.TOOLS
             ) -> {
                 destination = Destination.SETTINGS
                 viewerStoryTitle = null
@@ -1084,6 +1085,7 @@ fun GalleryApp() {
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
                                 "About" -> navigateTo(Destination.ABOUT)
+                                "Tools" -> navigateTo(Destination.TOOLS)
                             }
                         },
                         onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
@@ -1171,6 +1173,9 @@ fun GalleryApp() {
                         onBack = { performBackNavigation() }
                     )
                     Destination.ABOUT -> AboutScreen(
+                        onBack = { performBackNavigation() }
+                    )
+                    Destination.TOOLS -> ToolsScreen(
                         onBack = { performBackNavigation() }
                     )
                     Destination.SEARCH -> {
