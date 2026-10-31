@@ -322,65 +322,62 @@ fun CropControlsPanel(
  */
 @Composable
 fun AdjustmentsPanel(
-    activeProperty: String,
-    currentValue: Float,
-    onSelectProperty: (String) -> Unit,
-    onValueChange: (Float) -> Unit,
-    onValueChangeFinished: (() -> Unit)? = null,
     category: String = "Light",
+    valueForProperty: (String) -> Float,
+    onValueChange: (String, Float) -> Unit,
+    onValueChangeFinished: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val properties = when (category) {
         "Color" -> listOf("Temperature", "Tint", "Saturation", "Vibrance", "White Balance")
         "Effects" -> listOf("Blur", "Vignette", "Grain", "Dehaze", "Dodge", "Burn")
         "Detail" -> listOf("Sharpness")
-        else -> listOf("Exposure", "Brightness", "Contrast", "Highlights", "Shadows")
+        else -> listOf("Exposure", "Contrast", "Highlights", "Shadows", "Brightness")
     }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(14.dp)
+            .padding(horizontal = 15.dp, vertical = 5.dp)
     ) {
-        // Value slider with label
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(activeProperty, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, modifier = Modifier.width(100.dp))
-            Slider(
-                value = currentValue,
-                onValueChange = onValueChange,
-                onValueChangeFinished = onValueChangeFinished,
-                valueRange = when (activeProperty) {
-                    "White Balance" -> 2500f..9500f
-                    in listOf("Sharpness", "Blur", "Vignette", "Grain", "Dehaze", "Dodge", "Burn") -> 0f..100f
-                    else -> -100f..100f
-                },
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary
-                ),
-                modifier = Modifier.weight(1f)
-            )
-            Text(currentValue.toInt().toString(), style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(42.dp), textAlign = TextAlign.End)
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // Property tabs
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            items(properties) { prop ->
-                val isSelected = activeProperty == prop
-                FilterChip(
-                    selected = isSelected,
-                    onClick = { onSelectProperty(prop) },
-                    label = { Text(prop) },
-                    colors = monochromeFilterChipColors()
+        properties.forEach { property ->
+            val value = valueForProperty(property)
+            val range = when (property) {
+                "White Balance" -> 2500f..9500f
+                "Sharpness", "Blur", "Vignette", "Grain", "Dehaze", "Dodge", "Burn" -> 0f..100f
+                else -> -100f..100f
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    property,
+                    color = Color(0xFFE3E3E3),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.width(82.dp)
+                )
+                Slider(
+                    value = value.coerceIn(range.start, range.endInclusive),
+                    onValueChange = { onValueChange(property, it) },
+                    onValueChangeFinished = onValueChangeFinished,
+                    valueRange = range,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White,
+                        activeTrackColor = Color.White,
+                        inactiveTrackColor = Color(0xFF666666),
+                        activeTickColor = Color.Transparent,
+                        inactiveTickColor = Color.Transparent
+                    ),
+                    modifier = Modifier.weight(1f).height(32.dp)
+                )
+                Text(
+                    if (property == "White Balance") value.toInt().toString() else value.toInt().toString(),
+                    color = Color(0xFFD0D0D0),
+                    style = MaterialTheme.typography.labelMedium,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(42.dp)
                 )
             }
         }
