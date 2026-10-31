@@ -410,7 +410,7 @@ fun PhotoEditorScreen(
                                 onApply = applyCropMode
                             )
                         } else {
-                            LightcraftToolNavigation(activeTool, lightcraftToolSelected, ::selectEditorTool, vertical = true)
+                            LightcraftToolNavigation(activeTool, lightcraftToolSelected, { tool -> selectEditorTool(tool) }, vertical = true)
                         }
                     }
                 }
@@ -446,7 +446,7 @@ fun PhotoEditorScreen(
                                 onApply = applyCropMode
                             )
                         } else {
-                            LightcraftToolNavigation(activeTool, lightcraftToolSelected, ::selectEditorTool)
+                            LightcraftToolNavigation(activeTool, lightcraftToolSelected, { tool -> selectEditorTool(tool) })
                         }
                     }
                 }
