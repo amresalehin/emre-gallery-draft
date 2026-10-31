@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.editor.ui
 
 import android.widget.Toast
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -141,6 +142,26 @@ fun PhotoEditorScreen(
         }
     }
 
+    val doShare: () -> Unit = {
+        scope.launch {
+            val shared = viewModel.saveResult(context, mediaRepository, false, 95)
+            if (shared == null) {
+                Toast.makeText(context, "Could not prepare edited photo", Toast.LENGTH_SHORT).show()
+            } else {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = shared.mimeType ?: "image/jpeg"
+                    putExtra(Intent.EXTRA_STREAM, android.net.Uri.parse(shared.uri))
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                runCatching {
+                    context.startActivity(Intent.createChooser(intent, "Share edited photo"))
+                }.onFailure {
+                    Toast.makeText(context, "No app available to share this photo", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     Surface(Modifier.fillMaxSize(), color = Color.Black) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val landscape = maxWidth > maxHeight
@@ -178,6 +199,7 @@ fun PhotoEditorScreen(
                         onRedo = { viewModel.redo() },
                         onQuickSave = { doSave(false, 95) },
                         onContinueExport = { showExportSheet = true },
+                        onShare = doShare,
                         onEditWithAi = { showAiSheet = true },
                         modifier = Modifier.align(Alignment.TopCenter)
                     )
