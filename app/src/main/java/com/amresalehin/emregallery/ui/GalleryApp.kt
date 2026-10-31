@@ -1222,10 +1222,8 @@ fun GalleryApp() {
                                 item = selectedMedia!!,
                                 mediaRepository = mediaRepository,
                                 onBack = { performBackNavigation() },
-                                onSaved = { savedItem ->
+                                onSaved = {
                                     refreshMedia()
-                                    selectedMedia = savedItem
-                                    performBackNavigation()
                                 }
                             )
                         } else {
