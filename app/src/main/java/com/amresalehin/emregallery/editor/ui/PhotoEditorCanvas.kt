@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -48,6 +49,7 @@ fun PhotoEditorCanvas(
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var zoomScale by remember { mutableFloatStateOf(1f) }
     var panOffset by remember { mutableStateOf(Offset.Zero) }
+    var cropDragHandle by remember { mutableStateOf("NONE") }
 
     // Live drawing points for active in-flight gesture
     val livePoints = remember { mutableStateListOf<Offset>() }
@@ -83,12 +85,30 @@ fun PhotoEditorCanvas(
 
     val isDrawingMode = activeTool == EditorTool.BRUSHES || activeTool == EditorTool.DRAW || activeTool == EditorTool.DISPERSION
     val isRetouchMode = activeTool == EditorTool.RETOUCH || activeTool == EditorTool.REMOVE || activeTool == EditorTool.CLONE
-    val isCropMode = activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP || activeTool == EditorTool.TOOLS || (cropAspectRatio != null)
+    val isCropMode = activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP || (cropAspectRatio != null)
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .onSizeChanged { containerSize = it }
+            .pointerInput(isDrawingMode, isRetouchMode, isCropMode) {
+                if (!isDrawingMode && !isRetouchMode && !isCropMode) {
+                    detectTapGestures(
+                        onDoubleTap = { tap ->
+                            val target = if (zoomScale > 1.05f) 1f else 2.25f
+                            if (target == 1f) {
+                                zoomScale = 1f
+                                panOffset = Offset.Zero
+                            } else {
+                                val factor = target / zoomScale
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                panOffset = panOffset - (tap - center) * (factor - 1f)
+                                zoomScale = target
+                            }
+                        }
+                    )
+                }
+            }
             .then(
                 if (isDrawingMode || isRetouchMode) {
                     Modifier.pointerInput(isDrawingMode, isRetouchMode, brushType, brushColor, brushWidth, activeRetouchType, bitmap) {
@@ -132,20 +152,84 @@ fun PhotoEditorCanvas(
                         )
                     }
                 } else if (isCropMode) {
-                    Modifier.pointerInput(cropLeft, cropTop, cropRight, cropBottom) {
+                    Modifier.pointerInput(bitmap, cropAspectRatio, zoomScale, panOffset) {
+                        val image = bitmap ?: return@pointerInput
+                        val fitScale = min(size.width / image.width.toFloat(), size.height / image.height.toFloat()) * 0.94f * zoomScale
+                        val drawW = image.width * fitScale
+                        val drawH = image.height * fitScale
+                        val imageLeft = (size.width - drawW) / 2f + panOffset.x
+                        val imageTop = (size.height - drawH) / 2f + panOffset.y
+                        val hit = 28.dp.toPx()
+                        val minEdge = 0.08f
+
                         detectDragGestures(
+                            onDragStart = { down ->
+                                val left = imageLeft + cropLeft * drawW
+                                val top = imageTop + cropTop * drawH
+                                val right = imageLeft + cropRight * drawW
+                                val bottom = imageTop + cropBottom * drawH
+                                val nearLeft = kotlin.math.abs(down.x - left) <= hit
+                                val nearRight = kotlin.math.abs(down.x - right) <= hit
+                                val nearTop = kotlin.math.abs(down.y - top) <= hit
+                                val nearBottom = kotlin.math.abs(down.y - bottom) <= hit
+                                cropDragHandle = when {
+                                    nearLeft && nearTop -> "TL"
+                                    nearRight && nearTop -> "TR"
+                                    nearLeft && nearBottom -> "BL"
+                                    nearRight && nearBottom -> "BR"
+                                    nearTop && down.x in left..right -> "T"
+                                    nearBottom && down.x in left..right -> "B"
+                                    nearLeft && down.y in top..bottom -> "L"
+                                    nearRight && down.y in top..bottom -> "R"
+                                    down.x in left..right && down.y in top..bottom -> "MOVE"
+                                    else -> "NONE"
+                                }
+                            },
                             onDrag = { change, dragAmount ->
-                                change.consume()
-                                val sensitivity = 0.0018f
-                                cropLeft = (cropLeft + dragAmount.x * sensitivity * 0.5f).coerceIn(0f, cropRight - 0.2f)
-                                cropRight = (cropRight + dragAmount.x * sensitivity * 0.5f).coerceIn(cropLeft + 0.2f, 1f)
-                                cropTop = (cropTop + dragAmount.y * sensitivity * 0.5f).coerceIn(0f, cropBottom - 0.2f)
-                                cropBottom = (cropBottom + dragAmount.y * sensitivity * 0.5f).coerceIn(cropTop + 0.2f, 1f)
-                                onCropRectPreview(android.graphics.RectF(cropLeft, cropTop, cropRight, cropBottom))
+                                if (cropDragHandle != "NONE") {
+                                    change.consume()
+                                    val dx = dragAmount.x / max(drawW, 1f)
+                                    val dy = dragAmount.y / max(drawH, 1f)
+                                    when (cropDragHandle) {
+                                        "TL" -> {
+                                            cropLeft = (cropLeft + dx).coerceIn(0f, cropRight - minEdge)
+                                            cropTop = (cropTop + dy).coerceIn(0f, cropBottom - minEdge)
+                                        }
+                                        "TR" -> {
+                                            cropRight = (cropRight + dx).coerceIn(cropLeft + minEdge, 1f)
+                                            cropTop = (cropTop + dy).coerceIn(0f, cropBottom - minEdge)
+                                        }
+                                        "BL" -> {
+                                            cropLeft = (cropLeft + dx).coerceIn(0f, cropRight - minEdge)
+                                            cropBottom = (cropBottom + dy).coerceIn(cropTop + minEdge, 1f)
+                                        }
+                                        "BR" -> {
+                                            cropRight = (cropRight + dx).coerceIn(cropLeft + minEdge, 1f)
+                                            cropBottom = (cropBottom + dy).coerceIn(cropTop + minEdge, 1f)
+                                        }
+                                        "T" -> cropTop = (cropTop + dy).coerceIn(0f, cropBottom - minEdge)
+                                        "B" -> cropBottom = (cropBottom + dy).coerceIn(cropTop + minEdge, 1f)
+                                        "L" -> cropLeft = (cropLeft + dx).coerceIn(0f, cropRight - minEdge)
+                                        "R" -> cropRight = (cropRight + dx).coerceIn(cropLeft + minEdge, 1f)
+                                        "MOVE" -> {
+                                            val width = cropRight - cropLeft
+                                            val height = cropBottom - cropTop
+                                            cropLeft = (cropLeft + dx).coerceIn(0f, 1f - width)
+                                            cropTop = (cropTop + dy).coerceIn(0f, 1f - height)
+                                            cropRight = cropLeft + width
+                                            cropBottom = cropTop + height
+                                        }
+                                    }
+                                    onCropRectPreview(android.graphics.RectF(cropLeft, cropTop, cropRight, cropBottom))
+                                }
                             },
                             onDragEnd = {
-                                onCropRectChanged(android.graphics.RectF(cropLeft, cropTop, cropRight, cropBottom))
-                            }
+                                if (cropDragHandle != "NONE") {
+                                    onCropRectChanged(android.graphics.RectF(cropLeft, cropTop, cropRight, cropBottom))
+                                }
+                                cropDragHandle = "NONE"
+                            },
+                            onDragCancel = { cropDragHandle = "NONE" }
                         )
                     }
                 } else {
