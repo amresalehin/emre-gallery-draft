@@ -233,11 +233,30 @@ fun PhotoEditorScreen(
                         exit = shrinkVertically()
                     ) {
                         AdjustmentsPanel(
-                            activeProperty = activeAdjustment,
-                            currentValue = currentAdjValue,
                             category = activeAdjustCategory,
-                            onSelectProperty = { viewModel.setActiveAdjustment(it) },
-                            onValueChange = { viewModel.updateAdjustmentValue(activeAdjustment, it) },
+                            valueForProperty = { property ->
+                                when (property) {
+                                    "Brightness" -> sessionState.adjustments.brightness
+                                    "Contrast" -> sessionState.adjustments.contrast
+                                    "Exposure" -> sessionState.adjustments.exposure
+                                    "Highlights" -> sessionState.adjustments.highlights
+                                    "Shadows" -> sessionState.adjustments.shadows
+                                    "Temperature" -> sessionState.adjustments.temperature
+                                    "Tint" -> sessionState.adjustments.tint
+                                    "Saturation" -> sessionState.adjustments.saturation
+                                    "Vibrance" -> sessionState.adjustments.vibrance
+                                    "White Balance" -> sessionState.adjustments.whiteBalanceKelvin
+                                    "Sharpness" -> sessionState.adjustments.sharpness
+                                    "Blur" -> sessionState.adjustments.blur
+                                    "Vignette" -> sessionState.adjustments.vignette
+                                    "Grain" -> sessionState.adjustments.grain
+                                    "Dehaze" -> sessionState.adjustments.dehaze
+                                    "Dodge" -> sessionState.adjustments.dodge
+                                    "Burn" -> sessionState.adjustments.burn
+                                    else -> 0f
+                                }
+                            },
+                            onValueChange = { property, value -> viewModel.updateAdjustmentValue(property, value) },
                             onValueChangeFinished = { viewModel.commitSliderChange() }
                         )
                     }
