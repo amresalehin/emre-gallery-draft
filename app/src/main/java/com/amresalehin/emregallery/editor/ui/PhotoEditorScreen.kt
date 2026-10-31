@@ -68,7 +68,9 @@ fun PhotoEditorScreen(
     }
 
     val previewBitmap by viewModel.previewBitmap.collectAsStateWithLifecycle()
+    val originalBitmap by viewModel.originalBitmap.collectAsStateWithLifecycle()
     val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
+    var showingBefore by remember(item.uri) { mutableStateOf(false) }
     val activeTool by viewModel.activeTool.collectAsStateWithLifecycle()
     val activeSubItem by viewModel.activeSubItem.collectAsStateWithLifecycle()
     val activeAdjustment by viewModel.activeAdjustment.collectAsStateWithLifecycle()
@@ -172,6 +174,8 @@ fun PhotoEditorScreen(
                 Box(stageModifier.background(Color.Black), contentAlignment = Alignment.Center) {
                     PhotoEditorCanvas(
                         bitmap = previewBitmap,
+                        originalBitmap = originalBitmap,
+                        onBeforeChanged = { showingBefore = it },
                         activeTool = activeTool,
                         brushType = selectedBrushType,
                         brushColor = selectedBrushColor,
@@ -192,7 +196,7 @@ fun PhotoEditorScreen(
                             }
                         }
                     }
-                    PhotoEditorTopBar(
+                    if (!showingBefore) PhotoEditorTopBar(
                         canUndo = canUndo && !isReplaying,
                         canRedo = canRedo && !isReplaying,
                         onClose = { if (canUndo) showDiscardDialog = true else onBack() },
@@ -204,6 +208,11 @@ fun PhotoEditorScreen(
                         onEditWithAi = { showAiSheet = true },
                         modifier = Modifier.align(Alignment.TopCenter)
                     )
+                    if (showingBefore) {
+                        Surface(Modifier.align(Alignment.TopCenter).padding(top = 58.dp), shape = RoundedCornerShape(50), color = Color.Black.copy(alpha = 0.72f)) {
+                            Text("Before", color = Color.White, modifier = Modifier.padding(horizontal = 18.dp, vertical = 6.dp))
+                        }
+                    }
                 }
             }
             val editingPanel: @Composable () -> Unit = {
@@ -407,7 +416,7 @@ fun PhotoEditorScreen(
                 }
                 Row(Modifier.fillMaxSize()) {
                     photoStage(Modifier.weight(1f).fillMaxHeight())
-                    Row(Modifier.width(sideWidth).fillMaxHeight()) {
+                    if (!showingBefore) Row(Modifier.width(sideWidth).fillMaxHeight()) {
                         if (lightcraftToolSelected) {
                             LightcraftPanelSurface(Modifier.weight(1f).fillMaxHeight()) {
                                 Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) { editingPanel() }
@@ -436,7 +445,7 @@ fun PhotoEditorScreen(
             } else {
                 Box(Modifier.fillMaxSize()) {
                     photoStage(Modifier.fillMaxSize())
-                    Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                    if (!showingBefore) Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                         if (lightcraftToolSelected) {
                             val panelHeight = when {
                                 cropMode -> 232.dp
