@@ -3,6 +3,7 @@ package com.amresalehin.emregallery
 import com.amresalehin.emregallery.ocr.MlKitLanguage
 import com.amresalehin.emregallery.ocr.MlKitOcr
 import com.amresalehin.emregallery.ocr.OcrEngine
+import com.amresalehin.emregallery.ocr.TesseractOcr
 import com.amresalehin.emregallery.ui.OcrState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -95,5 +96,29 @@ class OcrEngineTest {
         assertTrue(lines.contains("営業時間"))
         // Deduplicated: "Open 08:00 - 20:00" appears once
         assertEquals(1, lines.count { it == "Open 08:00 - 20:00" })
+    }
+
+    @Test
+    fun testTesseractSupportedLanguages() {
+        val supported = TesseractOcr.supportedLanguages
+        assertTrue(supported.size >= 12)
+        assertTrue(supported.containsKey("English"))
+        assertTrue(supported.containsKey("Spanish"))
+        assertTrue(supported.containsKey("French"))
+        assertTrue(supported.containsKey("German"))
+        assertTrue(supported.containsKey("Hindi"))
+        assertTrue(supported.containsKey("Bengali"))
+        assertTrue(supported.containsKey("Arabic"))
+        assertTrue(supported.containsKey("Urdu"))
+        assertTrue(supported.containsKey("Portuguese"))
+        assertTrue(supported.containsKey("Russian"))
+        assertTrue(supported.containsKey("Chinese (Simplified)"))
+        assertTrue(supported.containsKey("Japanese"))
+
+        // Ensure language codes map properly
+        assertEquals("eng", supported["English"])
+        assertEquals("spa", supported["Spanish"])
+        assertEquals("fra", supported["French"])
+        assertEquals("deu", supported["German"])
     }
 }

@@ -56,6 +56,7 @@ import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.EnteFaceConstants
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.ocr.MlKitLanguage
+import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.launch
 
 @Composable
@@ -751,18 +752,16 @@ private fun PersonalizeOcrCard(
 
                     Spacer(Modifier.height(8.dp))
 
-                    // Language Chips Row (4 pills matching mockup)
+                    // Language Chips Row
                     if (selectedEngine == "mlkit") {
-                        val mlKitOptions = listOf(
-                            "latin" to "Latin",
-                            "chinese" to "Chinese",
-                            "devanagari" to "Devanagari",
-                            "japanese" to "Japanese"
-                        )
+                        val mlKitOptions = remember {
+                            MlKitLanguage.entries.map { it.code to it.title }
+                        }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
+                                .horizontalScroll(rememberScrollState())
+                                .testTag("welcome_mlkit_languages_row"),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             mlKitOptions.forEach { (code, label) ->
@@ -778,6 +777,7 @@ private fun PersonalizeOcrCard(
                                         .height(38.dp)
                                         .defaultMinSize(minWidth = 72.dp)
                                         .clickable { onToggleMlKitLang(code) }
+                                        .testTag("welcome_mlkit_lang_$code")
                                 ) {
                                     Box(
                                         contentAlignment = Alignment.Center,
@@ -796,16 +796,14 @@ private fun PersonalizeOcrCard(
                             }
                         }
                     } else {
-                        val tesseractOptions = listOf(
-                            "eng" to "English",
-                            "spa" to "Spanish",
-                            "fra" to "French",
-                            "deu" to "German"
-                        )
+                        val tesseractOptions = remember {
+                            TesseractOcr.supportedLanguages.entries.map { it.value to it.key }
+                        }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
+                                .horizontalScroll(rememberScrollState())
+                                .testTag("welcome_tesseract_languages_row"),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             tesseractOptions.forEach { (code, label) ->
@@ -821,6 +819,7 @@ private fun PersonalizeOcrCard(
                                         .height(38.dp)
                                         .defaultMinSize(minWidth = 72.dp)
                                         .clickable { onToggleOcrLang(code) }
+                                        .testTag("welcome_ocr_lang_$code")
                                 ) {
                                     Box(
                                         contentAlignment = Alignment.Center,
