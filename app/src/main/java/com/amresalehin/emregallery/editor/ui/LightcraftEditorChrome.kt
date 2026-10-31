@@ -160,7 +160,7 @@ private fun LcSectionButton(item: LcSection, selected: Boolean, vertical: Boolea
 
 @Composable
 fun LightcraftPanelSurface(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Surface(modifier = modifier, color = LcPanel, contentColor = LcText, shape = RoundedCornerShape(0.dp), shadowElevation = 0.dp) { content() }
+    Surface(modifier = modifier, color = LcPanel.copy(alpha = 0.95f), contentColor = LcText, shape = RoundedCornerShape(0.dp), shadowElevation = 0.dp) { content() }
 }
 
 @Composable
