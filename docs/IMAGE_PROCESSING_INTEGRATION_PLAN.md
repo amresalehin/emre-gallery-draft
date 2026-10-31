@@ -389,10 +389,12 @@ Each ticket must name the upstream files/modules it draws from, the Emre classes
 - [x] Full upstream source pinned as a Git submodule under `vendor/ImageToolbox`.
 - [x] Source inventory and upstream module inventory documented.
 - [x] Emre baseline architecture and overlap points identified from `Develop`.
-- [ ] Verify a clean CI checkout with submodules initialised.
-- [ ] Establish and record a green baseline build on this branch.
+- [x] Add a **Tools** card to Settings and an Emre-styled, searchable, expandable catalogue covering the supplied feature inventory in 18 groups.
+- [x] Enable CI on `research/**` branches and configure recursive submodule checkout.
+- [x] Verify `testDebugUnitTest` and `assembleDebug` on commit `31f8752cab24758433c5bac8713ecd031d8dde38` (workflow succeeded).
 - [ ] Complete source-to-feature file mapping and per-feature dependency/asset/licence audit.
-- [ ] Implement ITB-00 and ITB-01.
+- [ ] Implement the shared processing runtime, decoder, metadata and transactional export.
+- [ ] Connect catalogue entries to working processing screens and engines.
 - [ ] Integrate feature slices through ITB-13.
 
-**This document is a roadmap, not evidence that the listed capabilities are already implemented or that a build has passed.**
+**Scope clarification:** the Tools catalogue is a discovery surface and a complete feature inventory. Listing an operation does not mean its processing engine is already wired into Emre Gallery. Existing gallery functionality remains the protected baseline.

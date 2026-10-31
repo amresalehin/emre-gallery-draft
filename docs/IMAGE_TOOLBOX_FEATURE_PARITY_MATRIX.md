@@ -6,6 +6,8 @@
 
 This matrix accounts for **all 69 upstream feature Gradle modules**, all 10 upstream core modules and all 18 supporting library modules. "Disposition" describes how the feature should be delivered in Emre; it does not claim the feature is implemented.
 
+**Current implementation state:** Emre has a Settings entry named **Tools** and a searchable, expandable catalogue grouped into 18 categories. This is feature discovery only; individual processing actions are not yet connected. Use the disposition and acceptance checklist below to track implementation.
+
 ## A. Feature modules — all 69 accounted for
 
 | Upstream module | Emre delivery / responsibility | Disposition |
