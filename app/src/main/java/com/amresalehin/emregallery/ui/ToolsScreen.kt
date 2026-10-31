@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.amresalehin.emregallery.documents.PdfDocumentTool
 
 private data class ToolGroup(
     val title: String,
@@ -405,7 +406,7 @@ private val toolGroups = listOf(
 )
 
 @Composable
-fun ToolsScreen(onBack: () -> Unit) {
+fun ToolsScreen(onBack: () -> Unit, onOpenPdfTool: (PdfDocumentTool) -> Unit) {
     var query by remember { mutableStateOf("") }
     var expandedGroups by remember { mutableStateOf(setOf("Image editing")) }
 
@@ -592,30 +593,85 @@ fun ToolsScreen(onBack: () -> Unit) {
                             HorizontalDivider(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             )
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 10.dp),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                group.tools.forEach { tool ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .defaultMinSize(minHeight = 34.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                                            modifier = Modifier.size(4.dp)
-                                        ) {}
-                                        Spacer(Modifier.width(11.dp))
-                                        Text(
-                                            tool,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                            if (group.title == "PDF and documents") {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    PdfDocumentTool.entries.chunked(2).forEach { rowTools ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            rowTools.forEach { pdfTool ->
+                                                ElevatedCard(
+                                                    onClick = { onOpenPdfTool(pdfTool) },
+                                                    modifier = Modifier.weight(1f),
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    colors = CardDefaults.elevatedCardColors(
+                                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                                                    )
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .heightIn(min = 106.dp)
+                                                            .padding(12.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        Icon(
+                                                            pdfTool.icon,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.onSurface,
+                                                            modifier = Modifier.size(21.dp)
+                                                        )
+                                                        Text(
+                                                            pdfTool.title,
+                                                            style = MaterialTheme.typography.labelLarge,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 2
+                                                        )
+                                                        Text(
+                                                            pdfTool.description,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            maxLines = 3
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            if (rowTools.size == 1) Spacer(Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            } else {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    group.tools.forEach { tool ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .defaultMinSize(minHeight = 34.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                                modifier = Modifier.size(4.dp)
+                                            ) {}
+                                            Spacer(Modifier.width(11.dp))
+                                            Text(
+                                                tool,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
                                 }
                             }
