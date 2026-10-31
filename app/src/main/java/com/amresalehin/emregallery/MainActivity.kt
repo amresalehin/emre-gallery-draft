@@ -66,8 +66,8 @@ class MainActivity : FragmentActivity() {
             val params = currentWindow.attributes
             params.preferredRefreshRate = targetFps
 
-            // Android 14+ (API 34) frame rate boost on touch
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 15+ (API 35) frame rate boost on touch
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
                 params.setFrameRateBoostOnTouchEnabled(true)
             }
 
