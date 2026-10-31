@@ -8,6 +8,7 @@ import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
+import com.amresalehin.emregallery.documents.PdfDocumentEngine
 import kotlinx.coroutines.Dispatchers
 import java.io.File
 
@@ -15,6 +16,7 @@ class GalleryApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        PdfDocumentEngine.initialise(this)
         val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
         val isLowRam = activityManager?.isLowRamDevice ?: false
 
