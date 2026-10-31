@@ -112,7 +112,9 @@ fun GalleryApp() {
     val gridColumnsPref by prefs.gridColumns.collectAsStateWithLifecycle(initialValue = 3)
     val gridStylePref by prefs.gridStyle.collectAsStateWithLifecycle(initialValue = "masonry")
     val ocrLanguagesPref by prefs.ocrLanguages.collectAsStateWithLifecycle(initialValue = setOf("eng"))
+    val mlKitLanguagesPref by prefs.mlKitLanguages.collectAsStateWithLifecycle(initialValue = setOf("latin"))
     val ocrModelPref by prefs.ocrModel.collectAsStateWithLifecycle(initialValue = "fast")
+    val ocrEnginePref by prefs.ocrEngine.collectAsStateWithLifecycle(initialValue = "tesseract")
     val customTagsMap by prefs.customTagsMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val customPeopleMap by prefs.customPeopleMap.collectAsStateWithLifecycle(initialValue = emptyMap())
     val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -534,9 +536,6 @@ fun GalleryApp() {
         )
     }
 
-    fun openMemoryInViewer(title: String, items: List<MediaItem>) {
-        openMemoriesInViewer(listOf(StoryGroup(title, items)), 0)
-    }
 
     fun performBackNavigation() {
         if (homeSelectedUris.isNotEmpty()) {
@@ -668,8 +667,7 @@ fun GalleryApp() {
                     }
                 }
             }
-            inScope && matchesCategory && (!searchVideosOnly || item.isVideo) &&
-                (searchStage != SearchStage.RESULTS || item.name.contains(submittedQuery, true) || item.relativePath.contains(submittedQuery, true))
+            inScope && matchesCategory
         }
     }
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -687,7 +685,7 @@ fun GalleryApp() {
     val allRequiredPermissions = hasMediaPerm && (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNotifPerm) && hasAllFilesPerm
     if (!hasCompletedWelcome || !allRequiredPermissions) {
         WelcomeScreen(
-            initialStep = if (hasCompletedWelcome) 1 else 0,
+            initialStep = if (hasCompletedWelcome) 2 else 0,
             onComplete = {
                 scope.launch {
                     prefs.setCompletedWelcome(true)
@@ -869,7 +867,9 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
-                        onFilter = { when (it) { "Map" -> navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null); "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        onFilter = { when (it) { "Map" -> {
+                            navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
@@ -1098,7 +1098,10 @@ fun GalleryApp() {
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
                         ocrLanguages = ocrLanguagesPref,
                         ocrModel = ocrModelPref,
+                        ocrEngine = ocrEnginePref,
+                        mlKitLanguages = mlKitLanguagesPref,
                         onModelChange = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
+                        onEngineChange = { newEngine -> scope.launch { prefs.setOcrEngine(newEngine) } },
                         onToggleLanguage = { code ->
                             val updated = ocrLanguagesPref.toMutableSet()
                             if (code in updated) {
@@ -1108,12 +1111,35 @@ fun GalleryApp() {
                             }
                             scope.launch { prefs.setOcrLanguages(updated) }
                         },
-                        onOpenMap = { navigateTo(Destination.MAP) },
+                        onToggleMlKitLanguage = { code ->
+                            val updated = mlKitLanguagesPref.toMutableSet()
+                            when (code) {
+                                "all" -> updated.addAll(com.amresalehin.emregallery.ocr.MlKitLanguage.ALL_CODES)
+                                "latin_only" -> {
+                                    updated.clear()
+                                    updated.add("latin")
+                                }
+                                else -> {
+                                    if (code in updated) {
+                                        if (updated.size > 1) updated.remove(code)
+                                    } else {
+                                        updated.add(code)
+                                    }
+                                }
+                            }
+                            scope.launch { prefs.setMlKitLanguages(updated) }
+                        },
+                        onOpenMap = {
+                            navigateTo(Destination.MAP)
+                        },
                         onBack = { performBackNavigation() }
                     )
                     Destination.OCR_SETTINGS -> OcrSettingsScreen(
+                        currentEngine = ocrEnginePref,
                         currentModel = ocrModelPref,
                         ocrLanguages = ocrLanguagesPref,
+                        mlKitLanguages = mlKitLanguagesPref,
+                        onSelectEngine = { newEngine -> scope.launch { prefs.setOcrEngine(newEngine) } },
                         onSelectModel = { newModel -> scope.launch { prefs.setOcrModel(newModel) } },
                         onToggleLanguage = { code ->
                             val updated = ocrLanguagesPref.toMutableSet()
@@ -1124,36 +1150,87 @@ fun GalleryApp() {
                             }
                             scope.launch { prefs.setOcrLanguages(updated) }
                         },
+                        onToggleMlKitLanguage = { code ->
+                            val updated = mlKitLanguagesPref.toMutableSet()
+                            when (code) {
+                                "all" -> updated.addAll(com.amresalehin.emregallery.ocr.MlKitLanguage.ALL_CODES)
+                                "latin_only" -> {
+                                    updated.clear()
+                                    updated.add("latin")
+                                }
+                                else -> {
+                                    if (code in updated) {
+                                        if (updated.size > 1) updated.remove(code)
+                                    } else {
+                                        updated.add(code)
+                                    }
+                                }
+                            }
+                            scope.launch { prefs.setMlKitLanguages(updated) }
+                        },
                         onBack = { performBackNavigation() }
                     )
                     Destination.ABOUT -> AboutScreen(
                         onBack = { performBackNavigation() }
                     )
                     Destination.SEARCH -> {
-                        val searchResults = remember(media, hidden, inBin, searchVideosOnly, searchStage, submittedQuery) {
+                        val searchScopeMedia = remember(media, hidden, inBin, archive) {
                             media.filter {
-                                it.uri !in hidden && !it.isTrashed && it.uri !in inBin &&
-                                (!searchVideosOnly || it.isVideo) &&
-                                (searchStage != SearchStage.RESULTS || it.name.contains(submittedQuery, true) || it.relativePath.contains(submittedQuery, true))
+                                it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive
                             }
                         }
                         SearchScreen(
                             query = searchQuery,
                             stage = searchStage,
-                            results = searchResults,
+                            allMedia = searchScopeMedia,
                             recentSearches = recentSearches,
-                            onQuery = { searchQuery = it; searchStage = if (it.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING },
-                            onSubmit = { submittedQuery = it.trim(); searchQuery = it.trim(); searchStage = SearchStage.RESULTS; if (it.isNotBlank()) scope.launch { prefs.addRecentSearch(it.trim()) } },
-                            onRecent = { searchQuery = it; submittedQuery = it; searchStage = SearchStage.RESULTS },
+                            customAlbums = customAlbums,
+                            customTagsMap = customTagsMap,
+                            customPeopleMap = customPeopleMap,
+                            favourites = favourites,
+                            themePref = themePref,
+                            onQueryChange = { newQuery ->
+                                searchQuery = newQuery
+                                searchStage = if (newQuery.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING
+                            },
+                            onSubmitSearch = { submitted ->
+                                val clean = submitted.trim()
+                                searchQuery = clean
+                                submittedQuery = clean
+                                searchStage = SearchStage.RESULTS
+                                if (clean.isNotBlank()) {
+                                    scope.launch { prefs.addRecentSearch(clean) }
+                                }
+                            },
                             onClearRecent = { scope.launch { prefs.clearRecentSearches() } },
-                            onBack = { performBackNavigation() },
-                            onOpen = { openMediaInViewer(it, searchResults) },
-                            videosOnly = searchVideosOnly,
-                            onVideosOnly = { searchVideosOnly = it }
+                            onBack = {
+                                searchQuery = ""
+                                searchStage = SearchStage.DISCOVERY
+                                performBackNavigation()
+                            },
+                            onOpenMedia = { item, currentList ->
+                                openMediaInViewer(item, currentList)
+                            }
                         )
                     }
                     Destination.VIEWER -> {
                         Box(Modifier.fillMaxSize())
+                    }
+                    Destination.EDITOR -> {
+                        if (selectedMedia != null) {
+                            com.amresalehin.emregallery.editor.ui.PhotoEditorScreen(
+                                item = selectedMedia!!,
+                                mediaRepository = mediaRepository,
+                                onBack = { performBackNavigation() },
+                                onSaved = { savedItem ->
+                                    refreshMedia()
+                                    selectedMedia = savedItem
+                                    performBackNavigation()
+                                }
+                            )
+                        } else {
+                            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+                        }
                     }
                 }
             }
@@ -1174,6 +1251,7 @@ fun GalleryApp() {
                 initialStoryIndex = currentStoryIndex,
                 defaultOcrLanguages = ocrLanguagesPref,
                 defaultOcrModel = ocrModelPref,
+                defaultMlKitLanguages = mlKitLanguagesPref,
                 favourite = currentItem.uri in favourites,
                 isHidden = currentItem.uri in hidden,
                 isBin = isItemBinned,
@@ -1253,6 +1331,13 @@ fun GalleryApp() {
                     performBackNavigation()
                 },
                 onAddTo = { mediaForAddToAlbum = currentItem; showAddToAlbumSheet = true },
+                onEdit = {
+                    navigateTo(
+                        dest = Destination.EDITOR,
+                        rememberPrevious = true,
+                        newSelectedMedia = currentItem
+                    )
+                },
                 onOpenNeighbor = { selectedMedia = it; showDetails = false },
                 onOpenMap = {
                     showDetails = false
@@ -1272,7 +1357,7 @@ fun GalleryApp() {
         }
 
         // Wider top and bottom edge blur across app screens, smoothly fading with return progress
-        val showEdgeBlurs = destination != Destination.VIEWER || viewerTransitionProgress.value < 0.99f
+        val showEdgeBlurs = (destination != Destination.VIEWER && destination != Destination.EDITOR) || viewerTransitionProgress.value < 0.99f
         if (showEdgeBlurs) {
             Box(
                 modifier = Modifier
@@ -1318,7 +1403,7 @@ fun GalleryApp() {
         }
 
         // Floating search bar across Home and Albums - coordinated entrance downward from above screen edge
-        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS)
+        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && destination != Destination.EDITOR
         if (showSearchBar) {
             Box(
                 modifier = Modifier
@@ -1356,7 +1441,7 @@ fun GalleryApp() {
         }
 
         // Floating Bottom Navigation Bar across Home, Albums, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = (returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()
+        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && destination != Destination.EDITOR
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier

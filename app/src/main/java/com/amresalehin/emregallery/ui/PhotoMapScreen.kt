@@ -25,6 +25,7 @@ const val WORLD_VIEW_LAT_SOUTH = -85.0511
 const val WORLD_VIEW_LON_WEST = -180.0
 const val WORLD_VIEW_LON_EAST = 180.0
 
+/** Center of the full-world view used when there is no saved camera. */
 val WORLD_VIEW_CENTER = GeoPoint(0.0, 0.0)
 val WORLD_VIEW_BOUNDS = BoundingBox(
     WORLD_VIEW_LAT_NORTH,
@@ -84,19 +85,19 @@ internal fun persistPhotoMapCamera(context: Context, map: MapView) {
 }
 
 /**
- * Calculates the zoom level required for a single Mercator world frame (256 * 2^z)
- * to cleanly cover the container without vertical or horizontal repeating.
- * Uses the nearest bounding constraint (whichever dimension—width or height—fits first without repeating).
+ * Calculates the lowest zoom at which the complete Mercator world (256 * 2^z square)
+ * is fully visible inside the map viewport. The smaller viewport dimension is the
+ * limiting constraint; using the larger one would crop the world on the other axis.
  */
 fun calculateWorldFitZoom(map: MapView): Double {
-    if (map.width <= 0 || map.height <= 0) return 1.0
-    val maxDim = maxOf(map.width, map.height).toDouble()
-    return (kotlin.math.ln(maxDim / 256.0) / kotlin.math.ln(2.0)).coerceAtLeast(1.0)
+    if (map.width <= 0 || map.height <= 0) return 0.0
+    val limitingDimension = minOf(map.width, map.height).toDouble()
+    return (kotlin.math.ln(limitingDimension / 256.0) / kotlin.math.ln(2.0))
+        .coerceAtLeast(0.0)
 }
 
 /**
- * Fits the entire world view automatically, framing the viewport cleanly to fill
- * the container using the nearest bounding constraint without repeating.
+ * Frames the entire world, centered, so any geotagged media is visible at a glance.
  */
 fun showWorldView(map: MapView, animated: Boolean = false) {
     if (map.width <= 0 || map.height <= 0) {
@@ -191,7 +192,7 @@ fun fitBounds(
 
 /**
  * Fits a list of coordinates on the map.
- * When empty, falls back gracefully to single world fit.
+ * When empty, falls back to the full world view.
  */
 fun fitPointsToMap(
     map: MapView,
@@ -243,10 +244,20 @@ fun PhotoMapScreen(
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
+    // null means "still resolving"; the bar shows its placeholder text until this is set.
+    var selectedPlaceName by remember { mutableStateOf<String?>(null) }
     var lastFocusedUri by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(media) {
         viewModel.loadAndScanMedia(media)
+    }
+
+    LaunchedEffect(selectedMapMedia) {
+        val selected = selectedMapMedia
+        selectedPlaceName = null
+        if (selected != null) {
+            selectedPlaceName = viewModel.getPlaceName(selected.second) ?: "Place name unavailable"
+        }
     }
 
     // A requested photo is an explicit navigation action, so it may move the camera.
@@ -283,23 +294,8 @@ fun PhotoMapScreen(
 
     val onFitAllPhotos: () -> Unit = {
         selectedMapMedia = null
-        val map = mapRef
-        if (map != null) {
-            val geotaggedPoints = uiState.locatedMedia.map { it.second }
-            if (geotaggedPoints.isNotEmpty()) {
-                val allMediaBounds = computeMediaBoundingBox(geotaggedPoints)
-                if (allMediaBounds != null) {
-                    if (geotaggedPoints.size == 1) {
-                        focusSinglePhoto(map, geotaggedPoints.first(), animated = true)
-                    } else {
-                        fitBounds(map, allMediaBounds, animated = true)
-                    }
-                } else {
-                    showWorldView(map, animated = true)
-                }
-            } else {
-                showWorldView(map, animated = true)
-            }
+        mapRef?.let { map ->
+            fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
         }
     }
 
@@ -336,7 +332,10 @@ fun PhotoMapScreen(
                 scanProgress = uiState.scanProgress,
                 scanTotal = uiState.scanTotal,
                 selectedMedia = selectedMapMedia,
+                selectedPlaceName = selectedPlaceName,
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
+                // Swiping the bar away clears the selection, which also removes the pin.
+                onDismissSelected = { selectedMapMedia = null },
                 onMapReady = { map -> mapRef = map },
                 onBoundsChanged = { bounds -> viewModel.updateVisibleMapBounds(bounds) },
                 modifier = Modifier.weight(1f)
@@ -350,10 +349,10 @@ fun PhotoMapScreen(
                 scanTotal = uiState.scanTotal,
                 dayGroups = uiState.dayGroups,
                 onPhotoClick = { photo, point ->
+                    // Selecting a thumbnail only selects its media and marker.
+                    // It must not move or zoom the map camera.
                     selectedMapMedia = photo to point
-                    mapRef?.let { focusSinglePhoto(it, point, animated = true) }
                 },
-                onFitAllPhotos = onFitAllPhotos,
                 modifier = Modifier.weight(1f)
             )
         }

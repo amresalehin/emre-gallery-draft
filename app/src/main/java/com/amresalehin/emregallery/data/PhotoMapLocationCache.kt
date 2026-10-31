@@ -49,15 +49,27 @@ class PhotoMapLocationCache(context: Context) :
             val longitudeColumn = cursor.getColumnIndexOrThrow("longitude")
             while (cursor.moveToNext()) {
                 val uri = cursor.getString(uriColumn)
-                val point = if (cursor.isNull(latitudeColumn) || cursor.isNull(longitudeColumn)) {
+                val hasCoordinates = !cursor.isNull(latitudeColumn) && !cursor.isNull(longitudeColumn)
+                val point = if (!hasCoordinates) {
                     null
                 } else {
                     val lat = cursor.getDouble(latitudeColumn)
                     val lon = cursor.getDouble(longitudeColumn)
-                    if (lat.isFinite() && lon.isFinite() && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                    if (
+                        lat.isFinite() && lon.isFinite() &&
+                        lat in -90.0..90.0 && lon in -180.0..180.0 &&
+                        !(lat == 0.0 && lon == 0.0)
+                    ) {
                         GeoPoint(lat, lon)
-                    } else null
+                    } else {
+                        null
+                    }
                 }
+
+                // Old builds could cache (0, 0) as a real GPS coordinate. Do not turn
+                // an invalid coordinate into a permanent "no GPS" cache entry: omit it
+                // so the next scan re-reads the source metadata.
+                if (hasCoordinates && point == null) continue
                 result[uri] = CachedLocation(point)
             }
         }

@@ -4,8 +4,6 @@ import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.ui.Destination
 import com.amresalehin.emregallery.ui.NavBackStackEntry
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MemoriesStoryTest {
