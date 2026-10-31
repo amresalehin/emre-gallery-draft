@@ -327,14 +327,15 @@ fun AdjustmentsPanel(
     onSelectProperty: (String) -> Unit,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: (() -> Unit)? = null,
+    category: String = "Light",
     modifier: Modifier = Modifier
 ) {
-    val properties = listOf(
-        "Brightness", "Contrast", "Saturation", "Exposure",
-        "Highlights", "Shadows", "Temperature", "Tint",
-        "Sharpness", "Blur", "Vignette", "Grain",
-        "Vibrance", "Dehaze", "Dodge", "Burn", "White Balance"
-    )
+    val properties = when (category) {
+        "Color" -> listOf("Temperature", "Tint", "Saturation", "Vibrance", "White Balance")
+        "Effects" -> listOf("Blur", "Vignette", "Grain", "Dehaze", "Dodge", "Burn")
+        "Detail" -> listOf("Sharpness")
+        else -> listOf("Exposure", "Brightness", "Contrast", "Highlights", "Shadows")
+    }
 
     Column(
         modifier = modifier
