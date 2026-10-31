@@ -107,12 +107,28 @@ fun PhotoEditorScreen(
             showExportSheet -> showExportSheet = false
             activeSubItem != null -> viewModel.setActiveSubItem(null)
             lightcraftToolSelected -> { lightcraftToolSelected = false; viewModel.setActiveTool(EditorTool.ADJUST) }
-          Surface(Modifier.fillMaxSize(), color = Color.Black) {
+            canUndo -> showDiscardDialog = true
+            else -> onBack()
+        }
+    }
+
+    val doSave: (Boolean, Int) -> Unit = { isPng, quality ->
+        scope.launch {
+            val saved = viewModel.saveResult(context, mediaRepository, isPng, quality)
+            if (saved != null) {
+                Toast.makeText(context, "Saved photo to gallery", Toast.LENGTH_SHORT).show()
+                onSaved(saved)
+            } else {
+                Toast.makeText(context, "Failed to save photo", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    Surface(Modifier.fillMaxSize(), color = Color.Black) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val landscape = maxWidth > maxHeight
             val sectionVisible = lightcraftToolSelected && activeTool == EditorTool.ADJUST
             val cropMode = lightcraftToolSelected && (activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP)
-
             val photoStage: @Composable (Modifier) -> Unit = { stageModifier ->
                 Box(stageModifier.background(Color.Black), contentAlignment = Alignment.Center) {
                     PhotoEditorCanvas(
@@ -129,11 +145,7 @@ fun PhotoEditorScreen(
                         onCropRectChanged = { viewModel.commitCrop(it) }
                     )
                     if (isReplaying) {
-                        Surface(
-                            Modifier.align(Alignment.TopCenter).padding(top = 62.dp),
-                            shape = RoundedCornerShape(20.dp),
-                            color = Color.Black.copy(alpha = 0.75f)
-                        ) {
+                        Surface(Modifier.align(Alignment.TopCenter).padding(top = 62.dp), shape = RoundedCornerShape(20.dp), color = Color.Black.copy(alpha = 0.75f)) {
                             Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 CircularProgressIndicator(progress = { replayProgress }, modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
                                 Spacer(Modifier.width(8.dp))
@@ -154,7 +166,6 @@ fun PhotoEditorScreen(
                     )
                 }
             }
-
             val editingPanel: @Composable () -> Unit = {
                 Column(Modifier.fillMaxWidth()) {
                     // Contextual Tool Panels above Bottom Bar
@@ -257,41 +268,61 @@ fun PhotoEditorScreen(
                                 when (subItem) {
                                     ToolSheetSubItem.AUTO_LEVEL -> viewModel.autoLevelStraighten()
                                     ToolSheetSubItem.SHAPE_CROP -> {
-                                        val options = ShapeCropType.entries
-                                        val current = sessionState.transform.shapeCrop
-                                        val next = if (current != null) options[(options.indexOf(current) + 1) % options.size] else ShapeCropType.CIRCLE
+                                        val shapes = ShapeCropType.entries
+                                        val cur = sessionState.transform.shapeCrop
+                                        val next = if (cur != null) shapes[(shapes.indexOf(cur) + 1) % shapes.size] else ShapeCropType.CIRCLE
                                         viewModel.setShapeCrop(next)
                                     }
-                                    ToolSheetSubItem.CORNER_PIN -> viewModel.setCornerPins(
-                                        listOf(CornerPinPoint(0.04f, 0.04f), CornerPinPoint(0.96f, 0.08f),
-                                            CornerPinPoint(0.92f, 0.96f), CornerPinPoint(0.06f, 0.92f))
-                                    )
-                                    ToolSheetSubItem.LIQUIFY -> viewModel.addLiquifyPoint(LiquifyPoint(0.5f, 0.5f, mode = LiquifyMode.EXPAND))
-                                    ToolSheetSubItem.SMUDGE -> { viewModel.setActiveTool(EditorTool.RETOUCH); activeRetouchType = RetouchType.SMUDGE_BRUSH }
-                                    ToolSheetSubItem.PATCH -> { viewModel.setActiveTool(EditorTool.RETOUCH); activeRetouchType = RetouchType.PATCH_HEALING }
-                                    ToolSheetSubItem.CLONE -> { viewModel.setActiveTool(EditorTool.RETOUCH); activeRetouchType = RetouchType.CLONE_STAMP }
-                                    ToolSheetSubItem.DISPERSION -> {
-                                        val current = sessionState.transform.dispersionAmount
-                                        viewModel.setDispersion(if (current > 0f) 0f else 50f)
+                                    ToolSheetSubItem.CORNER_PIN -> {
+                                        viewModel.setCornerPins(
+                                            listOf(
+                                                CornerPinPoint(0.04f, 0.04f),
+                                                CornerPinPoint(0.96f, 0.08f),
+                                                CornerPinPoint(0.92f, 0.96f),
+                                                CornerPinPoint(0.06f, 0.92f)
+                                            )
+                                        )
                                     }
-                                    ToolSheetSubItem.STRETCH -> viewModel.setPerspective(20f, 0f)
+                                    ToolSheetSubItem.LIQUIFY -> {
+                                        viewModel.addLiquifyPoint(LiquifyPoint(0.5f, 0.5f, mode = LiquifyMode.EXPAND))
+                                    }
+                                    ToolSheetSubItem.SMUDGE -> {
+                                        viewModel.setActiveTool(EditorTool.RETOUCH)
+                                        activeRetouchType = RetouchType.SMUDGE_BRUSH
+                                    }
+                                    ToolSheetSubItem.PATCH -> {
+                                        viewModel.setActiveTool(EditorTool.RETOUCH)
+                                        activeRetouchType = RetouchType.PATCH_HEALING
+                                    }
+                                    ToolSheetSubItem.CLONE -> {
+                                        viewModel.setActiveTool(EditorTool.RETOUCH)
+                                        activeRetouchType = RetouchType.CLONE_STAMP
+                                    }
+                                    ToolSheetSubItem.DISPERSION -> {
+                                        val cur = sessionState.transform.dispersionAmount
+                                        viewModel.setDispersion(if (cur > 0f) 0f else 50f)
+                                    }
+                                    ToolSheetSubItem.STRETCH -> {
+                                        viewModel.setPerspective(20f, 0f)
+                                    }
                                     ToolSheetSubItem.MOTION -> {
-                                        val current = sessionState.transform.motionAmount
-                                        viewModel.setMotion(if (current > 0f) 0f else 45f, 45f)
+                                        val cur = sessionState.transform.motionAmount
+                                        viewModel.setMotion(if (cur > 0f) 0f else 45f, 45f)
                                     }
                                     ToolSheetSubItem.ROTATE -> viewModel.rotate90()
                                     ToolSheetSubItem.FLIP -> viewModel.flipHorizontal()
-                                    ToolSheetSubItem.STRAIGHTEN, ToolSheetSubItem.CROP, ToolSheetSubItem.PERSPECTIVE -> viewModel.setActiveTool(EditorTool.CROP)
+                                    ToolSheetSubItem.STRAIGHTEN, ToolSheetSubItem.CROP, ToolSheetSubItem.PERSPECTIVE -> {
+                                        viewModel.setActiveTool(EditorTool.CROP)
+                                    }
                                     else -> {}
                                 }
                             }
                         )
                     }
-                }
+    
     
                 }
             }
-
             val selectEditorTool: (EditorTool) -> Unit = { tool ->
                 lightcraftToolSelected = true
                 viewModel.setActiveTool(tool)
@@ -303,7 +334,6 @@ fun PhotoEditorScreen(
                     else -> {}
                 }
             }
-
             if (landscape) {
                 val sideWidth = when {
                     !lightcraftToolSelected -> 54.dp
@@ -374,7 +404,6 @@ fun PhotoEditorScreen(
                     }
                 }
             }
-
             if (isProcessing) {
                 Surface(Modifier.fillMaxSize(), color = Color.Black.copy(alpha = 0.55f)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -383,20 +412,6 @@ fun PhotoEditorScreen(
                                 CircularProgressIndicator(color = Color.White, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                                 Spacer(Modifier.width(14.dp))
                                 Text(processingMessage.ifBlank { "Processing…" }, color = Color.White, fontWeight = FontWeight.Medium)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-                            modifier = Modifier.padding(24.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                                Spacer(Modifier.width(16.dp))
-                                Text(processingMessage.ifBlank { "Processing..." }, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
