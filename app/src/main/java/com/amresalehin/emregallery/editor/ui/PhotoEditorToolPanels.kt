@@ -829,7 +829,7 @@ fun LrSliderRow(
     displayValue: String,
     valueRange: ClosedFloatingPointRange<Float>,
     gradientBrush: Brush? = null,
-    activeTrackColor: Color = Color.White,
+    activeTrackColor: Color = Color.Unspecified,
     onDragStart: () -> Unit,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
@@ -841,6 +841,8 @@ fun LrSliderRow(
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
+    val colors = LocalEmreEditorColors.current
+    val resolvedActiveTrackColor = if (activeTrackColor != Color.Unspecified) activeTrackColor else colors.activeControlBg
     val isBipolar = valueRange.start < 0f && valueRange.endInclusive > 0f
     val isModified = abs(value - defaultValue) > (if (isEv) 0.05f else 0.4f)
     val isNearZero = isBipolar && abs(value) <= (if (isEv) 0.8f else 1.2f)
@@ -892,7 +894,7 @@ fun LrSliderRow(
         ) {
             Text(
                 text = title,
-                color = if (isModified) Color.White else Color(0xFFCCCCCC),
+                color = if (isModified) colors.primaryText else colors.secondaryText,
                 fontSize = 13.sp,
                 fontWeight = if (isModified) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
@@ -909,7 +911,7 @@ fun LrSliderRow(
                     Icon(
                         imageVector = Icons.Default.RestartAlt,
                         contentDescription = "Reset $title",
-                        tint = Color(0xFFAAAAAA),
+                        tint = colors.secondaryText,
                         modifier = Modifier.size(13.dp)
                     )
                 }
@@ -960,8 +962,9 @@ fun LrSliderRow(
                             cap = StrokeCap.Round
                         )
                     } else {
+                        val inactiveColor = if (colors.isDark) Color(0xFF2C2C2E) else Color(0xFFE2E2E2)
                         drawLine(
-                            color = Color(0xFF2C2C2E),
+                            color = inactiveColor,
                             start = Offset(trackStartX, centerY),
                             end = Offset(trackEndX, centerY),
                             strokeWidth = strokeH,
@@ -972,7 +975,7 @@ fun LrSliderRow(
                         if (isBipolar) {
                             if (currentX > zeroX) {
                                 drawLine(
-                                    color = activeTrackColor,
+                                    color = resolvedActiveTrackColor,
                                     start = Offset(zeroX, centerY),
                                     end = Offset(currentX, centerY),
                                     strokeWidth = strokeH,
@@ -980,7 +983,7 @@ fun LrSliderRow(
                                 )
                             } else if (currentX < zeroX) {
                                 drawLine(
-                                    color = activeTrackColor,
+                                    color = resolvedActiveTrackColor,
                                     start = Offset(currentX, centerY),
                                     end = Offset(zeroX, centerY),
                                     strokeWidth = strokeH,
@@ -989,7 +992,7 @@ fun LrSliderRow(
                             }
                         } else {
                             drawLine(
-                                color = activeTrackColor,
+                                color = resolvedActiveTrackColor,
                                 start = Offset(trackStartX, centerY),
                                 end = Offset(currentX, centerY),
                                 strokeWidth = strokeH,
@@ -1000,7 +1003,7 @@ fun LrSliderRow(
 
                     // Draw Center Tick Notch for bipolar sliders
                     if (isBipolar) {
-                        val tickColor = if (isNearZero) Color.White else Color(0xFF777777)
+                        val tickColor = if (isNearZero) colors.primaryText else colors.secondaryText
                         drawLine(
                             color = tickColor,
                             start = Offset(zeroX, centerY - 5.dp.toPx()),
@@ -1028,7 +1031,7 @@ fun LrSliderRow(
                     valueRange = valueRange,
                     interactionSource = interactionSource,
                     colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
+                        thumbColor = colors.activeControlBg,
                         activeTrackColor = Color.Transparent,
                         inactiveTrackColor = Color.Transparent
                     ),
@@ -1046,7 +1049,7 @@ fun LrSliderRow(
             ) {
                 Text(
                     text = effectiveMinLabel,
-                    color = Color(0xFF666666),
+                    color = colors.secondaryText,
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = (-0.2).sp
@@ -1054,7 +1057,7 @@ fun LrSliderRow(
                 if (isBipolar) {
                     Text(
                         text = "0",
-                        color = if (isNearZero) Color.White else Color(0xFF666666),
+                        color = if (isNearZero) colors.primaryText else colors.secondaryText,
                         fontSize = 9.sp,
                         fontWeight = if (isNearZero) FontWeight.Bold else FontWeight.Normal,
                         fontFamily = FontFamily.Monospace
@@ -1062,7 +1065,7 @@ fun LrSliderRow(
                 }
                 Text(
                     text = effectiveMaxLabel,
-                    color = Color(0xFF666666),
+                    color = colors.secondaryText,
                     fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace,
                     letterSpacing = (-0.2).sp
@@ -1075,12 +1078,9 @@ fun LrSliderRow(
         // 3. Right numeric value indicator: Tap or click to reset to default
         Surface(
             onClick = resetToDefault,
-            shape = RoundedCornerShape(6.dp),
-            color = if (isModified) Color(0x33FFFFFF) else Color(0x18FFFFFF),
-            border = BorderStroke(
-                0.5.dp,
-                if (isModified) Color.White.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.12f)
-            ),
+            shape = RoundedCornerShape(8.dp),
+            color = if (isModified) colors.elevatedSurface else colors.panelSurface,
+            border = BorderStroke(1.dp, colors.border),
             modifier = Modifier
                 .width(68.dp)
                 .testTag("slider_value_$title")
@@ -1092,7 +1092,7 @@ fun LrSliderRow(
             ) {
                 Text(
                     text = displayValue,
-                    color = if (isModified) Color.White else Color(0xFFAAAAAA),
+                    color = if (isModified) colors.primaryText else colors.secondaryText,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
@@ -1125,7 +1125,7 @@ fun LightPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // Curve button on top right (clean monochrome pill)
@@ -1290,8 +1290,8 @@ fun CurveControlsBar(
 ) {
     Surface(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        color = Color(0xFF141414),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+        color = LocalEmreEditorColors.current.panelSurface,
+        border = BorderStroke(1.dp, LocalEmreEditorColors.current.border),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
@@ -1398,7 +1398,7 @@ fun ColorPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // Top action pills: [ B & W ], [ Grading ], [ Mix ]
@@ -1654,7 +1654,7 @@ fun ColorMixPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         // 8 color swatches row
@@ -1780,7 +1780,7 @@ fun ColorGradingPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
         Row(
@@ -1888,7 +1888,7 @@ fun EffectsPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // Sub-tabs row
@@ -2124,7 +2124,7 @@ fun DetailPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // Sub-tabs row
@@ -2250,7 +2250,7 @@ fun OpticsPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // Toggle 1: Remove Chromatic Aberration
@@ -2908,7 +2908,7 @@ fun CropControlsPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // Quick Actions row: Rotate, Flip H, Flip V, Auto-Level
@@ -3045,7 +3045,7 @@ fun BrushesPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // Size slider
@@ -3128,7 +3128,7 @@ fun RetouchPanel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
+            .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         // Radius slider

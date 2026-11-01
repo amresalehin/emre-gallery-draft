@@ -897,6 +897,57 @@ class PhotoEditorTest {
         assertEquals(-10f, updated.lightnessShift, 0.001f)
         assertTrue(updated.isColorize)
     }
+
+    @Test
+    fun testOperationToolbar_undoRedoApplyWorkflow() {
+        val vm = PhotoEditorViewModel()
+        assertFalse(vm.canUndo.value)
+        assertFalse(vm.canRedo.value)
+
+        // 1. User performs an edit in Contextual Panel (e.g. Light domain adjustment)
+        vm.updateAdjustmentValue("Exposure", 25f)
+        vm.commitSliderChange()
+        assertTrue(vm.canUndo.value)
+        assertEquals(25f, vm.sessionState.value.adjustments.exposure, 0.001f)
+
+        // 2. Undo via Operation Toolbar
+        vm.undo()
+        assertEquals(0f, vm.sessionState.value.adjustments.exposure, 0.001f)
+        assertTrue(vm.canRedo.value)
+
+        // 3. Redo via Operation Toolbar
+        vm.redo()
+        assertEquals(25f, vm.sessionState.value.adjustments.exposure, 0.001f)
+        assertFalse(vm.canRedo.value)
+
+        // 4. Mode transition with Cancel/Apply
+        vm.enterMode(EditorMode.CURVES)
+        assertEquals(EditorMode.CURVES, vm.currentMode.value)
+        vm.addCurvePoint(CurveChannel.RGB, 0.5f, 0.7f)
+        assertEquals(3, vm.sessionState.value.adjustments.curves.master.size)
+
+        // Cancel restores baseline
+        vm.cancelModeChanges()
+        assertEquals(EditorMode.NONE, vm.currentMode.value)
+        assertEquals(2, vm.sessionState.value.adjustments.curves.master.size)
+    }
+
+    @Test
+    fun testOperationToolbar_resetCropAndAdjustments() {
+        val vm = PhotoEditorViewModel()
+
+        // Rotate and straighten in Crop domain
+        vm.rotate90()
+        vm.setStraighten(15f)
+        vm.commitSliderChange()
+        assertEquals(90, vm.sessionState.value.transform.rotationDegrees)
+        assertEquals(15f, vm.sessionState.value.transform.straightenAngle, 0.001f)
+
+        // Reset Crop
+        vm.resetCrop()
+        assertEquals(0, vm.sessionState.value.transform.rotationDegrees)
+        assertEquals(0f, vm.sessionState.value.transform.straightenAngle, 0.001f)
+    }
 }
 
 
