@@ -100,6 +100,7 @@ import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.max
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 private enum class EditorMode { Crop, Adjust, Filters, Effects }
@@ -594,7 +595,7 @@ fun ImageEditorScreen(
                     updateRecipe(recipe.copy(filterStrength = it))
                 }
                 Text(
-                    "19 non-destructive colour presets. Strength blends each filter with the original.",
+                    "40 non-destructive colour presets. Strength blends each filter with the original.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

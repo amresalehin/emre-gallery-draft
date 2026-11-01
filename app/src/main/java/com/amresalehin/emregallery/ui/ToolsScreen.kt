@@ -542,7 +542,7 @@ fun ToolsScreen(
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(26.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Open Filters & Effects", fontWeight = FontWeight.SemiBold)
-                            Text("19 filters, film grain, fade and vignette", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("40 filters, colour grading and six image effects", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Default.ArrowForward, contentDescription = null)
                     }
