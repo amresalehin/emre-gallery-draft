@@ -88,6 +88,13 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 private enum class EditorMode { Crop, Adjust }
+private enum class CropPreset(val title: String, val ratio: Float?) {
+    Free("Free", null),
+    Square("1:1", 1f),
+    FourThree("4:3", 4f / 3f),
+    ThreeTwo("3:2", 3f / 2f),
+    SixteenNine("16:9", 16f / 9f)
+}
 
 private data class EditorRecipe(
     val rotation: Int = 0,
@@ -117,6 +124,7 @@ fun ImageEditorScreen(
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showCropHandles by remember { mutableStateOf(true) }
+    var cropPreset by remember { mutableStateOf(CropPreset.Free) }
 
     LaunchedEffect(source.uri) {
         loading = true
@@ -174,6 +182,7 @@ fun ImageEditorScreen(
             TextButton(
                 onClick = {
                     recipe = EditorRecipe()
+                    cropPreset = CropPreset.Free
                     showCropHandles = true
                 },
                 enabled = !saving
@@ -278,8 +287,33 @@ fun ImageEditorScreen(
                 item { EditorAction("90°", Icons.Default.Rotate90DegreesCcw) { recipe = recipe.copy(rotation = (recipe.rotation + 90) % 360) } }
                 item { EditorAction("Flip H", Icons.Default.Flip) { recipe = recipe.copy(flipHorizontal = !recipe.flipHorizontal) } }
                 item { EditorAction("Flip V", Icons.Default.Flip) { recipe = recipe.copy(flipVertical = !recipe.flipVertical) } }
-                item { EditorAction("Reset crop", Icons.Default.Refresh) { recipe = recipe.copy(cropLeft=0f,cropTop=0f,cropRight=1f,cropBottom=1f) } }
+                item { EditorAction("Reset crop", Icons.Default.Refresh) { recipe = recipe.copy(cropLeft=0f,cropTop=0f,cropRight=1f,cropBottom=1f); cropPreset = CropPreset.Free } }
                 item { EditorAction("Apply crop", Icons.Default.Check) { showCropHandles = false } }
+            }
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                items(CropPreset.entries.size) { index ->
+                    val preset = CropPreset.entries[index]
+                    val selected = preset == cropPreset
+                    Surface(
+                        modifier = Modifier.clip(CircleShape).clickable {
+                            cropPreset = preset
+                            recipe = applyCropPreset(recipe, preset.ratio)
+                            showCropHandles = true
+                        },
+                        color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = CircleShape
+                    ) {
+                        Text(
+                            preset.title,
+                            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+                            color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
             }
             Text(
                 "Drag the crop edges over the image. Export creates a new copy.",
@@ -381,6 +415,27 @@ private fun CropOverlay(
             drawCircle(Color.White, handle, it)
         }
     }
+}
+
+private fun applyCropPreset(recipe: EditorRecipe, ratio: Float?): EditorRecipe {
+    if (ratio == null) return recipe.copy(cropLeft = 0f, cropTop = 0f, cropRight = 1f, cropBottom = 1f)
+    val currentWidth = recipe.cropRight - recipe.cropLeft
+    val currentHeight = recipe.cropBottom - recipe.cropTop
+    val currentRatio = currentWidth / currentHeight
+    val width: Float
+    val height: Float
+    if (currentRatio > ratio) {
+        height = currentHeight
+        width = (height * ratio).coerceAtMost(1f)
+    } else {
+        width = currentWidth
+        height = (width / ratio).coerceAtMost(1f)
+    }
+    val centerX = (recipe.cropLeft + recipe.cropRight) / 2f
+    val centerY = (recipe.cropTop + recipe.cropBottom) / 2f
+    val left = (centerX - width / 2f).coerceIn(0f, 1f - width)
+    val top = (centerY - height / 2f).coerceIn(0f, 1f - height)
+    return recipe.copy(cropLeft = left, cropTop = top, cropRight = left + width, cropBottom = top + height)
 }
 
 private fun applyEditorRecipe(source: Bitmap, recipe: EditorRecipe): Bitmap {
