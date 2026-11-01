@@ -1195,6 +1195,20 @@ fun GalleryApp() {
                             selectedPdfTool = tool
                             navigateTo(Destination.PDF_DOCUMENT_TOOL, rememberPrevious = true)
                         }
+                        ,onOpenEditor = {
+                            val candidate = selectedMedia
+                                ?: media.firstOrNull { !it.isVideo && it.uri !in hidden && !it.isTrashed }
+                            if (candidate != null) {
+                                editorSource = candidate
+                                navigateTo(
+                                    Destination.IMAGE_EDITOR,
+                                    rememberPrevious = true,
+                                    newSelectedMedia = candidate
+                                )
+                            } else {
+                                scope.launch { snackbarHostState.showSnackbar("Select a photo to edit") }
+                            }
+                        }
                     )
                     Destination.IMAGE_EDITOR -> editorSource?.let { source ->
                         ImageEditorScreen(
