@@ -356,15 +356,7 @@ fun ViewerScreen(
         shareMediaItem(context, item)
     }
 
-    val launchEdit: () -> Unit = {
-        runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_EDIT)
-                    .setDataAndType(Uri.parse(item.uri), item.mimeType ?: "image/*")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            )
-        }
-    }
+    val launchEdit: () -> Unit = onEdit
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val screenWidthPx = constraints.maxWidth.toFloat()
