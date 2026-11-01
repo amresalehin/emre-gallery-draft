@@ -385,18 +385,33 @@ private fun CropOverlay(
 
 private fun applyEditorRecipe(source: Bitmap, recipe: EditorRecipe): Bitmap {
     val matrix = Matrix().apply {
-        postRotate(recipe.rotation.toFloat(), source.width / 2f, source.height / 2f)
+        postRotate(recipe.rotation.toFloat())
         postScale(
             if (recipe.flipHorizontal) -1f else 1f,
-            if (recipe.flipVertical) -1f else 1f,
-            source.width / 2f,
-            source.height / 2f
+            if (recipe.flipVertical) -1f else 1f
         )
     }
     val rotated = if (recipe.rotation % 360 == 0 && !recipe.flipHorizontal && !recipe.flipVertical) {
         source
     } else {
-        Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+        // Matrix output bounds expand for quarter turns so the full image is retained.
+        val values = FloatArray(9)
+        matrix.getValues(values)
+        val radians = Math.toRadians(recipe.rotation.toDouble())
+        val boundWidth = kotlin.math.ceil(
+            kotlin.math.abs(source.width * kotlin.math.cos(radians)) +
+                kotlin.math.abs(source.height * kotlin.math.sin(radians))
+        ).toInt().coerceAtLeast(1)
+        val boundHeight = kotlin.math.ceil(
+            kotlin.math.abs(source.width * kotlin.math.sin(radians)) +
+                kotlin.math.abs(source.height * kotlin.math.cos(radians))
+        ).toInt().coerceAtLeast(1)
+        val centered = Matrix(matrix).apply {
+            postTranslate((boundWidth - source.width) / 2f, (boundHeight - source.height) / 2f)
+        }
+        Bitmap.createBitmap(boundWidth, boundHeight, Bitmap.Config.ARGB_8888).also { target ->
+            android.graphics.Canvas(target).drawBitmap(source, centered, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG))
+        }
     }
     val left = (rotated.width * recipe.cropLeft).roundToInt().coerceIn(0, rotated.width - 1)
     val top = (rotated.height * recipe.cropTop).roundToInt().coerceIn(0, rotated.height - 1)
