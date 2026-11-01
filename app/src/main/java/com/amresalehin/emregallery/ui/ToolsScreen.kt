@@ -42,12 +42,14 @@ private val toolGroups = listOf(
         "Filters and effects",
         Icons.Default.Tune,
         listOf(
-            "19 colour and monochrome filter presets",
+            "40 colour and monochrome filter presets",
             "Portrait, film, vintage, monochrome and colour categories",
-            "Adjustable filter strength",
-            "Vignette, film grain and fade effects",
-            "Brightness, contrast and saturation controls",
-            "Non-destructive preview with undo and redo",
+            "Adjustable filter strength and original-versus-edited comparison",
+            "Brightness, exposure, contrast and saturation",
+            "Temperature and tint colour grading",
+            "Vignette, film grain, fade and soft-focus effects",
+            "Sharpening and pixelation effects",
+            "Non-destructive preview with 30-step undo and redo",
             "Export a new JPEG copy with preserved photo metadata"
         )
     ),

@@ -130,7 +130,28 @@ private enum class EditorFilter(val title: String, val category: FilterCategory)
     Vivid("Vivid", FilterCategory.Colour),
     Matte("Matte", FilterCategory.Colour),
     Rose("Rose", FilterCategory.Colour),
-    Emerald("Emerald", FilterCategory.Colour)
+    Emerald("Emerald", FilterCategory.Colour),
+    Natural("Natural", FilterCategory.Portrait),
+    Cream("Cream", FilterCategory.Portrait),
+    Peach("Peach", FilterCategory.Portrait),
+    Honey("Honey", FilterCategory.Portrait),
+    KodakGold("Kodak Gold", FilterCategory.Film),
+    Portra400("Portra 400", FilterCategory.Film),
+    Fuji("Fuji", FilterCategory.Film),
+    BlueHour("Blue Hour", FilterCategory.Film),
+    TealCinema("Teal Cinema", FilterCategory.Film),
+    Dusty("Dusty", FilterCategory.Vintage),
+    Polaroid("Polaroid", FilterCategory.Vintage),
+    Amber("Amber", FilterCategory.Vintage),
+    FadedPrint("Faded Print", FilterCategory.Vintage),
+    HighKey("High Key", FilterCategory.Monochrome),
+    Dramatic("Dramatic", FilterCategory.Monochrome),
+    Infrared("Infrared", FilterCategory.Monochrome),
+    Arctic("Arctic", FilterCategory.Colour),
+    RoseGold("Rose Gold", FilterCategory.Colour),
+    Copper("Copper", FilterCategory.Colour),
+    Lavender("Lavender", FilterCategory.Colour),
+    Ocean("Ocean", FilterCategory.Colour)
 }
 private enum class CropEdge { Left, Top, Right, Bottom }
 private enum class CropPreset(val title: String, val ratio: Float?) {
@@ -151,13 +172,19 @@ private data class EditorRecipe(
     val cropRight: Float = 1f,
     val cropBottom: Float = 1f,
     val brightness: Float = 0f,
+    val exposure: Float = 0f,
     val contrast: Float = 1f,
     val saturation: Float = 1f,
+    val temperature: Float = 0f,
+    val tint: Float = 0f,
     val filter: EditorFilter = EditorFilter.Original,
     val filterStrength: Float = 1f,
     val vignette: Float = 0f,
     val grain: Float = 0f,
-    val fade: Float = 0f
+    val fade: Float = 0f,
+    val softFocus: Float = 0f,
+    val sharpen: Float = 0f,
+    val pixelate: Float = 0f
 )
 
 @Composable
@@ -199,6 +226,7 @@ fun ImageEditorScreen(
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showCropHandles by remember { mutableStateOf(true) }
+    var showOriginalPreview by remember(source.uri) { mutableStateOf(false) }
     var cropPreset by remember { mutableStateOf(CropPreset.Free) }
 
     LaunchedEffect(source.uri) {
@@ -322,7 +350,7 @@ fun ImageEditorScreen(
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
-            val currentPreview = preview
+            val currentPreview = if (showOriginalPreview) image else preview
             when {
                 loading -> CircularProgressIndicator()
                 currentPreview != null -> {
@@ -341,7 +369,7 @@ fun ImageEditorScreen(
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.FillBounds
                             )
-                            if (mode == EditorMode.Crop && showCropHandles) {
+                            if (mode == EditorMode.Crop && showCropHandles && !showOriginalPreview) {
                                 CropOverlay(
                                     recipe = recipe,
                                     onRecipeChange = ::updateRecipe,
@@ -357,6 +385,25 @@ fun ImageEditorScreen(
 
         error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 18.dp, vertical = 4.dp))
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 1.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(
+                onClick = { showOriginalPreview = !showOriginalPreview },
+                enabled = image != null && preview != null && !loading
+            ) {
+                Text(if (showOriginalPreview) "Show edited result" else "Compare with original")
+            }
+            Text(
+                if (showOriginalPreview) "Before" else "After",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 6.dp)
+            )
         }
 
         Row(
@@ -444,10 +491,38 @@ fun ImageEditorScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else if (mode == EditorMode.Adjust) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AdjustmentSlider("Brightness", recipe.brightness, -0.5f..0.5f) { updateRecipe(recipe.copy(brightness = it)) }
-                AdjustmentSlider("Contrast", recipe.contrast, 0.5f..1.8f) { updateRecipe(recipe.copy(contrast = it)) }
-                AdjustmentSlider("Saturation", recipe.saturation, 0f..2f) { updateRecipe(recipe.copy(saturation = it)) }
+            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                AdjustmentSlider(
+                    "Brightness", recipe.brightness, -0.5f..0.5f,
+                    valueLabel = { (it * 100f).roundToInt().toString() }
+                ) { updateRecipe(recipe.copy(brightness = it)) }
+                AdjustmentSlider(
+                    "Exposure", recipe.exposure, -2f..2f,
+                    valueLabel = { "${(it * 10f).roundToInt() / 10f} EV" }
+                ) { updateRecipe(recipe.copy(exposure = it)) }
+                AdjustmentSlider("Contrast", recipe.contrast, 0.5f..1.8f) {
+                    updateRecipe(recipe.copy(contrast = it))
+                }
+                AdjustmentSlider("Saturation", recipe.saturation, 0f..2f) {
+                    updateRecipe(recipe.copy(saturation = it))
+                }
+                AdjustmentSlider(
+                    "Temperature", recipe.temperature, -1f..1f,
+                    valueLabel = { (it * 100f).roundToInt().let { v -> if (v > 0) "+$v" else "$v" } }
+                ) { updateRecipe(recipe.copy(temperature = it)) }
+                AdjustmentSlider(
+                    "Tint", recipe.tint, -1f..1f,
+                    valueLabel = { (it * 100f).roundToInt().let { v -> if (v > 0) "+$v" else "$v" } }
+                ) { updateRecipe(recipe.copy(tint = it)) }
+                TextButton(
+                    onClick = {
+                        updateRecipe(recipe.copy(
+                            brightness = 0f, exposure = 0f, contrast = 1f,
+                            saturation = 1f, temperature = 0f, tint = 0f
+                        ))
+                    },
+                    modifier = Modifier.align(Alignment.End)
+                ) { Text("Reset adjustments") }
             }
         } else if (mode == EditorMode.Filters) {
             LazyRow(
@@ -526,8 +601,8 @@ fun ImageEditorScreen(
             }
         } else {
             Column(
-                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(7.dp)
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 AdjustmentSlider("Vignette", recipe.vignette, 0f..1f) {
                     updateRecipe(recipe.copy(vignette = it))
@@ -538,11 +613,28 @@ fun ImageEditorScreen(
                 AdjustmentSlider("Fade", recipe.fade, 0f..1f) {
                     updateRecipe(recipe.copy(fade = it))
                 }
-                Text(
-                    "Effects are applied after colour grading and remain editable until export.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                AdjustmentSlider("Soft focus", recipe.softFocus, 0f..1f) {
+                    updateRecipe(recipe.copy(softFocus = it))
+                }
+                AdjustmentSlider("Sharpen", recipe.sharpen, 0f..1f) {
+                    updateRecipe(recipe.copy(sharpen = it))
+                }
+                AdjustmentSlider("Pixelate", recipe.pixelate, 0f..1f) {
+                    updateRecipe(recipe.copy(pixelate = it))
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(
+                        onClick = {
+                            updateRecipe(recipe.copy(
+                                vignette = 0f, grain = 0f, fade = 0f,
+                                softFocus = 0f, sharpen = 0f, pixelate = 0f
+                            ))
+                        }
+                    ) { Text("Reset effects") }
+                }
             }
         }
 
@@ -569,15 +661,17 @@ private fun AdjustmentSlider(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
+    valueLabel: (Float) -> String = { "${(it * 100f).roundToInt()}%" },
     onChange: (Float) -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(86.dp))
         Slider(value = value, onValueChange = onChange, valueRange = range, modifier = Modifier.weight(1f))
         Text(
-            if (label == "Brightness") "${(value * 100).roundToInt()}" else "${(value * 100).roundToInt()}%",
+            valueLabel(value),
             style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.width(43.dp)
+            modifier = Modifier.width(52.dp),
+            maxLines = 1
         )
     }
 }
@@ -739,20 +833,25 @@ private fun applyEditorRecipe(
         transformed.recycle()
     }
 
-    val hasAdjustments = recipe.brightness != 0f || recipe.contrast != 1f || recipe.saturation != 1f
+    val hasAdjustments = recipe.brightness != 0f ||
+        recipe.exposure != 0f || recipe.contrast != 1f || recipe.saturation != 1f ||
+        recipe.temperature != 0f || recipe.tint != 0f
     val hasFilter = recipe.filter != EditorFilter.Original && recipe.filterStrength > 0f
     var adjusted = cropped
     if (hasAdjustments || hasFilter) {
         val brightnessOffset = recipe.brightness * 255f
+        val exposureScale = 2f.pow(recipe.exposure.coerceIn(-2f, 2f))
+        val temperatureOffset = recipe.temperature.coerceIn(-1f, 1f) * 28f
+        val tintOffset = recipe.tint.coerceIn(-1f, 1f) * 18f
         val contrast = recipe.contrast
         val saturation = recipe.saturation
         val lumR = 0.213f * (1f - saturation)
         val lumG = 0.715f * (1f - saturation)
         val lumB = 0.072f * (1f - saturation)
         val adjustmentMatrix = android.graphics.ColorMatrix(floatArrayOf(
-            contrast * (lumR + saturation), contrast * lumG, contrast * lumB, 0f, brightnessOffset,
-            contrast * lumR, contrast * (lumG + saturation), contrast * lumB, 0f, brightnessOffset,
-            contrast * lumR, contrast * lumG, contrast * (lumB + saturation), 0f, brightnessOffset,
+            exposureScale * contrast * (lumR + saturation), exposureScale * contrast * lumG, exposureScale * contrast * lumB, 0f, brightnessOffset + temperatureOffset - tintOffset * 0.35f,
+            exposureScale * contrast * lumR, exposureScale * contrast * (lumG + saturation), exposureScale * contrast * lumB, 0f, brightnessOffset + tintOffset,
+            exposureScale * contrast * lumR, exposureScale * contrast * lumG, exposureScale * contrast * (lumB + saturation), 0f, brightnessOffset - temperatureOffset - tintOffset * 0.35f,
             0f, 0f, 0f, 1f, 0f
         ))
         val filterValues = blendFilterWithIdentity(
@@ -771,9 +870,13 @@ private fun applyEditorRecipe(
         if (cropped !== source && !cropped.isRecycled) cropped.recycle()
     }
 
-    val hasSpatialEffects = recipe.vignette > 0f || recipe.grain > 0f || recipe.fade > 0f
+    val hasSpatialEffects = recipe.vignette > 0f || recipe.grain > 0f || recipe.fade > 0f ||
+        recipe.softFocus > 0f || recipe.sharpen > 0f || recipe.pixelate > 0f
     if (!hasSpatialEffects) return adjusted
-    val effected = applyEditorEffects(adjusted, recipe.vignette, recipe.grain, recipe.fade)
+    val effected = applyEditorEffects(
+        adjusted, recipe.vignette, recipe.grain, recipe.fade,
+        recipe.softFocus, recipe.sharpen, recipe.pixelate
+    )
     if (effected !== adjusted && adjusted !== source && !adjusted.isRecycled) adjusted.recycle()
     return effected
 }
@@ -833,6 +936,37 @@ private fun editorFilterMatrix(filter: EditorFilter): FloatArray = when (filter)
     EditorFilter.Matte -> buildToneMatrix(0.84f, 0.87f, 18f, 18f, 18f)
     EditorFilter.Rose -> buildToneMatrix(1.08f, 1.01f, 14f, 0f, 7f)
     EditorFilter.Emerald -> buildToneMatrix(1.12f, 1.04f, -4f, 12f, 3f)
+    EditorFilter.Natural -> buildToneMatrix(1.02f, 1.01f, 2f, 1f, 0f)
+    EditorFilter.Cream -> buildToneMatrix(0.86f, 0.93f, 16f, 12f, 7f)
+    EditorFilter.Peach -> buildToneMatrix(1.03f, 0.98f, 18f, 3f, 1f)
+    EditorFilter.Honey -> buildToneMatrix(1.08f, 1.04f, 22f, 10f, -8f)
+    EditorFilter.KodakGold -> buildToneMatrix(1.12f, 1.08f, 18f, 7f, -12f)
+    EditorFilter.Portra400 -> buildToneMatrix(0.94f, 0.98f, 10f, 5f, 2f)
+    EditorFilter.Fuji -> buildToneMatrix(1.1f, 1.05f, -5f, 4f, 11f)
+    EditorFilter.BlueHour -> buildToneMatrix(0.98f, 1.08f, -10f, 1f, 24f)
+    EditorFilter.TealCinema -> floatArrayOf(
+        0.98f, 0.08f, -0.02f, 0f, 5f,
+        0.02f, 1.02f, 0.03f, 0f, 2f,
+        -0.04f, 0.14f, 1.08f, 0f, 14f,
+        0f, 0f, 0f, 1f, 0f
+    )
+    EditorFilter.Dusty -> buildToneMatrix(0.78f, 0.88f, 18f, 14f, 11f)
+    EditorFilter.Polaroid -> buildToneMatrix(0.9f, 0.94f, 21f, 12f, 3f)
+    EditorFilter.Amber -> buildToneMatrix(0.88f, 1.02f, 24f, 10f, -15f)
+    EditorFilter.FadedPrint -> buildToneMatrix(0.76f, 0.82f, 31f, 29f, 24f)
+    EditorFilter.HighKey -> buildToneMatrix(0f, 0.84f, 28f, 28f, 28f)
+    EditorFilter.Dramatic -> buildToneMatrix(0f, 1.55f, -20f, -20f, -20f)
+    EditorFilter.Infrared -> floatArrayOf(
+        0.72f, 0.24f, 0.04f, 0f, 8f,
+        0.72f, 0.24f, 0.04f, 0f, 8f,
+        0.72f, 0.24f, 0.04f, 0f, 8f,
+        0f, 0f, 0f, 1f, 0f
+    )
+    EditorFilter.Arctic -> buildToneMatrix(1.02f, 1.08f, -8f, 3f, 19f)
+    EditorFilter.RoseGold -> buildToneMatrix(1.04f, 1.01f, 20f, 5f, 10f)
+    EditorFilter.Copper -> buildToneMatrix(0.94f, 1.12f, 22f, 5f, -14f)
+    EditorFilter.Lavender -> buildToneMatrix(0.98f, 1.01f, 9f, 0f, 18f)
+    EditorFilter.Ocean -> buildToneMatrix(1.12f, 1.05f, -10f, 5f, 22f)
 }
 
 private fun blendFilterWithIdentity(matrix: FloatArray, amount: Float): FloatArray {
@@ -852,69 +986,206 @@ private fun applyEditorEffects(
     source: Bitmap,
     vignette: Float,
     grain: Float,
-    fade: Float
+    fade: Float,
+    softFocus: Float,
+    sharpen: Float,
+    pixelate: Float
 ): Bitmap {
-    if (vignette <= 0f && grain <= 0f && fade <= 0f) return source
-    val width = source.width
-    val height = source.height
-    val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val row = IntArray(width)
-    val centerX = (width - 1) / 2f
-    val centerY = (height - 1) / 2f
-    val maxRadiusSquared = (centerX * centerX + centerY * centerY).coerceAtLeast(1f)
     val vignetteAmount = vignette.coerceIn(0f, 1f) * 0.62f
     val grainAmount = grain.coerceIn(0f, 1f) * 26f
     val fadeAmount = fade.coerceIn(0f, 1f)
+    val softAmount = softFocus.coerceIn(0f, 1f) * 0.72f
+    val sharpenAmount = sharpen.coerceIn(0f, 1f) * 0.72f
+    val pixelAmount = pixelate.coerceIn(0f, 1f) * 0.92f
 
-    for (y in 0 until height) {
-        source.getPixels(row, 0, width, 0, y, width, 1)
-        val dy = y - centerY
-        for (x in 0 until width) {
-            val pixel = row[x]
-            val alpha = android.graphics.Color.alpha(pixel)
-            var red = android.graphics.Color.red(pixel).toFloat()
-            var green = android.graphics.Color.green(pixel).toFloat()
-            var blue = android.graphics.Color.blue(pixel).toFloat()
+    if (
+        vignetteAmount <= 0f && grainAmount <= 0f && fadeAmount <= 0f &&
+        softAmount <= 0f && sharpenAmount <= 0f && pixelAmount <= 0f
+    ) return source
 
-            if (fadeAmount > 0f) {
-                val lift = fadeAmount * 27f
-                val compression = 1f - fadeAmount * 0.2f
-                red = red * compression + lift
-                green = green * compression + lift
-                blue = blue * compression + lift
+    val width = source.width
+    val height = source.height
+    val blurBitmap = if (softAmount > 0f && width > 1 && height > 1) {
+        val scale = (1f - softFocus.coerceIn(0f, 1f) * 0.84f).coerceIn(0.16f, 1f)
+        val blurWidth = (width * scale).roundToInt().coerceIn(1, width)
+        val blurHeight = (height * scale).roundToInt().coerceIn(1, height)
+        if (blurWidth < width || blurHeight < height) {
+            Bitmap.createScaledBitmap(source, blurWidth, blurHeight, true)
+        } else null
+    } else null
+
+    val pixelBitmap = if (pixelAmount > 0f && width > 1 && height > 1) {
+        val blockSize = (2f + pixelate.coerceIn(0f, 1f) * 46f).roundToInt().coerceAtLeast(2)
+        val pixelWidth = ((width + blockSize - 1) / blockSize).coerceIn(1, width)
+        val pixelHeight = ((height + blockSize - 1) / blockSize).coerceIn(1, height)
+        if (pixelWidth < width || pixelHeight < height) {
+            Bitmap.createScaledBitmap(source, pixelWidth, pixelHeight, false)
+        } else null
+    } else null
+
+    val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    var completed = false
+    try {
+        val sourceRow = IntArray(width)
+        val aboveRow = IntArray(width)
+        val belowRow = IntArray(width)
+        val outputRow = IntArray(width)
+        val centerX = (width - 1) / 2f
+        val centerY = (height - 1) / 2f
+        val maxRadiusSquared = (centerX * centerX + centerY * centerY).coerceAtLeast(1f)
+
+        val blurWidth = blurBitmap?.width ?: 0
+        val blurHeight = blurBitmap?.height ?: 0
+        val blurTop = if (blurBitmap != null) IntArray(blurWidth) else null
+        val blurBottom = if (blurBitmap != null) IntArray(blurWidth) else null
+
+        val pixelWidth = pixelBitmap?.width ?: 0
+        val pixelHeight = pixelBitmap?.height ?: 0
+        val pixelRow = if (pixelBitmap != null) IntArray(pixelWidth) else null
+
+        for (y in 0 until height) {
+            source.getPixels(sourceRow, 0, width, 0, y, width, 1)
+            source.getPixels(aboveRow, 0, width, 0, (y - 1).coerceAtLeast(0), width, 1)
+            source.getPixels(belowRow, 0, width, 0, (y + 1).coerceAtMost(height - 1), width, 1)
+
+            var blurY0 = 0
+            var blurY1 = 0
+            var blurFractionY = 0f
+            if (blurBitmap != null && blurTop != null && blurBottom != null) {
+                val mappedY = if (height <= 1) 0f else y * (blurHeight - 1).toFloat() / (height - 1)
+                blurY0 = mappedY.toInt().coerceIn(0, blurHeight - 1)
+                blurY1 = (blurY0 + 1).coerceAtMost(blurHeight - 1)
+                blurFractionY = mappedY - blurY0
+                blurBitmap.getPixels(blurTop, 0, blurWidth, 0, blurY0, blurWidth, 1)
+                blurBitmap.getPixels(blurBottom, 0, blurWidth, 0, blurY1, blurWidth, 1)
             }
 
-            if (vignetteAmount > 0f) {
-                val dx = x - centerX
-                val radiusSquared = (dx * dx + dy * dy) / maxRadiusSquared
-                val shade = (1f - vignetteAmount * radiusSquared).coerceIn(0.35f, 1f)
-                red *= shade
-                green *= shade
-                blue *= shade
+            if (pixelBitmap != null && pixelRow != null) {
+                val mappedY = (y.toLong() * pixelHeight / height).toInt().coerceIn(0, pixelHeight - 1)
+                pixelBitmap.getPixels(pixelRow, 0, pixelWidth, 0, mappedY, pixelWidth, 1)
             }
 
-            if (grainAmount > 0f) {
-                var seed = (x * 0x1f123bb5) xor (y * 0x5f356495)
-                seed = (seed xor (seed ushr 13)) * 1274126177
-                val noise = (((seed ushr 24) and 0xff) / 255f - 0.5f) * grainAmount
-                red += noise
-                green += noise
-                blue += noise
-            }
+            val dy = y - centerY
+            for (x in 0 until width) {
+                val pixel = sourceRow[x]
+                val alpha = android.graphics.Color.alpha(pixel)
+                var red = android.graphics.Color.red(pixel).toFloat()
+                var green = android.graphics.Color.green(pixel).toFloat()
+                var blue = android.graphics.Color.blue(pixel).toFloat()
 
-            row[x] = android.graphics.Color.argb(
-                alpha,
-                red.toInt().coerceIn(0, 255),
-                green.toInt().coerceIn(0, 255),
-                blue.toInt().coerceIn(0, 255)
-            )
+                if (sharpenAmount > 0f) {
+                    val left = sourceRow[(x - 1).coerceAtLeast(0)]
+                    val right = sourceRow[(x + 1).coerceAtMost(width - 1)]
+                    val up = aboveRow[x]
+                    val down = belowRow[x]
+                    val averageRed = (
+                        android.graphics.Color.red(left) +
+                        android.graphics.Color.red(right) +
+                        android.graphics.Color.red(up) +
+                        android.graphics.Color.red(down)
+                    ) * 0.25f
+                    val averageGreen = (
+                        android.graphics.Color.green(left) +
+                        android.graphics.Color.green(right) +
+                        android.graphics.Color.green(up) +
+                        android.graphics.Color.green(down)
+                    ) * 0.25f
+                    val averageBlue = (
+                        android.graphics.Color.blue(left) +
+                        android.graphics.Color.blue(right) +
+                        android.graphics.Color.blue(up) +
+                        android.graphics.Color.blue(down)
+                    ) * 0.25f
+                    red += (red - averageRed) * sharpenAmount
+                    green += (green - averageGreen) * sharpenAmount
+                    blue += (blue - averageBlue) * sharpenAmount
+                }
+
+                if (blurBitmap != null && blurTop != null && blurBottom != null) {
+                    val mappedX = if (width <= 1) 0f else x * (blurWidth - 1).toFloat() / (width - 1)
+                    val blurX0 = mappedX.toInt().coerceIn(0, blurWidth - 1)
+                    val blurX1 = (blurX0 + 1).coerceAtMost(blurWidth - 1)
+                    val fractionX = mappedX - blurX0
+                    val blurredRed = bilinearChannel(blurTop, blurBottom, blurX0, blurX1, fractionX, blurFractionY, 0)
+                    val blurredGreen = bilinearChannel(blurTop, blurBottom, blurX0, blurX1, fractionX, blurFractionY, 1)
+                    val blurredBlue = bilinearChannel(blurTop, blurBottom, blurX0, blurX1, fractionX, blurFractionY, 2)
+                    red += (blurredRed - red) * softAmount
+                    green += (blurredGreen - green) * softAmount
+                    blue += (blurredBlue - blue) * softAmount
+                }
+
+                if (pixelBitmap != null && pixelRow != null) {
+                    val pixelX = (x.toLong() * pixelWidth / width).toInt().coerceIn(0, pixelWidth - 1)
+                    val pixel = pixelRow[pixelX]
+                    red += (android.graphics.Color.red(pixel) - red) * pixelAmount
+                    green += (android.graphics.Color.green(pixel) - green) * pixelAmount
+                    blue += (android.graphics.Color.blue(pixel) - blue) * pixelAmount
+                }
+
+                if (fadeAmount > 0f) {
+                    val lift = fadeAmount * 27f
+                    val compression = 1f - fadeAmount * 0.2f
+                    red = red * compression + lift
+                    green = green * compression + lift
+                    blue = blue * compression + lift
+                }
+
+                if (vignetteAmount > 0f) {
+                    val dx = x - centerX
+                    val radiusSquared = (dx * dx + dy * dy) / maxRadiusSquared
+                    val shade = (1f - vignetteAmount * radiusSquared).coerceIn(0.35f, 1f)
+                    red *= shade
+                    green *= shade
+                    blue *= shade
+                }
+
+                if (grainAmount > 0f) {
+                    var seed = (x * 0x1f123bb5) xor (y * 0x5f356495)
+                    seed = (seed xor (seed ushr 13)) * 1274126177
+                    val noise = (((seed ushr 24) and 0xff) / 255f - 0.5f) * grainAmount
+                    red += noise
+                    green += noise
+                    blue += noise
+                }
+
+                outputRow[x] = android.graphics.Color.argb(
+                    alpha,
+                    red.toInt().coerceIn(0, 255),
+                    green.toInt().coerceIn(0, 255),
+                    blue.toInt().coerceIn(0, 255)
+                )
+            }
+            output.setPixels(outputRow, 0, width, 0, y, width, 1)
         }
-        output.setPixels(row, 0, width, 0, y, width, 1)
+        completed = true
+        return output
+    } finally {
+        blurBitmap?.takeIf { it !== source && !it.isRecycled }?.recycle()
+        pixelBitmap?.takeIf { it !== source && it !== blurBitmap && !it.isRecycled }?.recycle()
+        if (!completed && !output.isRecycled) output.recycle()
     }
-    return output
 }
 
-private fun decodeEditorBitmap(
+private fun bilinearChannel(
+    top: IntArray,
+    bottom: IntArray,
+    x0: Int,
+    x1: Int,
+    fractionX: Float,
+    fractionY: Float,
+    channel: Int
+): Float {
+    fun component(pixel: Int): Int = when (channel) {
+        0 -> android.graphics.Color.red(pixel)
+        1 -> android.graphics.Color.green(pixel)
+        else -> android.graphics.Color.blue(pixel)
+    }
+    val topValue = component(top[x0]) + (component(top[x1]) - component(top[x0])) * fractionX
+    val bottomValue = component(bottom[x0]) + (component(bottom[x1]) - component(bottom[x0])) * fractionX
+    return topValue + (bottomValue - topValue) * fractionY
+}
+
+private suspend fun decodeEditorBitmap(
     context: Context,
     imageUri: String,
     maxDimension: Int?
