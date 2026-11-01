@@ -30,26 +30,11 @@ private val toolGroups = listOf(
         "Image editing",
         Icons.Default.Edit,
         listOf(
-            "Single-image editing",
-            "Batch image processing",
-            "Crop and free-rotation crop",
-            "Perspective correction",
-            "Aspect-ratio crop and custom presets",
-            "Shape-based crop and masks",
-            "Resize by width and height",
-            "Adaptive and aspect-ratio-preserving resize",
-            "Maximum-dimension resize",
-            "Center crop",
-            "Background blur while resizing",
-            "Background colour customization",
-            "Rotate and flip",
-            "Image stitching",
-            "Image stacking",
-            "Image splitting",
-            "Batch image cutting",
-            "Raster image tracing to SVG",
-            "Before/after preview",
-            "Undo and redo history"
+            "Open selected image in Emre Editor",
+            "Crop, rotate and flip",
+            "Adjustments and filter workspace",
+            "Layers, text, stickers and shapes",
+            "AI enhancement and background removal"
         )
     ),
     ToolGroup(
@@ -406,7 +391,7 @@ private val toolGroups = listOf(
 )
 
 @Composable
-fun ToolsScreen(onBack: () -> Unit, onOpenPdfTool: (PdfDocumentTool) -> Unit) {
+fun ToolsScreen(onBack: () -> Unit, onOpenPdfTool: (PdfDocumentTool) -> Unit, onOpenEditor: () -> Unit = {}) {
     var query by remember { mutableStateOf("") }
     var expandedGroups by remember { mutableStateOf(setOf("Image editing")) }
 
@@ -530,6 +515,27 @@ fun ToolsScreen(onBack: () -> Unit, onOpenPdfTool: (PdfDocumentTool) -> Unit) {
                 }
             }
 
+            item {
+                ElevatedCard(
+                    onClick = onOpenEditor,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Edit, null, modifier = Modifier.size(26.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Open Emre Editor", fontWeight = FontWeight.SemiBold)
+                            Text("Edit a photo with Emre's native workspace", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ArrowForward, null)
+                    }
+                }
+            }
             items(visibleGroups, key = { it.title }) { group ->
                 val expanded = query.isNotBlank() || group.title in expandedGroups
                 ElevatedCard(
