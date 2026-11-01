@@ -143,18 +143,7 @@ fun ImageEditorScreen(
         loading = true
         error = null
         val decoded = withContext(Dispatchers.IO) {
-            runCatching {
-                val request = ImageRequest.Builder(context)
-                    .data(Uri.parse(source.uri))
-                    .size(CoilSize.ORIGINAL)
-                    .allowHardware(false)
-                    .build()
-                Coil.imageLoader(context).execute(request).drawable?.let { drawable ->
-                    val bitmapDrawable = drawable as? android.graphics.drawable.BitmapDrawable
-                    bitmapDrawable?.bitmap?.copy(Bitmap.Config.ARGB_8888, false)
-                        ?: throw IOException("Unsupported image decoder output")
-                } ?: context.contentResolver.openInputStream(Uri.parse(source.uri))?.use(BitmapFactory::decodeStream)
-            }.getOrNull()
+            runCatching { decodeEditorBitmap(context, source.uri, maxDimension = 2048) }.getOrNull()
         }
         sourceBitmap = decoded
         loading = false
@@ -215,12 +204,20 @@ fun ImageEditorScreen(
             ) { Text("Reset") }
             IconButton(
                 onClick = {
-                    val current = image ?: return@IconButton
+                    image ?: return@IconButton
                     saving = true
                     error = null
                     scope.launch {
                         val saved = withContext(Dispatchers.IO) {
-                            runCatching { exportEditorResult(context, current, recipe) }
+                            runCatching {
+                                val fullResolution = decodeEditorBitmap(context, source.uri, maxDimension = null)
+                                    ?: throw IOException("Unable to decode the original image for export")
+                                try {
+                                    exportEditorResult(context, fullResolution, recipe)
+                                } finally {
+                                    if (!fullResolution.isRecycled) fullResolution.recycle()
+                                }
+                            }
                         }
                         saving = false
                         saved.onSuccess(onSaved).onFailure {
@@ -638,6 +635,51 @@ private fun applyEditorRecipe(
     android.graphics.Canvas(filtered).drawBitmap(adjusted, 0f, 0f, lookPaint)
     if (adjusted !== source && !adjusted.isRecycled) adjusted.recycle()
     return filtered
+}
+
+
+private fun decodeEditorBitmap(
+    context: Context,
+    imageUri: String,
+    maxDimension: Int?
+): Bitmap? {
+    val uri = Uri.parse(imageUri)
+    val requestBuilder = ImageRequest.Builder(context)
+        .data(uri)
+        .allowHardware(false)
+    if (maxDimension == null) {
+        requestBuilder.size(CoilSize.ORIGINAL)
+    } else {
+        requestBuilder.size(maxDimension, maxDimension)
+    }
+    val coilDrawable = Coil.imageLoader(context).execute(requestBuilder.build()).drawable
+    val coilBitmap = (coilDrawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+    if (coilBitmap != null) {
+        return coilBitmap.copy(Bitmap.Config.ARGB_8888, false)
+            ?: throw IOException("Could not create an editor-owned bitmap")
+    }
+
+    // Fallback path for image providers that Coil cannot decode into a BitmapDrawable.
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.contentResolver.openInputStream(uri)?.use {
+        BitmapFactory.decodeStream(it, null, bounds)
+    } ?: return null
+    var sampleSize = 1
+    if (maxDimension != null) {
+        while (
+            bounds.outWidth / sampleSize > maxDimension ||
+            bounds.outHeight / sampleSize > maxDimension
+        ) {
+            sampleSize *= 2
+        }
+    }
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    return context.contentResolver.openInputStream(uri)?.use {
+        BitmapFactory.decodeStream(it, null, options)
+    }
 }
 
 private fun exportEditorResult(
