@@ -1194,8 +1194,8 @@ fun GalleryApp() {
                         onOpenPdfTool = { tool ->
                             selectedPdfTool = tool
                             navigateTo(Destination.PDF_DOCUMENT_TOOL, rememberPrevious = true)
-                        }
-                        ,onOpenEditor = {
+                        },
+                        onOpenEditor = {
                             val candidate = selectedMedia
                                 ?: media.firstOrNull { !it.isVideo && it.uri !in hidden && !it.isTrashed }
                             if (candidate != null) {
