@@ -85,10 +85,6 @@ fun GalleryApp() {
     var destination by remember { mutableStateOf(Destination.HOME) }
     var selectedPdfTool by remember { mutableStateOf(PdfDocumentTool.SCAN) }
     var editorSource by remember { mutableStateOf<MediaItem?>(null) }
-    var editorStartInFilters by remember { mutableStateOf(false) }
-    var editorStartInAi by remember { mutableStateOf(false) }
-    var editorStartInDrawing by remember { mutableStateOf(false) }
-    var editorStartInResize by remember { mutableStateOf(false) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -1194,111 +1190,6 @@ fun GalleryApp() {
                             selectedPdfTool = tool
                             navigateTo(Destination.PDF_DOCUMENT_TOOL, rememberPrevious = true)
                         },
-                        onOpenEditor = {
-                            val candidate = selectedMedia?.takeUnless {
-                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
-                            } ?: media.firstOrNull {
-                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
-                            }
-                            if (candidate != null) {
-                                editorSource = candidate
-                                editorStartInFilters = false
-                                editorStartInAi = false
-                                editorStartInDrawing = false
-                                editorStartInResize = false
-                                navigateTo(
-                                    Destination.IMAGE_EDITOR,
-                                    rememberPrevious = true,
-                                    newSelectedMedia = candidate
-                                )
-                            } else {
-                                scope.launch { snackbarHostState.showSnackbar("Select a photo to edit") }
-                            }
-                        },
-                        onOpenFilters = {
-                            val candidate = selectedMedia?.takeUnless {
-                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
-                            } ?: media.firstOrNull {
-                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
-                            }
-                            if (candidate != null) {
-                                editorSource = candidate
-                                editorStartInFilters = true
-                                editorStartInAi = false
-                                editorStartInDrawing = false
-                                editorStartInResize = false
-                                navigateTo(
-                                    Destination.IMAGE_EDITOR,
-                                    rememberPrevious = true,
-                                    newSelectedMedia = candidate
-                                )
-                            } else {
-                                scope.launch { snackbarHostState.showSnackbar("Select a photo to apply filters") }
-                            }
-                        },
-                        onOpenAiTools = {
-                            val candidate = selectedMedia?.takeUnless {
-                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
-                            } ?: media.firstOrNull {
-                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
-                            }
-                            if (candidate != null) {
-                                editorSource = candidate
-                                editorStartInFilters = false
-                                editorStartInAi = true
-                                editorStartInDrawing = false
-                                editorStartInResize = false
-                                navigateTo(
-                                    Destination.IMAGE_EDITOR,
-                                    rememberPrevious = true,
-                                    newSelectedMedia = candidate
-                                )
-                            } else {
-                                scope.launch { snackbarHostState.showSnackbar("Select a photo for AI background removal") }
-                            }
-                        },
-                        onOpenDrawing = {
-                            val candidate = selectedMedia?.takeUnless {
-                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
-                            } ?: media.firstOrNull {
-                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
-                            }
-                            if (candidate != null) {
-                                editorSource = candidate
-                                editorStartInFilters = false
-                                editorStartInAi = false
-                                editorStartInDrawing = true
-                                editorStartInResize = false
-                                navigateTo(
-                                    Destination.IMAGE_EDITOR,
-                                    rememberPrevious = true,
-                                    newSelectedMedia = candidate
-                                )
-                            } else {
-                                scope.launch { snackbarHostState.showSnackbar("Select a photo to annotate") }
-                            }
-                        },
-                        onOpenResize = {
-                            val candidate = selectedMedia?.takeUnless {
-                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
-                            } ?: media.firstOrNull {
-                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
-                            }
-                            if (candidate != null) {
-                                editorSource = candidate
-                                editorStartInFilters = false
-                                editorStartInAi = false
-                                editorStartInDrawing = false
-                                editorStartInResize = true
-                                navigateTo(
-                                    Destination.IMAGE_EDITOR,
-                                    rememberPrevious = true,
-                                    newSelectedMedia = candidate
-                                )
-                            } else {
-                                scope.launch { snackbarHostState.showSnackbar("Select a photo to resize or convert") }
-                            }
-                        }
                     )
                     Destination.IMAGE_EDITOR -> editorSource?.let { source ->
                         ImageEditorScreen(
@@ -1325,10 +1216,6 @@ fun GalleryApp() {
                                     showViewerControls = true
                                 }
                             },
-                            startInFilters = editorStartInFilters,
-                            startInAi = editorStartInAi,
-                            startInDrawing = editorStartInDrawing,
-                            startInResize = editorStartInResize
                         )
                     }
                     Destination.PDF_DOCUMENT_TOOL -> PdfDocumentToolScreen(
@@ -1487,10 +1374,6 @@ fun GalleryApp() {
                         scope.launch { snackbarHostState.showSnackbar("Video editing is not available yet") }
                     } else {
                         editorSource = currentItem
-                        editorStartInFilters = false
-                        editorStartInAi = false
-                        editorStartInDrawing = false
-                        editorStartInResize = false
                         navigateTo(Destination.IMAGE_EDITOR, rememberPrevious = true, newSelectedMedia = currentItem)
                     }
                 },

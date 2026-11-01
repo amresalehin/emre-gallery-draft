@@ -6,7 +6,7 @@
 
 This matrix accounts for **all 69 upstream feature Gradle modules**, all 10 upstream core modules and all 18 supporting library modules. "Disposition" describes how the feature should be delivered in Emre; it does not claim the feature is implemented.
 
-**Current implementation state:** The Tools catalogue is searchable and grouped into feature categories. Connected initial vertical slices include the native editor (crop/transform/adjust), 40 Emre ColorMatrix filter looks and six CPU effects, ML Kit person segmentation with transparent PNG export, and layered drawing annotations (pen, highlighter, annotation-only eraser, line, arrow, rectangle, ellipse and text), plus resize/conversion/compression (custom dimensions, JPEG/PNG/WebP output, lossy quality control and target-size search). The remaining upstream modules are planned/discovery entries until their UI, backend, export and tests are connected.
+**Current implementation state:** Settings → Tools is reserved for non-editor utilities such as OCR, PDF, QR/barcode, photo discovery, files and archives. The unified Emre Editor owns crop/transform/adjust, filters/effects, AI person cutout, layered drawing, resize/conversion/compression and export. Additional image-creation categories have moved into the editor's More mode and are explicitly marked Planned until their UI, backend and export paths are implemented.
 
 ## A. Feature modules — all 69 accounted for
 

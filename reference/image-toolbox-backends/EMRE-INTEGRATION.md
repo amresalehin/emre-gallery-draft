@@ -23,7 +23,7 @@ The editor is a native Compose destination and uses Emre's existing Coil 2 image
 - Best-effort EXIF transfer for capture date, camera/lens, exposure and GPS fields; output orientation and pixel dimensions are normalized to the exported pixels.
 - MediaStore pending-row export on Android 10+, with a legacy public-folder path and runtime write-permission request on Android 8–9.
 
-The viewer's Edit action and the Tools shortcut open this native editor. Video items are intentionally excluded.
+The viewer's Edit action opens one unified native editor workspace. Crop, Adjust, Filters, Effects, Draw, Export/Resize and AI are all editor modes; there are no separate image-editor launch cards in Settings → Tools. Additional image-creation categories are grouped under the editor's More mode and explicitly marked Planned until implemented. Video items are intentionally excluded.
 
 ## Not integrated yet
 

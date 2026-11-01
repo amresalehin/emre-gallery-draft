@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.FilterVintage
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Save
@@ -122,7 +123,23 @@ import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-private enum class EditorMode { Crop, Adjust, Filters, Effects, Drawing, Resize, AI }
+private enum class EditorMode { Crop, Adjust, Filters, Effects, Drawing, Resize, AI, More }
+
+private data class PlannedEditorToolGroup(
+    val title: String,
+    val summary: String,
+    val features: List<String>
+)
+
+private val EDITOR_MORE_TOOL_GROUPS = listOf(
+    PlannedEditorToolGroup("Watermark & privacy", "Text/logo stamps, privacy masks and watermark workflows", listOf("Text and repeating watermarks", "Logo and timestamp stamps", "Face masking, blur and pixelation")),
+    PlannedEditorToolGroup("Collage & image creation", "Composition and generated-image workflows", listOf("Collage layouts", "Panorama and image stitching", "Photomosaic, stacking and patterns")),
+    PlannedEditorToolGroup("Colour & analysis", "Advanced colour tools and scopes", listOf("Curves and colour picker", "Palettes and gradients", "Histograms, waveform and vectorscope")),
+    PlannedEditorToolGroup("Image comparison", "Detailed before/after and pixel comparison", listOf("Side-by-side and split comparison", "Transparency overlay", "Pixel metrics and comparison animation")),
+    PlannedEditorToolGroup("Code preview", "Render syntax-highlighted code as an image", listOf("Code cards", "Syntax themes", "Custom backgrounds and framing")),
+    PlannedEditorToolGroup("Shader Studio", "Custom shader-based image effects", listOf("GLSL editor", "Live shader preview", "Reusable shader presets")),
+    PlannedEditorToolGroup("Screenshot & social export", "Device-ready image framing for social platforms", listOf("Custom backgrounds, padding and ratios", "Rounded corners and shadows", "Platform-specific image layouts"))
+)
 
 private enum class EditorOutputFormat(val title: String, val extension: String, val mimeType: String) {
     JPEG("JPEG", "jpg", "image/jpeg"),
@@ -250,11 +267,7 @@ private data class EditorRecipe(
 fun ImageEditorScreen(
     source: MediaItem,
     onBack: () -> Unit,
-    onSaved: (MediaItem) -> Unit,
-    startInFilters: Boolean = false,
-    startInAi: Boolean = false,
-    startInDrawing: Boolean = false,
-    startInResize: Boolean = false
+    onSaved: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -280,15 +293,7 @@ fun ImageEditorScreen(
         redoStack = redoStack.dropLast(1)
         recipe = next
     }
-    var mode by remember(source.uri, startInFilters, startInAi, startInDrawing, startInResize) {
-        mutableStateOf(when {
-            startInResize -> EditorMode.Resize
-            startInDrawing -> EditorMode.Drawing
-            startInAi -> EditorMode.AI
-            startInFilters -> EditorMode.Filters
-            else -> EditorMode.Crop
-        })
-    }
+    var mode by remember(source.uri) { mutableStateOf(EditorMode.Crop) }
     var selectedFilterCategory by remember(source.uri) { mutableStateOf(FilterCategory.All) }
     var markupTool by remember(source.uri) { mutableStateOf(MarkupTool.Pen) }
     var markupColor by remember(source.uri) { mutableIntStateOf(android.graphics.Color.WHITE) }
@@ -298,7 +303,7 @@ fun ImageEditorScreen(
     var exportWidthText by remember(source.uri) { mutableStateOf(source.width.coerceAtLeast(1).toString()) }
     var exportHeightText by remember(source.uri) { mutableStateOf(source.height.coerceAtLeast(1).toString()) }
     var lockExportAspect by remember(source.uri) { mutableStateOf(true) }
-    var exportFormat by remember(source.uri, startInAi) { mutableStateOf(if (startInAi) EditorOutputFormat.PNG else EditorOutputFormat.JPEG) }
+    var exportFormat by remember(source.uri) { mutableStateOf(EditorOutputFormat.JPEG) }
     var exportQuality by remember(source.uri) { mutableFloatStateOf(92f) }
     var fitTargetSize by remember(source.uri) { mutableStateOf(false) }
     var targetSizeMbText by remember(source.uri) { mutableStateOf("2") }
@@ -579,6 +584,7 @@ fun ImageEditorScreen(
                                 EditorMode.Drawing -> Icons.Default.Brush
                                 EditorMode.Resize -> Icons.Default.Save
                                 EditorMode.AI -> Icons.Default.AutoAwesome
+                                EditorMode.More -> Icons.Default.MoreHoriz
                             },
                             contentDescription = null,
                             modifier = Modifier.size(17.dp),
@@ -593,6 +599,7 @@ fun ImageEditorScreen(
                                 EditorMode.Drawing -> "Draw"
                                 EditorMode.Resize -> "Export"
                                 EditorMode.AI -> "AI"
+                                EditorMode.More -> "More"
                             },
                             modifier = Modifier.padding(start = 7.dp),
                             color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
@@ -909,6 +916,28 @@ fun ImageEditorScreen(
                 Text("Source: ${source.width} × ${source.height} px • ${(source.sizeBytes / (1024f * 1024f)).let { String.format(Locale.US, "%.2f MB", it) }}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Export creates a new file in Pictures/Emre. The original image is not overwritten.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        } else if (mode == EditorMode.More) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("More editor tools", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text("These tools are grouped here in the editor workspace. Items marked Planned are not implemented yet; available editing tools are in the tabs above.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                EDITOR_MORE_TOOL_GROUPS.forEach { group ->
+                    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(15.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(group.title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+                                    Text("Planned", modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                            Text(group.summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(group.features.joinToString("  •  "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
         } else if (mode == EditorMode.AI) {
             Column(
                 Modifier.fillMaxWidth()
@@ -932,7 +961,9 @@ fun ImageEditorScreen(
                     Icons.Default.AutoAwesome
                 ) {
                     showOriginalPreview = false
-                    updateRecipe(recipe.copy(removePersonBackground = !recipe.removePersonBackground))
+                    val enableCutout = !recipe.removePersonBackground
+                    if (enableCutout && exportFormat == EditorOutputFormat.JPEG) exportFormat = EditorOutputFormat.PNG
+                    updateRecipe(recipe.copy(removePersonBackground = enableCutout))
                 }
                 if (recipe.removePersonBackground) {
                     Text(

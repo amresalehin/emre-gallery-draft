@@ -27,74 +27,6 @@ private data class ToolGroup(
 
 private val toolGroups = listOf(
     ToolGroup(
-        "Image editing",
-        Icons.Default.Edit,
-        listOf(
-            "Open a photo in Emre Editor",
-            "Free crop and aspect-ratio presets",
-            "Rotate by 90 degrees",
-            "Horizontal and vertical flip",
-            "Brightness, contrast and saturation",
-            "Save edited result as a new JPEG copy"
-        )
-    ),
-    ToolGroup(
-        "Filters and effects",
-        Icons.Default.Tune,
-        listOf(
-            "40 colour and monochrome filter presets",
-            "Portrait, film, vintage, monochrome and colour categories",
-            "Adjustable filter strength and original-versus-edited comparison",
-            "Brightness, exposure, contrast and saturation",
-            "Temperature and tint colour grading",
-            "Vignette, film grain, fade and soft-focus effects",
-            "Sharpening and pixelation effects",
-            "Non-destructive preview with 30-step undo and redo",
-            "Export a new JPEG copy with preserved photo metadata"
-        )
-    ),
-    ToolGroup(
-        "AI tools",
-        Icons.Default.AutoAwesome,
-        listOf(
-            "People-only background segmentation with the on-device ML Kit Selfie Segmenter",
-            "Transparent PNG export to Pictures/Emre",
-            "Original photo remains unchanged",
-            "Works offline after installation; no photo upload"
-        )
-    ),
-    ToolGroup(
-        "Drawing and annotation",
-        Icons.Default.Brush,
-        listOf(
-            "Freehand pen strokes",
-            "Semi-transparent highlighter strokes",
-            "Annotation-only eraser that preserves the source photo",
-            "Straight lines and arrow annotations",
-            "Rectangle and ellipse outlines",
-            "Text layers placed by tapping the image",
-            "Eight annotation colours and adjustable stroke width",
-            "Independent annotation layers with undo and redo",
-            "Remove the last layer or clear all annotations",
-            "Annotations are composited into the exported image copy"
-        )
-    ),
-    ToolGroup(
-        "Watermark and privacy",
-        Icons.Default.Security,
-        listOf(
-            "Text watermark",
-            "Repeating text watermark",
-            "Image and logo watermark",
-            "Timestamp and stamp watermark",
-            "Digital watermarking through steganography",
-            "Face masking",
-            "Privacy blur",
-            "Pixelation-based censorship",
-            "File encryption and decryption with 100+ algorithms"
-        )
-    ),
-    ToolGroup(
         "OCR and text extraction",
         Icons.Default.TextFields,
         listOf(
@@ -139,36 +71,6 @@ private val toolGroups = listOf(
         )
     ),
     ToolGroup(
-        "Resize, conversion and compression",
-        Icons.Default.Image,
-        listOf(
-            "Custom output width and height in pixels",
-            "Aspect-ratio lock for proportional resizing",
-            "Resize after crop, adjustments, filters and annotations",
-            "Convert to JPEG, PNG or WebP",
-            "Adjustable JPEG and WebP quality",
-            "Best-effort target file-size compression for JPEG and WebP",
-            "Automatic output dimension safety limit (40 megapixels)",
-            "Save a new file in Pictures/Emre without changing the original"
-        )
-    ),
-    ToolGroup(
-        "Collage and creation",
-        Icons.Default.GridView,
-        listOf(
-            "Collages from 1–20 images",
-            "310+ collage layouts",
-            "Photomosaic generation",
-            "Image stitching and panorama",
-            "Image stacking",
-            "Texture generation",
-            "Procedural pattern generation",
-            "3D geometric pattern generation",
-            "Wallpaper creation",
-            "ASCII art generation"
-        )
-    ),
-    ToolGroup(
         "Barcode and QR",
         Icons.Default.QrCode,
         listOf(
@@ -184,43 +86,6 @@ private val toolGroups = listOf(
             "Contacts (vCard)",
             "Calendar events",
             "Export as raster image or SVG"
-        )
-    ),
-    ToolGroup(
-        "Colour and analysis",
-        Icons.Default.Palette,
-        listOf(
-            "Colour picker",
-            "Palette generation and extraction",
-            "33,000+ colour library",
-            "Material You colour schemes",
-            "Gradient and mesh-gradient generation",
-            "Gradient overlay",
-            "Colour mixing and conversion",
-            "Colour harmonies and shading",
-            "Palette import/export in 41 formats",
-            "Tone, RGB, CMYK and LAB curves",
-            "Hue versus saturation, hue and luminance",
-            "Colour wheels",
-            "RGB and brightness histograms",
-            "Camera-style RGB histogram",
-            "Waveform scopes",
-            "Vectorscope"
-        )
-    ),
-    ToolGroup(
-        "Image comparison",
-        Icons.Default.CompareArrows,
-        listOf(
-            "Slide comparison",
-            "Side-by-side comparison",
-            "Transparency comparison",
-            "Tap-to-toggle comparison",
-            "Before/after GIF export",
-            "Horizontal and vertical comparison animations",
-            "Optional comparison labels",
-            "Pixel-by-pixel comparison",
-            "SSIM, AE, MAE, NCC, PSNR and RMSE metrics"
         )
     ),
     ToolGroup(
@@ -244,56 +109,6 @@ private val toolGroups = listOf(
             "Face covers and matching thresholds",
             "Merge people groups",
             "Exclude selected photographs"
-        )
-    ),
-    ToolGroup(
-        "Code preview",
-        Icons.Default.Code,
-        listOf(
-            "Code-to-image cards",
-            "Syntax highlighting for 190+ languages",
-            "256 syntax themes",
-            "30 gradient backgrounds",
-            "Custom colours and transparency",
-            "Canvas spacing and rounded corners",
-            "Rotation and window controls",
-            "Line numbers and card shadows"
-        )
-    ),
-    ToolGroup(
-        "Shader Studio",
-        Icons.Default.DeveloperMode,
-        listOf(
-            "Custom fragment shaders",
-            "GLSL editor and syntax highlighting",
-            "Shader validation",
-            "Live preview",
-            "Configurable shader parameters",
-            "Import and export shader presets",
-            "Share and manage saved shaders"
-        )
-    ),
-    ToolGroup(
-        "Screenshot and social export",
-        Icons.Default.CropLandscape,
-        listOf(
-            "Solid and gradient backgrounds",
-            "Custom padding and aspect ratios",
-            "Rounded corners and shadows",
-            "Instagram posts, Stories, Reels and profile images",
-            "Facebook posts, Stories and covers",
-            "YouTube thumbnails, banners and channel images",
-            "TikTok portrait, landscape and square",
-            "X posts, headers and profile images",
-            "LinkedIn posts, covers and article images",
-            "Pinterest Pins",
-            "Reddit banners and community icons",
-            "Snapchat Stories and advertisements",
-            "Behance project images",
-            "GitHub social previews",
-            "Telegram stickers and custom emoji",
-            "Discord banners and avatars",
-            "Twitch banners and thumbnails"
         )
     ),
     ToolGroup(
@@ -344,15 +159,10 @@ private val toolGroups = listOf(
 @Composable
 fun ToolsScreen(
     onBack: () -> Unit,
-    onOpenPdfTool: (PdfDocumentTool) -> Unit,
-    onOpenEditor: () -> Unit = {},
-    onOpenFilters: () -> Unit = {},
-    onOpenAiTools: () -> Unit = {},
-    onOpenDrawing: () -> Unit = {},
-    onOpenResize: () -> Unit = {}
+    onOpenPdfTool: (PdfDocumentTool) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
-    var expandedGroups by remember { mutableStateOf(setOf("Image editing")) }
+    var expandedGroups by remember { mutableStateOf(emptySet<String>()) }
 
     val visibleGroups = remember(query) {
         toolGroups.mapNotNull { group ->
@@ -474,111 +284,6 @@ fun ToolsScreen(
                 }
             }
 
-            item {
-                ElevatedCard(
-                    onClick = onOpenEditor,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(26.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Open Emre Editor", fontWeight = FontWeight.SemiBold)
-                            Text("Edit a photo with Emre's native workspace", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.Default.ArrowForward, contentDescription = null)
-                    }
-                }
-            }
-            item {
-                ElevatedCard(
-                    onClick = onOpenFilters,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(26.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Open Filters & Effects", fontWeight = FontWeight.SemiBold)
-                            Text("40 filters, colour grading and six image effects", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.Default.ArrowForward, contentDescription = null)
-                    }
-                }
-            }
-            item {
-                ElevatedCard(
-                    onClick = onOpenAiTools,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(26.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Open AI Background Removal", fontWeight = FontWeight.SemiBold)
-                            Text("Person cutout with transparent PNG export", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.Default.ArrowForward, contentDescription = null)
-                    }
-                }
-            }
-            item {
-                ElevatedCard(
-                    onClick = onOpenDrawing,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Brush, contentDescription = null, modifier = Modifier.size(26.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Open Drawing & Annotation", fontWeight = FontWeight.SemiBold)
-                            Text("Brush, highlighter, shapes, arrows and text layers", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.Default.ArrowForward, contentDescription = null)
-                    }
-                }
-            }
-            item {
-                ElevatedCard(
-                    onClick = onOpenResize,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(26.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Open Resize & Export", fontWeight = FontWeight.SemiBold)
-                            Text("Pixel dimensions, JPEG / PNG / WebP and target-size compression", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Icon(Icons.Default.ArrowForward, contentDescription = null)
-                    }
-                }
-            }
             items(visibleGroups, key = { it.title }) { group ->
                 val expanded = query.isNotBlank() || group.title in expandedGroups
                 ElevatedCard(

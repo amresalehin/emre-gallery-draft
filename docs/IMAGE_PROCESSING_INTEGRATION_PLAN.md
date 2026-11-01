@@ -17,7 +17,7 @@ The following work has now been committed on `research/image-toolbox-backends`:
 
 | Area | Branch state | Notes |
 |---|---|---|
-| Native editor navigation | Implemented | Viewer Edit and Tools shortcuts route to the Emre Compose editor. |
+| Native editor navigation | Implemented | Viewer Edit opens one unified Emre Compose editor. Image editing controls are not duplicated in Settings → Tools. |
 | Crop / transform | Initial implementation | Free crop, aspect presets, quarter-turn rotation and horizontal/vertical flip. |
 | Adjust / Filters & Effects | Initial implementation | Six tonal controls, 40 Emre ColorMatrix looks and six CPU effects; not the full upstream catalogue. |
 | Drawing & Annotation | Initial implementation | Non-destructive pen/highlighter/eraser, line/arrow/rectangle/ellipse and text layers; preview and export compositing. |
