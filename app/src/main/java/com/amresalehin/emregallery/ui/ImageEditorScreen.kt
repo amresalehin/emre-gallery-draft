@@ -30,11 +30,14 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -492,7 +495,13 @@ fun ImageEditorScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else if (mode == EditorMode.Adjust) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .heightIn(max = 260.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 3.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 AdjustmentSlider(
                     "Brightness", recipe.brightness, -0.5f..0.5f,
                     valueLabel = { (it * 100f).roundToInt().toString() }
@@ -602,7 +611,10 @@ fun ImageEditorScreen(
             }
         } else {
             Column(
-                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 3.dp),
+                Modifier.fillMaxWidth()
+                    .heightIn(max = 260.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 3.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 AdjustmentSlider("Vignette", recipe.vignette, 0f..1f) {
@@ -1006,27 +1018,33 @@ private fun applyEditorEffects(
 
     val width = source.width
     val height = source.height
-    val blurBitmap = if (softAmount > 0f && width > 1 && height > 1) {
-        val scale = (1f - softFocus.coerceIn(0f, 1f) * 0.84f).coerceIn(0.16f, 1f)
-        val blurWidth = (width * scale).roundToInt().coerceIn(1, width)
-        val blurHeight = (height * scale).roundToInt().coerceIn(1, height)
-        if (blurWidth < width || blurHeight < height) {
-            Bitmap.createScaledBitmap(source, blurWidth, blurHeight, true)
-        } else null
-    } else null
-
-    val pixelBitmap = if (pixelAmount > 0f && width > 1 && height > 1) {
-        val blockSize = (2f + pixelate.coerceIn(0f, 1f) * 46f).roundToInt().coerceAtLeast(2)
-        val pixelWidth = ((width + blockSize - 1) / blockSize).coerceIn(1, width)
-        val pixelHeight = ((height + blockSize - 1) / blockSize).coerceIn(1, height)
-        if (pixelWidth < width || pixelHeight < height) {
-            Bitmap.createScaledBitmap(source, pixelWidth, pixelHeight, false)
-        } else null
-    } else null
-
-    val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    var blurBitmap: Bitmap? = null
+    var pixelBitmap: Bitmap? = null
+    var output: Bitmap? = null
     var completed = false
+
     try {
+        if (softAmount > 0f && width > 1 && height > 1) {
+            val scale = (1f - softFocus.coerceIn(0f, 1f) * 0.84f).coerceIn(0.16f, 1f)
+            val blurWidth = (width * scale).roundToInt().coerceIn(1, width)
+            val blurHeight = (height * scale).roundToInt().coerceIn(1, height)
+            if (blurWidth < width || blurHeight < height) {
+                blurBitmap = Bitmap.createScaledBitmap(source, blurWidth, blurHeight, true)
+            }
+        }
+
+        if (pixelAmount > 0f && width > 1 && height > 1) {
+            val blockSize = (2f + pixelate.coerceIn(0f, 1f) * 46f).roundToInt().coerceAtLeast(2)
+            val pixelWidth = ((width + blockSize - 1) / blockSize).coerceIn(1, width)
+            val pixelHeight = ((height + blockSize - 1) / blockSize).coerceIn(1, height)
+            if (pixelWidth < width || pixelHeight < height) {
+                pixelBitmap = Bitmap.createScaledBitmap(source, pixelWidth, pixelHeight, false)
+            }
+        }
+
+        val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        output = result
+
         val sourceRow = IntArray(width)
         val aboveRow = IntArray(width)
         val belowRow = IntArray(width)
@@ -1035,74 +1053,75 @@ private fun applyEditorEffects(
         val centerY = (height - 1) / 2f
         val maxRadiusSquared = (centerX * centerX + centerY * centerY).coerceAtLeast(1f)
 
-        val blurWidth = blurBitmap?.width ?: 0
-        val blurHeight = blurBitmap?.height ?: 0
-        val blurTop = if (blurBitmap != null) IntArray(blurWidth) else null
-        val blurBottom = if (blurBitmap != null) IntArray(blurWidth) else null
+        val blur = blurBitmap
+        val blurWidth = blur?.width ?: 0
+        val blurHeight = blur?.height ?: 0
+        val blurTop = if (blur != null) IntArray(blurWidth) else null
+        val blurBottom = if (blur != null) IntArray(blurWidth) else null
 
-        val pixelWidth = pixelBitmap?.width ?: 0
-        val pixelHeight = pixelBitmap?.height ?: 0
-        val pixelRow = if (pixelBitmap != null) IntArray(pixelWidth) else null
+        val pixel = pixelBitmap
+        val pixelWidth = pixel?.width ?: 0
+        val pixelHeight = pixel?.height ?: 0
+        val pixelRow = if (pixel != null) IntArray(pixelWidth) else null
 
         for (y in 0 until height) {
             source.getPixels(sourceRow, 0, width, 0, y, width, 1)
             source.getPixels(aboveRow, 0, width, 0, (y - 1).coerceAtLeast(0), width, 1)
             source.getPixels(belowRow, 0, width, 0, (y + 1).coerceAtMost(height - 1), width, 1)
 
-            var blurY0 = 0
             var blurY1 = 0
             var blurFractionY = 0f
-            if (blurBitmap != null && blurTop != null && blurBottom != null) {
+            if (blur != null && blurTop != null && blurBottom != null) {
                 val mappedY = if (height <= 1) 0f else y * (blurHeight - 1).toFloat() / (height - 1)
-                blurY0 = mappedY.toInt().coerceIn(0, blurHeight - 1)
+                val blurY0 = mappedY.toInt().coerceIn(0, blurHeight - 1)
                 blurY1 = (blurY0 + 1).coerceAtMost(blurHeight - 1)
                 blurFractionY = mappedY - blurY0
-                blurBitmap.getPixels(blurTop, 0, blurWidth, 0, blurY0, blurWidth, 1)
-                blurBitmap.getPixels(blurBottom, 0, blurWidth, 0, blurY1, blurWidth, 1)
+                blur.getPixels(blurTop, 0, blurWidth, 0, blurY0, blurWidth, 1)
+                blur.getPixels(blurBottom, 0, blurWidth, 0, blurY1, blurWidth, 1)
             }
 
-            if (pixelBitmap != null && pixelRow != null) {
+            if (pixel != null && pixelRow != null) {
                 val mappedY = (y.toLong() * pixelHeight / height).toInt().coerceIn(0, pixelHeight - 1)
-                pixelBitmap.getPixels(pixelRow, 0, pixelWidth, 0, mappedY, pixelWidth, 1)
+                pixel.getPixels(pixelRow, 0, pixelWidth, 0, mappedY, pixelWidth, 1)
             }
 
             val dy = y - centerY
             for (x in 0 until width) {
-                val pixel = sourceRow[x]
-                val alpha = android.graphics.Color.alpha(pixel)
-                var red = android.graphics.Color.red(pixel).toFloat()
-                var green = android.graphics.Color.green(pixel).toFloat()
-                var blue = android.graphics.Color.blue(pixel).toFloat()
+                val sourcePixel = sourceRow[x]
+                val alpha = android.graphics.Color.alpha(sourcePixel)
+                var red = android.graphics.Color.red(sourcePixel).toFloat()
+                var green = android.graphics.Color.green(sourcePixel).toFloat()
+                var blue = android.graphics.Color.blue(sourcePixel).toFloat()
 
                 if (sharpenAmount > 0f) {
-                    val left = sourceRow[(x - 1).coerceAtLeast(0)]
-                    val right = sourceRow[(x + 1).coerceAtMost(width - 1)]
-                    val up = aboveRow[x]
-                    val down = belowRow[x]
+                    val leftPixel = sourceRow[(x - 1).coerceAtLeast(0)]
+                    val rightPixel = sourceRow[(x + 1).coerceAtMost(width - 1)]
+                    val upPixel = aboveRow[x]
+                    val downPixel = belowRow[x]
                     val averageRed = (
-                        android.graphics.Color.red(left) +
-                        android.graphics.Color.red(right) +
-                        android.graphics.Color.red(up) +
-                        android.graphics.Color.red(down)
+                        android.graphics.Color.red(leftPixel) +
+                        android.graphics.Color.red(rightPixel) +
+                        android.graphics.Color.red(upPixel) +
+                        android.graphics.Color.red(downPixel)
                     ) * 0.25f
                     val averageGreen = (
-                        android.graphics.Color.green(left) +
-                        android.graphics.Color.green(right) +
-                        android.graphics.Color.green(up) +
-                        android.graphics.Color.green(down)
+                        android.graphics.Color.green(leftPixel) +
+                        android.graphics.Color.green(rightPixel) +
+                        android.graphics.Color.green(upPixel) +
+                        android.graphics.Color.green(downPixel)
                     ) * 0.25f
                     val averageBlue = (
-                        android.graphics.Color.blue(left) +
-                        android.graphics.Color.blue(right) +
-                        android.graphics.Color.blue(up) +
-                        android.graphics.Color.blue(down)
+                        android.graphics.Color.blue(leftPixel) +
+                        android.graphics.Color.blue(rightPixel) +
+                        android.graphics.Color.blue(upPixel) +
+                        android.graphics.Color.blue(downPixel)
                     ) * 0.25f
                     red += (red - averageRed) * sharpenAmount
                     green += (green - averageGreen) * sharpenAmount
                     blue += (blue - averageBlue) * sharpenAmount
                 }
 
-                if (blurBitmap != null && blurTop != null && blurBottom != null) {
+                if (blur != null && blurTop != null && blurBottom != null) {
                     val mappedX = if (width <= 1) 0f else x * (blurWidth - 1).toFloat() / (width - 1)
                     val blurX0 = mappedX.toInt().coerceIn(0, blurWidth - 1)
                     val blurX1 = (blurX0 + 1).coerceAtMost(blurWidth - 1)
@@ -1115,12 +1134,12 @@ private fun applyEditorEffects(
                     blue += (blurredBlue - blue) * softAmount
                 }
 
-                if (pixelBitmap != null && pixelRow != null) {
+                if (pixel != null && pixelRow != null) {
                     val pixelX = (x.toLong() * pixelWidth / width).toInt().coerceIn(0, pixelWidth - 1)
-                    val pixel = pixelRow[pixelX]
-                    red += (android.graphics.Color.red(pixel) - red) * pixelAmount
-                    green += (android.graphics.Color.green(pixel) - green) * pixelAmount
-                    blue += (android.graphics.Color.blue(pixel) - blue) * pixelAmount
+                    val pixelPixel = pixelRow[pixelX]
+                    red += (android.graphics.Color.red(pixelPixel) - red) * pixelAmount
+                    green += (android.graphics.Color.green(pixelPixel) - green) * pixelAmount
+                    blue += (android.graphics.Color.blue(pixelPixel) - blue) * pixelAmount
                 }
 
                 if (fadeAmount > 0f) {
@@ -1156,14 +1175,15 @@ private fun applyEditorEffects(
                     blue.toInt().coerceIn(0, 255)
                 )
             }
-            output.setPixels(outputRow, 0, width, 0, y, width, 1)
+            result.setPixels(outputRow, 0, width, 0, y, width, 1)
         }
+
         completed = true
-        return output
+        return result
     } finally {
         blurBitmap?.takeIf { it !== source && !it.isRecycled }?.recycle()
         pixelBitmap?.takeIf { it !== source && it !== blurBitmap && !it.isRecycled }?.recycle()
-        if (!completed && !output.isRecycled) output.recycle()
+        if (!completed) output?.takeIf { !it.isRecycled }?.recycle()
     }
 }
 
