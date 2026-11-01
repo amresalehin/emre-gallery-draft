@@ -87,10 +87,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
 
-private enum class EditorMode { Crop, Adjust }
+private enum class EditorMode { Crop, Adjust, Looks }
+private enum class EditorLook(val title: String) {
+    Original("Original"),
+    Mono("Mono"),
+    Sepia("Sepia"),
+    Warm("Warm"),
+    Cool("Cool"),
+    Vivid("Vivid"),
+    Matte("Matte")
+}
 private enum class CropEdge { Left, Top, Right, Bottom }
 private enum class CropPreset(val title: String, val ratio: Float?) {
     Free("Free", null),
@@ -110,7 +118,8 @@ private data class EditorRecipe(
     val cropBottom: Float = 1f,
     val brightness: Float = 0f,
     val contrast: Float = 1f,
-    val saturation: Float = 1f
+    val saturation: Float = 1f,
+    val look: EditorLook = EditorLook.Original
 )
 
 @Composable
@@ -280,13 +289,21 @@ fun ImageEditorScreen(
                 ) {
                     Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            if (target == EditorMode.Crop) Icons.Default.Crop else Icons.Default.Tune,
+                            when (target) {
+                                EditorMode.Crop -> Icons.Default.Crop
+                                EditorMode.Adjust -> Icons.Default.Tune
+                                EditorMode.Looks -> Icons.Default.AutoAwesome
+                            },
                             contentDescription = null,
                             modifier = Modifier.size(17.dp),
                             tint = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            if (target == EditorMode.Crop) "Crop" else "Adjust",
+                            when (target) {
+                                EditorMode.Crop -> "Crop"
+                                EditorMode.Adjust -> "Adjust"
+                                EditorMode.Looks -> "Looks"
+                            },
                             modifier = Modifier.padding(start = 7.dp),
                             color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Medium
@@ -341,12 +358,40 @@ fun ImageEditorScreen(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        } else {
+        } else if (mode == EditorMode.Adjust) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 AdjustmentSlider("Brightness", recipe.brightness, -0.5f..0.5f) { recipe = recipe.copy(brightness = it) }
                 AdjustmentSlider("Contrast", recipe.contrast, 0.5f..1.8f) { recipe = recipe.copy(contrast = it) }
                 AdjustmentSlider("Saturation", recipe.saturation, 0f..2f) { recipe = recipe.copy(saturation = it) }
             }
+        } else {
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(EditorLook.entries.size) { index ->
+                    val look = EditorLook.entries[index]
+                    val selected = recipe.look == look
+                    Surface(
+                        modifier = Modifier.clip(CircleShape).clickable { recipe = recipe.copy(look = look) },
+                        color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = CircleShape
+                    ) {
+                        Text(
+                            look.title,
+                            modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp),
+                            color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
+            }
+            Text(
+                "Looks are previewed non-destructively. Save creates a separate JPEG copy.",
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
 
         Spacer(Modifier.height(WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding().coerceAtLeast(4.dp)))
@@ -542,29 +587,57 @@ private fun applyEditorRecipe(
         transformed.recycle()
     }
 
-    if (recipe.brightness == 0f && recipe.contrast == 1f && recipe.saturation == 1f) {
-        return cropped
+    val hasAdjustments = recipe.brightness != 0f || recipe.contrast != 1f || recipe.saturation != 1f
+    var adjusted = cropped
+    if (hasAdjustments) {
+        val brightnessOffset = recipe.brightness * 255f
+        val contrast = recipe.contrast
+        val saturation = recipe.saturation
+        val lumR = 0.213f * (1f - saturation)
+        val lumG = 0.715f * (1f - saturation)
+        val lumB = 0.072f * (1f - saturation)
+        val adjustmentMatrix = android.graphics.ColorMatrix(floatArrayOf(
+            contrast * (lumR + saturation), contrast * lumG, contrast * lumB, 0f, brightnessOffset,
+            contrast * lumR, contrast * (lumG + saturation), contrast * lumB, 0f, brightnessOffset,
+            contrast * lumR, contrast * lumG, contrast * (lumB + saturation), 0f, brightnessOffset,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        adjusted = Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = android.graphics.ColorMatrixColorFilter(adjustmentMatrix)
+        }
+        android.graphics.Canvas(adjusted).drawBitmap(cropped, 0f, 0f, paint)
+        if (cropped !== source && !cropped.isRecycled) cropped.recycle()
     }
 
-    val result = Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888)
-    val brightnessOffset = recipe.brightness * 255f
-    val contrast = recipe.contrast
-    val saturation = recipe.saturation
-    val lumR = 0.213f * (1f - saturation)
-    val lumG = 0.715f * (1f - saturation)
-    val lumB = 0.072f * (1f - saturation)
-    val colorMatrix = android.graphics.ColorMatrix(floatArrayOf(
-        contrast * (lumR + saturation), contrast * lumG, contrast * lumB, 0f, brightnessOffset,
-        contrast * lumR, contrast * (lumG + saturation), contrast * lumB, 0f, brightnessOffset,
-        contrast * lumR, contrast * lumG, contrast * (lumB + saturation), 0f, brightnessOffset,
-        0f, 0f, 0f, 1f, 0f
-    ))
-    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        colorFilter = android.graphics.ColorMatrixColorFilter(colorMatrix)
+    if (recipe.look == EditorLook.Original) return adjusted
+
+    val lookMatrix = when (recipe.look) {
+        EditorLook.Original -> android.graphics.ColorMatrix()
+        EditorLook.Mono -> android.graphics.ColorMatrix().apply { setSaturation(0f) }
+        EditorLook.Sepia -> android.graphics.ColorMatrix(floatArrayOf(
+            0.393f, 0.769f, 0.189f, 0f, 0f,
+            0.349f, 0.686f, 0.168f, 0f, 0f,
+            0.272f, 0.534f, 0.131f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+        ))
+        EditorLook.Warm -> android.graphics.ColorMatrix().apply { setScale(1.08f, 1.025f, 0.92f, 1f) }
+        EditorLook.Cool -> android.graphics.ColorMatrix().apply { setScale(0.92f, 1.015f, 1.08f, 1f) }
+        EditorLook.Vivid -> android.graphics.ColorMatrix().apply { setSaturation(1.35f) }
+        EditorLook.Matte -> android.graphics.ColorMatrix(floatArrayOf(
+            0.84f, 0f, 0f, 0f, 20f,
+            0f, 0.84f, 0f, 0f, 20f,
+            0f, 0f, 0.84f, 0f, 20f,
+            0f, 0f, 0f, 1f, 0f
+        ))
     }
-    android.graphics.Canvas(result).drawBitmap(cropped, 0f, 0f, paint)
-    if (cropped !== source && !cropped.isRecycled) cropped.recycle()
-    return result
+    val filtered = Bitmap.createBitmap(adjusted.width, adjusted.height, Bitmap.Config.ARGB_8888)
+    val lookPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        colorFilter = android.graphics.ColorMatrixColorFilter(lookMatrix)
+    }
+    android.graphics.Canvas(filtered).drawBitmap(adjusted, 0f, 0f, lookPaint)
+    if (adjusted !== source && !adjusted.isRecycled) adjusted.recycle()
+    return filtered
 }
 
 private fun exportEditorResult(
