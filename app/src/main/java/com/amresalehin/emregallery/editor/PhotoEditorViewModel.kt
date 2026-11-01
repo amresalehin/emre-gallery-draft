@@ -1231,6 +1231,180 @@ class PhotoEditorViewModel : ViewModel() {
         clearDrawingStrokes()
     }
 
+    // --- Photoshop Mobile Overlay Layer Stack Management ---
+    fun addOverlayLayer(layer: EditorOverlayLayer) {
+        val current = _sessionState.value.overlayLayers
+        val updated = current + layer
+        pushState(_sessionState.value.copy(
+            overlayLayers = updated,
+            activeOverlayLayerId = layer.id,
+            description = "Add ${layer.name}"
+        ))
+    }
+
+    fun updateOverlayLayer(layer: EditorOverlayLayer) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layer.id) layer else it
+        }
+        _sessionState.value = _sessionState.value.copy(overlayLayers = updated)
+        updateLivePreview()
+    }
+
+    fun selectOverlayLayer(layerId: String) {
+        _sessionState.value = _sessionState.value.copy(activeOverlayLayerId = layerId)
+    }
+
+    fun deleteOverlayLayer(layerId: String) {
+        val current = _sessionState.value.overlayLayers
+        val updated = current.filterNot { it.id == layerId }
+        val newActiveId = if (_sessionState.value.activeOverlayLayerId == layerId) {
+            updated.lastOrNull()?.id
+        } else {
+            _sessionState.value.activeOverlayLayerId
+        }
+        pushState(_sessionState.value.copy(
+            overlayLayers = updated,
+            activeOverlayLayerId = newActiveId,
+            description = "Delete layer"
+        ))
+    }
+
+    fun duplicateOverlayLayer(layerId: String) {
+        val current = _sessionState.value.overlayLayers
+        val target = current.firstOrNull { it.id == layerId } ?: return
+        val newId = java.util.UUID.randomUUID().toString()
+        val dup = target.copy(
+            id = newId,
+            name = "${target.name} Copy",
+            xRatio = (target.xRatio + 0.04f).coerceIn(0.1f, 0.9f),
+            yRatio = (target.yRatio + 0.04f).coerceIn(0.1f, 0.9f)
+        )
+        val idx = current.indexOfFirst { it.id == layerId }
+        val list = current.toMutableList().apply {
+            add((idx + 1).coerceAtMost(size), dup)
+        }
+        pushState(_sessionState.value.copy(
+            overlayLayers = list,
+            activeOverlayLayerId = newId,
+            description = "Duplicate ${target.name}"
+        ))
+    }
+
+    fun toggleOverlayLayerVisibility(layerId: String) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(isVisible = !it.isVisible) else it
+        }
+        pushState(_sessionState.value.copy(overlayLayers = updated, description = "Toggle layer visibility"))
+    }
+
+    fun toggleOverlayLayerLock(layerId: String) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(isLocked = !it.isLocked) else it
+        }
+        _sessionState.value = _sessionState.value.copy(overlayLayers = updated)
+    }
+
+    fun setOverlayLayerOpacity(layerId: String, opacity: Float) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(opacity = opacity.coerceIn(0f, 1f)) else it
+        }
+        _sessionState.value = _sessionState.value.copy(overlayLayers = updated)
+        updateLivePreview()
+    }
+
+    fun commitOverlayLayerOpacity() {
+        pushState(_sessionState.value.copy(description = "Change layer opacity"))
+    }
+
+    fun setOverlayLayerBlendMode(layerId: String, blendMode: String) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(blendMode = blendMode) else it
+        }
+        pushState(_sessionState.value.copy(overlayLayers = updated, description = "Blend mode $blendMode"))
+    }
+
+    fun moveOverlayLayer(layerId: String, direction: Int) {
+        val current = _sessionState.value.overlayLayers.toMutableList()
+        val idx = current.indexOfFirst { it.id == layerId }
+        if (idx == -1) return
+        val newIdx = (idx + direction).coerceIn(0, current.size - 1)
+        if (newIdx == idx) return
+        val item = current.removeAt(idx)
+        current.add(newIdx, item)
+        pushState(_sessionState.value.copy(overlayLayers = current, description = "Reorder layer"))
+    }
+
+    fun renameOverlayLayer(layerId: String, newName: String) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(name = newName) else it
+        }
+        pushState(_sessionState.value.copy(overlayLayers = updated, description = "Rename layer"))
+    }
+
+    fun applyOverlayLayerMask(layerId: String, mask: LayerMask) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(mask = mask) else it
+        }
+        pushState(_sessionState.value.copy(overlayLayers = updated, description = "Apply layer mask"))
+    }
+
+    fun modifyOverlayLayerMask(layerId: String, contractExpand: Float, feather: Float, smooth: Float) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId && it.mask != null) {
+                it.copy(mask = it.mask.copy(
+                    contractExpand = contractExpand,
+                    feather = feather,
+                    smooth = smooth
+                ))
+            } else it
+        }
+        pushState(_sessionState.value.copy(overlayLayers = updated, description = "Modify mask"))
+    }
+
+    fun removeOverlayLayerMask(layerId: String) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(mask = null) else it
+        }
+        pushState(_sessionState.value.copy(overlayLayers = updated, description = "Remove layer mask"))
+    }
+
+    fun updateOverlayLayerTransform(
+        layerId: String,
+        xRatio: Float,
+        yRatio: Float,
+        scale: Float,
+        rotation: Float,
+        flipH: Boolean = false,
+        flipV: Boolean = false
+    ) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) {
+                it.copy(
+                    xRatio = xRatio.coerceIn(0f, 1f),
+                    yRatio = yRatio.coerceIn(0f, 1f),
+                    scaleFactor = scale.coerceIn(0.2f, 4.0f),
+                    rotationDegrees = rotation,
+                    isFlippedH = flipH,
+                    isFlippedV = flipV
+                )
+            } else it
+        }
+        _sessionState.value = _sessionState.value.copy(overlayLayers = updated)
+        updateLivePreview()
+    }
+
+    fun commitOverlayLayerTransform() {
+        pushState(_sessionState.value.copy(description = "Transform layer"))
+    }
+
+    fun updateOverlayLayerAdjustment(layerId: String, bwSettings: BlackAndWhiteSettings) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(bwSettings = bwSettings) else it
+        }
+        _sessionState.value = _sessionState.value.copy(overlayLayers = updated)
+        updateLivePreview()
+    }
+
     // --- LightCraft Masking Layer Management ---
     fun createMaskLayer(
         initialType: MaskComponentType = MaskComponentType.BRUSH,

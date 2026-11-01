@@ -750,6 +750,73 @@ data class AiEditSettings(
     val tryOnStyle: AiTryOnStyle? get() = activeTryOn
 }
 
+enum class OverlayLayerType(val label: String) {
+    IMAGE("Image layer"),
+    ADJUSTMENT("Adjustment layer"),
+    TYPE("Type layer"),
+    FILL("Fill layer"),
+    EMPTY("Empty layer")
+}
+
+enum class AdjustmentLayerType(val label: String, val subtitle: String) {
+    HUE_SATURATION("Hue and Saturation", "Change colors, saturation, and lightness"),
+    BRIGHTNESS_CONTRAST("Brightness and Contrast", "Make simple adjustments to the tonal range"),
+    BLACK_AND_WHITE("Black and white", "Change color to black and white"),
+    COLOR_BALANCE("Color balance", "Adjust the balance of color throughout"),
+    EXPOSURE("Exposure", "Make adjustments to the amount of light"),
+    CURVES("Curves", "Fine-tune tone curve"),
+    LEVELS("Levels", "Adjust tonal range and midtones")
+}
+
+data class BlackAndWhiteSettings(
+    val reds: Float = 40f,
+    val yellows: Float = 60f,
+    val greens: Float = 40f,
+    val cyans: Float = 60f,
+    val blues: Float = 20f,
+    val magentas: Float = 80f
+)
+
+data class LayerMask(
+    val isEnabled: Boolean = true,
+    val isInverted: Boolean = false,
+    val feather: Float = 0f,
+    val contractExpand: Float = 0f,
+    val smooth: Float = 0f,
+    val hasSubjectMask: Boolean = true
+)
+
+data class EditorOverlayLayer(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val name: String = "Layer 1",
+    val type: OverlayLayerType = OverlayLayerType.IMAGE,
+    val isVisible: Boolean = true,
+    val isLocked: Boolean = false,
+    val opacity: Float = 1.0f,
+    val blendMode: String = "Normal",
+    // Normalized 0f..1f center position and sizing relative to base image
+    val xRatio: Float = 0.5f,
+    val yRatio: Float = 0.5f,
+    val widthRatio: Float = 0.85f,
+    val heightRatio: Float = 0.85f,
+    val rotationDegrees: Float = 0f,
+    val scaleFactor: Float = 1.0f,
+    val isFlippedH: Boolean = false,
+    val isFlippedV: Boolean = false,
+    // Content payload
+    val imageUri: String? = null,
+    val stockImageKey: String? = null, // "space", "propplane", "astronaut", "whale", "white_canvas"
+    val adjustmentType: AdjustmentLayerType? = null,
+    val bwSettings: BlackAndWhiteSettings = BlackAndWhiteSettings(),
+    val fillSolidColor: Color = Color.White,
+    val textContent: String = "Sample Text",
+    val textColor: Color = Color.White,
+    val textBgColor: Color = Color.Transparent,
+    val fontSizeSp: Float = 28f,
+    // Mask
+    val mask: LayerMask? = null
+)
+
 /**
  * Immutable snapshot of the entire editable session.
  * Used for the operation history stack, undo, redo, and animated replay.
@@ -780,5 +847,7 @@ data class EditSessionState(
     val activeMaskId: String? = null,
     val activeComponentId: String? = null,
     val maskOverlaySettings: MaskOverlaySettings = MaskOverlaySettings(),
+    val overlayLayers: List<EditorOverlayLayer> = emptyList(),
+    val activeOverlayLayerId: String? = null,
     val description: String = "Initial Image"
 )

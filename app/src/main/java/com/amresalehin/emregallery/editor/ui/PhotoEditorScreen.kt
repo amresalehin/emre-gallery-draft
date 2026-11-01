@@ -646,6 +646,7 @@ fun PhotoEditorScreen(
                     MainBottomTab.OVERLAYS -> {
                         OverlaysWorkspacePanel(
                             sessionState = sessionState,
+                            viewModel = viewModel,
                             onFrameChange = { viewModel.setFrame(it) },
                             onBorderChange = { viewModel.setBorder(it) },
                             onAddText = { text, col, bgCol ->
@@ -776,6 +777,14 @@ fun PhotoEditorScreen(
                                 onToggleEraser = { isEraser ->
                                     selectedBrushType = if (isEraser) BrushType.ERASER else BrushType.PEN
                                 }
+                            )
+                        }
+
+                        // Photoshop Mobile Canvas Overlay Controls in Landscape
+                        if (currentBottomTab == MainBottomTab.OVERLAYS) {
+                            PhotoshopCanvasOverlaysControls(
+                                sessionState = sessionState,
+                                viewModel = viewModel
                             )
                         }
 
@@ -1096,6 +1105,14 @@ fun PhotoEditorScreen(
                                 onToggleEraser = { isEraser ->
                                     selectedBrushType = if (isEraser) BrushType.ERASER else BrushType.PEN
                                 }
+                            )
+                        }
+
+                        // Photoshop Mobile Canvas Overlay Controls in Portrait
+                        if (currentBottomTab == MainBottomTab.OVERLAYS) {
+                            PhotoshopCanvasOverlaysControls(
+                                sessionState = sessionState,
+                                viewModel = viewModel
                             )
                         }
 

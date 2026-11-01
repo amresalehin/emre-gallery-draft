@@ -711,5 +711,112 @@ class PhotoEditorTest {
         assertEquals(80, rendered.width)
         assertEquals(80, rendered.height)
     }
+
+    @Test
+    fun testOverlayLayerStackManagement_viewModelOperations() {
+        val vm = PhotoEditorViewModel()
+        assertTrue(vm.sessionState.value.overlayLayers.isEmpty())
+
+        // 1. Add Image Layer
+        val layer1 = EditorOverlayLayer(
+            id = "layer_1",
+            name = "Nebula",
+            type = OverlayLayerType.IMAGE,
+            stockImageKey = "nebula"
+        )
+        vm.addOverlayLayer(layer1)
+        assertEquals(1, vm.sessionState.value.overlayLayers.size)
+        assertEquals("layer_1", vm.sessionState.value.activeOverlayLayerId)
+
+        // 2. Add second layer (PropPlane)
+        val layer2 = EditorOverlayLayer(
+            id = "layer_2",
+            name = "PropPlane",
+            type = OverlayLayerType.IMAGE,
+            stockImageKey = "propplane"
+        )
+        vm.addOverlayLayer(layer2)
+        assertEquals(2, vm.sessionState.value.overlayLayers.size)
+        assertEquals("layer_2", vm.sessionState.value.activeOverlayLayerId)
+
+        // 3. Rename Layer
+        vm.renameOverlayLayer("layer_1", "Deep Space")
+        assertEquals("Deep Space", vm.sessionState.value.overlayLayers.first { it.id == "layer_1" }.name)
+
+        // 4. Apply Layer Mask
+        val mask = LayerMask(isEnabled = true, hasSubjectMask = true, contractExpand = -3f)
+        vm.applyOverlayLayerMask("layer_2", mask)
+        val masked = vm.sessionState.value.overlayLayers.first { it.id == "layer_2" }
+        assertNotNull(masked.mask)
+        assertEquals(-3f, masked.mask!!.contractExpand, 0.01f)
+
+        // 5. Change Blend Mode & Opacity
+        vm.setOverlayLayerBlendMode("layer_2", "Multiply")
+        vm.setOverlayLayerOpacity("layer_2", 0.75f)
+        val blended = vm.sessionState.value.overlayLayers.first { it.id == "layer_2" }
+        assertEquals("Multiply", blended.blendMode)
+        assertEquals(0.75f, blended.opacity, 0.01f)
+
+        // 6. Duplicate Layer
+        vm.duplicateOverlayLayer("layer_2")
+        assertEquals(3, vm.sessionState.value.overlayLayers.size)
+
+        // 7. Toggle Lock & Visibility
+        vm.toggleOverlayLayerLock("layer_1")
+        assertTrue(vm.sessionState.value.overlayLayers.first { it.id == "layer_1" }.isLocked)
+        vm.toggleOverlayLayerVisibility("layer_1")
+        assertFalse(vm.sessionState.value.overlayLayers.first { it.id == "layer_1" }.isVisible)
+
+        // 8. Undo / Redo
+        vm.undo()
+        assertTrue(vm.sessionState.value.overlayLayers.first { it.id == "layer_1" }.isVisible)
+        vm.redo()
+        assertFalse(vm.sessionState.value.overlayLayers.first { it.id == "layer_1" }.isVisible)
+
+        // 9. Delete Layer
+        vm.deleteOverlayLayer("layer_1")
+        assertEquals(2, vm.sessionState.value.overlayLayers.size)
+    }
+
+    @Test
+    fun testOverlayLayerRendering_pipelineExecutesCleanly() = runBlocking {
+        val src = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888)
+        val layers = listOf(
+            EditorOverlayLayer(
+                id = "bg",
+                name = "White canvas",
+                type = OverlayLayerType.IMAGE,
+                stockImageKey = "white_canvas"
+            ),
+            EditorOverlayLayer(
+                id = "nebula",
+                name = "Nebula",
+                type = OverlayLayerType.IMAGE,
+                stockImageKey = "nebula",
+                opacity = 0.9f,
+                blendMode = "Normal"
+            ),
+            EditorOverlayLayer(
+                id = "plane",
+                name = "PropPlane",
+                type = OverlayLayerType.IMAGE,
+                stockImageKey = "propplane",
+                mask = LayerMask(isEnabled = true, hasSubjectMask = true, contractExpand = -2f)
+            ),
+            EditorOverlayLayer(
+                id = "bw",
+                name = "Black & White 1",
+                type = OverlayLayerType.ADJUSTMENT,
+                adjustmentType = AdjustmentLayerType.BLACK_AND_WHITE,
+                bwSettings = BlackAndWhiteSettings(reds = 80f, blues = 10f)
+            )
+        )
+        val state = EditSessionState(overlayLayers = layers)
+        val rendered = PhotoProcessor.renderFinal(src, state)
+        assertNotNull(rendered)
+        assertEquals(80, rendered.width)
+        assertEquals(80, rendered.height)
+    }
 }
+
 

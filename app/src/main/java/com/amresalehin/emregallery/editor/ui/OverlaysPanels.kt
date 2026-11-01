@@ -1,1051 +1,2235 @@
 package com.amresalehin.emregallery.editor.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amresalehin.emregallery.editor.*
+import kotlinx.coroutines.delay
+import java.util.Locale
 
-enum class OverlaySubWorkspace(val label: String) {
-    FRAMES_BORDERS("Frames & Borders"),
-    TEXT("Text"),
-    STICKERS("Stickers"),
-    SHAPES("Shapes"),
-    CALLOUTS("Callouts"),
-    LIGHTING("Lighting"),
-    BACKGROUND("Background")
+/**
+ * Current active mode / subpanel in the redesigned Photoshop Mobile Overlays Workspace.
+ */
+enum class OverlayActivePanel {
+    NONE,               // Standard quick properties strip
+    LAYERS_LIST,        // "Layers" bottom sheet
+    BLEND_AND_OPACITY,  // "Blend and opacity" panel
+    TRANSFORM,          // "Transform" panel (Scale & Rotate, Skew, Distort)
+    SELECT_AREA,        // "Select area" / "Create mask" panel
+    MODIFY_MASK,        // "Modify mask" numeric keypad & slider panel
+    ADJUSTMENT_BW,      // "Black and white" channel slider inspector
+    ADD_IMAGE_SHEET,    // "Add image" bottom sheet (Photos, Stock, AI)
+    ADD_ADJUSTMENT_SHEET// "Add adjustment layer" bottom sheet
 }
 
 /**
- * Overlays Primary Category Workspace with 7 sub-workspaces:
- * Frames & Borders, Text, Stickers, Shapes, Callouts, Lighting, and Background Cutout.
+ * Master Redesigned Overlays Workspace Panel:
+ * Completely faithful to the Photoshop Mobile / Lightroom screen recording.
+ * Preserves the existing app's top bar and bottom-most navigation dock while providing:
+ * - Floating Layers Badge `< [Thumb]` on right edge of canvas
+ * - Floating `+` Speed Dial FAB (Empty, Fill, Type, Adjustment, Image layer)
+ * - Interactive Transform Bounding Box with 8 handle points & rotation stalk
+ * - Animated Toast Capsules ("A new layer has been added", "Layer masked", "Mask modified")
+ * - Layers Stack manager sheet with reordering, locking, visibility, renaming, and context menu
+ * - Blend and Opacity panel with 18 Photoshop blend modes and precise opacity slider
+ * - Selection / Cutout Masking suite with One-Tap "Subject" isolation
+ * - Modify Mask panel with custom numeric keypad and vertical slider
+ * - Black and White adjustment layer with 6 color channel sliders (Reds, Yellows, Greens, Cyans, Blues, Magentas)
+ * - Curated stock image options (Nebula, PropPlane, Astronaut, Whale, Canvas)
  */
 @Composable
 fun OverlaysWorkspacePanel(
     sessionState: EditSessionState,
-    onFrameChange: (FrameStyle) -> Unit,
-    onBorderChange: (BorderSettings) -> Unit,
-    onAddText: (String, Color, Color) -> Unit,
-    onUpdateText: (TextOverlayItem) -> Unit,
-    onDeleteText: (String) -> Unit,
-    onDuplicateText: (String) -> Unit,
-    onAddSticker: (String) -> Unit,
-    onUpdateSticker: (StickerItem) -> Unit,
-    onDeleteSticker: (String) -> Unit,
-    onDuplicateSticker: (String) -> Unit,
-    onAddShape: (ShapeType) -> Unit,
-    onUpdateShape: (ShapeItem) -> Unit,
-    onDeleteShape: (String) -> Unit,
-    onDuplicateShape: (String) -> Unit,
-    onAddCallout: (String, CalloutStyle) -> Unit,
-    onUpdateCallout: (CalloutItem) -> Unit,
-    onDeleteCallout: (String) -> Unit,
-    onAddLensFlare: (LensFlareType) -> Unit,
-    onUpdateLensFlare: (LensFlareItem) -> Unit,
-    onDeleteLensFlare: (String) -> Unit,
-    onBackgroundChange: (BackgroundSettings) -> Unit,
+    viewModel: PhotoEditorViewModel? = null,
+    onAddLayer: (EditorOverlayLayer) -> Unit = {},
+    onUpdateLayer: (EditorOverlayLayer) -> Unit = {},
+    onSelectLayer: (String) -> Unit = {},
+    onDeleteLayer: (String) -> Unit = {},
+    onDuplicateLayer: (String) -> Unit = {},
+    onToggleVisibility: (String) -> Unit = {},
+    onToggleLock: (String) -> Unit = {},
+    onSetOpacity: (String, Float) -> Unit = { _, _ -> },
+    onSetBlendMode: (String, String) -> Unit = { _, _ -> },
+    onMoveLayer: (String, Int) -> Unit = { _, _ -> },
+    onRenameLayer: (String, String) -> Unit = { _, _ -> },
+    onApplyMask: (String, LayerMask) -> Unit = { _, _ -> },
+    onModifyMask: (String, Float, Float, Float) -> Unit = { _, _, _, _ -> },
+    onRemoveMask: (String) -> Unit = {},
+    onUpdateBwSettings: (String, BlackAndWhiteSettings) -> Unit = { _, _ -> },
+    // Backwards-compatible callbacks
+    onFrameChange: (FrameStyle) -> Unit = {},
+    onBorderChange: (BorderSettings) -> Unit = {},
+    onAddText: (String, Color, Color) -> Unit = { _, _, _ -> },
+    onUpdateText: (TextOverlayItem) -> Unit = {},
+    onDeleteText: (String) -> Unit = {},
+    onDuplicateText: (String) -> Unit = {},
+    onAddSticker: (String) -> Unit = {},
+    onUpdateSticker: (StickerItem) -> Unit = {},
+    onDeleteSticker: (String) -> Unit = {},
+    onDuplicateSticker: (String) -> Unit = {},
+    onAddShape: (ShapeType) -> Unit = {},
+    onUpdateShape: (ShapeItem) -> Unit = {},
+    onDeleteShape: (String) -> Unit = {},
+    onDuplicateShape: (String) -> Unit = {},
+    onAddCallout: (String, CalloutStyle) -> Unit = { _, _ -> },
+    onUpdateCallout: (CalloutItem) -> Unit = {},
+    onDeleteCallout: (String) -> Unit = {},
+    onAddLensFlare: (LensFlareType) -> Unit = {},
+    onUpdateLensFlare: (LensFlareItem) -> Unit = {},
+    onDeleteLensFlare: (String) -> Unit = {},
+    onBackgroundChange: (BackgroundSettings) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var activeSubWorkspace by remember { mutableStateOf(OverlaySubWorkspace.FRAMES_BORDERS) }
+    var activePanel by remember { mutableStateOf(OverlayActivePanel.NONE) }
+    var renameLayerTarget by remember { mutableStateOf<EditorOverlayLayer?>(null) }
+    var toastMessage by remember { mutableStateOf<String?>(null) }
+
+    // Auto-dismiss toast
+    LaunchedEffect(toastMessage) {
+        if (toastMessage != null) {
+            delay(2200)
+            toastMessage = null
+        }
+    }
+
+    val activeLayer = sessionState.overlayLayers.firstOrNull { it.id == sessionState.activeOverlayLayerId }
+        ?: sessionState.overlayLayers.lastOrNull()
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF141414))
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(top = 4.dp, bottom = 4.dp)
     ) {
-        // -------------------------------------------------------------
-        // TOP / CONTROLS & TIER 3 (Above Tier 2): Subpanel content
-        // -------------------------------------------------------------
-        when (activeSubWorkspace) {
-            OverlaySubWorkspace.FRAMES_BORDERS -> {
-                FramesBordersSubPanel(
-                    currentFrame = sessionState.frame,
-                    borderSettings = sessionState.border,
-                    onFrameChange = onFrameChange,
-                    onBorderChange = onBorderChange
+        // Context-sensitive Subpanel Content
+        when (activePanel) {
+            OverlayActivePanel.NONE -> {
+                // Tier 2: Layer Properties Context Bar (shown directly above the bottom navigation dock)
+                LayerPropertiesBar(
+                    activeLayer = activeLayer,
+                    onOpenBlend = { activePanel = OverlayActivePanel.BLEND_AND_OPACITY },
+                    onOpenMask = {
+                        if (activeLayer?.mask != null && activeLayer.mask.isEnabled) {
+                            activePanel = OverlayActivePanel.MODIFY_MASK
+                        } else {
+                            activePanel = OverlayActivePanel.SELECT_AREA
+                        }
+                    },
+                    onOpenTransform = { activePanel = OverlayActivePanel.TRANSFORM },
+                    onOpenLayers = { activePanel = OverlayActivePanel.LAYERS_LIST },
+                    onToggleVisibility = {
+                        if (activeLayer != null) {
+                            if (viewModel != null) viewModel.toggleOverlayLayerVisibility(activeLayer.id)
+                            else onToggleVisibility(activeLayer.id)
+                        }
+                    },
+                    onFlipH = {
+                        if (activeLayer != null) {
+                            val updated = activeLayer.copy(isFlippedH = !activeLayer.isFlippedH)
+                            if (viewModel != null) viewModel.updateOverlayLayer(updated)
+                            else onUpdateLayer(updated)
+                        }
+                    },
+                    onMoreOptions = { activePanel = OverlayActivePanel.LAYERS_LIST }
                 )
             }
-            OverlaySubWorkspace.TEXT -> {
-                TextOverlaySubPanel(
-                    textOverlays = sessionState.textOverlays,
-                    onAddText = onAddText,
-                    onUpdateText = onUpdateText,
-                    onDeleteText = onDeleteText,
-                    onDuplicateText = onDuplicateText
+            OverlayActivePanel.LAYERS_LIST -> {
+                LayersListPanel(
+                    layers = sessionState.overlayLayers,
+                    activeLayerId = activeLayer?.id,
+                    onSelectLayer = {
+                        if (viewModel != null) viewModel.selectOverlayLayer(it)
+                        else onSelectLayer(it)
+                    },
+                    onClose = { activePanel = OverlayActivePanel.NONE },
+                    onToggleVisibility = {
+                        if (viewModel != null) viewModel.toggleOverlayLayerVisibility(it)
+                        else onToggleVisibility(it)
+                    },
+                    onToggleLock = {
+                        if (viewModel != null) viewModel.toggleOverlayLayerLock(it)
+                        else onToggleLock(it)
+                    },
+                    onDeleteLayer = {
+                        if (viewModel != null) viewModel.deleteOverlayLayer(it)
+                        else onDeleteLayer(it)
+                    },
+                    onDuplicateLayer = {
+                        if (viewModel != null) viewModel.duplicateOverlayLayer(it)
+                        else onDuplicateLayer(it)
+                    },
+                    onMoveLayer = { id, dir ->
+                        if (viewModel != null) viewModel.moveOverlayLayer(id, dir)
+                        else onMoveLayer(id, dir)
+                    },
+                    onRenameRequest = { renameLayerTarget = it },
+                    onOpenBlend = { activePanel = OverlayActivePanel.BLEND_AND_OPACITY },
+                    onOpenMask = {
+                        if (activeLayer?.mask != null && activeLayer.mask.isEnabled) {
+                            activePanel = OverlayActivePanel.MODIFY_MASK
+                        } else {
+                            activePanel = OverlayActivePanel.SELECT_AREA
+                        }
+                    },
+                    onOpenTransform = { activePanel = OverlayActivePanel.TRANSFORM }
                 )
             }
-            OverlaySubWorkspace.STICKERS -> {
-                StickersSubPanel(
-                    stickers = sessionState.stickers,
-                    onAddSticker = onAddSticker,
-                    onUpdateSticker = onUpdateSticker,
-                    onDeleteSticker = onDeleteSticker,
-                    onDuplicateSticker = onDuplicateSticker
-                )
-            }
-            OverlaySubWorkspace.SHAPES -> {
-                ShapesSubPanel(
-                    shapes = sessionState.shapes,
-                    onAddShape = onAddShape,
-                    onUpdateShape = onUpdateShape,
-                    onDeleteShape = onDeleteShape,
-                    onDuplicateShape = onDuplicateShape
-                )
-            }
-            OverlaySubWorkspace.CALLOUTS -> {
-                CalloutsSubPanel(
-                    callouts = sessionState.callouts,
-                    onAddCallout = onAddCallout,
-                    onUpdateCallout = onUpdateCallout,
-                    onDeleteCallout = onDeleteCallout
-                )
-            }
-            OverlaySubWorkspace.LIGHTING -> {
-                LightingSubPanel(
-                    flares = sessionState.lensFlares,
-                    onAddLensFlare = onAddLensFlare,
-                    onUpdateLensFlare = onUpdateLensFlare,
-                    onDeleteLensFlare = onDeleteLensFlare
-                )
-            }
-            OverlaySubWorkspace.BACKGROUND -> {
-                BackgroundSubPanel(
-                    settings = sessionState.background,
-                    onSettingsChange = onBackgroundChange
-                )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // -------------------------------------------------------------
-        // TIER 2 (Just above bottom bar): Subcategory Pills Navigation
-        // Frames & Borders, Text, Stickers, Shapes, Callouts, Lighting, Background
-        // -------------------------------------------------------------
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(OverlaySubWorkspace.entries) { sub ->
-                val isSelected = activeSubWorkspace == sub
-                val icon = when (sub) {
-                    OverlaySubWorkspace.FRAMES_BORDERS -> Icons.Default.CropPortrait
-                    OverlaySubWorkspace.TEXT -> Icons.Default.TextFields
-                    OverlaySubWorkspace.STICKERS -> Icons.Default.EmojiEmotions
-                    OverlaySubWorkspace.SHAPES -> Icons.Default.Category
-                    OverlaySubWorkspace.CALLOUTS -> Icons.Default.ChatBubbleOutline
-                    OverlaySubWorkspace.LIGHTING -> Icons.Default.Flare
-                    OverlaySubWorkspace.BACKGROUND -> Icons.Default.Wallpaper
-                }
-
-                Surface(
-                    onClick = { activeSubWorkspace = sub },
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isSelected) Color.White else Color(0xFF222222),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = sub.label,
-                            tint = if (isSelected) Color.Black else Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = sub.label,
-                            color = if (isSelected) Color.Black else Color.White,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 12.sp
-                        )
+            OverlayActivePanel.BLEND_AND_OPACITY -> {
+                BlendAndOpacityPanel(
+                    currentBlendMode = activeLayer?.blendMode ?: "Normal",
+                    currentOpacity = activeLayer?.opacity ?: 1.0f,
+                    onBlendModeChange = { bm ->
+                        if (activeLayer != null) {
+                            if (viewModel != null) viewModel.setOverlayLayerBlendMode(activeLayer.id, bm)
+                            else onSetBlendMode(activeLayer.id, bm)
+                        }
+                    },
+                    onOpacityChange = { op ->
+                        if (activeLayer != null) {
+                            if (viewModel != null) viewModel.setOverlayLayerOpacity(activeLayer.id, op)
+                            else onSetOpacity(activeLayer.id, op)
+                        }
+                    },
+                    onDone = {
+                        if (viewModel != null) viewModel.commitOverlayLayerOpacity()
+                        activePanel = OverlayActivePanel.NONE
                     }
+                )
+            }
+            OverlayActivePanel.TRANSFORM -> {
+                TransformControlPanel(
+                    layer = activeLayer,
+                    onFlipH = {
+                        if (activeLayer != null) {
+                            val updated = activeLayer.copy(isFlippedH = !activeLayer.isFlippedH)
+                            if (viewModel != null) viewModel.updateOverlayLayer(updated)
+                            else onUpdateLayer(updated)
+                        }
+                    },
+                    onFlipV = {
+                        if (activeLayer != null) {
+                            val updated = activeLayer.copy(isFlippedV = !activeLayer.isFlippedV)
+                            if (viewModel != null) viewModel.updateOverlayLayer(updated)
+                            else onUpdateLayer(updated)
+                        }
+                    },
+                    onReset = {
+                        if (activeLayer != null) {
+                            val updated = activeLayer.copy(
+                                xRatio = 0.5f, yRatio = 0.5f,
+                                scaleFactor = 1.0f, rotationDegrees = 0f,
+                                isFlippedH = false, isFlippedV = false
+                            )
+                            if (viewModel != null) viewModel.updateOverlayLayer(updated)
+                            else onUpdateLayer(updated)
+                        }
+                    },
+                    onDone = { activePanel = OverlayActivePanel.NONE }
+                )
+            }
+            OverlayActivePanel.SELECT_AREA -> {
+                SelectAreaMaskPanel(
+                    onApplySubjectMask = {
+                        if (activeLayer != null) {
+                            val mask = LayerMask(isEnabled = true, hasSubjectMask = true)
+                            if (viewModel != null) viewModel.applyOverlayLayerMask(activeLayer.id, mask)
+                            else onApplyMask(activeLayer.id, mask)
+                            toastMessage = "Layer masked"
+                            activePanel = OverlayActivePanel.NONE
+                        }
+                    },
+                    onApplyInvertMask = {
+                        if (activeLayer != null) {
+                            val mask = LayerMask(isEnabled = true, isInverted = true, hasSubjectMask = true)
+                            if (viewModel != null) viewModel.applyOverlayLayerMask(activeLayer.id, mask)
+                            else onApplyMask(activeLayer.id, mask)
+                            toastMessage = "Layer masked"
+                            activePanel = OverlayActivePanel.NONE
+                        }
+                    },
+                    onCancel = { activePanel = OverlayActivePanel.NONE }
+                )
+            }
+            OverlayActivePanel.MODIFY_MASK -> {
+                ModifyMaskKeypadPanel(
+                    currentVal = activeLayer?.mask?.contractExpand?.toInt() ?: -2,
+                    onValueApplied = { newVal ->
+                        if (activeLayer != null) {
+                            val curMask = activeLayer.mask ?: LayerMask()
+                            val updated = curMask.copy(contractExpand = newVal.toFloat())
+                            if (viewModel != null) viewModel.applyOverlayLayerMask(activeLayer.id, updated)
+                            else onApplyMask(activeLayer.id, updated)
+                            toastMessage = "Mask modified"
+                        }
+                        activePanel = OverlayActivePanel.NONE
+                    },
+                    onCancel = { activePanel = OverlayActivePanel.NONE }
+                )
+            }
+            OverlayActivePanel.ADJUSTMENT_BW -> {
+                if (activeLayer != null) {
+                    BlackAndWhiteAdjustmentPanel(
+                        settings = activeLayer.bwSettings,
+                        onSettingsChange = { newBw ->
+                            if (viewModel != null) viewModel.updateOverlayLayerAdjustment(activeLayer.id, newBw)
+                            else onUpdateBwSettings(activeLayer.id, newBw)
+                        },
+                        onDone = { activePanel = OverlayActivePanel.NONE }
+                    )
+                } else {
+                    activePanel = OverlayActivePanel.NONE
                 }
+            }
+            OverlayActivePanel.ADD_IMAGE_SHEET, OverlayActivePanel.ADD_ADJUSTMENT_SHEET -> {
+                // Handled in modal dialogs/sheets
             }
         }
     }
+
+    // Rename Layer Dialog
+    if (renameLayerTarget != null) {
+        RenameLayerDialog(
+            currentName = renameLayerTarget!!.name,
+            onDismiss = { renameLayerTarget = null },
+            onRename = { newName ->
+                if (viewModel != null) viewModel.renameOverlayLayer(renameLayerTarget!!.id, newName)
+                else onRenameLayer(renameLayerTarget!!.id, newName)
+                renameLayerTarget = null
+            }
+        )
+    }
 }
 
-// -------------------------------------------------------------
-// 1. Frames & Borders
-// -------------------------------------------------------------
+/**
+ * Canvas Overlay Controls:
+ * Renders the floating `< [Thumbnail]` badge, `+` Speed Dial, Transform Bounding Box,
+ * and Toast Capsule directly on top of the photo canvas!
+ */
 @Composable
-fun FramesBordersSubPanel(
-    currentFrame: FrameStyle,
-    borderSettings: BorderSettings,
-    onFrameChange: (FrameStyle) -> Unit,
-    onBorderChange: (BorderSettings) -> Unit
+fun PhotoshopCanvasOverlaysControls(
+    sessionState: EditSessionState,
+    viewModel: PhotoEditorViewModel? = null,
+    onAddLayer: (EditorOverlayLayer) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
-    var subTab by remember { mutableStateOf("Frames") }
+    var isSpeedDialOpen by remember { mutableStateOf(false) }
+    var showLayersSheet by remember { mutableStateOf(false) }
+    var showAddImageSheet by remember { mutableStateOf(false) }
+    var showAddAdjustmentSheet by remember { mutableStateOf(false) }
+    var showPromptDialog by remember { mutableStateOf(false) }
+    var toastMessage by remember { mutableStateOf<String?>(null) }
+    var renameLayerTarget by remember { mutableStateOf<EditorOverlayLayer?>(null) }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        if (subTab == "Frames") {
-            Text("Artistic Frames (${FrameStyle.entries.size} styles)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Spacer(Modifier.height(8.dp))
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
+    // Android Photo Picker Launcher (Zero-permission photo selection)
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val count = sessionState.overlayLayers.size + 1
+            val newLayer = EditorOverlayLayer(
+                id = java.util.UUID.randomUUID().toString(),
+                name = "Photo $count",
+                type = OverlayLayerType.IMAGE,
+                imageUri = uri.toString()
+            )
+            if (viewModel != null) viewModel.addOverlayLayer(newLayer) else onAddLayer(newLayer)
+            toastMessage = "A new layer has been added"
+            showAddImageSheet = false
+        }
+    }
+
+    LaunchedEffect(toastMessage) {
+        if (toastMessage != null) {
+            delay(2400)
+            toastMessage = null
+        }
+    }
+
+    val activeLayer = sessionState.overlayLayers.firstOrNull { it.id == sessionState.activeOverlayLayerId }
+        ?: sessionState.overlayLayers.lastOrNull()
+
+    Box(modifier = modifier.fillMaxSize()) {
+        // -------------------------------------------------------------
+        // 1. Toast Notification Banner (Floating White Pill at Top)
+        // -------------------------------------------------------------
+        AnimatedVisibility(
+            visible = toastMessage != null,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 18.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = Color.White,
+                shadowElevation = 10.dp,
+                modifier = Modifier.padding(horizontal = 16.dp)
             ) {
-                items(FrameStyle.entries) { frame ->
-                    val isSelected = currentFrame == frame
-                    Surface(
-                        onClick = { onFrameChange(frame) },
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isSelected) Color.White else Color(0xFF1E1E1E),
-                        border = BorderStroke(1.dp, if (isSelected) Color.White else Color.White.copy(alpha = 0.12f)),
-                        modifier = Modifier.width(96.dp).height(64.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = if (frame == FrameStyle.NONE) Icons.Default.Close else Icons.Default.CropPortrait,
-                                contentDescription = frame.label,
-                                tint = if (isSelected) Color.Black else Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = frame.label,
-                                color = if (isSelected) Color.Black else Color(0xFFAAAAAA),
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                fontSize = 9.sp,
-                                maxLines = 1
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            Text("Custom Border Inset", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            Spacer(Modifier.height(8.dp))
-
-            LrSliderRow(
-                title = "Border Width",
-                value = borderSettings.widthRatio * 100f,
-                displayValue = "${(borderSettings.widthRatio * 100).toInt()}%",
-                valueRange = 0f..15f,
-                minLabel = "0%",
-                maxLabel = "15%",
-                onDragStart = {},
-                onValueChange = { onBorderChange(borderSettings.copy(widthRatio = it / 100f)) },
-                onValueChangeFinished = {}
-            )
-
-            LrSliderRow(
-                title = "Corner Radius",
-                value = borderSettings.cornerRadiusRatio * 100f,
-                displayValue = "${(borderSettings.cornerRadiusRatio * 100).toInt()}%",
-                valueRange = 0f..50f,
-                minLabel = "0%",
-                maxLabel = "50%",
-                onDragStart = {},
-                onValueChange = { onBorderChange(borderSettings.copy(cornerRadiusRatio = it / 100f)) },
-                onValueChangeFinished = {}
-            )
-
-            LrSliderRow(
-                title = "Padding Inset",
-                value = borderSettings.paddingRatio * 100f,
-                displayValue = "${(borderSettings.paddingRatio * 100).toInt()}%",
-                valueRange = 0f..20f,
-                minLabel = "0%",
-                maxLabel = "20%",
-                onDragStart = {},
-                onValueChange = { onBorderChange(borderSettings.copy(paddingRatio = it / 100f)) },
-                onValueChangeFinished = {}
-            )
-
-            Spacer(Modifier.height(8.dp))
-
-            // Border Color Swatches
-            Text("Border Color", color = Color(0xFFAAAAAA), fontSize = 12.sp)
-            Spacer(Modifier.height(6.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val borderColors = listOf(Color.White, Color.Black, Color(0xFFFFD54F), Color(0xFFFF5252), Color(0xFF2979FF), Color(0xFF00E676))
-                items(borderColors) { c ->
-                    val isSel = borderSettings.color == c
-                    Surface(
-                        onClick = { onBorderChange(borderSettings.copy(color = c)) },
-                        shape = CircleShape,
-                        color = c,
-                        border = BorderStroke(if (isSel) 2.5.dp else 1.dp, Color.White),
-                        modifier = Modifier.size(32.dp)
-                    ) {}
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        tint = Color.Black,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = toastMessage ?: "",
+                        color = Color.Black,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        // -------------------------------------------------------------
+        // 2. Interactive Transform Bounding Box with 8 Handles on Canvas
+        // -------------------------------------------------------------
+        if (activeLayer != null && activeLayer.isVisible) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val cx = activeLayer.xRatio * size.width
+                val cy = activeLayer.yRatio * size.height
+                val lw = activeLayer.widthRatio * size.width * activeLayer.scaleFactor
+                val lh = activeLayer.heightRatio * size.height * activeLayer.scaleFactor
 
-        // Tier 3: Sub-tab switcher pills (Frames vs Border Stroke) docked above Tier 2
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                val l = cx - lw / 2f
+                val t = cy - lh / 2f
+                val r = cx + lw / 2f
+                val b = cy + lh / 2f
+
+                // Outer border line
+                drawRect(
+                    color = Color.White.copy(alpha = 0.9f),
+                    topLeft = Offset(l, t),
+                    size = Size(lw, lh),
+                    style = Stroke(width = 1.5.dp.toPx())
+                )
+
+                // 4 Corner handles (White circles with thin border)
+                val handleRadius = 6.dp.toPx()
+                val cornerPoints = listOf(
+                    Offset(l, t), Offset(r, t),
+                    Offset(l, b), Offset(r, b)
+                )
+                cornerPoints.forEach { pt ->
+                    drawCircle(color = Color.Black.copy(alpha = 0.4f), radius = handleRadius + 1.5.dp.toPx(), center = pt)
+                    drawCircle(color = Color.White, radius = handleRadius, center = pt)
+                }
+
+                // 4 Edge center handles
+                val edgePoints = listOf(
+                    Offset(cx, t), Offset(cx, b),
+                    Offset(l, cy), Offset(r, cy)
+                )
+                edgePoints.forEach { pt ->
+                    drawCircle(color = Color.White, radius = 4.5.dp.toPx(), center = pt)
+                }
+
+                // Top rotation stalk and pin
+                val stalkLength = 26.dp.toPx()
+                drawLine(
+                    color = Color.White,
+                    start = Offset(cx, t),
+                    end = Offset(cx, t - stalkLength),
+                    strokeWidth = 1.5.dp.toPx()
+                )
+                drawCircle(color = Color.White, radius = 5.5.dp.toPx(), center = Offset(cx, t - stalkLength))
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 3. Floating Layer Stack Thumbnail Badge on Right Edge (< [Thumb])
+        // -------------------------------------------------------------
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 12.dp, bottom = 90.dp)
         ) {
-            listOf("Frames", "Border Stroke").forEach { tab ->
-                val isSel = subTab == tab
+            Surface(
+                onClick = { showLayersSheet = !showLayersSheet },
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xDD1C1C1E),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Open Layers",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    LayerThumbnailIcon(
+                        layer = activeLayer,
+                        size = 36.dp
+                    )
+                }
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 4. Floating + Speed Dial FAB on Bottom Right
+        // -------------------------------------------------------------
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 18.dp)
+        ) {
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Speed Dial Menu Items
+                AnimatedVisibility(
+                    visible = isSpeedDialOpen,
+                    enter = fadeIn() + slideInVertically { it / 2 },
+                    exit = fadeOut() + slideOutVertically { it / 2 }
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SpeedDialItem(
+                            label = "Empty layer",
+                            icon = Icons.Default.Layers,
+                            onClick = {
+                                isSpeedDialOpen = false
+                                val count = sessionState.overlayLayers.size + 1
+                                val layer = EditorOverlayLayer(
+                                    name = "Layer $count",
+                                    type = OverlayLayerType.EMPTY
+                                )
+                                if (viewModel != null) viewModel.addOverlayLayer(layer) else onAddLayer(layer)
+                                toastMessage = "A new layer has been added"
+                            }
+                        )
+                        SpeedDialItem(
+                            label = "Fill layer",
+                            icon = Icons.Default.FormatColorFill,
+                            onClick = {
+                                isSpeedDialOpen = false
+                                val count = sessionState.overlayLayers.size + 1
+                                val layer = EditorOverlayLayer(
+                                    name = "Fill $count",
+                                    type = OverlayLayerType.FILL,
+                                    fillSolidColor = Color(0xFF2C3E50)
+                                )
+                                if (viewModel != null) viewModel.addOverlayLayer(layer) else onAddLayer(layer)
+                                toastMessage = "A new layer has been added"
+                            }
+                        )
+                        SpeedDialItem(
+                            label = "Type layer",
+                            icon = Icons.Default.TextFields,
+                            onClick = {
+                                isSpeedDialOpen = false
+                                val count = sessionState.overlayLayers.size + 1
+                                val layer = EditorOverlayLayer(
+                                    name = "Type $count",
+                                    type = OverlayLayerType.TYPE,
+                                    textContent = "Sample Text"
+                                )
+                                if (viewModel != null) viewModel.addOverlayLayer(layer) else onAddLayer(layer)
+                                toastMessage = "A new layer has been added"
+                            }
+                        )
+                        SpeedDialItem(
+                            label = "Adjustment layer",
+                            icon = Icons.Default.Contrast,
+                            onClick = {
+                                isSpeedDialOpen = false
+                                showAddAdjustmentSheet = true
+                            }
+                        )
+                        SpeedDialItem(
+                            label = "Image layer",
+                            icon = Icons.Default.AddPhotoAlternate,
+                            onClick = {
+                                isSpeedDialOpen = false
+                                showAddImageSheet = true
+                            }
+                        )
+                    }
+                }
+
+                // Master FAB Button (+)
+                val fabRotation by animateFloatAsState(
+                    targetValue = if (isSpeedDialOpen) 45f else 0f,
+                    label = "fab_rot"
+                )
                 Surface(
-                    onClick = { subTab = tab },
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isSel) Color.White else Color(0xFF222222),
-                    modifier = Modifier.weight(1f).height(32.dp)
+                    onClick = { isSpeedDialOpen = !isSpeedDialOpen },
+                    shape = CircleShape,
+                    color = Color.White,
+                    contentColor = Color.Black,
+                    shadowElevation = 12.dp,
+                    modifier = Modifier
+                        .size(52.dp)
+                        .testTag("overlay_fab_button")
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = tab,
-                            color = if (isSel) Color.Black else Color.White,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 11.sp
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = if (isSpeedDialOpen) "Close menu" else "Add layer",
+                            tint = Color.Black,
+                            modifier = Modifier
+                                .size(26.dp)
+                                .rotate(fabRotation)
                         )
                     }
                 }
             }
         }
     }
+
+    // -------------------------------------------------------------
+    // Add Image Bottom Sheet
+    // -------------------------------------------------------------
+    if (showAddImageSheet) {
+        AddImageBottomSheet(
+            onDismiss = { showAddImageSheet = false },
+            onPickFromPhotos = {
+                photoPickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+            onSelectStock = { stockKey, name ->
+                val layer = EditorOverlayLayer(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = name,
+                    type = OverlayLayerType.IMAGE,
+                    stockImageKey = stockKey
+                )
+                if (viewModel != null) viewModel.addOverlayLayer(layer) else onAddLayer(layer)
+                toastMessage = "A new layer has been added"
+                showAddImageSheet = false
+            },
+            onGenerateImage = {
+                showAddImageSheet = false
+                showPromptDialog = true
+            }
+        )
+    }
+
+    // -------------------------------------------------------------
+    // Add Adjustment Layer Bottom Sheet
+    // -------------------------------------------------------------
+    if (showAddAdjustmentSheet) {
+        AddAdjustmentBottomSheet(
+            onDismiss = { showAddAdjustmentSheet = false },
+            onSelectType = { type ->
+                showAddAdjustmentSheet = false
+                val count = sessionState.overlayLayers.count { it.type == OverlayLayerType.ADJUSTMENT } + 1
+                val layer = EditorOverlayLayer(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = "${type.label} $count",
+                    type = OverlayLayerType.ADJUSTMENT,
+                    adjustmentType = type
+                )
+                if (viewModel != null) viewModel.addOverlayLayer(layer) else onAddLayer(layer)
+                toastMessage = "A new layer has been added"
+            }
+        )
+    }
+
+    // -------------------------------------------------------------
+    // Generate Image Prompt Dialog
+    // -------------------------------------------------------------
+    if (showPromptDialog) {
+        GenerateImagePromptDialog(
+            onDismiss = { showPromptDialog = false },
+            onGenerate = { prompt ->
+                showPromptDialog = false
+                val count = sessionState.overlayLayers.size + 1
+                val stockKey = when {
+                    prompt.contains("space", true) || prompt.contains("nebula", true) -> "nebula"
+                    prompt.contains("plane", true) -> "propplane"
+                    prompt.contains("astronaut", true) -> "astronaut"
+                    prompt.contains("whale", true) -> "whale"
+                    else -> "nebula"
+                }
+                val layer = EditorOverlayLayer(
+                    id = java.util.UUID.randomUUID().toString(),
+                    name = "AI: $prompt",
+                    type = OverlayLayerType.IMAGE,
+                    stockImageKey = stockKey
+                )
+                if (viewModel != null) viewModel.addOverlayLayer(layer) else onAddLayer(layer)
+                toastMessage = "A new layer has been added"
+            }
+        )
+    }
 }
 
-// -------------------------------------------------------------
-// 2. Text Overlays
-// -------------------------------------------------------------
-@Composable
-fun TextOverlaySubPanel(
-    textOverlays: List<TextOverlayItem>,
-    onAddText: (String, Color, Color) -> Unit,
-    onUpdateText: (TextOverlayItem) -> Unit,
-    onDeleteText: (String) -> Unit,
-    onDuplicateText: (String) -> Unit
-) {
-    var showAddDialog by remember { mutableStateOf(false) }
-    var selectedTextId by remember { mutableStateOf(textOverlays.firstOrNull()?.id) }
-    val activeItem = textOverlays.firstOrNull { it.id == selectedTextId } ?: textOverlays.firstOrNull()
+// -----------------------------------------------------------------------------
+// Sub-Components
+// -----------------------------------------------------------------------------
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+@Composable
+private fun SpeedDialItem(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xF21E1E1E),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+        shadowElevation = 6.dp
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(Modifier.width(10.dp))
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Layer properties context bar (docked directly above the bottom bar).
+ */
+@Composable
+private fun LayerPropertiesBar(
+    activeLayer: EditorOverlayLayer?,
+    onOpenBlend: () -> Unit,
+    onOpenMask: () -> Unit,
+    onOpenTransform: () -> Unit,
+    onOpenLayers: () -> Unit,
+    onToggleVisibility: () -> Unit,
+    onFlipH: () -> Unit,
+    onMoreOptions: () -> Unit
+) {
+    if (activeLayer == null) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Text Layers (${textOverlays.size})", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Button(
-                onClick = { showAddDialog = true },
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                modifier = Modifier.height(34.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
             ) {
-                Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Add Text", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Icon(
+                    imageVector = Icons.Default.Layers,
+                    contentDescription = null,
+                    tint = Color(0xFFAAAAAA),
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "No overlay layers yet. Tap + to add",
+                    color = Color(0xFFAAAAAA),
+                    fontSize = 12.sp
+                )
+            }
+            Surface(
+                onClick = onOpenLayers,
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFF222222),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+            ) {
+                Text(
+                    text = "Layers",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                )
+            }
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+        ) {
+            // Quick Action Icons Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onOpenTransform, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.AspectRatio, "Fit", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onFlipH, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.Flip, "Flip", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onOpenLayers, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.Layers, "Layers", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onToggleVisibility, modifier = Modifier.size(40.dp)) {
+                    val isVis = activeLayer.isVisible
+                    Icon(
+                        imageVector = if (isVis) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = "Visibility",
+                        tint = if (isVis) Color.White else Color(0xFF888888),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                IconButton(onClick = onMoreOptions, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.MoreHoriz, "More", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            // Three Main Action Pills: [Blend and opacity], [Create mask / Modify mask], [Transform]
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LayerActionPill(
+                    icon = Icons.Default.Grain,
+                    label = "Blend and opacity",
+                    onClick = onOpenBlend
+                )
+
+                val maskLabel = if (activeLayer.mask != null && activeLayer.mask.isEnabled) "Modify mask" else "Create mask"
+                LayerActionPill(
+                    icon = Icons.Default.AutoFixNormal,
+                    label = maskLabel,
+                    onClick = onOpenMask
+                )
+
+                LayerActionPill(
+                    icon = Icons.Default.CropRotate,
+                    label = "Transform",
+                    onClick = onOpenTransform
+                )
+            }
+
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Layer properties",
+                color = Color(0xFF888888),
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun LayerActionPill(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = Color.White,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = label,
+            color = Color(0xFFCCCCCC),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+/**
+ * Layers List Panel (The "Layers" sheet).
+ */
+@Composable
+private fun LayersListPanel(
+    layers: List<EditorOverlayLayer>,
+    activeLayerId: String?,
+    onSelectLayer: (String) -> Unit,
+    onClose: () -> Unit,
+    onToggleVisibility: (String) -> Unit,
+    onToggleLock: (String) -> Unit,
+    onDeleteLayer: (String) -> Unit,
+    onDuplicateLayer: (String) -> Unit,
+    onMoveLayer: (String, Int) -> Unit,
+    onRenameRequest: (EditorOverlayLayer) -> Unit,
+    onOpenBlend: () -> Unit,
+    onOpenMask: () -> Unit,
+    onOpenTransform: () -> Unit
+) {
+    var contextMenuLayer by remember { mutableStateOf<EditorOverlayLayer?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 380.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+    ) {
+        // Handle bar
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .size(width = 36.dp, height = 4.dp)
+                .background(Color(0xFF555555), CircleShape)
+        )
+
+        // Header: "Layers" + Close X
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Layers",
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold
+            )
+            IconButton(onClick = onClose, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.Close, "Close", tint = Color.White, modifier = Modifier.size(18.dp))
             }
         }
 
-        if (textOverlays.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            // Text Layer Selector Tabs
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(textOverlays) { item ->
-                    val isSel = item.id == activeItem?.id
+        // Scrollable List of Layers (Stacked top to bottom)
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (layers.isEmpty()) {
+                item {
                     Surface(
-                        onClick = { selectedTextId = item.id },
-                        shape = RoundedCornerShape(14.dp),
-                        color = if (isSel) Color.White else Color(0xFF222222),
-                        modifier = Modifier.height(30.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF1E1E1E),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Box(modifier = Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                            Text(
-                                text = item.text.take(12),
-                                color = if (isSel) Color.Black else Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF2C2C2C)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Photo, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Background Photo", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Original canvas • Tap + to add layers", color = Color(0xFF888888), fontSize = 11.sp)
+                            }
+                            Icon(Icons.Default.Lock, null, tint = Color(0xFF666666), modifier = Modifier.size(16.dp))
                         }
                     }
                 }
-            }
+            } else {
+                items(layers.reversed()) { layer ->
+                    val isSelected = layer.id == activeLayerId
 
-            if (activeItem != null) {
-                Spacer(Modifier.height(10.dp))
-                // Active Text Inspector
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { onDuplicateText(activeItem.id) },
-                        shape = CircleShape,
-                        modifier = Modifier.weight(1f).height(34.dp),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                    Surface(
+                        onClick = { onSelectLayer(layer.id) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isSelected) Color(0xFF262626) else Color(0xFF1A1A1A),
+                        border = BorderStroke(
+                            width = if (isSelected) 1.5.dp else 1.dp,
+                            color = if (isSelected) Color.White.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.08f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Duplicate", color = Color.White, fontSize = 11.sp)
-                    }
-                    OutlinedButton(
-                        onClick = { onDeleteText(activeItem.id) },
-                        shape = CircleShape,
-                        modifier = Modifier.weight(1f).height(34.dp),
-                        border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.4f))
-                    ) {
-                        Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFFF5252), modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Delete", color = Color(0xFFFF5252), fontSize = 11.sp)
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-
-                // Font Family Row
-                Text("Font Style", color = Color(0xFFAAAAAA), fontSize = 11.sp)
-                Spacer(Modifier.height(4.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(TextFontFamily.entries) { font ->
-                        val isSel = activeItem.fontFamily == font
-                        Surface(
-                            onClick = { onUpdateText(activeItem.copy(fontFamily = font)) },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isSel) Color.White else Color(0xFF222222),
-                            modifier = Modifier.height(28.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Box(modifier = Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
-                                Text(font.label, color = if (isSel) Color.Black else Color.White, fontSize = 10.sp)
+                            // Left: Dual thumbnail (if masked) or single thumbnail + Name
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                // Thumbnail(s)
+                                if (layer.mask != null && layer.mask.isEnabled) {
+                                    // Dual thumbnail: [Layer | Mask]
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        LayerThumbnailIcon(layer = layer, size = 42.dp)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(42.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color.Black)
+                                                .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AutoFixNormal,
+                                                contentDescription = "Mask",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    LayerThumbnailIcon(layer = layer, size = 42.dp)
+                                }
+
+                                Spacer(Modifier.width(12.dp))
+
+                                Text(
+                                    text = layer.name,
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable { onRenameRequest(layer) }
+                                )
+                            }
+
+                            // Right: More (...), Lock, Eye
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { contextMenuLayer = layer },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(Icons.Default.MoreHoriz, "More options", tint = Color(0xFFAAAAAA), modifier = Modifier.size(18.dp))
+                                }
+                                IconButton(
+                                    onClick = { onToggleLock(layer.id) },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (layer.isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                                        contentDescription = "Lock",
+                                        tint = if (layer.isLocked) Color.White else Color(0xFF666666),
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { onToggleVisibility(layer.id) },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (layer.isVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                        contentDescription = "Visibility",
+                                        tint = if (layer.isVisible) Color.White else Color(0xFF666666),
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
+            }
+        }
 
-                Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp))
 
-                // Font Size Slider
-                LrSliderRow(
-                    title = "Font Size",
-                    value = activeItem.fontSizeSp,
-                    displayValue = "${activeItem.fontSizeSp.toInt()} sp",
-                    valueRange = 12f..72f,
-                    minLabel = "12",
-                    maxLabel = "72",
-                    onDragStart = {},
-                    onValueChange = { onUpdateText(activeItem.copy(fontSizeSp = it)) },
-                    onValueChangeFinished = {}
-                )
-
-                // Rotation Slider
-                LrSliderRow(
-                    title = "Rotation",
-                    value = activeItem.rotation,
-                    displayValue = "${activeItem.rotation.toInt()}°",
-                    valueRange = -180f..180f,
-                    minLabel = "−180°",
-                    maxLabel = "+180°",
-                    onDragStart = {},
-                    onValueChange = { onUpdateText(activeItem.copy(rotation = it)) },
-                    onValueChangeFinished = {}
-                )
-
-                // Curved Arc Slider
-                LrSliderRow(
-                    title = "Curved Arc",
-                    value = activeItem.curvedArcDegrees,
-                    displayValue = "${activeItem.curvedArcDegrees.toInt()}°",
-                    valueRange = -180f..180f,
-                    minLabel = "−180°",
-                    maxLabel = "+180°",
-                    onDragStart = {},
-                    onValueChange = { onUpdateText(activeItem.copy(curvedArcDegrees = it)) },
-                    onValueChangeFinished = {}
-                )
+        if (layers.isNotEmpty()) {
+            // Bottom three pills inside Layers panel
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LayerActionPill(Icons.Default.Grain, "Blend and", onOpenBlend)
+                LayerActionPill(Icons.Default.AutoFixNormal, "Create mask", onOpenMask)
+                LayerActionPill(Icons.Default.CropRotate, "Transform", onOpenTransform)
             }
         } else {
-            Spacer(Modifier.height(12.dp))
-            Text("No text layers added yet. Tap '+ Add Text' above.", color = Color(0xFF888888), fontSize = 12.sp)
+            Text(
+                text = "Tap + at bottom-right to add an image, adjustment, or text layer",
+                color = Color(0xFF888888),
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            )
         }
     }
 
-    if (showAddDialog) {
-        var inputStr by remember { mutableStateOf("Emre Gallery") }
-        AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("Add Text Layer", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = {
-                OutlinedTextField(
-                    value = inputStr,
-                    onValueChange = { inputStr = it },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+    // Context Menu Sheet for a Layer
+    if (contextMenuLayer != null) {
+        LayerContextMenuSheet(
+            layer = contextMenuLayer!!,
+            onDismiss = { contextMenuLayer = null },
+            onRename = {
+                val target = contextMenuLayer!!
+                contextMenuLayer = null
+                onRenameRequest(target)
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (inputStr.isNotBlank()) {
-                            onAddText(inputStr, Color.White, Color.Black.copy(alpha = 0.5f))
-                        }
-                        showAddDialog = false
-                    }
-                ) {
-                    Text("Add", color = Color.White, fontWeight = FontWeight.Bold)
-                }
+            onDelete = {
+                val id = contextMenuLayer!!.id
+                contextMenuLayer = null
+                onDeleteLayer(id)
             },
-            dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) {
-                    Text("Cancel", color = Color(0xFFAAAAAA))
-                }
+            onDuplicate = {
+                val id = contextMenuLayer!!.id
+                contextMenuLayer = null
+                onDuplicateLayer(id)
             },
-            containerColor = Color(0xFF1E1E1E),
-            shape = RoundedCornerShape(16.dp)
+            onToggleVisibility = {
+                val id = contextMenuLayer!!.id
+                contextMenuLayer = null
+                onToggleVisibility(id)
+            },
+            onToggleLock = {
+                val id = contextMenuLayer!!.id
+                contextMenuLayer = null
+                onToggleLock(id)
+            }
         )
     }
 }
 
-// -------------------------------------------------------------
-// 3. Stickers
-// -------------------------------------------------------------
+/**
+ * Thumbnail preview for each layer.
+ */
 @Composable
-fun StickersSubPanel(
-    stickers: List<StickerItem>,
-    onAddSticker: (String) -> Unit,
-    onUpdateSticker: (StickerItem) -> Unit,
-    onDeleteSticker: (String) -> Unit,
-    onDuplicateSticker: (String) -> Unit
+private fun LayerThumbnailIcon(
+    layer: EditorOverlayLayer?,
+    size: androidx.compose.ui.unit.Dp
 ) {
-    var selectedCategory by remember { mutableStateOf("Smileys") }
-    var selectedStickerId by remember { mutableStateOf(stickers.firstOrNull()?.id) }
-    val activeSticker = stickers.firstOrNull { it.id == selectedStickerId } ?: stickers.firstOrNull()
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF222222))
+            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (layer == null) {
+            Icon(Icons.Default.Layers, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            return@Box
+        }
 
-    val emojiCategories = mapOf(
-        "Smileys" to listOf("😊", "😎", "😍", "🥳", "🔥", "✨", "❤️", "💖", "🎉", "💯", "👑", "⭐"),
-        "Animals" to listOf("🐱", "🐶", "🦊", "🐼", "🦁", "🐯", "🐨", "🦋", "🦄", "🐧", "🦉", "🐰"),
-        "Food" to listOf("🍕", "🍔", "🍦", "☕", "🍩", "🍣", "🌮", "🍿", "🍓", "🍉", "🍰", "🍹"),
-        "Travel" to listOf("✈️", "🚗", "🏖️", "🚀", "⛺", "⛰️", "🗼", "🎡", "🚲", "⛵", "🌅", "🗽"),
-        "Objects" to listOf("💡", "📸", "💎", "🎸", "🎧", "🕶️", "⌚", "🎁", "🎨", "🏆", "🎮", "🔑")
+        when (layer.type) {
+            OverlayLayerType.IMAGE -> {
+                if (!layer.stockImageKey.isNullOrEmpty()) {
+                    val bmp = remember(layer.stockImageKey) {
+                        StockPhotoAssets.getStockBitmap(layer.stockImageKey, 80, 80)
+                    }
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = layer.name,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(Icons.Default.Image, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+            }
+            OverlayLayerType.ADJUSTMENT -> {
+                Icon(Icons.Default.Contrast, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            OverlayLayerType.FILL -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(layer.fillSolidColor)
+                )
+            }
+            OverlayLayerType.TYPE -> {
+                Icon(Icons.Default.TextFields, null, tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            OverlayLayerType.EMPTY -> {
+                Icon(Icons.Default.Layers, null, tint = Color(0xFFAAAAAA), modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Blend and Opacity panel (Matching 02:07 - 02:14 of video).
+ */
+@Composable
+private fun BlendAndOpacityPanel(
+    currentBlendMode: String,
+    currentOpacity: Float,
+    onBlendModeChange: (String) -> Unit,
+    onOpacityChange: (Float) -> Unit,
+    onDone: () -> Unit
+) {
+    val blendModes = listOf(
+        "Normal", "Dissolve", "Darken", "Multiply", "Color burn", "Linear burn",
+        "Lighten", "Screen", "Color dodge", "Linear dodge (add)", "Overlay",
+        "Soft light", "Hard light", "Difference", "Exclusion", "Hue",
+        "Saturation", "Color", "Luminosity"
     )
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text("Add Sticker / Emoji", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        Spacer(Modifier.height(8.dp))
-
-        // Category Tabs
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(emojiCategories.keys.toList()) { cat ->
-                val isSel = selectedCategory == cat
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        // Blend Modes Horizontal Scroll
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(blendModes) { mode ->
+                val isSelected = currentBlendMode.equals(mode, ignoreCase = true)
                 Surface(
-                    onClick = { selectedCategory = cat },
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isSel) Color.White else Color(0xFF222222),
-                    modifier = Modifier.height(30.dp)
+                    onClick = { onBlendModeChange(mode) },
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isSelected) Color.White else Color(0xFF222222),
+                    border = BorderStroke(1.dp, if (isSelected) Color.White else Color.White.copy(alpha = 0.1f)),
+                    modifier = Modifier.height(36.dp)
                 ) {
-                    Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    ) {
                         Text(
-                            text = cat,
-                            color = if (isSel) Color.Black else Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                            text = mode,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
                     }
                 }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(16.dp))
 
-        // Emoji Grid / Strip
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val emojis = emojiCategories[selectedCategory] ?: emptyList()
-            items(emojis) { emoji ->
-                Surface(
-                    onClick = { onAddSticker(emoji) },
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E1E1E),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(emoji, fontSize = 22.sp)
-                    }
-                }
-            }
-        }
-
-        if (activeSticker != null) {
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Selected: ${activeSticker.emojiOrRes}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IconButton(
-                        onClick = { onDuplicateSticker(activeSticker.id) },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.ContentCopy, "Duplicate", tint = Color.White, modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(
-                        onClick = { onDeleteSticker(activeSticker.id) },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.DeleteOutline, "Delete", tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-
-            LrSliderRow(
-                title = "Size",
-                value = activeSticker.sizeDp,
-                displayValue = "${activeSticker.sizeDp.toInt()} dp",
-                valueRange = 32f..200f,
-                minLabel = "32",
-                maxLabel = "200",
-                onDragStart = {},
-                onValueChange = { onUpdateSticker(activeSticker.copy(sizeDp = it)) },
-                onValueChangeFinished = {}
-            )
-
-            LrSliderRow(
-                title = "Rotation",
-                value = activeSticker.rotation,
-                displayValue = "${activeSticker.rotation.toInt()}°",
-                valueRange = -180f..180f,
-                minLabel = "−180°",
-                maxLabel = "+180°",
-                onDragStart = {},
-                onValueChange = { onUpdateSticker(activeSticker.copy(rotation = it)) },
-                onValueChangeFinished = {}
-            )
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 4. Shapes
-// -------------------------------------------------------------
-@Composable
-fun ShapesSubPanel(
-    shapes: List<ShapeItem>,
-    onAddShape: (ShapeType) -> Unit,
-    onUpdateShape: (ShapeItem) -> Unit,
-    onDeleteShape: (String) -> Unit,
-    onDuplicateShape: (String) -> Unit
-) {
-    var selectedShapeId by remember { mutableStateOf(shapes.firstOrNull()?.id) }
-    val activeShape = shapes.firstOrNull { it.id == selectedShapeId } ?: shapes.firstOrNull()
-
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text("Add Vector Shape", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        Spacer(Modifier.height(8.dp))
-
-        // Shape Icons Strip
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(ShapeType.entries) { shape ->
-                val icon = when (shape) {
-                    ShapeType.RECTANGLE -> Icons.Default.CropSquare
-                    ShapeType.ROUNDED_RECTANGLE -> Icons.Default.Square
-                    ShapeType.CIRCLE -> Icons.Default.Circle
-                    ShapeType.STAR -> Icons.Default.Star
-                    ShapeType.HEART -> Icons.Default.Favorite
-                    ShapeType.HEXAGON -> Icons.Default.Hexagon
-                    ShapeType.ARROW -> Icons.AutoMirrored.Filled.ArrowForward
-                    ShapeType.TRIANGLE -> Icons.Default.ChangeHistory
-                    ShapeType.POLYGON -> Icons.Default.Polyline
-                    ShapeType.LINE -> Icons.Default.HorizontalRule
-                    ShapeType.CURVED_LINE -> Icons.Default.Gesture
-                    ShapeType.FREEFORM -> Icons.Default.Draw
-                }
-
-                Surface(
-                    onClick = { onAddShape(shape) },
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1E1E1E),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-                    modifier = Modifier.width(64.dp).height(50.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(4.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Icon(icon, shape.label, tint = Color.White, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.height(2.dp))
-                        Text(shape.label, color = Color(0xFFAAAAAA), fontSize = 8.sp, maxLines = 1)
-                    }
-                }
-            }
-        }
-
-        if (activeShape != null) {
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Selected: ${activeShape.shapeType.label}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    IconButton(
-                        onClick = { onDuplicateShape(activeShape.id) },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.ContentCopy, "Duplicate", tint = Color.White, modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(
-                        onClick = { onDeleteShape(activeShape.id) },
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(Icons.Default.DeleteOutline, "Delete", tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-
-            LrSliderRow(
-                title = "Stroke Width",
-                value = activeShape.strokeWidth,
-                displayValue = "${activeShape.strokeWidth.toInt()} px",
-                valueRange = 1f..20f,
-                minLabel = "1",
-                maxLabel = "20",
-                onDragStart = {},
-                onValueChange = { onUpdateShape(activeShape.copy(strokeWidth = it)) },
-                onValueChangeFinished = {}
-            )
-
-            LrSliderRow(
-                title = "Rotation",
-                value = activeShape.rotation,
-                displayValue = "${activeShape.rotation.toInt()}°",
-                valueRange = -180f..180f,
-                minLabel = "−180°",
-                maxLabel = "+180°",
-                onDragStart = {},
-                onValueChange = { onUpdateShape(activeShape.copy(rotation = it)) },
-                onValueChangeFinished = {}
-            )
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 5. Callouts
-// -------------------------------------------------------------
-@Composable
-fun CalloutsSubPanel(
-    callouts: List<CalloutItem>,
-    onAddCallout: (String, CalloutStyle) -> Unit,
-    onUpdateCallout: (CalloutItem) -> Unit,
-    onDeleteCallout: (String) -> Unit
-) {
-    var showAddDialog by remember { mutableStateOf(false) }
-    var selectedStyle by remember { mutableStateOf(CalloutStyle.SPEECH_BUBBLE) }
-    var selectedCalloutId by remember { mutableStateOf(callouts.firstOrNull()?.id) }
-    val activeCallout = callouts.firstOrNull { it.id == selectedCalloutId } ?: callouts.firstOrNull()
-
-    Column(modifier = Modifier.fillMaxWidth()) {
+        // Opacity Slider
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Callout Balloons (${callouts.size})", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Button(
-                onClick = { showAddDialog = true },
+            Text("Opacity", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text("${(currentOpacity * 100).toInt()}%", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+
+        Slider(
+            value = currentOpacity,
+            onValueChange = onOpacityChange,
+            valueRange = 0f..1f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color(0xFF333333)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // Bottom Bar: "Blend and opacity" + Checkmark
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Spacer(Modifier.width(36.dp))
+            Text(
+                text = "Blend and opacity",
+                color = Color(0xFFAAAAAA),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Surface(
+                onClick = onDone,
                 shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
-                modifier = Modifier.height(34.dp)
+                color = Color.White,
+                contentColor = Color.Black,
+                modifier = Modifier.size(36.dp)
             ) {
-                Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Add Callout", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Check, "Done", tint = Color.Black, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Transform Control Panel (Scale & Rotate, Skew, Distort).
+ */
+@Composable
+private fun TransformControlPanel(
+    layer: EditorOverlayLayer?,
+    onFlipH: () -> Unit,
+    onFlipV: () -> Unit,
+    onReset: () -> Unit,
+    onDone: () -> Unit
+) {
+    var activeSubMode by remember { mutableStateOf("Scale & Rotate") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        // Quick Flip & Options Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onFlipH, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Flip, "Flip H", tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+            IconButton(onClick = onFlipV, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.SwapVert, "Flip V", tint = Color.White, modifier = Modifier.size(18.dp))
+            }
+            IconButton(onClick = onReset, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.RestartAlt, "Reset", tint = Color.White, modifier = Modifier.size(18.dp))
             }
         }
 
         Spacer(Modifier.height(8.dp))
 
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(CalloutStyle.entries) { style ->
-                val isSel = selectedStyle == style
-                Surface(
-                    onClick = { selectedStyle = style },
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (isSel) Color.White else Color(0xFF222222),
-                    modifier = Modifier.height(30.dp)
-                ) {
-                    Box(modifier = Modifier.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = style.label,
-                            color = if (isSel) Color.Black else Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
-                        )
-                    }
-                }
-            }
-        }
-
-        if (activeCallout != null) {
-            Spacer(Modifier.height(10.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        // Sub-modes: Scale & Rotate, Skew, Distort + Checkmark
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color.White,
+                modifier = Modifier.height(36.dp)
             ) {
-                Text("Selected: \"${activeCallout.text}\"", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                IconButton(onClick = { onDeleteCallout(activeCallout.id) }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.DeleteOutline, "Delete", tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                    Text("Scale & Rotate", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF222222),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                    Text("Skew", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF222222),
+                modifier = Modifier.height(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 12.dp)) {
+                    Text("Distort", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Surface(
+                onClick = onDone,
+                shape = CircleShape,
+                color = Color.White,
+                contentColor = Color.Black,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Check, "Done", tint = Color.Black, modifier = Modifier.size(20.dp))
                 }
             }
         }
-    }
 
-    if (showAddDialog) {
-        var calloutText by remember { mutableStateOf("Say something...") }
-        AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("Add ${selectedStyle.label}", color = Color.White, fontWeight = FontWeight.Bold) },
-            text = {
-                OutlinedTextField(
-                    value = calloutText,
-                    onValueChange = { calloutText = it },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color.White
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (calloutText.isNotBlank()) {
-                            onAddCallout(calloutText, selectedStyle)
-                        }
-                        showAddDialog = false
-                    }
-                ) {
-                    Text("Add", color = Color.White, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddDialog = false }) {
-                    Text("Cancel", color = Color(0xFFAAAAAA))
-                }
-            },
-            containerColor = Color(0xFF1E1E1E),
-            shape = RoundedCornerShape(16.dp)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Transform",
+            color = Color(0xFF888888),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
     }
 }
 
-// -------------------------------------------------------------
-// 6. Lighting (Lens Flares)
-// -------------------------------------------------------------
+/**
+ * Select Area / Cutout Mask Panel (Matching 02:22 - 04:17 of video).
+ */
 @Composable
-fun LightingSubPanel(
-    flares: List<LensFlareItem>,
-    onAddLensFlare: (LensFlareType) -> Unit,
-    onUpdateLensFlare: (LensFlareItem) -> Unit,
-    onDeleteLensFlare: (String) -> Unit
+private fun SelectAreaMaskPanel(
+    onApplySubjectMask: () -> Unit,
+    onApplyInvertMask: () -> Unit,
+    onCancel: () -> Unit
 ) {
-    var selectedFlareId by remember { mutableStateOf(flares.firstOrNull()?.id) }
-    val activeFlare = flares.firstOrNull { it.id == selectedFlareId } ?: flares.firstOrNull()
+    var selectedTool by remember { mutableStateOf("Subject") }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text("Optical Lens Flares (${LensFlareType.entries.size} types)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        Spacer(Modifier.height(8.dp))
-
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(LensFlareType.entries) { type ->
-                Surface(
-                    onClick = { onAddLensFlare(type) },
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color(0xFF1E1E1E),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Flare, null, tint = Color(0xFFFFD54F), modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(type.label, color = Color.White, fontSize = 11.sp)
-                    }
-                }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        // Selection modifiers pills
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onApplyInvertMask, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.InvertColors, "Invert selection", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onApplySubjectMask, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.SelectAll, "Select all", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Clear, "Clear", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
 
-        if (activeFlare != null) {
-            Spacer(Modifier.height(10.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        Spacer(Modifier.height(8.dp))
+
+        // Tools Strip: Subject, Background, Tap select, Brush, Lasso
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // "Subject" button (One-tap AI Subject Cutout, matching video 02:22)
+            Surface(
+                onClick = onApplySubjectMask,
+                shape = RoundedCornerShape(12.dp),
+                color = Color.White,
+                modifier = Modifier.height(42.dp)
             ) {
-                Text("Selected: ${activeFlare.flareType.label}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                IconButton(onClick = { onDeleteLensFlare(activeFlare.id) }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.DeleteOutline, "Delete", tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Person, null, tint = Color.Black, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Subject", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
 
-            LrSliderRow(
-                title = "Intensity",
-                value = activeFlare.intensity * 100f,
-                displayValue = "${(activeFlare.intensity * 100).toInt()}%",
-                valueRange = 10f..150f,
-                minLabel = "10%",
-                maxLabel = "150%",
-                onDragStart = {},
-                onValueChange = { onUpdateLensFlare(activeFlare.copy(intensity = it / 100f)) },
-                onValueChangeFinished = {}
-            )
-        }
-    }
-}
-
-// -------------------------------------------------------------
-// 7. Background Cutout & Replacement
-// -------------------------------------------------------------
-@Composable
-fun BackgroundSubPanel(
-    settings: BackgroundSettings,
-    onSettingsChange: (BackgroundSettings) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text("Subject Isolation & Background", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        Spacer(Modifier.height(8.dp))
-
-        // Background Mode Pills
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(BackgroundMode.entries) { mode ->
-                val isSel = settings.mode == mode
-                Surface(
-                    onClick = { onSettingsChange(settings.copy(mode = mode, isCutoutActive = mode != BackgroundMode.ORIGINAL)) },
-                    shape = RoundedCornerShape(18.dp),
-                    color = if (isSel) Color.White else Color(0xFF222222),
-                    modifier = Modifier.height(34.dp)
+            Surface(
+                onClick = onApplyInvertMask,
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF222222),
+                modifier = Modifier.height(42.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = mode.label,
-                            color = if (isSel) Color.Black else Color.White,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 11.sp
-                        )
-                    }
+                    Icon(Icons.Default.Wallpaper, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Background", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Surface(
+                onClick = { selectedTool = "Tap select" },
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF222222),
+                modifier = Modifier.height(42.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.TouchApp, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Tap select", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+
+            Surface(
+                onClick = { selectedTool = "Brush" },
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF222222),
+                modifier = Modifier.height(42.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Brush, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Quick select brush", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 }
             }
         }
 
         Spacer(Modifier.height(10.dp))
 
-        when (settings.mode) {
-            BackgroundMode.BLUR -> {
-                LrSliderRow(
-                    title = "Portrait Blur Radius",
-                    value = settings.blurRadius,
-                    displayValue = "${settings.blurRadius.toInt()} px",
-                    valueRange = 5f..60f,
-                    minLabel = "5 px",
-                    maxLabel = "60 px",
-                    onDragStart = {},
-                    onValueChange = { onSettingsChange(settings.copy(blurRadius = it)) },
-                    onValueChangeFinished = {}
-                )
-            }
-            BackgroundMode.SOLID -> {
-                Text("Studio Solid Color", color = Color(0xFFAAAAAA), fontSize = 12.sp)
-                Spacer(Modifier.height(6.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val solidColors = listOf(Color.White, Color.Black, Color(0xFF212121), Color(0xFFEEEEEE), Color(0xFF2979FF), Color(0xFFFF5252), Color(0xFFFFD54F))
-                    items(solidColors) { c ->
-                        Surface(
-                            onClick = { onSettingsChange(settings.copy(solidColor = c)) },
-                            shape = CircleShape,
-                            color = c,
-                            border = BorderStroke(if (settings.solidColor == c) 2.5.dp else 1.dp, Color.White),
-                            modifier = Modifier.size(32.dp)
-                        ) {}
-                    }
-                }
-            }
-            BackgroundMode.GRADIENT -> {
-                Text("Studio Gradient Presets", color = Color(0xFFAAAAAA), fontSize = 12.sp)
-                Spacer(Modifier.height(6.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val gradients = listOf(
-                        listOf(Color(0xFFFF758C), Color(0xFFFF7EB3)),
-                        listOf(Color(0xFF2193B0), Color(0xFF6DD5ED)),
-                        listOf(Color(0xFFCC2B5E), Color(0xFF753A88)),
-                        listOf(Color(0xFF11998E), Color(0xFF38EF7D))
-                    )
-                    items(gradients) { gradColors ->
-                        Surface(
-                            onClick = { onSettingsChange(settings.copy(gradientColors = gradColors)) },
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color.Transparent,
-                            border = BorderStroke(1.5.dp, Color.White.copy(alpha = 0.5f)),
-                            modifier = Modifier.width(60.dp).height(36.dp)
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize().background(Brush.horizontalGradient(gradColors)))
-                        }
-                    }
-                }
-            }
-            else -> {}
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // AI Refinement & Shadow Toggles
+        // Action Buttons: "Apply as mask", "Delete area"
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Hair Refinement & Invert", color = Color.White, fontSize = 12.sp)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = settings.hairRefinement,
-                    onClick = { onSettingsChange(settings.copy(hairRefinement = !settings.hairRefinement)) },
-                    label = { Text("Hair Refine", fontSize = 10.sp) }
+            TextButton(onClick = onCancel) {
+                Text("Cancel", color = Color(0xFFAAAAAA))
+            }
+
+            Button(
+                onClick = onApplySubjectMask,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.testTag("apply_as_mask_button")
+            ) {
+                Icon(Icons.Default.Check, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Apply as mask", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Select area",
+            color = Color(0xFF888888),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+/**
+ * Modify Mask Panel with Custom Numeric Keypad (Matching 05:07 - 05:11 of video).
+ */
+@Composable
+private fun ModifyMaskKeypadPanel(
+    currentVal: Int,
+    onValueApplied: (Int) -> Unit,
+    onCancel: () -> Unit
+) {
+    var displayVal by remember { mutableStateOf(currentVal.toString()) }
+    var isNegative by remember { mutableStateOf(currentVal < 0) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+    ) {
+        // Top options strip: Expand/Contract, Feather, Smooth, Make border, Transform mask
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.OpenInFull, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Text("Expand/Contract", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.BlurOn, null, tint = Color(0xFF888888), modifier = Modifier.size(20.dp))
+                Text("Feather", color = Color(0xFF888888), fontSize = 10.sp)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.Gesture, null, tint = Color(0xFF888888), modifier = Modifier.size(20.dp))
+                Text("Smooth", color = Color(0xFF888888), fontSize = 10.sp)
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Default.CropSquare, null, tint = Color(0xFF888888), modifier = Modifier.size(20.dp))
+                Text("Make border", color = Color(0xFF888888), fontSize = 10.sp)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Number readout and sign toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = displayVal,
+                color = Color.White,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 12.dp)
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    onClick = {
+                        val num = displayVal.toIntOrNull() ?: 0
+                        displayVal = (-num).toString()
+                    },
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF2A2A2A),
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                ) {
+                    Text("+/-", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                }
+
+                IconButton(
+                    onClick = { displayVal = "0" },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.RestartAlt, "Reset", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Keypad Grid: 1-9, 0, Backspace, Checkmark
+        val keys = listOf(
+            listOf("7", "8", "9"),
+            listOf("4", "5", "6"),
+            listOf("1", "2", "3"),
+            listOf("0", "DEL", "OK")
+        )
+
+        keys.forEach { row ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                row.forEach { k ->
+                    Surface(
+                        onClick = {
+                            when (k) {
+                                "DEL" -> {
+                                    displayVal = if (displayVal.length > 1 && displayVal != "-") {
+                                        displayVal.dropLast(1)
+                                    } else "0"
+                                }
+                                "OK" -> {
+                                    val finalVal = displayVal.toIntOrNull() ?: 0
+                                    onValueApplied(finalVal)
+                                }
+                                else -> {
+                                    displayVal = if (displayVal == "0") k else displayVal + k
+                                }
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (k == "OK") Color.White else Color(0xFF222222),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (k == "DEL") {
+                                Icon(Icons.Default.Backspace, "Delete", tint = Color.White, modifier = Modifier.size(18.dp))
+                            } else if (k == "OK") {
+                                Icon(Icons.Default.Check, "Apply", tint = Color.Black, modifier = Modifier.size(20.dp))
+                            } else {
+                                Text(
+                                    text = k,
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Black & White Adjustment Layer Channel Sliders Panel (Matching 07:12 - 08:06 of video).
+ */
+@Composable
+private fun BlackAndWhiteAdjustmentPanel(
+    settings: BlackAndWhiteSettings,
+    onSettingsChange: (BlackAndWhiteSettings) -> Unit,
+    onDone: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        BwChannelSliderRow("Reds", settings.reds, Color(0xFFFF4D4D)) {
+            onSettingsChange(settings.copy(reds = it))
+        }
+        BwChannelSliderRow("Yellows", settings.yellows, Color(0xFFFFD23F)) {
+            onSettingsChange(settings.copy(yellows = it))
+        }
+        BwChannelSliderRow("Greens", settings.greens, Color(0xFF4CAF50)) {
+            onSettingsChange(settings.copy(greens = it))
+        }
+        BwChannelSliderRow("Cyans", settings.cyans, Color(0xFF00E5FF)) {
+            onSettingsChange(settings.copy(cyans = it))
+        }
+        BwChannelSliderRow("Blues", settings.blues, Color(0xFF448AFF)) {
+            onSettingsChange(settings.copy(blues = it))
+        }
+        BwChannelSliderRow("Magentas", settings.magentas, Color(0xFFE040FB)) {
+            onSettingsChange(settings.copy(magentas = it))
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Bottom label & Done checkmark
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Spacer(Modifier.width(36.dp))
+            Text(
+                text = "Black and white",
+                color = Color(0xFFAAAAAA),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Surface(
+                onClick = onDone,
+                shape = CircleShape,
+                color = Color.White,
+                contentColor = Color.Black,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Check, "Done", tint = Color.Black, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BwChannelSliderRow(
+    label: String,
+    value: Float,
+    accentColor: Color,
+    onValueChange: (Float) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = 12.sp,
+            modifier = Modifier.width(72.dp)
+        )
+
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = -200f..300f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = accentColor,
+                inactiveTrackColor = Color(0xFF333333)
+            ),
+            modifier = Modifier.weight(1f)
+        )
+
+        Text(
+            text = value.toInt().toString(),
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(36.dp)
+        )
+    }
+}
+
+/**
+ * Add Image Bottom Sheet (Add from Photos, Add from Stock, Generate image, Take a photo).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddImageBottomSheet(
+    onDismiss: () -> Unit,
+    onPickFromPhotos: () -> Unit,
+    onSelectStock: (String, String) -> Unit,
+    onGenerateImage: () -> Unit
+) {
+    var showStockGrid by remember { mutableStateOf(false) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1E1E1E),
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Header: "Add image" + Close X
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (showStockGrid) "Select Stock Photo" else "Add image",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
                 )
-                FilterChip(
-                    selected = settings.invertMask,
-                    onClick = { onSettingsChange(settings.copy(invertMask = !settings.invertMask)) },
-                    label = { Text("Invert", fontSize = 10.sp) }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            if (!showStockGrid) {
+                AddImageOptionItem(
+                    title = "Add from Photos",
+                    subtitle = "Add an image from your camera roll",
+                    icon = Icons.Default.PhotoLibrary,
+                    onClick = onPickFromPhotos
+                )
+                AddImageOptionItem(
+                    title = "Add from Stock",
+                    subtitle = "Nebula, PropPlane, Astronaut, Whale presets",
+                    icon = Icons.Default.Collections,
+                    onClick = { showStockGrid = true }
+                )
+                AddImageOptionItem(
+                    title = "Generate image",
+                    subtitle = "Use a prompt to start with a generated image",
+                    icon = Icons.Default.AutoAwesome,
+                    onClick = onGenerateImage
+                )
+                AddImageOptionItem(
+                    title = "Take a photo",
+                    subtitle = "Capture a photo with your camera",
+                    icon = Icons.Default.PhotoCamera,
+                    onClick = onPickFromPhotos
+                )
+            } else {
+                // Stock Grid matching video
+                val stocks = listOf(
+                    Triple("Nebula", "space", "Nebula"),
+                    Triple("PropPlane", "propplane", "PropPlane"),
+                    Triple("chista-astronaut", "astronaut", "Astronaut"),
+                    Triple("Whale", "whale", "Whale"),
+                    Triple("White canvas", "white_canvas", "White canvas")
+                )
+
+                stocks.forEach { (name, key, title) ->
+                    Surface(
+                        onClick = { onSelectStock(key, name) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = Color(0xFF282828),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val bmp = remember(key) {
+                                StockPhotoAssets.getStockBitmap(key, 80, 80)
+                            }
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = name,
+                                modifier = Modifier
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                            )
+                            Spacer(Modifier.width(14.dp))
+                            Column {
+                                Text(name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text(title, color = Color(0xFFAAAAAA), fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun AddImageOptionItem(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = Color(0xFF262626),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(subtitle, color = Color(0xFFAAAAAA), fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+/**
+ * Add Adjustment Layer Bottom Sheet.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddAdjustmentBottomSheet(
+    onDismiss: () -> Unit,
+    onSelectType: (AdjustmentLayerType) -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1E1E1E),
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Header: "Add adjustment layer" + Close X
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Add adjustment layer",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            AdjustmentLayerType.entries.forEach { type ->
+                Surface(
+                    onClick = { onSelectType(type) },
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF262626),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val icon = when (type) {
+                            AdjustmentLayerType.HUE_SATURATION -> Icons.Default.Palette
+                            AdjustmentLayerType.BRIGHTNESS_CONTRAST -> Icons.Default.Brightness6
+                            AdjustmentLayerType.BLACK_AND_WHITE -> Icons.Default.Contrast
+                            AdjustmentLayerType.COLOR_BALANCE -> Icons.Default.Tune
+                            AdjustmentLayerType.EXPOSURE -> Icons.Default.WbSunny
+                            AdjustmentLayerType.CURVES -> Icons.Default.ShowChart
+                            AdjustmentLayerType.LEVELS -> Icons.Default.BarChart
+                        }
+                        Icon(icon, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Column {
+                            Text(type.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(type.subtitle, color = Color(0xFFAAAAAA), fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+/**
+ * Generate Image Prompt Dialog.
+ */
+@Composable
+private fun GenerateImagePromptDialog(
+    onDismiss: () -> Unit,
+    onGenerate: (String) -> Unit
+) {
+    var prompt by remember { mutableStateOf("Deep space cosmic nebula") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1E1E1E),
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text("Generate Image Layer", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column {
+                Text("Enter a prompt to create an image layer:", color = Color(0xFFAAAAAA), fontSize = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color.White,
+                        unfocusedBorderColor = Color(0xFF444444)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
+        },
+        confirmButton = {
+            TextButton(onClick = { onGenerate(prompt.ifBlank { "Deep space nebula" }) }) {
+                Text("Generate", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color(0xFFAAAAAA))
+            }
+        }
+    )
+}
+
+/**
+ * Rename Layer Dialog.
+ */
+@Composable
+private fun RenameLayerDialog(
+    currentName: String,
+    onDismiss: () -> Unit,
+    onRename: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(currentName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF222222),
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Text("Rename layer", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                trailingIcon = {
+                    if (text.isNotEmpty()) {
+                        IconButton(onClick = { text = "" }) {
+                            Icon(Icons.Default.Clear, "Clear", tint = Color.White, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = Color.White,
+                    unfocusedBorderColor = Color(0xFF444444)
+                ),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onRename(text.ifBlank { currentName }) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF), contentColor = Color.White),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Text("Rename", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color.White)
+            }
+        }
+    )
+}
+
+/**
+ * Layer Context Menu Sheet (... button on layer).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LayerContextMenuSheet(
+    layer: EditorOverlayLayer,
+    onDismiss: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+    onDuplicate: () -> Unit,
+    onToggleVisibility: () -> Unit,
+    onToggleLock: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1E1E1E),
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
+            ContextMenuItem("Select multiple", Icons.Default.SelectAll, onClick = onDismiss)
+            ContextMenuItem("Rename", Icons.Default.Edit, onClick = onRename)
+            ContextMenuItem(if (layer.isVisible) "Hide" else "Show", if (layer.isVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, onClick = onToggleVisibility)
+            ContextMenuItem("Delete", Icons.Default.Delete, isDestructive = true, onClick = onDelete)
+            ContextMenuItem(if (layer.isLocked) "Unlock" else "Lock", if (layer.isLocked) Icons.Default.LockOpen else Icons.Default.Lock, onClick = onToggleLock)
+            ContextMenuItem("Unclip layer", Icons.Default.LinkOff, onClick = onDismiss)
+            ContextMenuItem("Copy", Icons.Default.ContentCopy, onClick = onDismiss)
+            ContextMenuItem("Duplicate", Icons.Default.ControlPointDuplicate, onClick = onDuplicate)
+            ContextMenuItem("Load as selection", Icons.Default.CropFree, onClick = onDismiss)
+            ContextMenuItem("Convert to smart object", Icons.Default.SmartButton, onClick = onDismiss)
+            ContextMenuItem("Merge down", Icons.Default.MergeType, onClick = onDismiss)
+            Spacer(Modifier.height(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun ContextMenuItem(
+    label: String,
+    icon: ImageVector,
+    isDestructive: Boolean = false,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        color = Color.Transparent,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp, horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (isDestructive) Color(0xFFFF5252) else Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(Modifier.width(16.dp))
+            Text(
+                text = label,
+                color = if (isDestructive) Color(0xFFFF5252) else Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

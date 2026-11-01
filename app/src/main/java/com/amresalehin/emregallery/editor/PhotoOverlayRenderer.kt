@@ -14,6 +14,9 @@ import kotlin.random.Random
 object PhotoOverlayRenderer {
 
     fun renderAll(canvas: Canvas, width: Float, height: Float, state: EditSessionState, density: Float) {
+        // 0. Redesigned Photoshop-Style Overlay Layer Stack
+        renderOverlayLayers(canvas, width, height, state.overlayLayers, density)
+
         // 1. Borders
         renderBorder(canvas, width, height, state.border)
 
@@ -836,4 +839,151 @@ object PhotoOverlayRenderer {
         }
         canvas.restore()
     }
+
+    private fun renderOverlayLayers(
+        canvas: Canvas,
+        width: Float,
+        height: Float,
+        layers: List<EditorOverlayLayer>,
+        density: Float
+    ) {
+        for (layer in layers) {
+            if (!layer.isVisible) continue
+
+            val cx = layer.xRatio * width
+            val cy = layer.yRatio * height
+            val lw = layer.widthRatio * width * layer.scaleFactor
+            val lh = layer.heightRatio * height * layer.scaleFactor
+
+            canvas.save()
+            canvas.translate(cx, cy)
+            canvas.rotate(layer.rotationDegrees)
+            if (layer.isFlippedH || layer.isFlippedV) {
+                canvas.scale(if (layer.isFlippedH) -1f else 1f, if (layer.isFlippedV) -1f else 1f)
+            }
+
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                alpha = (layer.opacity.coerceIn(0f, 1f) * 255).toInt()
+                xfermode = when (layer.blendMode) {
+                    "Multiply" -> PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
+                    "Screen" -> PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+                    "Overlay" -> PorterDuffXfermode(PorterDuff.Mode.OVERLAY)
+                    "Darken" -> PorterDuffXfermode(PorterDuff.Mode.DARKEN)
+                    "Lighten" -> PorterDuffXfermode(PorterDuff.Mode.LIGHTEN)
+                    "Linear dodge (add)" -> PorterDuffXfermode(PorterDuff.Mode.ADD)
+                    "Color dodge" -> PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+                    "Color burn" -> PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
+                    "Difference" -> PorterDuffXfermode(PorterDuff.Mode.XOR)
+                    else -> null
+                }
+            }
+
+            val layerRect = RectF(-lw / 2f, -lh / 2f, lw / 2f, lh / 2f)
+
+            // Layer Mask Clipping
+            val mask = layer.mask
+            val hasMask = mask?.isEnabled == true
+
+            if (hasMask) {
+                canvas.save()
+                val maskPath = Path()
+                if (mask!!.hasSubjectMask) {
+                    // Elliptical / organic subject cutout matching the airplane/astronaut subject
+                    val feather = mask.feather * density
+                    val expansion = mask.contractExpand * density
+                    val ovalRect = RectF(
+                        layerRect.left + 30f * density - expansion,
+                        layerRect.top + 20f * density - expansion,
+                        layerRect.right - 30f * density + expansion,
+                        layerRect.bottom - 10f * density + expansion
+                    )
+                    maskPath.addRoundRect(ovalRect, 40f * density, 40f * density, Path.Direction.CW)
+                } else {
+                    maskPath.addRect(layerRect, Path.Direction.CW)
+                }
+
+                if (mask.isInverted) {
+                    val fullPath = Path().apply { addRect(RectF(-width, -height, width, height), Path.Direction.CW) }
+                    fullPath.op(maskPath, Path.Op.DIFFERENCE)
+                    canvas.clipPath(fullPath)
+                } else {
+                    canvas.clipPath(maskPath)
+                }
+            }
+
+            when (layer.type) {
+                OverlayLayerType.IMAGE -> {
+                    val bmp = if (!layer.stockImageKey.isNullOrEmpty()) {
+                        StockPhotoAssets.getStockBitmap(layer.stockImageKey, lw.toInt().coerceAtLeast(10), lh.toInt().coerceAtLeast(10))
+                    } else if (layer.imageUri != null) {
+                        try {
+                            BitmapFactory.decodeFile(layer.imageUri)
+                        } catch (_: Exception) {
+                            null
+                        }
+                    } else null
+
+                    if (bmp != null) {
+                        canvas.drawBitmap(bmp, null, layerRect, paint)
+                    } else {
+                        // Fallback placeholder pattern
+                        paint.color = AndroidColor.rgb(45, 52, 65)
+                        canvas.drawRoundRect(layerRect, 16f, 16f, paint)
+                    }
+                }
+                OverlayLayerType.ADJUSTMENT -> {
+                    if (layer.adjustmentType == AdjustmentLayerType.BLACK_AND_WHITE) {
+                        // Apply custom monochrome color matrix to simulate the channel sliders
+                        val bw = layer.bwSettings
+                        val rWeight = (bw.reds / 100f) * 0.3f
+                        val yWeight = (bw.yellows / 100f) * 0.2f
+                        val gWeight = (bw.greens / 100f) * 0.3f
+                        val cWeight = (bw.cyans / 100f) * 0.1f
+                        val bWeight = (bw.blues / 100f) * 0.1f
+                        val mWeight = (bw.magentas / 100f) * 0.1f
+                        val r = rWeight + yWeight / 2f + mWeight / 2f
+                        val g = gWeight + yWeight / 2f + cWeight / 2f
+                        val b = bWeight + cWeight / 2f + mWeight / 2f
+
+                        val cm = ColorMatrix(floatArrayOf(
+                            r, g, b, 0f, 0f,
+                            r, g, b, 0f, 0f,
+                            r, g, b, 0f, 0f,
+                            0f, 0f, 0f, 1f, 0f
+                        ))
+                        paint.colorFilter = ColorMatrixColorFilter(cm)
+                        paint.color = AndroidColor.WHITE
+                        canvas.drawRect(layerRect, paint)
+                    }
+                }
+                OverlayLayerType.FILL -> {
+                    paint.color = layer.fillSolidColor.toArgb()
+                    canvas.drawRect(layerRect, paint)
+                }
+                OverlayLayerType.TYPE -> {
+                    val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = layer.textColor.toArgb()
+                        textSize = layer.fontSizeSp * density
+                        textAlign = Paint.Align.CENTER
+                        typeface = Typeface.DEFAULT_BOLD
+                        alpha = paint.alpha
+                    }
+                    if (layer.textBgColor != androidx.compose.ui.graphics.Color.Transparent) {
+                        val bgP = Paint().apply { color = layer.textBgColor.toArgb() }
+                        canvas.drawRoundRect(layerRect, 12f * density, 12f * density, bgP)
+                    }
+                    canvas.drawText(layer.textContent, 0f, textPaint.textSize / 3f, textPaint)
+                }
+                OverlayLayerType.EMPTY -> {
+                    // Transparent empty layer
+                }
+            }
+
+            if (hasMask) {
+                canvas.restore()
+            }
+            canvas.restore()
+        }
+    }
 }
+
