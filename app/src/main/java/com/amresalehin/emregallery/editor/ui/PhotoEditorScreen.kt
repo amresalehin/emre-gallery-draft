@@ -100,7 +100,9 @@ fun PhotoEditorScreen(
     var selectedBrushColor by remember { mutableStateOf(Color.White) }
     var brushWidth by remember { mutableFloatStateOf(10f) }
     var brushOpacity by remember { mutableFloatStateOf(1.0f) }
+    var brushHardness by remember { mutableFloatStateOf(1.0f) }
     var brushFlow by remember { mutableFloatStateOf(1.0f) }
+    var isEyedropperActive by remember { mutableStateOf(false) }
     var maskingSelectionType by remember { mutableStateOf(MaskingSelectionType.BRUSH) }
     var magicWandTolerance by remember { mutableFloatStateOf(30f) }
 
@@ -520,6 +522,60 @@ fun PhotoEditorScreen(
                             onResetCrop = { viewModel.resetCrop() }
                         )
                     }
+                    MainBottomTab.DRAW -> {
+                        DrawExtendedPanel(
+                            selectedBrush = selectedBrushType,
+                            onSelectBrush = { selectedBrushType = it },
+                            brushColor = selectedBrushColor,
+                            onColorSelect = { selectedBrushColor = it },
+                            brushWidth = brushWidth,
+                            onWidthChange = { brushWidth = it },
+                            brushOpacity = brushOpacity,
+                            onOpacityChange = { brushOpacity = it },
+                            brushHardness = brushHardness,
+                            onHardnessChange = { brushHardness = it },
+                            brushFlow = brushFlow,
+                            onFlowChange = { brushFlow = it },
+
+                            isEyedropperActive = isEyedropperActive,
+                            onToggleEyedropper = { isEyedropperActive = !isEyedropperActive },
+
+                            drawLayers = sessionState.drawLayers,
+                            activeLayerId = sessionState.activeDrawLayerId,
+                            onAddLayer = { viewModel.addDrawLayer() },
+                            onSelectLayer = { viewModel.selectDrawLayer(it) },
+                            onDeleteLayer = { viewModel.deleteDrawLayer(it) },
+                            onDuplicateLayer = { viewModel.duplicateDrawLayer(it) },
+                            onToggleLayerVisibility = { viewModel.toggleDrawLayerVisibility(it) },
+                            onToggleLayerLock = { viewModel.toggleDrawLayerLock(it) },
+                            onSetLayerOpacity = { id, op -> viewModel.setDrawLayerOpacity(id, op) },
+                            onCommitLayerOpacity = { viewModel.commitDrawLayerOpacity() },
+                            onSetLayerBlendMode = { id, bm -> viewModel.setDrawLayerBlendMode(id, bm) },
+                            onMergeLayerDown = { viewModel.mergeDrawLayerDown(it) },
+                            onMoveLayer = { id, dir -> viewModel.moveDrawLayer(id, dir) },
+                            onClearLayer = { viewModel.clearDrawingStrokes(sessionState.activeDrawLayerId) },
+                            onInvertStrokes = { viewModel.invertDrawingStrokes(sessionState.activeDrawLayerId) },
+
+                            symmetryMode = sessionState.drawSymmetryMode,
+                            onSelectSymmetryMode = { viewModel.setDrawSymmetryMode(it) },
+
+                            onStampShape = { shape, isFilled, strokeW, radius ->
+                                val bmp = previewBitmap
+                                val w = (bmp?.width ?: 800).toFloat()
+                                val h = (bmp?.height ?: 800).toFloat()
+                                viewModel.addDrawShapeStroke(
+                                    shapeType = shape,
+                                    isFilled = isFilled,
+                                    strokeWidth = strokeW,
+                                    color = selectedBrushColor,
+                                    opacity = brushOpacity,
+                                    centerX = w / 2f,
+                                    centerY = h / 2f,
+                                    radius = radius
+                                )
+                            }
+                        )
+                    }
                     MainBottomTab.MASKING -> {
                         MaskingExtendedPanel(
                             selectedType = maskingSelectionType,
@@ -673,7 +729,16 @@ fun PhotoEditorScreen(
                             onCropRectPreview = { viewModel.updateCropPreview(it) },
                             onCropRectChanged = { viewModel.commitCrop(it) },
                             maskOverlaySettings = sessionState.maskOverlaySettings,
-                            activeMaskLayer = sessionState.maskLayers.firstOrNull { it.id == sessionState.activeMaskId }
+                            activeMaskLayer = sessionState.maskLayers.firstOrNull { it.id == sessionState.activeMaskId },
+                            brushOpacity = brushOpacity,
+                            brushHardness = brushHardness,
+                            symmetryMode = sessionState.drawSymmetryMode,
+                            isEyedropperActive = isEyedropperActive,
+                            onColorPicked = {
+                                selectedBrushColor = it
+                                isEyedropperActive = false
+                            },
+                            activeDrawLayerId = sessionState.activeDrawLayerId
                         )
 
                         // Top-Left floating overlay action bar in landscape
@@ -860,6 +925,7 @@ fun PhotoEditorScreen(
                                         MainBottomTab.ADJUST -> viewModel.setActiveTool(EditorTool.ADJUST)
                                         MainBottomTab.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
                                         MainBottomTab.CROP -> viewModel.setActiveTool(EditorTool.CROP)
+                                        MainBottomTab.DRAW -> viewModel.setActiveTool(EditorTool.BRUSHES)
                                         MainBottomTab.MASKING -> viewModel.setActiveTool(EditorTool.BRUSHES)
                                         MainBottomTab.HEALING -> viewModel.setActiveTool(EditorTool.RETOUCH)
                                         MainBottomTab.OVERLAYS -> viewModel.setActiveTool(EditorTool.TEXT)
@@ -955,7 +1021,16 @@ fun PhotoEditorScreen(
                             onCropRectPreview = { viewModel.updateCropPreview(it) },
                             onCropRectChanged = { viewModel.commitCrop(it) },
                             maskOverlaySettings = sessionState.maskOverlaySettings,
-                            activeMaskLayer = sessionState.maskLayers.firstOrNull { it.id == sessionState.activeMaskId }
+                            activeMaskLayer = sessionState.maskLayers.firstOrNull { it.id == sessionState.activeMaskId },
+                            brushOpacity = brushOpacity,
+                            brushHardness = brushHardness,
+                            symmetryMode = sessionState.drawSymmetryMode,
+                            isEyedropperActive = isEyedropperActive,
+                            onColorPicked = {
+                                selectedBrushColor = it
+                                isEyedropperActive = false
+                            },
+                            activeDrawLayerId = sessionState.activeDrawLayerId
                         )
 
                         // Floating Slider HUD Banner at Top
@@ -1028,6 +1103,7 @@ fun PhotoEditorScreen(
                                         MainBottomTab.ADJUST -> viewModel.setActiveTool(EditorTool.ADJUST)
                                         MainBottomTab.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
                                         MainBottomTab.CROP -> viewModel.setActiveTool(EditorTool.CROP)
+                                        MainBottomTab.DRAW -> viewModel.setActiveTool(EditorTool.BRUSHES)
                                         MainBottomTab.MASKING -> viewModel.setActiveTool(EditorTool.BRUSHES)
                                         MainBottomTab.HEALING -> viewModel.setActiveTool(EditorTool.RETOUCH)
                                         MainBottomTab.OVERLAYS -> viewModel.setActiveTool(EditorTool.TEXT)

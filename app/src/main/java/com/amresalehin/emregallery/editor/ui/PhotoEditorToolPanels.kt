@@ -596,7 +596,7 @@ fun MinimalSingleSliderRow(
  * [Adjust], [Presets], [Crop], [Masking], [Healing]
  */
 enum class MainBottomTab {
-    ADJUST, PRESETS, CROP, MASKING, HEALING, OVERLAYS, AI_TOOLS
+    ADJUST, PRESETS, CROP, DRAW, MASKING, HEALING, OVERLAYS, AI_TOOLS
 }
 
 /**
@@ -639,7 +639,8 @@ fun MainBottomTierBar(
                     Triple(MainBottomTab.ADJUST, "Adjust", Icons.Default.Tune),
                     Triple(MainBottomTab.PRESETS, "Presets", Icons.Default.FilterVintage),
                     Triple(MainBottomTab.CROP, "Crop", Icons.Default.Crop),
-                    Triple(MainBottomTab.MASKING, "Masking", Icons.Default.Brush),
+                    Triple(MainBottomTab.DRAW, "Draw", Icons.Default.Brush),
+                    Triple(MainBottomTab.MASKING, "Masking", Icons.Default.AutoFixNormal),
                     Triple(MainBottomTab.HEALING, "Healing", Icons.Default.Healing),
                     Triple(MainBottomTab.OVERLAYS, "Overlays", Icons.Default.Layers),
                     Triple(MainBottomTab.AI_TOOLS, "AI Magic", Icons.Default.AutoAwesome)
@@ -696,6 +697,7 @@ fun MainBottomTierBar(
                                     MainBottomTab.PRESETS -> "bottom_tab_presets"
                                     MainBottomTab.CROP -> "bottom_tab_crop"
                                     MainBottomTab.ADJUST -> "bottom_tab_adjust"
+                                    MainBottomTab.DRAW -> "bottom_tab_draw"
                                     MainBottomTab.MASKING -> "bottom_tab_masking"
                                     MainBottomTab.HEALING -> "bottom_tab_healing"
                                     MainBottomTab.OVERLAYS -> "bottom_tab_overlays"
@@ -3038,7 +3040,8 @@ fun BrushesPanel(
     modifier: Modifier = Modifier
 ) {
     val colors = listOf(
-        Color.White, Color.LightGray, Color.Gray, Color.DarkGray, Color.Black
+        Color.White, Color(0xFFFF5252), Color(0xFFFF9100), Color(0xFFFFEA00),
+        Color(0xFF00E676), Color(0xFF00B0FF), Color(0xFFD500F9), Color.Black
     )
 
     Column(

@@ -93,6 +93,12 @@ fun PhotoEditorCanvas(
     onCropRectChanged: (RectF?) -> Unit,
     maskOverlaySettings: MaskOverlaySettings = MaskOverlaySettings(),
     activeMaskLayer: LightcraftMaskLayer? = null,
+    brushOpacity: Float = 1.0f,
+    brushHardness: Float = 1.0f,
+    symmetryMode: DrawSymmetryMode = DrawSymmetryMode.OFF,
+    isEyedropperActive: Boolean = false,
+    onColorPicked: ((Color) -> Unit)? = null,
+    activeDrawLayerId: String = "layer_1",
     modifier: Modifier = Modifier
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
@@ -177,8 +183,25 @@ fun PhotoEditorCanvas(
             .onSizeChanged { containerSize = it }
             .then(
                 when {
+                    isEyedropperActive -> {
+                        Modifier.pointerInput(isEyedropperActive, bitmap, imgLeft, imgTop, drawW, drawH) {
+                            detectTapGestures { tapOffset ->
+                                val bmp = bitmap
+                                if (bmp != null && !bmp.isRecycled && drawW > 0 && drawH > 0) {
+                                    val relX = (tapOffset.x - imgLeft) / drawW
+                                    val relY = (tapOffset.y - imgTop) / drawH
+                                    if (relX in 0f..1f && relY in 0f..1f) {
+                                        val px = (relX * bmp.width).toInt().coerceIn(0, bmp.width - 1)
+                                        val py = (relY * bmp.height).toInt().coerceIn(0, bmp.height - 1)
+                                        val colorInt = bmp.getPixel(px, py)
+                                        onColorPicked?.invoke(Color(colorInt))
+                                    }
+                                }
+                            }
+                        }
+                    }
                     isDrawingMode || isRetouchMode -> {
-                        Modifier.pointerInput(isDrawingMode, isRetouchMode, brushType, brushColor, brushWidth, activeRetouchType, bitmap) {
+                        Modifier.pointerInput(isDrawingMode, isRetouchMode, brushType, brushColor, brushWidth, brushOpacity, brushHardness, symmetryMode, activeDrawLayerId, activeRetouchType, bitmap) {
                             detectDragGestures(
                                 onDragStart = { offset ->
                                     livePoints.clear()
@@ -194,15 +217,45 @@ fun PhotoEditorCanvas(
                                     if (livePoints.isNotEmpty()) {
                                         val pts = livePoints.toList()
                                         if (isDrawingMode) {
-                                            onDrawingStrokeFinished(
-                                                DrawingStroke(
-                                                    id = System.currentTimeMillis().toString(),
-                                                    points = pts,
-                                                    color = brushColor,
-                                                    width = brushWidth,
-                                                    brushType = brushType
-                                                )
+                                            val cx = imgLeft + drawW / 2f
+                                            val cy = imgTop + drawH / 2f
+                                            val baseStroke = DrawingStroke(
+                                                id = System.currentTimeMillis().toString(),
+                                                points = pts,
+                                                color = brushColor,
+                                                width = brushWidth,
+                                                brushType = brushType,
+                                                opacity = brushOpacity,
+                                                hardness = brushHardness,
+                                                layerId = activeDrawLayerId
                                             )
+                                            onDrawingStrokeFinished(baseStroke)
+
+                                            when (symmetryMode) {
+                                                DrawSymmetryMode.VERTICAL -> {
+                                                    val ptsV = pts.map { Offset(2 * cx - it.x, it.y) }
+                                                    onDrawingStrokeFinished(baseStroke.copy(
+                                                        id = "${baseStroke.id}_v",
+                                                        points = ptsV
+                                                    ))
+                                                }
+                                                DrawSymmetryMode.HORIZONTAL -> {
+                                                    val ptsH = pts.map { Offset(it.x, 2 * cy - it.y) }
+                                                    onDrawingStrokeFinished(baseStroke.copy(
+                                                        id = "${baseStroke.id}_h",
+                                                        points = ptsH
+                                                    ))
+                                                }
+                                                DrawSymmetryMode.QUAD -> {
+                                                    val ptsV = pts.map { Offset(2 * cx - it.x, it.y) }
+                                                    val ptsH = pts.map { Offset(it.x, 2 * cy - it.y) }
+                                                    val ptsD = pts.map { Offset(2 * cx - it.x, 2 * cy - it.y) }
+                                                    onDrawingStrokeFinished(baseStroke.copy(id = "${baseStroke.id}_v", points = ptsV))
+                                                    onDrawingStrokeFinished(baseStroke.copy(id = "${baseStroke.id}_h", points = ptsH))
+                                                    onDrawingStrokeFinished(baseStroke.copy(id = "${baseStroke.id}_d", points = ptsD))
+                                                }
+                                                DrawSymmetryMode.OFF -> {}
+                                            }
                                         } else if (isRetouchMode) {
                                             onRetouchStrokeFinished(
                                                 RetouchStroke(
@@ -444,21 +497,90 @@ fun PhotoEditorCanvas(
                 dstSize = IntSize(drawW.toInt(), drawH.toInt())
             )
 
+            // PicsArt Symmetry Guides
+            if (isDrawingMode && symmetryMode != DrawSymmetryMode.OFF) {
+                val cx = imgLeft + drawW / 2f
+                val cy = imgTop + drawH / 2f
+                val guideCol = Color(0xFF00E5FF).copy(alpha = 0.5f)
+                if (symmetryMode == DrawSymmetryMode.VERTICAL || symmetryMode == DrawSymmetryMode.QUAD) {
+                    drawLine(
+                        color = guideCol,
+                        start = Offset(cx, imgTop),
+                        end = Offset(cx, imgTop + drawH),
+                        strokeWidth = 1.5.dp.toPx()
+                    )
+                }
+                if (symmetryMode == DrawSymmetryMode.HORIZONTAL || symmetryMode == DrawSymmetryMode.QUAD) {
+                    drawLine(
+                        color = guideCol,
+                        start = Offset(imgLeft, cy),
+                        end = Offset(imgLeft + drawW, cy),
+                        strokeWidth = 1.5.dp.toPx()
+                    )
+                }
+            }
+
             // Draw in-progress live drawing path
             if (livePoints.size > 1 && isDrawingMode) {
+                val strokeAlpha = (brushColor.alpha * brushOpacity).coerceIn(0.05f, 1f)
+                val liveCol = if (brushType == BrushType.ERASER) Color.White.copy(alpha = 0.45f) else brushColor.copy(alpha = strokeAlpha)
                 val path = Path()
                 livePoints.forEachIndexed { idx, pt ->
                     if (idx == 0) path.moveTo(pt.x, pt.y) else path.lineTo(pt.x, pt.y)
                 }
+                val strokeStyle = Stroke(
+                    width = brushWidth * density,
+                    cap = if (brushType in listOf(BrushType.CHISEL, BrushType.CALLIGRAPHY, BrushType.HIGHLIGHTER)) StrokeCap.Square else StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
                 drawPath(
                     path = path,
-                    color = brushColor,
-                    style = Stroke(
-                        width = brushWidth * density,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round
-                    )
+                    color = liveCol,
+                    style = strokeStyle
                 )
+
+                val cx = imgLeft + drawW / 2f
+                val cy = imgTop + drawH / 2f
+                when (symmetryMode) {
+                    DrawSymmetryMode.VERTICAL -> {
+                        val pathV = Path()
+                        livePoints.forEachIndexed { idx, pt ->
+                            val mx = 2 * cx - pt.x
+                            if (idx == 0) pathV.moveTo(mx, pt.y) else pathV.lineTo(mx, pt.y)
+                        }
+                        drawPath(path = pathV, color = liveCol, style = strokeStyle)
+                    }
+                    DrawSymmetryMode.HORIZONTAL -> {
+                        val pathH = Path()
+                        livePoints.forEachIndexed { idx, pt ->
+                            val my = 2 * cy - pt.y
+                            if (idx == 0) pathH.moveTo(pt.x, my) else pathH.lineTo(pt.x, my)
+                        }
+                        drawPath(path = pathH, color = liveCol, style = strokeStyle)
+                    }
+                    DrawSymmetryMode.QUAD -> {
+                        val pathV = Path()
+                        val pathH = Path()
+                        val pathD = Path()
+                        livePoints.forEachIndexed { idx, pt ->
+                            val mx = 2 * cx - pt.x
+                            val my = 2 * cy - pt.y
+                            if (idx == 0) {
+                                pathV.moveTo(mx, pt.y)
+                                pathH.moveTo(pt.x, my)
+                                pathD.moveTo(mx, my)
+                            } else {
+                                pathV.lineTo(mx, pt.y)
+                                pathH.lineTo(pt.x, my)
+                                pathD.lineTo(mx, my)
+                            }
+                        }
+                        drawPath(path = pathV, color = liveCol, style = strokeStyle)
+                        drawPath(path = pathH, color = liveCol, style = strokeStyle)
+                        drawPath(path = pathD, color = liveCol, style = strokeStyle)
+                    }
+                    DrawSymmetryMode.OFF -> {}
+                }
             }
 
             // Draw in-progress live retouch points and live brush circle footprint with LightCraft feather ring

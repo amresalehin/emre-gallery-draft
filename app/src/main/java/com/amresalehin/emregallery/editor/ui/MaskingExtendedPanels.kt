@@ -977,6 +977,50 @@ private fun CreativeDrawWorkspace(
 
         Spacer(Modifier.height(8.dp))
 
+        // Live Stroke Preview
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = Color(0xFF1E1E1E),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .padding(vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.width(90.dp)) {
+                    Text(selectedBrush.label, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("${brushWidth.toInt()}px • ${(brushOpacity * 100).toInt()}%", color = Color.Gray, fontSize = 9.sp)
+                }
+                Box(modifier = Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                        val w = size.width
+                        val h = size.height
+                        val path = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(10f, h * 0.65f)
+                            cubicTo(w * 0.35f, h * 0.15f, w * 0.65f, h * 0.85f, w - 10f, h * 0.35f)
+                        }
+                        val strokeAlpha = (brushColor.alpha * brushOpacity).coerceIn(0.05f, 1f)
+                        drawPath(
+                            path = path,
+                            color = brushColor.copy(alpha = strokeAlpha),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                width = (brushWidth * 1.1f).coerceIn(2f, 32f),
+                                cap = androidx.compose.ui.graphics.StrokeCap.Round
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
         // Brush Width Slider
         LrSliderRow(
             title = "Brush Size",

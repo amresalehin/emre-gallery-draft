@@ -750,10 +750,278 @@ class PhotoEditorViewModel : ViewModel() {
         ))
     }
 
-    // --- Drawing & Brushes ---
+    // --- Drawing & Brushes (PicsArt Extended Suite) ---
     fun addDrawingStroke(stroke: DrawingStroke) {
-        val list = _sessionState.value.drawingStrokes + stroke
+        val targetLayerId = if (stroke.layerId.isNotEmpty()) stroke.layerId else _sessionState.value.activeDrawLayerId
+        val strokeWithLayer = stroke.copy(layerId = targetLayerId)
+        val list = _sessionState.value.drawingStrokes + strokeWithLayer
         pushState(_sessionState.value.copy(drawingStrokes = list, description = "Brush stroke"))
+    }
+
+    fun clearDrawingStrokes(targetLayerId: String? = null) {
+        val list = if (targetLayerId != null) {
+            _sessionState.value.drawingStrokes.filterNot { it.layerId == targetLayerId }
+        } else {
+            emptyList()
+        }
+        pushState(_sessionState.value.copy(drawingStrokes = list, description = "Clear drawings"))
+    }
+
+    fun invertDrawingStrokes(targetLayerId: String? = null) {
+        val list = _sessionState.value.drawingStrokes.map { s ->
+            if (targetLayerId == null || s.layerId == targetLayerId) {
+                val invCol = Color(
+                    red = 1f - s.color.red,
+                    green = 1f - s.color.green,
+                    blue = 1f - s.color.blue,
+                    alpha = s.color.alpha
+                )
+                s.copy(color = invCol)
+            } else {
+                s
+            }
+        }
+        pushState(_sessionState.value.copy(drawingStrokes = list, description = "Invert drawings"))
+    }
+
+    fun setDrawSymmetryMode(mode: DrawSymmetryMode) {
+        _sessionState.value = _sessionState.value.copy(drawSymmetryMode = mode)
+    }
+
+    // --- Draw Layers (PicsArt Layer Manager) ---
+    fun addDrawLayer(name: String? = null) {
+        val currentLayers = _sessionState.value.drawLayers
+        val newIndex = currentLayers.size + 1
+        val newLayer = DrawLayer(
+            id = "layer_${java.util.UUID.randomUUID()}",
+            name = name ?: "Layer $newIndex"
+        )
+        val updatedLayers = currentLayers + newLayer
+        pushState(_sessionState.value.copy(
+            drawLayers = updatedLayers,
+            activeDrawLayerId = newLayer.id,
+            description = "Add draw layer"
+        ))
+    }
+
+    fun selectDrawLayer(layerId: String) {
+        _sessionState.value = _sessionState.value.copy(activeDrawLayerId = layerId)
+    }
+
+    fun deleteDrawLayer(layerId: String) {
+        val currentLayers = _sessionState.value.drawLayers
+        if (currentLayers.size <= 1) {
+            clearDrawingStrokes(layerId)
+            return
+        }
+        val updatedLayers = currentLayers.filterNot { it.id == layerId }
+        val updatedStrokes = _sessionState.value.drawingStrokes.filterNot { it.layerId == layerId }
+        val newActiveId = if (_sessionState.value.activeDrawLayerId == layerId) {
+            updatedLayers.last().id
+        } else {
+            _sessionState.value.activeDrawLayerId
+        }
+        pushState(_sessionState.value.copy(
+            drawLayers = updatedLayers,
+            activeDrawLayerId = newActiveId,
+            drawingStrokes = updatedStrokes,
+            description = "Delete draw layer"
+        ))
+    }
+
+    fun duplicateDrawLayer(layerId: String) {
+        val currentLayers = _sessionState.value.drawLayers
+        val targetLayer = currentLayers.firstOrNull { it.id == layerId } ?: return
+        val newLayerId = "layer_${java.util.UUID.randomUUID()}"
+        val dupLayer = targetLayer.copy(
+            id = newLayerId,
+            name = "${targetLayer.name} Copy"
+        )
+        val matchingStrokes = _sessionState.value.drawingStrokes.filter { it.layerId == layerId }
+        val dupStrokes = matchingStrokes.map {
+            it.copy(id = "${it.id}_copy_${java.util.UUID.randomUUID()}", layerId = newLayerId)
+        }
+        val targetIndex = currentLayers.indexOfFirst { it.id == layerId }
+        val updatedLayers = currentLayers.toMutableList().apply {
+            add((targetIndex + 1).coerceAtMost(size), dupLayer)
+        }
+        pushState(_sessionState.value.copy(
+            drawLayers = updatedLayers,
+            activeDrawLayerId = newLayerId,
+            drawingStrokes = _sessionState.value.drawingStrokes + dupStrokes,
+            description = "Duplicate draw layer"
+        ))
+    }
+
+    fun toggleDrawLayerVisibility(layerId: String) {
+        val updatedLayers = _sessionState.value.drawLayers.map {
+            if (it.id == layerId) it.copy(isVisible = !it.isVisible) else it
+        }
+        pushState(_sessionState.value.copy(drawLayers = updatedLayers, description = "Toggle layer visibility"))
+    }
+
+    fun toggleDrawLayerLock(layerId: String) {
+        val updatedLayers = _sessionState.value.drawLayers.map {
+            if (it.id == layerId) it.copy(isLocked = !it.isLocked) else it
+        }
+        _sessionState.value = _sessionState.value.copy(drawLayers = updatedLayers)
+    }
+
+    fun setDrawLayerOpacity(layerId: String, opacity: Float) {
+        val updatedLayers = _sessionState.value.drawLayers.map {
+            if (it.id == layerId) it.copy(opacity = opacity.coerceIn(0f, 1f)) else it
+        }
+        _sessionState.value = _sessionState.value.copy(drawLayers = updatedLayers)
+        updateLivePreview()
+    }
+
+    fun commitDrawLayerOpacity() {
+        pushState(_sessionState.value.copy(description = "Change layer opacity"))
+    }
+
+    fun setDrawLayerBlendMode(layerId: String, blendMode: DrawBlendMode) {
+        val updatedLayers = _sessionState.value.drawLayers.map {
+            if (it.id == layerId) it.copy(blendMode = blendMode) else it
+        }
+        pushState(_sessionState.value.copy(drawLayers = updatedLayers, description = "Change blend mode to ${blendMode.label}"))
+    }
+
+    fun mergeDrawLayerDown(layerId: String) {
+        val currentLayers = _sessionState.value.drawLayers
+        val idx = currentLayers.indexOfFirst { it.id == layerId }
+        if (idx <= 0) return
+        val targetLayerBelow = currentLayers[idx - 1]
+        val updatedStrokes = _sessionState.value.drawingStrokes.map {
+            if (it.layerId == layerId) it.copy(layerId = targetLayerBelow.id) else it
+        }
+        val updatedLayers = currentLayers.filterNot { it.id == layerId }
+        pushState(_sessionState.value.copy(
+            drawLayers = updatedLayers,
+            activeDrawLayerId = targetLayerBelow.id,
+            drawingStrokes = updatedStrokes,
+            description = "Merge layer down"
+        ))
+    }
+
+    fun moveDrawLayer(layerId: String, direction: Int) {
+        val currentLayers = _sessionState.value.drawLayers.toMutableList()
+        val idx = currentLayers.indexOfFirst { it.id == layerId }
+        if (idx == -1) return
+        val newIdx = (idx + direction).coerceIn(0, currentLayers.size - 1)
+        if (newIdx == idx) return
+        val item = currentLayers.removeAt(idx)
+        currentLayers.add(newIdx, item)
+        pushState(_sessionState.value.copy(drawLayers = currentLayers, description = "Reorder draw layer"))
+    }
+
+    fun addDrawShapeStroke(
+        shapeType: DrawShapeType,
+        isFilled: Boolean,
+        strokeWidth: Float,
+        color: Color,
+        opacity: Float,
+        centerX: Float,
+        centerY: Float,
+        radius: Float
+    ) {
+        val points = mutableListOf<Offset>()
+        when (shapeType) {
+            DrawShapeType.LINE -> {
+                points.add(Offset(centerX - radius, centerY))
+                points.add(Offset(centerX + radius, centerY))
+            }
+            DrawShapeType.ARROW -> {
+                points.add(Offset(centerX - radius, centerY))
+                points.add(Offset(centerX + radius, centerY))
+                points.add(Offset(centerX + radius * 0.7f, centerY - radius * 0.35f))
+                points.add(Offset(centerX + radius, centerY))
+                points.add(Offset(centerX + radius * 0.7f, centerY + radius * 0.35f))
+            }
+            DrawShapeType.CIRCLE -> {
+                val stepCount = 48
+                for (i in 0..stepCount) {
+                    val angle = (i.toFloat() / stepCount) * 2f * Math.PI.toFloat()
+                    points.add(Offset(centerX + radius * kotlin.math.cos(angle), centerY + radius * kotlin.math.sin(angle)))
+                }
+            }
+            DrawShapeType.RECTANGLE -> {
+                points.add(Offset(centerX - radius, centerY - radius * 0.75f))
+                points.add(Offset(centerX + radius, centerY - radius * 0.75f))
+                points.add(Offset(centerX + radius, centerY + radius * 0.75f))
+                points.add(Offset(centerX - radius, centerY + radius * 0.75f))
+                points.add(Offset(centerX - radius, centerY - radius * 0.75f))
+            }
+            DrawShapeType.ROUNDED_RECT -> {
+                val rw = radius
+                val rh = radius * 0.75f
+                val cr = radius * 0.2f
+                val step = 8
+                points.add(Offset(centerX - rw + cr, centerY - rh))
+                points.add(Offset(centerX + rw - cr, centerY - rh))
+                for (i in 0..step) {
+                    val a = -Math.PI.toFloat() / 2f + (i.toFloat() / step) * (Math.PI.toFloat() / 2f)
+                    points.add(Offset(centerX + rw - cr + cr * kotlin.math.cos(a), centerY - rh + cr + cr * kotlin.math.sin(a)))
+                }
+                points.add(Offset(centerX + rw, centerY + rh - cr))
+                for (i in 0..step) {
+                    val a = (i.toFloat() / step) * (Math.PI.toFloat() / 2f)
+                    points.add(Offset(centerX + rw - cr + cr * kotlin.math.cos(a), centerY + rh - cr + cr * kotlin.math.sin(a)))
+                }
+                points.add(Offset(centerX - rw + cr, centerY + rh))
+                for (i in 0..step) {
+                    val a = Math.PI.toFloat() / 2f + (i.toFloat() / step) * (Math.PI.toFloat() / 2f)
+                    points.add(Offset(centerX - rw + cr + cr * kotlin.math.cos(a), centerY + rh - cr + cr * kotlin.math.sin(a)))
+                }
+                points.add(Offset(centerX - rw, centerY - rh + cr))
+                for (i in 0..step) {
+                    val a = Math.PI.toFloat() + (i.toFloat() / step) * (Math.PI.toFloat() / 2f)
+                    points.add(Offset(centerX - rw + cr + cr * kotlin.math.cos(a), centerY - rh + cr + cr * kotlin.math.sin(a)))
+                }
+            }
+            DrawShapeType.TRIANGLE -> {
+                points.add(Offset(centerX, centerY - radius))
+                points.add(Offset(centerX + radius, centerY + radius * 0.85f))
+                points.add(Offset(centerX - radius, centerY + radius * 0.85f))
+                points.add(Offset(centerX, centerY - radius))
+            }
+            DrawShapeType.STAR -> {
+                val pointsCount = 5
+                for (i in 0 until pointsCount * 2 + 1) {
+                    val a = -Math.PI.toFloat() / 2f + (i.toFloat() / (pointsCount * 2)) * 2f * Math.PI.toFloat()
+                    val r = if (i % 2 == 0) radius else radius * 0.45f
+                    points.add(Offset(centerX + r * kotlin.math.cos(a), centerY + r * kotlin.math.sin(a)))
+                }
+            }
+            DrawShapeType.HEART -> {
+                val stepCount = 48
+                for (i in 0..stepCount) {
+                    val t = (i.toFloat() / stepCount) * 2f * Math.PI.toFloat()
+                    val x = 16f * kotlin.math.sin(t) * kotlin.math.sin(t) * kotlin.math.sin(t)
+                    val y = -(13f * kotlin.math.cos(t) - 5f * kotlin.math.cos(2f * t) - 2f * kotlin.math.cos(3f * t) - kotlin.math.cos(4f * t))
+                    val scale = radius / 18f
+                    points.add(Offset(centerX + x * scale, centerY + y * scale))
+                }
+            }
+            DrawShapeType.POLYGON -> {
+                val sides = 6
+                for (i in 0..sides) {
+                    val a = (i.toFloat() / sides) * 2f * Math.PI.toFloat() - Math.PI.toFloat() / 2f
+                    points.add(Offset(centerX + radius * kotlin.math.cos(a), centerY + radius * kotlin.math.sin(a)))
+                }
+            }
+        }
+
+        val stroke = DrawingStroke(
+            id = System.currentTimeMillis().toString(),
+            points = points,
+            color = color,
+            width = strokeWidth,
+            brushType = BrushType.PEN,
+            opacity = opacity,
+            hardness = 1.0f,
+            layerId = _sessionState.value.activeDrawLayerId
+        )
+        addDrawingStroke(stroke)
     }
 
     // --- Text Overlays ---

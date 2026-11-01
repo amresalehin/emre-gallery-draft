@@ -458,6 +458,44 @@ data class BackgroundSettings(
     val shadowOpacity: Float = 0.55f
 )
 
+enum class DrawBlendMode(val label: String) {
+    NORMAL("Normal"),
+    MULTIPLY("Multiply"),
+    SCREEN("Screen"),
+    OVERLAY("Overlay"),
+    DARKEN("Darken"),
+    LIGHTEN("Lighten"),
+    ADD("Add / Glow")
+}
+
+data class DrawLayer(
+    val id: String,
+    val name: String,
+    val isVisible: Boolean = true,
+    val opacity: Float = 1.0f,
+    val blendMode: DrawBlendMode = DrawBlendMode.NORMAL,
+    val isLocked: Boolean = false
+)
+
+enum class DrawSymmetryMode(val label: String) {
+    OFF("Off"),
+    VERTICAL("Vertical Mirror"),
+    HORIZONTAL("Horizontal Mirror"),
+    QUAD("4-Way Radial")
+}
+
+enum class DrawShapeType(val label: String) {
+    LINE("Line"),
+    ARROW("Arrow"),
+    RECTANGLE("Rectangle"),
+    ROUNDED_RECT("Rounded Rect"),
+    CIRCLE("Circle"),
+    TRIANGLE("Triangle"),
+    STAR("Star"),
+    HEART("Heart"),
+    POLYGON("Polygon")
+}
+
 enum class BrushType(val label: String) {
     PEN("Pen"),
     GLOW("Neon Glow"),
@@ -476,7 +514,10 @@ enum class BrushType(val label: String) {
     SMUDGE("Smudge"),
     BLUR("Blur Brush"),
     PIXEL("Pixel Brush"),
-    SHAPE("Shape Scatter")
+    SHAPE("Shape Scatter"),
+    SPARKLE("Sparkle / Glitter"),
+    RAINBOW("Rainbow Brush"),
+    CHISEL("Chisel Pen")
 }
 
 data class DrawingStroke(
@@ -484,7 +525,10 @@ data class DrawingStroke(
     val points: List<Offset>,
     val color: Color,
     val width: Float,
-    val brushType: BrushType
+    val brushType: BrushType,
+    val opacity: Float = 1.0f,
+    val hardness: Float = 1.0f,
+    val layerId: String = "layer_1"
 )
 
 enum class TextFontFamily(val label: String) {
@@ -719,6 +763,9 @@ data class EditSessionState(
     val retouchStrokes: List<RetouchStroke> = emptyList(),
     val background: BackgroundSettings = BackgroundSettings(),
     val drawingStrokes: List<DrawingStroke> = emptyList(),
+    val drawLayers: List<DrawLayer> = listOf(DrawLayer("layer_1", "Layer 1")),
+    val activeDrawLayerId: String = "layer_1",
+    val drawSymmetryMode: DrawSymmetryMode = DrawSymmetryMode.OFF,
     val textOverlays: List<TextOverlayItem> = emptyList(),
     val stickers: List<StickerItem> = emptyList(),
     val shapes: List<ShapeItem> = emptyList(),

@@ -337,10 +337,11 @@ class PhotoEditorTest {
     @Test
     fun testMainBottomTabs_autoRemoved() {
         val tabs = com.amresalehin.emregallery.editor.ui.MainBottomTab.entries
-        assertEquals(7, tabs.size)
+        assertEquals(8, tabs.size)
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.ADJUST))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.PRESETS))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.CROP))
+        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.DRAW))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.MASKING))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.HEALING))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.OVERLAYS))
@@ -557,6 +558,129 @@ class PhotoEditorTest {
         assertNotNull(processed)
         assertEquals(40, processed.width)
         assertEquals(40, processed.height)
+    }
+
+    @Test
+    fun testPicsartDraw_layersAndBlendModes() {
+        val vm = PhotoEditorViewModel()
+        assertEquals(1, vm.sessionState.value.drawLayers.size)
+        val initialLayerId = vm.sessionState.value.activeDrawLayerId
+
+        // Add drawing stroke to initial layer
+        val stroke1 = DrawingStroke(
+            id = "s1",
+            points = listOf(androidx.compose.ui.geometry.Offset(10f, 10f), androidx.compose.ui.geometry.Offset(20f, 20f)),
+            color = androidx.compose.ui.graphics.Color.Red,
+            width = 12f,
+            brushType = BrushType.PEN,
+            opacity = 0.8f,
+            hardness = 0.9f,
+            layerId = initialLayerId
+        )
+        vm.addDrawingStroke(stroke1)
+        assertEquals(1, vm.sessionState.value.drawingStrokes.size)
+
+        // Add new draw layer
+        vm.addDrawLayer("Art Layer 2")
+        assertEquals(2, vm.sessionState.value.drawLayers.size)
+        val newLayerId = vm.sessionState.value.activeDrawLayerId
+        assertNotEquals(initialLayerId, newLayerId)
+
+        // Set blend mode and opacity
+        vm.setDrawLayerBlendMode(newLayerId, DrawBlendMode.MULTIPLY)
+        assertEquals(DrawBlendMode.MULTIPLY, vm.sessionState.value.drawLayers.first { it.id == newLayerId }.blendMode)
+
+        vm.setDrawLayerOpacity(newLayerId, 0.75f)
+        assertEquals(0.75f, vm.sessionState.value.drawLayers.first { it.id == newLayerId }.opacity, 0.001f)
+
+        // Toggle visibility & lock
+        vm.toggleDrawLayerVisibility(newLayerId)
+        assertFalse(vm.sessionState.value.drawLayers.first { it.id == newLayerId }.isVisible)
+
+        vm.toggleDrawLayerLock(newLayerId)
+        assertTrue(vm.sessionState.value.drawLayers.first { it.id == newLayerId }.isLocked)
+
+        // Duplicate layer
+        vm.duplicateDrawLayer(initialLayerId)
+        assertEquals(3, vm.sessionState.value.drawLayers.size)
+        assertEquals(2, vm.sessionState.value.drawingStrokes.size)
+
+        // Delete layer
+        vm.deleteDrawLayer(newLayerId)
+        assertEquals(2, vm.sessionState.value.drawLayers.size)
+    }
+
+    @Test
+    fun testPicsartDraw_symmetryAndShapes() {
+        val vm = PhotoEditorViewModel()
+        vm.setDrawSymmetryMode(DrawSymmetryMode.VERTICAL)
+        assertEquals(DrawSymmetryMode.VERTICAL, vm.sessionState.value.drawSymmetryMode)
+
+        // Stamp a star shape
+        vm.addDrawShapeStroke(
+            shapeType = DrawShapeType.STAR,
+            isFilled = false,
+            strokeWidth = 4f,
+            color = androidx.compose.ui.graphics.Color.Yellow,
+            opacity = 1.0f,
+            centerX = 100f,
+            centerY = 100f,
+            radius = 30f
+        )
+        assertEquals(1, vm.sessionState.value.drawingStrokes.size)
+        val starStroke = vm.sessionState.value.drawingStrokes.first()
+        assertTrue(starStroke.points.size >= 10)
+
+        // Clear layer
+        vm.clearDrawingStrokes(starStroke.layerId)
+        assertEquals(0, vm.sessionState.value.drawingStrokes.size)
+    }
+
+    @Test
+    fun testPicsartDraw_renderNewBrushesAndLayersWithoutCrash() = runBlocking {
+        val src = Bitmap.createBitmap(80, 80, Bitmap.Config.ARGB_8888)
+        val strokes = listOf(
+            DrawingStroke(
+                id = "s_sparkle",
+                points = listOf(androidx.compose.ui.geometry.Offset(10f, 10f), androidx.compose.ui.geometry.Offset(50f, 50f)),
+                color = androidx.compose.ui.graphics.Color.Cyan,
+                width = 8f,
+                brushType = BrushType.SPARKLE,
+                opacity = 0.9f,
+                layerId = "l1"
+            ),
+            DrawingStroke(
+                id = "s_rainbow",
+                points = listOf(androidx.compose.ui.geometry.Offset(5f, 70f), androidx.compose.ui.geometry.Offset(70f, 70f)),
+                color = androidx.compose.ui.graphics.Color.Red,
+                width = 10f,
+                brushType = BrushType.RAINBOW,
+                opacity = 1.0f,
+                layerId = "l1"
+            ),
+            DrawingStroke(
+                id = "s_glow",
+                points = listOf(androidx.compose.ui.geometry.Offset(20f, 40f), androidx.compose.ui.geometry.Offset(60f, 40f)),
+                color = androidx.compose.ui.graphics.Color.Magenta,
+                width = 14f,
+                brushType = BrushType.GLOW,
+                opacity = 0.85f,
+                hardness = 0.5f,
+                layerId = "l2"
+            )
+        )
+        val layers = listOf(
+            DrawLayer(id = "l1", name = "Layer 1", isVisible = true, opacity = 1.0f, blendMode = DrawBlendMode.NORMAL),
+            DrawLayer(id = "l2", name = "Layer 2", isVisible = true, opacity = 0.8f, blendMode = DrawBlendMode.ADD)
+        )
+        val state = EditSessionState(
+            drawingStrokes = strokes,
+            drawLayers = layers
+        )
+        val rendered = PhotoProcessor.renderFinal(src, state)
+        assertNotNull(rendered)
+        assertEquals(80, rendered.width)
+        assertEquals(80, rendered.height)
     }
 }
 
