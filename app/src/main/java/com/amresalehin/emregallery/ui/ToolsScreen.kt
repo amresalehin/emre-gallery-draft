@@ -536,6 +536,27 @@ fun ToolsScreen(onBack: () -> Unit, onOpenPdfTool: (PdfDocumentTool) -> Unit, on
                     }
                 }
             }
+            item {
+                ElevatedCard(
+                    onClick = onOpenEditor,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(26.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Open Emre Editor", fontWeight = FontWeight.SemiBold)
+                            Text("Edit a photo with Emre's native workspace", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ArrowForward, contentDescription = null)
+                    }
+                }
+            }
             items(visibleGroups, key = { it.title }) { group ->
                 val expanded = query.isNotBlank() || group.title in expandedGroups
                 ElevatedCard(
