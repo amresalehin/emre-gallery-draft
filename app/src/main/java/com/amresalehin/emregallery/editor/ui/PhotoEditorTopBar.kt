@@ -124,36 +124,6 @@ fun PhotoEditorTopBar(
                     )
                 }
 
-                // Edit History
-                IconButton(
-                    onClick = onOpenHistory,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .testTag("editor_history_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Restore,
-                        contentDescription = "Edit History",
-                        tint = Color.White,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-
-                // Animated Replay
-                IconButton(
-                    onClick = onStartReplay,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .testTag("editor_replay_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Animated Replay",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
                 // Share
                 IconButton(
                     onClick = onShare,

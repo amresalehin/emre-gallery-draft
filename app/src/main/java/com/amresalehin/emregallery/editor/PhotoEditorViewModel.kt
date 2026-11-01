@@ -355,10 +355,6 @@ class PhotoEditorViewModel : ViewModel() {
         updateLivePreview()
     }
 
-    fun autoLevelStraighten() {
-        // Disabled per user instruction
-    }
-
     fun setShapeCrop(shape: ShapeCropType?) {
         pushState(_sessionState.value.copy(
             transform = _sessionState.value.transform.copy(shapeCrop = shape),
@@ -761,6 +757,10 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     // --- Text Overlays ---
+    fun addTextOverlay(item: TextOverlayItem) {
+        pushState(_sessionState.value.copy(textOverlays = _sessionState.value.textOverlays + item, description = "Add text"))
+    }
+
     fun addTextOverlay(text: String, color: Color = Color.White, bg: Color = Color.Black.copy(alpha = 0.5f)) {
         val item = TextOverlayItem(
             id = System.currentTimeMillis().toString(),
@@ -768,7 +768,7 @@ class PhotoEditorViewModel : ViewModel() {
             color = color,
             backgroundColor = bg
         )
-        pushState(_sessionState.value.copy(textOverlays = _sessionState.value.textOverlays + item, description = "Add text"))
+        addTextOverlay(item)
     }
 
     fun updateTextOverlay(updated: TextOverlayItem) {
@@ -793,12 +793,16 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     // --- Stickers ---
+    fun addSticker(item: StickerItem) {
+        pushState(_sessionState.value.copy(stickers = _sessionState.value.stickers + item, description = "Add sticker"))
+    }
+
     fun addSticker(emoji: String) {
         val item = StickerItem(
             id = System.currentTimeMillis().toString(),
             emojiOrRes = emoji
         )
-        pushState(_sessionState.value.copy(stickers = _sessionState.value.stickers + item, description = "Add sticker"))
+        addSticker(item)
     }
 
     fun updateSticker(updated: StickerItem) {
@@ -957,11 +961,14 @@ class PhotoEditorViewModel : ViewModel() {
 
     // --- AI Tools ---
     fun toggleAiAutoEnhance(enabled: Boolean) {
-        // Disabled per user instruction
+        val updated = _sessionState.value.aiSettings.copy(autoEnhanceEnabled = enabled)
+        pushState(_sessionState.value.copy(aiSettings = updated, description = if (enabled) "AI Auto Enhance" else "AI Auto Enhance Off"))
     }
 
     fun setAiAutoEnhanceIntensity(intensity: Float) {
-        // Disabled per user instruction
+        val updated = _sessionState.value.aiSettings.copy(autoEnhanceIntensity = intensity)
+        _sessionState.value = _sessionState.value.copy(aiSettings = updated)
+        updateLivePreview()
     }
 
     fun setAiStyleTransfer(style: AiStyleTransfer?) {

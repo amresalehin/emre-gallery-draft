@@ -32,31 +32,7 @@ enum class EditorTool(val label: String) {
     LENS_FLARE("Lens Flare"),
     AI_TOOLS("AI Magic"),
     REPLAY("Replay"),
-
-    // Aliases for compatibility
-    FREE_CROP("Free Crop"),
-    SHAPE_CROP("Shape Crop"),
-    DISPERSION("Dispersion"),
-    CLONE("Clone"),
-    AI_REPLACE("AI Replace"),
-    STRETCH("Stretch"),
-    MOTION("Motion"),
-    SELECTION("Selection"),
-    CURVES("Curves"),
-    AI_ENHANCE("AI Enhance"),
-    TILT_SHIFT("Tilt Shift"),
-    PERSPECTIVE("Perspective"),
-    RESIZE("Resize"),
-    ROTATE("Rotate"),
-    AI_EXPAND("AI Expand"),
-    CUTOUT("Cutout"),
-    ADD_PHOTO("Add Photo"),
-    REMOVE("Remove"),
-    FIT("Fit"),
-    BORDER("Border"),
-    MASK("Mask"),
-    DRAW("Draw"),
-    AI_TRY_ON("AI Try On")
+    CURVES("Curves")
 }
 
 enum class ToolSheetSubItem(val label: String) {
@@ -573,7 +549,7 @@ data class TextOverlayItem(
 
 data class StickerItem(
     val id: String,
-    val emojiOrRes: String,
+    val emojiOrRes: String = "",
     val xRatio: Float = 0.5f,
     val yRatio: Float = 0.5f,
     val sizeDp: Float = 64f,
@@ -586,7 +562,8 @@ data class StickerItem(
     val shadowRadius: Float = 0f,
     val shadowColor: Color = Color.Black.copy(alpha = 0.4f),
     val isCustomImage: Boolean = false,
-    val customUri: String? = null
+    val customUri: String? = null,
+    val stickerId: String = emojiOrRes
 )
 
 enum class ShapeType(val label: String) {
@@ -709,6 +686,7 @@ enum class AiStyleTransfer(val label: String) {
 
 enum class AiTryOnStyle(val label: String, val description: String) {
     LEATHER_JACKET("Biker Leather", "Sharp matte leather styling"),
+    BIKER_LEATHER("Biker Leather", "Sharp matte leather styling"),
     FORMAL_SUIT("Classic Tuxedo", "Tailored midnight black blazer"),
     NEON_HOODIE("Cyber Streetwear", "Neon accents streetwear hoodie"),
     DENIM_VINTAGE("Vintage Denim", "Distressed washed denim jacket"),
@@ -721,7 +699,12 @@ data class AiEditSettings(
     val activeStyleTransfer: AiStyleTransfer? = null,
     val activeTryOn: AiTryOnStyle? = null,
     val expandOutpaintRatio: Float = 0f // 0f to 0.5f expansion
-)
+) {
+    val autoEnhance: Boolean get() = autoEnhanceEnabled
+    val generativeExpandRatio: Float get() = expandOutpaintRatio
+    val styleTransfer: AiStyleTransfer? get() = activeStyleTransfer
+    val tryOnStyle: AiTryOnStyle? get() = activeTryOn
+}
 
 /**
  * Immutable snapshot of the entire editable session.

@@ -713,38 +713,6 @@ fun PhotoEditorScreen(
                                     }
                                 }
                             }
-
-                            Surface(
-                                shape = CircleShape,
-                                color = Color(0xCC161616),
-                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
-                            ) {
-                                Row(modifier = Modifier.padding(horizontal = 4.dp)) {
-                                    IconButton(
-                                        onClick = { showHistoryDialog = true },
-                                        modifier = Modifier.size(40.dp).testTag("editor_history_button_landscape")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Restore,
-                                            contentDescription = "Edit History",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    IconButton(
-                                        onClick = { viewModel.startReplay() },
-                                        enabled = canUndo && !isReplaying,
-                                        modifier = Modifier.size(40.dp).testTag("editor_replay_button_landscape")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.PlayArrow,
-                                            contentDescription = "Animated Replay",
-                                            tint = if (canUndo && !isReplaying) Color.White else Color.White.copy(alpha = 0.28f),
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
                         }
 
                         // Floating HUD Slider Banner at Top

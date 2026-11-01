@@ -882,7 +882,7 @@ object PhotoProcessor {
             // Torso bounds
             val torsoRect = RectF(w * 0.22f, h * 0.48f, w * 0.78f, h * 0.88f)
             val colorInt = when (tryOn) {
-                AiTryOnStyle.LEATHER_JACKET -> android.graphics.Color.argb(105, 30, 30, 30)
+                AiTryOnStyle.LEATHER_JACKET, AiTryOnStyle.BIKER_LEATHER -> android.graphics.Color.argb(105, 30, 30, 30)
                 AiTryOnStyle.FORMAL_SUIT -> android.graphics.Color.argb(105, 17, 23, 38)
                 AiTryOnStyle.NEON_HOODIE -> android.graphics.Color.argb(105, 80, 80, 80)
                 AiTryOnStyle.DENIM_VINTAGE -> android.graphics.Color.argb(105, 56, 94, 140)

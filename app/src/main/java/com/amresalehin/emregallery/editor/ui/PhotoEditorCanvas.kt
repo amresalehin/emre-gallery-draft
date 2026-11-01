@@ -144,9 +144,9 @@ fun PhotoEditorCanvas(
         }
     }
 
-    val isDrawingMode = activeTool == EditorTool.BRUSHES || activeTool == EditorTool.DRAW
-    val isRetouchMode = activeTool == EditorTool.RETOUCH || activeTool == EditorTool.REMOVE || activeTool == EditorTool.CLONE
-    val isCropMode = activeTool == EditorTool.CROP || activeTool == EditorTool.FREE_CROP || (cropAspectRatio != null)
+    val isDrawingMode = activeTool == EditorTool.BRUSHES
+    val isRetouchMode = activeTool == EditorTool.RETOUCH
+    val isCropMode = activeTool == EditorTool.CROP || (cropAspectRatio != null)
 
     // Base dimensions calculation
     val bWidth = (bitmap?.width ?: 1).toFloat()

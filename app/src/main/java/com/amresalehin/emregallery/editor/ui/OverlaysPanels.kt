@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -675,7 +676,7 @@ fun ShapesSubPanel(
                     ShapeType.STAR -> Icons.Default.Star
                     ShapeType.HEART -> Icons.Default.Favorite
                     ShapeType.HEXAGON -> Icons.Default.Hexagon
-                    ShapeType.ARROW -> Icons.Default.ArrowForward
+                    ShapeType.ARROW -> Icons.AutoMirrored.Filled.ArrowForward
                     ShapeType.TRIANGLE -> Icons.Default.ChangeHistory
                     ShapeType.POLYGON -> Icons.Default.Polyline
                     ShapeType.LINE -> Icons.Default.HorizontalRule
