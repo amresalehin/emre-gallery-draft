@@ -639,15 +639,13 @@ fun MainBottomTierBar(
                     Triple(MainBottomTab.ADJUST, "Adjust", Icons.Default.Tune),
                     Triple(MainBottomTab.PRESETS, "Presets", Icons.Default.FilterVintage),
                     Triple(MainBottomTab.CROP, "Crop", Icons.Default.Crop),
-                    Triple(MainBottomTab.DRAW, "Draw", Icons.Default.Brush),
-                    Triple(MainBottomTab.MASKING, "Masking", Icons.Default.AutoFixNormal),
+                    Triple(MainBottomTab.OVERLAYS, "Layers", Icons.Default.Layers),
                     Triple(MainBottomTab.HEALING, "Healing", Icons.Default.Healing),
-                    Triple(MainBottomTab.OVERLAYS, "Overlays", Icons.Default.Layers),
                     Triple(MainBottomTab.AI_TOOLS, "AI Magic", Icons.Default.AutoAwesome)
                 )
 
                 tabs.forEach { (tab, label, icon) ->
-                    val selected = currentTab == tab
+                    val selected = currentTab == tab || (tab == MainBottomTab.OVERLAYS && (currentTab == MainBottomTab.DRAW || currentTab == MainBottomTab.MASKING))
                     val interactionSource = remember { MutableInteractionSource() }
                     val isPressed by interactionSource.collectIsPressedAsState()
 

@@ -783,6 +783,7 @@ data class LayerMask(
     val feather: Float = 0f,
     val contractExpand: Float = 0f,
     val smooth: Float = 0f,
+    val density: Float = 1.0f,
     val hasSubjectMask: Boolean = true
 )
 
@@ -794,6 +795,8 @@ data class EditorOverlayLayer(
     val isLocked: Boolean = false,
     val opacity: Float = 1.0f,
     val blendMode: String = "Normal",
+    val isClipped: Boolean = false,
+    val isMaskSelected: Boolean = false,
     // Normalized 0f..1f center position and sizing relative to base image
     val xRatio: Float = 0.5f,
     val yRatio: Float = 0.5f,
@@ -808,12 +811,16 @@ data class EditorOverlayLayer(
     val stockImageKey: String? = null, // "space", "propplane", "astronaut", "whale", "white_canvas"
     val adjustmentType: AdjustmentLayerType? = null,
     val bwSettings: BlackAndWhiteSettings = BlackAndWhiteSettings(),
+    val hueShift: Float = 0f,           // -180..+180
+    val satShift: Float = 0f,           // -100..+100
+    val lightnessShift: Float = 0f,     // -100..+100
+    val isColorize: Boolean = false,
     val fillSolidColor: Color = Color.White,
     val textContent: String = "Sample Text",
     val textColor: Color = Color.White,
     val textBgColor: Color = Color.Transparent,
     val fontSizeSp: Float = 28f,
-    // Mask
+    // Mask as a direct property and child of this layer
     val mask: LayerMask? = null
 )
 
@@ -849,5 +856,6 @@ data class EditSessionState(
     val maskOverlaySettings: MaskOverlaySettings = MaskOverlaySettings(),
     val overlayLayers: List<EditorOverlayLayer> = emptyList(),
     val activeOverlayLayerId: String? = null,
+    val isMaskTargetActive: Boolean = false,
     val description: String = "Initial Image"
 )

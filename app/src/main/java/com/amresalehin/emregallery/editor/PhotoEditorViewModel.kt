@@ -1397,9 +1397,53 @@ class PhotoEditorViewModel : ViewModel() {
         pushState(_sessionState.value.copy(description = "Transform layer"))
     }
 
+    fun toggleOverlayLayerClipping(layerId: String) {
+        var isNowClipped = false
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) {
+                isNowClipped = !it.isClipped
+                it.copy(isClipped = isNowClipped)
+            } else it
+        }
+        val desc = if (isNowClipped) "Layer clipped" else "Layer un-clipped"
+        pushState(_sessionState.value.copy(overlayLayers = updated, description = desc))
+    }
+
+    fun setOverlayLayerMaskTarget(layerId: String, isMaskTarget: Boolean) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) it.copy(isMaskSelected = isMaskTarget) else it.copy(isMaskSelected = false)
+        }
+        _sessionState.value = _sessionState.value.copy(
+            overlayLayers = updated,
+            activeOverlayLayerId = layerId,
+            isMaskTargetActive = isMaskTarget
+        )
+    }
+
     fun updateOverlayLayerAdjustment(layerId: String, bwSettings: BlackAndWhiteSettings) {
         val updated = _sessionState.value.overlayLayers.map {
             if (it.id == layerId) it.copy(bwSettings = bwSettings) else it
+        }
+        _sessionState.value = _sessionState.value.copy(overlayLayers = updated)
+        updateLivePreview()
+    }
+
+    fun updateOverlayLayerHsl(
+        layerId: String,
+        hue: Float,
+        sat: Float,
+        lightness: Float,
+        colorize: Boolean = false
+    ) {
+        val updated = _sessionState.value.overlayLayers.map {
+            if (it.id == layerId) {
+                it.copy(
+                    hueShift = hue,
+                    satShift = sat,
+                    lightnessShift = lightness,
+                    isColorize = colorize
+                )
+            } else it
         }
         _sessionState.value = _sessionState.value.copy(overlayLayers = updated)
         updateLivePreview()

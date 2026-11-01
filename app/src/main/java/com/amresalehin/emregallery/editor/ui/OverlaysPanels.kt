@@ -66,6 +66,7 @@ enum class OverlayActivePanel {
     SELECT_AREA,        // "Select area" / "Create mask" panel
     MODIFY_MASK,        // "Modify mask" numeric keypad & slider panel
     ADJUSTMENT_BW,      // "Black and white" channel slider inspector
+    ADJUSTMENT_HUE_SAT, // "Hue and Saturation" channel slider inspector
     ADD_IMAGE_SHEET,    // "Add image" bottom sheet (Photos, Stock, AI)
     ADD_ADJUSTMENT_SHEET// "Add adjustment layer" bottom sheet
 }
@@ -177,6 +178,32 @@ fun OverlaysWorkspacePanel(
                             if (viewModel != null) viewModel.updateOverlayLayer(updated)
                             else onUpdateLayer(updated)
                         }
+                    },
+                    onToggleClipping = {
+                        if (activeLayer != null) {
+                            viewModel?.toggleOverlayLayerClipping(activeLayer.id)
+                            val isNowClipped = !(activeLayer.isClipped)
+                            toastMessage = if (isNowClipped) "Layer clipped" else "Layer un-clipped"
+                        }
+                    },
+                    onInvertMask = {
+                        if (activeLayer != null && activeLayer.mask != null) {
+                            val cur = activeLayer.mask
+                            val updated = cur.copy(isInverted = !cur.isInverted)
+                            if (viewModel != null) viewModel.applyOverlayLayerMask(activeLayer.id, updated)
+                            else onApplyMask(activeLayer.id, updated)
+                            toastMessage = "Mask modified"
+                        }
+                    },
+                    onRemoveMask = {
+                        if (activeLayer != null) {
+                            if (viewModel != null) viewModel.removeOverlayLayerMask(activeLayer.id)
+                            else onRemoveMask(activeLayer.id)
+                            toastMessage = "Mask removed"
+                        }
+                    },
+                    onEditMask = {
+                        activePanel = OverlayActivePanel.SELECT_AREA
                     },
                     onMoreOptions = { activePanel = OverlayActivePanel.LAYERS_LIST }
                 )
@@ -328,6 +355,22 @@ fun OverlaysWorkspacePanel(
                     activePanel = OverlayActivePanel.NONE
                 }
             }
+            OverlayActivePanel.ADJUSTMENT_HUE_SAT -> {
+                if (activeLayer != null) {
+                    HueSaturationAdjustmentPanel(
+                        hue = activeLayer.hueShift,
+                        sat = activeLayer.satShift,
+                        lightness = activeLayer.lightnessShift,
+                        isColorize = activeLayer.isColorize,
+                        onValuesChange = { h, s, l, col ->
+                            viewModel?.updateOverlayLayerHsl(activeLayer.id, h, s, l, col)
+                        },
+                        onDone = { activePanel = OverlayActivePanel.NONE }
+                    )
+                } else {
+                    activePanel = OverlayActivePanel.NONE
+                }
+            }
             OverlayActivePanel.ADD_IMAGE_SHEET, OverlayActivePanel.ADD_ADJUSTMENT_SHEET -> {
                 // Handled in modal dialogs/sheets
             }
@@ -361,12 +404,22 @@ fun PhotoshopCanvasOverlaysControls(
     modifier: Modifier = Modifier
 ) {
     var isSpeedDialOpen by remember { mutableStateOf(false) }
+    var isLayerRailExpanded by remember { mutableStateOf(false) }
     var showLayersSheet by remember { mutableStateOf(false) }
     var showAddImageSheet by remember { mutableStateOf(false) }
     var showAddAdjustmentSheet by remember { mutableStateOf(false) }
     var showPromptDialog by remember { mutableStateOf(false) }
     var toastMessage by remember { mutableStateOf<String?>(null) }
     var renameLayerTarget by remember { mutableStateOf<EditorOverlayLayer?>(null) }
+
+    LaunchedEffect(sessionState.description) {
+        if (sessionState.description.startsWith("Layer clipped") ||
+            sessionState.description.startsWith("Layer un-clipped") ||
+            sessionState.description.startsWith("Apply layer mask")
+        ) {
+            toastMessage = if (sessionState.description.startsWith("Apply layer mask")) "Layer masked" else sessionState.description
+        }
+    }
 
     // Android Photo Picker Launcher (Zero-permission photo selection)
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -491,7 +544,7 @@ fun PhotoshopCanvasOverlaysControls(
         }
 
         // -------------------------------------------------------------
-        // 3. Floating Layer Stack Thumbnail Badge on Right Edge (< [Thumb])
+        // 3. Floating Layer Stack Rail on Right Edge (Photoshop Mobile Style)
         // -------------------------------------------------------------
         Box(
             modifier = Modifier
@@ -499,27 +552,126 @@ fun PhotoshopCanvasOverlaysControls(
                 .padding(end = 12.dp, bottom = 90.dp)
         ) {
             Surface(
-                onClick = { showLayersSheet = !showLayersSheet },
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = Color(0xDD1C1C1E),
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
-                shadowElevation = 8.dp
+                shadowElevation = 10.dp
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier.padding(4.dp),
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Open Layers",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    LayerThumbnailIcon(
-                        layer = activeLayer,
-                        size = 36.dp
-                    )
+                    // Header expand/collapse toggle row (< / >)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        IconButton(
+                            onClick = { isLayerRailExpanded = !isLayerRailExpanded },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isLayerRailExpanded) Icons.AutoMirrored.Filled.ArrowForward else Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = if (isLayerRailExpanded) "Collapse layer rail" else "Expand layer rail",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+
+                        if (!isLayerRailExpanded) {
+                            // Collapsed view: active layer thumbnail + child mask thumbnail
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(end = 4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .border(
+                                            width = if (activeLayer?.isMaskSelected != true) 2.dp else 1.dp,
+                                            color = if (activeLayer?.isMaskSelected != true) Color.White else Color.White.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            if (activeLayer != null) {
+                                                viewModel?.setOverlayLayerMaskTarget(activeLayer.id, false)
+                                            }
+                                        }
+                                ) {
+                                    LayerThumbnailIcon(layer = activeLayer, size = 38.dp)
+                                }
+
+                                if (activeLayer?.mask != null && activeLayer.mask.isEnabled) {
+                                    MaskThumbnailIcon(
+                                        mask = activeLayer.mask,
+                                        size = 38.dp,
+                                        isSelected = activeLayer.isMaskSelected,
+                                        onClick = {
+                                            viewModel?.setOverlayLayerMaskTarget(activeLayer.id, true)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Expanded Vertical Layer Rail: Shows all layers in composition with child masks attached!
+                    if (isLayerRailExpanded) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalAlignment = Alignment.End,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            for (layer in sessionState.overlayLayers.reversed()) {
+                                val isLayerActive = layer.id == activeLayer?.id
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (layer.isClipped) {
+                                        Icon(
+                                            imageVector = Icons.Default.SubdirectoryArrowRight,
+                                            contentDescription = "Clipped",
+                                            tint = Color(0xFF64B5F6),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .border(
+                                                width = if (isLayerActive && !layer.isMaskSelected) 2.dp else 1.dp,
+                                                color = if (isLayerActive && !layer.isMaskSelected) Color.White else Color.White.copy(alpha = 0.2f),
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable {
+                                                viewModel?.selectOverlayLayer(layer.id)
+                                                viewModel?.setOverlayLayerMaskTarget(layer.id, false)
+                                            }
+                                    ) {
+                                        LayerThumbnailIcon(layer = layer, size = 38.dp)
+                                    }
+
+                                    if (layer.mask != null && layer.mask.isEnabled) {
+                                        MaskThumbnailIcon(
+                                            mask = layer.mask,
+                                            size = 38.dp,
+                                            isSelected = isLayerActive && layer.isMaskSelected,
+                                            onClick = {
+                                                viewModel?.selectOverlayLayer(layer.id)
+                                                viewModel?.setOverlayLayerMaskTarget(layer.id, true)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -758,6 +910,8 @@ private fun SpeedDialItem(
 
 /**
  * Layer properties context bar (docked directly above the bottom bar).
+ * Dynamically switches between Layer Properties and Mask Properties depending on
+ * whether the layer or its attached child mask thumbnail is selected.
  */
 @Composable
 private fun LayerPropertiesBar(
@@ -768,6 +922,10 @@ private fun LayerPropertiesBar(
     onOpenLayers: () -> Unit,
     onToggleVisibility: () -> Unit,
     onFlipH: () -> Unit,
+    onToggleClipping: () -> Unit = {},
+    onInvertMask: () -> Unit = {},
+    onRemoveMask: () -> Unit = {},
+    onEditMask: () -> Unit = {},
     onMoreOptions: () -> Unit
 ) {
     if (activeLayer == null) {
@@ -810,7 +968,85 @@ private fun LayerPropertiesBar(
                 )
             }
         }
+    } else if (activeLayer.isMaskSelected) {
+        // =====================================================================
+        // MASK CHILD PROPERTIES BAR (When the attached mask thumbnail is tapped)
+        // =====================================================================
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+        ) {
+            // Quick Action Icons Row for Mask
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onInvertMask, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.InvertColors, "Invert mask", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onRemoveMask, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.DeleteOutline, "Remove mask", tint = Color(0xFFEF5350), modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onOpenLayers, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.Layers, "Layers", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onToggleVisibility, modifier = Modifier.size(40.dp)) {
+                    val isVis = activeLayer.mask?.isEnabled != false
+                    Icon(
+                        imageVector = if (isVis) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                        contentDescription = "Mask Visibility",
+                        tint = if (isVis) Color.White else Color(0xFF888888),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                IconButton(onClick = onMoreOptions, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Default.MoreHoriz, "More", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            // Three Main Mask Action Pills: [Edit mask], [Modify mask], [Invert]
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LayerActionPill(
+                    icon = Icons.Default.AutoFixNormal,
+                    label = "Edit mask",
+                    onClick = onEditMask
+                )
+
+                LayerActionPill(
+                    icon = Icons.Default.Tune,
+                    label = "Modify mask",
+                    onClick = onOpenMask
+                )
+
+                LayerActionPill(
+                    icon = Icons.Default.InvertColors,
+                    label = "Invert mask",
+                    onClick = onInvertMask
+                )
+            }
+
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Mask properties • Child of ${activeLayer.name}",
+                color = Color(0xFF64B5F6),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     } else {
+        // =====================================================================
+        // LAYER PROPERTIES BAR (When the image/adjustment layer itself is tapped)
+        // =====================================================================
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -822,8 +1058,14 @@ private fun LayerPropertiesBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onOpenTransform, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Default.AspectRatio, "Fit", tint = Color.White, modifier = Modifier.size(20.dp))
+                // Clipping Toggle Icon (Layer clipped / unclipped to layer below)
+                IconButton(onClick = onToggleClipping, modifier = Modifier.size(40.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.SubdirectoryArrowRight,
+                        contentDescription = if (activeLayer.isClipped) "Layer clipped" else "Layer unclipped",
+                        tint = if (activeLayer.isClipped) Color(0xFF64B5F6) else Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
                 IconButton(onClick = onFlipH, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.Flip, "Flip", tint = Color.White, modifier = Modifier.size(20.dp))
@@ -847,7 +1089,7 @@ private fun LayerPropertiesBar(
 
             Spacer(Modifier.height(4.dp))
 
-            // Three Main Action Pills: [Blend and opacity], [Create mask / Modify mask], [Transform]
+            // Main Action Pills: [Blend and opacity], [Create mask / Edit mask], [Transform]
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -859,12 +1101,24 @@ private fun LayerPropertiesBar(
                     onClick = onOpenBlend
                 )
 
-                val maskLabel = if (activeLayer.mask != null && activeLayer.mask.isEnabled) "Modify mask" else "Create mask"
-                LayerActionPill(
-                    icon = Icons.Default.AutoFixNormal,
-                    label = maskLabel,
-                    onClick = onOpenMask
-                )
+                if (activeLayer.mask != null && activeLayer.mask.isEnabled) {
+                    LayerActionPill(
+                        icon = Icons.Default.AutoFixNormal,
+                        label = "Edit mask",
+                        onClick = onEditMask
+                    )
+                    LayerActionPill(
+                        icon = Icons.Default.Tune,
+                        label = "Modify mask",
+                        onClick = onOpenMask
+                    )
+                } else {
+                    LayerActionPill(
+                        icon = Icons.Default.AutoFixNormal,
+                        label = "Create mask",
+                        onClick = onOpenMask
+                    )
+                }
 
                 LayerActionPill(
                     icon = Icons.Default.CropRotate,
@@ -1227,6 +1481,194 @@ private fun LayerThumbnailIcon(
                 Icon(Icons.Default.Layers, null, tint = Color(0xFFAAAAAA), modifier = Modifier.size(18.dp))
             }
         }
+    }
+}
+
+/**
+ * Thumbnail preview for the attached child mask of a layer.
+ * Displays high-contrast black/white silhouette to clearly indicate mask geometry.
+ */
+@Composable
+private fun MaskThumbnailIcon(
+    mask: LayerMask?,
+    size: androidx.compose.ui.unit.Dp,
+    isSelected: Boolean = false,
+    onClick: (() -> Unit)? = null
+) {
+    Box(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black)
+            .border(
+                width = if (isSelected) 2.dp else 1.dp,
+                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.25f),
+                shape = RoundedCornerShape(8.dp)
+            )
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(4.dp)) {
+            val w = this.size.width
+            val h = this.size.height
+            if (mask?.hasSubjectMask == true) {
+                drawOval(
+                    color = if (mask.isInverted) Color.Black else Color.White,
+                    topLeft = Offset(w * 0.15f, h * 0.12f),
+                    size = Size(w * 0.7f, h * 0.76f)
+                )
+            } else {
+                drawRect(
+                    color = if (mask?.isInverted == true) Color.Black else Color.White,
+                    topLeft = Offset(w * 0.1f, h * 0.1f),
+                    size = Size(w * 0.8f, h * 0.8f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Hue & Saturation Adjustment Panel (Matching 02:54 - 03:12 of the screen recording).
+ * Provides Hue spectrum slider (-180..+180), Saturation, Lightness, and Colorize switch.
+ */
+@Composable
+private fun HueSaturationAdjustmentPanel(
+    hue: Float,
+    sat: Float,
+    lightness: Float,
+    isColorize: Boolean,
+    onValuesChange: (Float, Float, Float, Boolean) -> Unit,
+    onDone: () -> Unit
+) {
+    var curHue by remember(hue) { mutableFloatStateOf(hue) }
+    var curSat by remember(sat) { mutableFloatStateOf(sat) }
+    var curLightness by remember(lightness) { mutableFloatStateOf(lightness) }
+    var colorize by remember(isColorize) { mutableStateOf(isColorize) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+    ) {
+        // Hue slider with continuous spectrum track
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Hue", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("${curHue.toInt()}", color = Color(0xFFAAAAAA), fontSize = 12.sp)
+        }
+        Slider(
+            value = curHue,
+            onValueChange = {
+                curHue = it
+                onValuesChange(curHue, curSat, curLightness, colorize)
+            },
+            valueRange = -180f..180f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color(0xFFE91E63),
+                inactiveTrackColor = Color(0xFF333333)
+            )
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        // Saturation slider
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Saturation", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("${curSat.toInt()}", color = Color(0xFFAAAAAA), fontSize = 12.sp)
+        }
+        Slider(
+            value = curSat,
+            onValueChange = {
+                curSat = it
+                onValuesChange(curHue, curSat, curLightness, colorize)
+            },
+            valueRange = -100f..100f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color(0xFF333333)
+            )
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        // Lightness slider
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Lightness", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text("${curLightness.toInt()}", color = Color(0xFFAAAAAA), fontSize = 12.sp)
+        }
+        Slider(
+            value = curLightness,
+            onValueChange = {
+                curLightness = it
+                onValuesChange(curHue, curSat, curLightness, colorize)
+            },
+            valueRange = -100f..100f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color(0xFF333333)
+            )
+        )
+
+        Spacer(Modifier.height(6.dp))
+
+        // Colorize Switch + Done button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(
+                    checked = colorize,
+                    onCheckedChange = {
+                        colorize = it
+                        onValuesChange(curHue, curSat, curLightness, colorize)
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.Black,
+                        checkedTrackColor = Color.White
+                    )
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Colorize", color = Color.White, fontSize = 13.sp)
+            }
+
+            Surface(
+                onClick = onDone,
+                shape = CircleShape,
+                color = Color.White,
+                contentColor = Color.Black,
+                modifier = Modifier.size(38.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Check, "Done", tint = Color.Black, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Hue and Saturation",
+            color = Color(0xFF888888),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 

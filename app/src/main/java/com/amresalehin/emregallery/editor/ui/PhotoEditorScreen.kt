@@ -781,7 +781,7 @@ fun PhotoEditorScreen(
                         }
 
                         // Photoshop Mobile Canvas Overlay Controls in Landscape
-                        if (currentBottomTab == MainBottomTab.OVERLAYS) {
+                        if (currentBottomTab == MainBottomTab.OVERLAYS || currentBottomTab == MainBottomTab.MASKING || currentBottomTab == MainBottomTab.DRAW) {
                             PhotoshopCanvasOverlaysControls(
                                 sessionState = sessionState,
                                 viewModel = viewModel
@@ -1109,7 +1109,7 @@ fun PhotoEditorScreen(
                         }
 
                         // Photoshop Mobile Canvas Overlay Controls in Portrait
-                        if (currentBottomTab == MainBottomTab.OVERLAYS) {
+                        if (currentBottomTab == MainBottomTab.OVERLAYS || currentBottomTab == MainBottomTab.MASKING || currentBottomTab == MainBottomTab.DRAW) {
                             PhotoshopCanvasOverlaysControls(
                                 sessionState = sessionState,
                                 viewModel = viewModel

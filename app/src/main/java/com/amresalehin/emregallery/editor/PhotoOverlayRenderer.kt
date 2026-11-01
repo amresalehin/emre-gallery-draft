@@ -847,7 +847,8 @@ object PhotoOverlayRenderer {
         layers: List<EditorOverlayLayer>,
         density: Float
     ) {
-        for (layer in layers) {
+        for (i in layers.indices) {
+            val layer = layers[i]
             if (!layer.isVisible) continue
 
             val cx = layer.xRatio * width
@@ -856,6 +857,23 @@ object PhotoOverlayRenderer {
             val lh = layer.heightRatio * height * layer.scaleFactor
 
             canvas.save()
+
+            // If clipped to underlying layer, clip within previous layer's bounds
+            if (layer.isClipped && i > 0) {
+                val prev = layers[i - 1]
+                val prevCx = prev.xRatio * width
+                val prevCy = prev.yRatio * height
+                val prevLw = prev.widthRatio * width * prev.scaleFactor
+                val prevLh = prev.heightRatio * height * prev.scaleFactor
+                val prevRect = RectF(
+                    prevCx - prevLw / 2f,
+                    prevCy - prevLh / 2f,
+                    prevCx + prevLw / 2f,
+                    prevCy + prevLh / 2f
+                )
+                canvas.clipRect(prevRect)
+            }
+
             canvas.translate(cx, cy)
             canvas.rotate(layer.rotationDegrees)
             if (layer.isFlippedH || layer.isFlippedV) {
@@ -863,7 +881,8 @@ object PhotoOverlayRenderer {
             }
 
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                alpha = (layer.opacity.coerceIn(0f, 1f) * 255).toInt()
+                val maskDensity = layer.mask?.density ?: 1.0f
+                alpha = ((layer.opacity.coerceIn(0f, 1f) * maskDensity.coerceIn(0f, 1f)) * 255).toInt()
                 xfermode = when (layer.blendMode) {
                     "Multiply" -> PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
                     "Screen" -> PorterDuffXfermode(PorterDuff.Mode.SCREEN)
@@ -880,7 +899,7 @@ object PhotoOverlayRenderer {
 
             val layerRect = RectF(-lw / 2f, -lh / 2f, lw / 2f, lh / 2f)
 
-            // Layer Mask Clipping
+            // Layer Mask Clipping (Mask treated as an editable child property of the layer)
             val mask = layer.mask
             val hasMask = mask?.isEnabled == true
 
@@ -888,7 +907,6 @@ object PhotoOverlayRenderer {
                 canvas.save()
                 val maskPath = Path()
                 if (mask!!.hasSubjectMask) {
-                    // Elliptical / organic subject cutout matching the airplane/astronaut subject
                     val feather = mask.feather * density
                     val expansion = mask.contractExpand * density
                     val ovalRect = RectF(
@@ -932,28 +950,56 @@ object PhotoOverlayRenderer {
                     }
                 }
                 OverlayLayerType.ADJUSTMENT -> {
-                    if (layer.adjustmentType == AdjustmentLayerType.BLACK_AND_WHITE) {
-                        // Apply custom monochrome color matrix to simulate the channel sliders
-                        val bw = layer.bwSettings
-                        val rWeight = (bw.reds / 100f) * 0.3f
-                        val yWeight = (bw.yellows / 100f) * 0.2f
-                        val gWeight = (bw.greens / 100f) * 0.3f
-                        val cWeight = (bw.cyans / 100f) * 0.1f
-                        val bWeight = (bw.blues / 100f) * 0.1f
-                        val mWeight = (bw.magentas / 100f) * 0.1f
-                        val r = rWeight + yWeight / 2f + mWeight / 2f
-                        val g = gWeight + yWeight / 2f + cWeight / 2f
-                        val b = bWeight + cWeight / 2f + mWeight / 2f
+                    when (layer.adjustmentType) {
+                        AdjustmentLayerType.BLACK_AND_WHITE -> {
+                            val bw = layer.bwSettings
+                            val rWeight = (bw.reds / 100f) * 0.3f
+                            val yWeight = (bw.yellows / 100f) * 0.2f
+                            val gWeight = (bw.greens / 100f) * 0.3f
+                            val cWeight = (bw.cyans / 100f) * 0.1f
+                            val bWeight = (bw.blues / 100f) * 0.1f
+                            val mWeight = (bw.magentas / 100f) * 0.1f
+                            val r = rWeight + yWeight / 2f + mWeight / 2f
+                            val g = gWeight + yWeight / 2f + cWeight / 2f
+                            val b = bWeight + cWeight / 2f + mWeight / 2f
 
-                        val cm = ColorMatrix(floatArrayOf(
-                            r, g, b, 0f, 0f,
-                            r, g, b, 0f, 0f,
-                            r, g, b, 0f, 0f,
-                            0f, 0f, 0f, 1f, 0f
-                        ))
-                        paint.colorFilter = ColorMatrixColorFilter(cm)
-                        paint.color = AndroidColor.WHITE
-                        canvas.drawRect(layerRect, paint)
+                            val cm = ColorMatrix(floatArrayOf(
+                                r, g, b, 0f, 0f,
+                                r, g, b, 0f, 0f,
+                                r, g, b, 0f, 0f,
+                                0f, 0f, 0f, 1f, 0f
+                            ))
+                            paint.colorFilter = ColorMatrixColorFilter(cm)
+                            paint.color = AndroidColor.WHITE
+                            canvas.drawRect(layerRect, paint)
+                        }
+                        AdjustmentLayerType.HUE_SATURATION -> {
+                            val cm = ColorMatrix()
+                            if (layer.satShift != 0f) {
+                                cm.setSaturation((layer.satShift + 100f) / 100f)
+                            }
+                            if (layer.hueShift != 0f) {
+                                val hueCm = ColorMatrix()
+                                val cosA = cos(Math.toRadians(layer.hueShift.toDouble())).toFloat()
+                                val sinA = sin(Math.toRadians(layer.hueShift.toDouble())).toFloat()
+                                val a = 0.213f; val b = 0.715f; val c = 0.072f
+                                hueCm.set(floatArrayOf(
+                                    a + cosA * (1 - a) + sinA * (-a), b + cosA * (-b) + sinA * (-b), c + cosA * (-c) + sinA * (1 - c), 0f, 0f,
+                                    a + cosA * (-a) + sinA * (0.143f), b + cosA * (1 - b) + sinA * (0.140f), c + cosA * (-c) + sinA * (-0.283f), 0f, 0f,
+                                    a + cosA * (-a) + sinA * (-(1 - a)), b + cosA * (-b) + sinA * (b), c + cosA * (1 - c) + sinA * (c), 0f, 0f,
+                                    0f, 0f, 0f, 1f, 0f
+                                ))
+                                cm.postConcat(hueCm)
+                            }
+                            paint.colorFilter = ColorMatrixColorFilter(cm)
+                            paint.color = AndroidColor.WHITE
+                            canvas.drawRect(layerRect, paint)
+                        }
+                        else -> {
+                            // Brightness / Exposure / Color balance
+                            paint.color = AndroidColor.argb(80, 255, 255, 255)
+                            canvas.drawRect(layerRect, paint)
+                        }
                     }
                 }
                 OverlayLayerType.FILL -> {

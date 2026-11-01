@@ -817,6 +817,86 @@ class PhotoEditorTest {
         assertEquals(80, rendered.width)
         assertEquals(80, rendered.height)
     }
+
+    @Test
+    fun testUnifiedLayersWorkspace_maskAsChildPropertyOfLayer() {
+        val vm = PhotoEditorViewModel()
+        val layer = EditorOverlayLayer(
+            id = "layer_img",
+            name = "Subject Dancer",
+            type = OverlayLayerType.IMAGE,
+            stockImageKey = "propplane"
+        )
+        vm.addOverlayLayer(layer)
+        assertNull(vm.sessionState.value.overlayLayers.first().mask)
+
+        // Attach mask as a child property of the layer
+        val mask = LayerMask(isEnabled = true, hasSubjectMask = true, feather = 4f, density = 0.95f)
+        vm.applyOverlayLayerMask("layer_img", mask)
+        val updatedLayer = vm.sessionState.value.overlayLayers.first()
+        assertNotNull(updatedLayer.mask)
+        assertTrue(updatedLayer.mask!!.isEnabled)
+        assertEquals(4f, updatedLayer.mask!!.feather, 0.001f)
+        assertEquals(0.95f, updatedLayer.mask!!.density, 0.001f)
+
+        // Switch selection target between Layer and child Mask
+        vm.setOverlayLayerMaskTarget("layer_img", true)
+        assertTrue(vm.sessionState.value.overlayLayers.first().isMaskSelected)
+        assertTrue(vm.sessionState.value.isMaskTargetActive)
+
+        vm.setOverlayLayerMaskTarget("layer_img", false)
+        assertFalse(vm.sessionState.value.overlayLayers.first().isMaskSelected)
+        assertFalse(vm.sessionState.value.isMaskTargetActive)
+
+        // Remove mask child
+        vm.removeOverlayLayerMask("layer_img")
+        assertNull(vm.sessionState.value.overlayLayers.first().mask)
+    }
+
+    @Test
+    fun testUnifiedLayersWorkspace_layerClipping() {
+        val vm = PhotoEditorViewModel()
+        val baseLayer = EditorOverlayLayer(id = "base", name = "Dancer", type = OverlayLayerType.IMAGE)
+        val adjLayer = EditorOverlayLayer(
+            id = "adj",
+            name = "Hue Sat 1",
+            type = OverlayLayerType.ADJUSTMENT,
+            adjustmentType = AdjustmentLayerType.HUE_SATURATION
+        )
+        vm.addOverlayLayer(baseLayer)
+        vm.addOverlayLayer(adjLayer)
+
+        assertFalse(vm.sessionState.value.overlayLayers.last().isClipped)
+
+        // Toggle clipping to layer below
+        vm.toggleOverlayLayerClipping("adj")
+        assertTrue(vm.sessionState.value.overlayLayers.last().isClipped)
+        assertEquals("Layer clipped", vm.sessionState.value.description)
+
+        // Un-clip
+        vm.toggleOverlayLayerClipping("adj")
+        assertFalse(vm.sessionState.value.overlayLayers.last().isClipped)
+        assertEquals("Layer un-clipped", vm.sessionState.value.description)
+    }
+
+    @Test
+    fun testUnifiedLayersWorkspace_hueSaturationAdjustment() {
+        val vm = PhotoEditorViewModel()
+        val hueLayer = EditorOverlayLayer(
+            id = "hsl",
+            name = "Hue and Saturation",
+            type = OverlayLayerType.ADJUSTMENT,
+            adjustmentType = AdjustmentLayerType.HUE_SATURATION
+        )
+        vm.addOverlayLayer(hueLayer)
+
+        vm.updateOverlayLayerHsl("hsl", hue = -114f, sat = 20f, lightness = -10f, colorize = true)
+        val updated = vm.sessionState.value.overlayLayers.last()
+        assertEquals(-114f, updated.hueShift, 0.001f)
+        assertEquals(20f, updated.satShift, 0.001f)
+        assertEquals(-10f, updated.lightnessShift, 0.001f)
+        assertTrue(updated.isColorize)
+    }
 }
 
 
