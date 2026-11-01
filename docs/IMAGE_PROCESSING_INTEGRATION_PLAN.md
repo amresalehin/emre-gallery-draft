@@ -17,20 +17,23 @@ The following work has now been committed on `research/image-toolbox-backends`:
 
 | Area | Branch state | Notes |
 |---|---|---|
-| Native editor navigation | Implemented | Viewer Edit and Tools shortcut route to an Emre Compose editor destination. |
-| Crop / transform | Initial implementation | Free crop, 1:1, 4:3, 3:2 and 16:9 presets; quarter-turn rotation; horizontal/vertical flip. |
-| Basic adjustments | Initial implementation | Brightness, contrast and saturation controls use a composed Android ColorMatrix. |
-| Preview | Initial implementation | Reuses Emre's Coil 2 loader; preview work is bounded to 2048 px and dispatched off the main thread. |
-| Export | Initial implementation | Saves a new JPEG copy in Pictures/Emre. Android 10+ uses a pending MediaStore row; Android 8–9 uses a file plus MediaScanner. |
-| Source preservation | Implemented for this slice | The source URI is never overwritten. |
-| ImageToolbox codec/filter/AI reference sources | Research only | The 44-file backend snapshot remains uncompiled reference material. It is not yet the live engine in Emre. |
-| Verification | Pending | No local Gradle build or Android device test has been run from this editing session. |
+| Native editor navigation | Implemented | Viewer Edit and Tools shortcuts route to the Emre Compose editor. |
+| Crop / transform | Initial implementation | Free crop, aspect presets, quarter-turn rotation and horizontal/vertical flip. |
+| Adjust / Filters & Effects | Initial implementation | Six tonal controls, 40 Emre ColorMatrix looks and six CPU effects; not the full upstream catalogue. |
+| Drawing & Annotation | Initial implementation | Non-destructive pen/highlighter/eraser, line/arrow/rectangle/ellipse and text layers; preview and export compositing. |
+| AI background removal | Initial implementation | Bundled on-device ML Kit Selfie Segmenter for people with transparent PNG export; not general object segmentation. |
+| Preview | Initial implementation | Reuses Coil 2; bounded 2048-pixel working preview, with markup rendered as a separate overlay. |
+| Export | Initial implementation | JPEG for standard edits; transparent PNG for person cutouts. MediaStore pending-row export on Android 10+ and legacy folder export on Android 8–9. |
+| Source preservation | Implemented for this slice | Edits and annotations export as a new copy; source URI is not overwritten. |
+| Upstream ImageToolbox sources | Reference only | The pinned upstream source remains a research/reference snapshot; it is not compiled wholesale as Emre's engine. |
+| Verification | CI passed | Unit tests and debug APK assembly passed on commit `09084e1`; device QA remains outstanding. |
 
-Known limitations of this first slice:
-- JPEG-only output; output format/quality selection is not yet exposed.
-- EXIF/XMP metadata is not copied to the edited output.
-- Crop handle interaction and transforms require device validation, especially unusual image dimensions/orientations.
-- Full ImageToolbox filter catalog, editable markup layers, drawing, background-removal models, advanced codecs and AI model registry are not yet integrated.
+Known limitations of the current slices:
+- No shared codec registry, format conversion UI, target-size compression or animated/RAW workflows.
+- EXIF transfer is best-effort for ordinary JPEG edits; transparent PNG cutouts do not copy source EXIF.
+- Drawing layers are in-memory edit-recipe data and are not yet saved as reopenable project files.
+- Stickers/image overlays, flood-fill/spray/transform brushes, spot healing, lasso selection and generative inpainting remain unimplemented.
+- Crop handles, alpha-edge quality, export memory and device-specific behaviour still require physical-device QA.
 
 Do not describe the 44 reference files as a functioning backend. The roadmap below remains the target architecture for subsequent vertical slices.
 

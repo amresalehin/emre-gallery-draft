@@ -67,21 +67,16 @@ private val toolGroups = listOf(
         "Drawing and annotation",
         Icons.Default.Brush,
         listOf(
-            "Freehand pen and brush",
-            "Flood fill and spray brush",
-            "Neon brush and highlighter",
-            "Text and sticker insertion",
-            "Image brush and filter brush",
-            "Warp, move, grow, shrink, swirl and mix brushes",
-            "Privacy blur and pixelation painting",
-            "Spot healing",
-            "AI-assisted generative inpainting",
-            "Automatic face detection with YuNet and UltraFace, plus face masking",
-            "Arrows, lines and double arrows",
-            "Rectangles, circles, triangles and polygons",
-            "Stars and lasso selection",
-            "Dashed, dotted, zigzag and stamped lines",
-            "Markup layers for text, images and shapes"
+            "Freehand pen strokes",
+            "Semi-transparent highlighter strokes",
+            "Annotation-only eraser that preserves the source photo",
+            "Straight lines and arrow annotations",
+            "Rectangle and ellipse outlines",
+            "Text layers placed by tapping the image",
+            "Eight annotation colours and adjustable stroke width",
+            "Independent annotation layers with undo and redo",
+            "Remove the last layer or clear all annotations",
+            "Annotations are composited into the exported image copy"
         )
     ),
     ToolGroup(
@@ -364,7 +359,8 @@ fun ToolsScreen(
     onOpenPdfTool: (PdfDocumentTool) -> Unit,
     onOpenEditor: () -> Unit = {},
     onOpenFilters: () -> Unit = {},
-    onOpenAiTools: () -> Unit = {}
+    onOpenAiTools: () -> Unit = {},
+    onOpenDrawing: () -> Unit = {}
 ) {
     var query by remember { mutableStateOf("") }
     var expandedGroups by remember { mutableStateOf(setOf("Image editing")) }
@@ -547,6 +543,27 @@ fun ToolsScreen(
                         Column(Modifier.weight(1f)) {
                             Text("Open AI Background Removal", fontWeight = FontWeight.SemiBold)
                             Text("Person cutout with transparent PNG export", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ArrowForward, contentDescription = null)
+                    }
+                }
+            }
+            item {
+                ElevatedCard(
+                    onClick = onOpenDrawing,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Brush, contentDescription = null, modifier = Modifier.size(26.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Open Drawing & Annotation", fontWeight = FontWeight.SemiBold)
+                            Text("Brush, highlighter, shapes, arrows and text layers", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Default.ArrowForward, contentDescription = null)
                     }

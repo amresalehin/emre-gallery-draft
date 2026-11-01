@@ -19,6 +19,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -57,6 +58,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -77,8 +79,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -112,7 +118,29 @@ import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-private enum class EditorMode { Crop, Adjust, Filters, Effects, AI }
+private enum class EditorMode { Crop, Adjust, Filters, Effects, Drawing, AI }
+
+private enum class MarkupTool(val title: String) {
+    Pen("Pen"), Highlighter("Highlight"), Eraser("Erase"), Line("Line"),
+    Arrow("Arrow"), Rectangle("Rect"), Ellipse("Oval"), Text("Text")
+}
+
+private data class MarkupPoint(val x: Float, val y: Float)
+
+private data class EditorMarkup(
+    val tool: MarkupTool,
+    val points: List<MarkupPoint>,
+    val text: String = "",
+    val colorArgb: Int = android.graphics.Color.WHITE,
+    val strokeWidthFraction: Float = 0.008f
+)
+
+private val EDITOR_MARKUP_COLORS = listOf(
+    android.graphics.Color.WHITE, android.graphics.Color.BLACK,
+    android.graphics.Color.RED, android.graphics.Color.YELLOW,
+    android.graphics.Color.GREEN, android.graphics.Color.CYAN,
+    android.graphics.Color.BLUE, android.graphics.Color.MAGENTA
+)
 private enum class FilterCategory(val title: String) {
     All("All"),
     Portrait("Portrait"),
@@ -195,7 +223,8 @@ private data class EditorRecipe(
     val softFocus: Float = 0f,
     val sharpen: Float = 0f,
     val pixelate: Float = 0f,
-    val removePersonBackground: Boolean = false
+    val removePersonBackground: Boolean = false,
+    val markups: List<EditorMarkup> = emptyList()
 )
 
 @Composable
@@ -204,7 +233,8 @@ fun ImageEditorScreen(
     onBack: () -> Unit,
     onSaved: (MediaItem) -> Unit,
     startInFilters: Boolean = false,
-    startInAi: Boolean = false
+    startInAi: Boolean = false,
+    startInDrawing: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -230,14 +260,19 @@ fun ImageEditorScreen(
         redoStack = redoStack.dropLast(1)
         recipe = next
     }
-    var mode by remember(source.uri, startInFilters, startInAi) {
+    var mode by remember(source.uri, startInFilters, startInAi, startInDrawing) {
         mutableStateOf(when {
+            startInDrawing -> EditorMode.Drawing
             startInAi -> EditorMode.AI
             startInFilters -> EditorMode.Filters
             else -> EditorMode.Crop
         })
     }
     var selectedFilterCategory by remember(source.uri) { mutableStateOf(FilterCategory.All) }
+    var markupTool by remember(source.uri) { mutableStateOf(MarkupTool.Pen) }
+    var markupColor by remember(source.uri) { mutableIntStateOf(android.graphics.Color.WHITE) }
+    var markupStrokeWidth by remember(source.uri) { mutableFloatStateOf(0.008f) }
+    var markupText by remember(source.uri) { mutableStateOf("Your text") }
     var loading by remember(source.uri) { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -289,15 +324,16 @@ fun ImageEditorScreen(
         else error = "Storage permission is required to save into Pictures/Emre"
     }
     var preview by remember(image) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(image, recipe) {
+    val basePreviewRecipe = recipe.copy(markups = emptyList())
+    LaunchedEffect(image, basePreviewRecipe) {
         val renderSource = image ?: run {
             preview = null
             return@LaunchedEffect
         }
         val renderResult = withContext(Dispatchers.Default) {
             runCatching {
-                val base = applyEditorRecipe(renderSource, recipe, maxPreviewDimension = 2048)
-                if (!recipe.removePersonBackground) {
+                val base = applyEditorRecipe(renderSource, basePreviewRecipe, maxPreviewDimension = 2048)
+                if (!basePreviewRecipe.removePersonBackground) {
                     base
                 } else {
                     try {
@@ -407,6 +443,25 @@ fun ImageEditorScreen(
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
+                            if (mode == EditorMode.Drawing && !showOriginalPreview) {
+                                DrawMarkupOverlay(
+                                    layers = recipe.markups,
+                                    tool = markupTool,
+                                    colorArgb = markupColor,
+                                    strokeWidthFraction = markupStrokeWidth,
+                                    text = markupText,
+                                    onCommit = { layer -> updateRecipe(recipe.copy(markups = recipe.markups + layer)) },
+                                    onTextTap = { point ->
+                                        if (markupText.isNotBlank()) {
+                                            updateRecipe(recipe.copy(markups = recipe.markups + EditorMarkup(
+                                                tool = MarkupTool.Text, points = listOf(point), text = markupText,
+                                                colorArgb = markupColor, strokeWidthFraction = markupStrokeWidth
+                                            )))
+                                        } else { error = "Enter some text before placing it" }
+                                    },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                         }
                     }
                 }
@@ -437,24 +492,27 @@ fun ImageEditorScreen(
             )
         }
 
-        Row(
+        LazyRow(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp)
         ) {
-            EditorMode.entries.forEach { target ->
+            items(EditorMode.entries.size) { index ->
+                val target = EditorMode.entries[index]
                 val selected = mode == target
                 Surface(
-                    modifier = Modifier.weight(1f).clip(CircleShape).clickable { mode = target },
+                    modifier = Modifier.clip(CircleShape).clickable { mode = target },
                     color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
                     shape = CircleShape
                 ) {
-                    Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.padding(horizontal = 13.dp, vertical = 11.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                         Icon(
                             when (target) {
                                 EditorMode.Crop -> Icons.Default.Crop
                                 EditorMode.Adjust -> Icons.Default.Tune
                                 EditorMode.Filters -> Icons.Default.AutoAwesome
                                 EditorMode.Effects -> Icons.Default.FilterVintage
+                                EditorMode.Drawing -> Icons.Default.Brush
                                 EditorMode.AI -> Icons.Default.AutoAwesome
                             },
                             contentDescription = null,
@@ -467,6 +525,7 @@ fun ImageEditorScreen(
                                 EditorMode.Adjust -> "Adjust"
                                 EditorMode.Filters -> "Filters"
                                 EditorMode.Effects -> "Effects"
+                                EditorMode.Drawing -> "Draw"
                                 EditorMode.AI -> "AI"
                             },
                             modifier = Modifier.padding(start = 7.dp),
@@ -638,6 +697,55 @@ fun ImageEditorScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        } else if (mode == EditorMode.Drawing) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 250.dp).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp, vertical = 5.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(MarkupTool.entries.size) { index ->
+                        val tool = MarkupTool.entries[index]
+                        val selected = markupTool == tool
+                        Surface(modifier = Modifier.clip(CircleShape).clickable { markupTool = tool }, shape = CircleShape, color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh) {
+                            Text(tool.title, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+                if (markupTool == MarkupTool.Text) {
+                    OutlinedTextField(value = markupText, onValueChange = { markupText = it }, modifier = Modifier.fillMaxWidth(), singleLine = false, maxLines = 2, label = { Text("Text to place") }, supportingText = { Text("Tap the image to add a text layer") })
+                } else {
+                    Text(
+                        when (markupTool) {
+                            MarkupTool.Pen -> "Draw directly on the image"
+                            MarkupTool.Highlighter -> "Transparent highlighter stroke"
+                            MarkupTool.Eraser -> "Erase annotation strokes only; the photo remains intact"
+                            MarkupTool.Line -> "Drag to place a straight line"
+                            MarkupTool.Arrow -> "Drag from the tail toward the arrow tip"
+                            MarkupTool.Rectangle -> "Drag to outline a rectangle"
+                            MarkupTool.Ellipse -> "Drag to outline an oval"
+                            MarkupTool.Text -> "Tap to place text"
+                        }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text("Colour", style = MaterialTheme.typography.labelMedium)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(EDITOR_MARKUP_COLORS.size) { index ->
+                            val swatch = EDITOR_MARKUP_COLORS[index]
+                            val selected = markupColor == swatch
+                            Surface(modifier = Modifier.size(27.dp).clip(CircleShape).clickable { markupColor = swatch }, shape = CircleShape, color = Color(swatch), border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)) {}
+                        }
+                    }
+                }
+                if (markupTool != MarkupTool.Text) {
+                    AdjustmentSlider("Brush size", markupStrokeWidth, 0.002f..0.035f, valueLabel = { (it * 1000f).roundToInt().toString() }) { markupStrokeWidth = it }
+                }
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${recipe.markups.size} annotation ${if (recipe.markups.size == 1) "layer" else "layers"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { updateRecipe(recipe.copy(markups = recipe.markups.dropLast(1))) }, enabled = recipe.markups.isNotEmpty() && !saving) { Text("Remove last") }
+                    TextButton(onClick = { updateRecipe(recipe.copy(markups = emptyList())) }, enabled = recipe.markups.isNotEmpty() && !saving) { Text("Clear all") }
+                }
+            }
         } else if (mode == EditorMode.AI) {
             Column(
                 Modifier.fillMaxWidth()
@@ -754,6 +862,165 @@ private fun AdjustmentSlider(
             modifier = Modifier.width(52.dp),
             maxLines = 1
         )
+    }
+}
+
+@Composable
+private fun DrawMarkupOverlay(
+    layers: List<EditorMarkup>,
+    tool: MarkupTool,
+    colorArgb: Int,
+    strokeWidthFraction: Float,
+    text: String,
+    onCommit: (EditorMarkup) -> Unit,
+    onTextTap: (MarkupPoint) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val currentLayers by rememberUpdatedState(layers)
+    val currentColor by rememberUpdatedState(colorArgb)
+    val currentWidth by rememberUpdatedState(strokeWidthFraction)
+    val currentOnCommit by rememberUpdatedState(onCommit)
+    val currentOnTextTap by rememberUpdatedState(onTextTap)
+    var inProgress by remember(tool) { mutableStateOf<EditorMarkup?>(null) }
+
+    Canvas(
+        modifier = modifier
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .pointerInput(tool) {
+                if (tool == MarkupTool.Text) {
+                    detectTapGestures { offset ->
+                        currentOnTextTap(
+                            MarkupPoint(
+                                (offset.x / size.width.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                                (offset.y / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                            )
+                        )
+                    }
+                } else {
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            val point = MarkupPoint(
+                                (offset.x / size.width.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                                (offset.y / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                            )
+                            inProgress = EditorMarkup(tool, listOf(point, point), colorArgb = currentColor, strokeWidthFraction = currentWidth)
+                        },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            val current = inProgress ?: return@detectDragGestures
+                            val point = MarkupPoint(
+                                (change.position.x / size.width.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                                (change.position.y / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                            )
+                            val points = when (tool) {
+                                MarkupTool.Pen, MarkupTool.Highlighter, MarkupTool.Eraser -> current.points + point
+                                else -> listOf(current.points.first(), point)
+                            }
+                            inProgress = current.copy(points = points)
+                        },
+                        onDragEnd = { inProgress?.let(currentOnCommit); inProgress = null },
+                        onDragCancel = { inProgress = null }
+                    )
+                }
+            }
+    ) {
+        drawIntoCanvas { composeCanvas ->
+            val canvas = composeCanvas.nativeCanvas
+            val checkpoint = canvas.saveLayer(0f, 0f, size.width, size.height, null)
+            drawEditorMarkupLayers(canvas, size.width, size.height, layers + listOfNotNull(inProgress))
+            canvas.restoreToCount(checkpoint)
+        }
+    }
+}
+
+private fun drawEditorMarkupLayers(
+    canvas: android.graphics.Canvas,
+    width: Float,
+    height: Float,
+    layers: List<EditorMarkup>
+) {
+    if (layers.isEmpty() || width <= 0f || height <= 0f) return
+    layers.forEach { layer ->
+        if (layer.points.isEmpty()) return@forEach
+        val first = layer.points.first()
+        val last = layer.points.last()
+        val startX = first.x.coerceIn(0f, 1f) * width
+        val startY = first.y.coerceIn(0f, 1f) * height
+        val endX = last.x.coerceIn(0f, 1f) * width
+        val endY = last.y.coerceIn(0f, 1f) * height
+        val strokeWidth = (layer.strokeWidthFraction.coerceIn(0.002f, 0.08f) * minOf(width, height)).coerceAtLeast(1f)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = layer.colorArgb
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = strokeWidth
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeJoin = android.graphics.Paint.Join.ROUND
+            isDither = true
+        }
+        when (layer.tool) {
+            MarkupTool.Pen, MarkupTool.Highlighter, MarkupTool.Eraser -> {
+                if (layer.tool == MarkupTool.Highlighter) {
+                    paint.alpha = (android.graphics.Color.alpha(layer.colorArgb) * 0.34f).roundToInt()
+                    paint.strokeWidth = strokeWidth * 3.2f
+                } else if (layer.tool == MarkupTool.Eraser) {
+                    paint.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+                    paint.strokeWidth = strokeWidth * 3.8f
+                }
+                if (layer.points.size == 1 || (layer.points.size == 2 && first == last)) {
+                    canvas.drawCircle(startX, startY, paint.strokeWidth / 2f, paint)
+                } else {
+                    val path = android.graphics.Path().apply {
+                        moveTo(startX, startY)
+                        layer.points.drop(1).forEach { point ->
+                            lineTo(point.x.coerceIn(0f, 1f) * width, point.y.coerceIn(0f, 1f) * height)
+                        }
+                    }
+                    canvas.drawPath(path, paint)
+                }
+            }
+            MarkupTool.Line -> canvas.drawLine(startX, startY, endX, endY, paint)
+            MarkupTool.Arrow -> {
+                canvas.drawLine(startX, startY, endX, endY, paint)
+                val angle = kotlin.math.atan2(endY - startY, endX - startX)
+                val head = (strokeWidth * 4.5f).coerceAtLeast(12f)
+                val spread = Math.PI.toFloat() / 6f
+                val arrowPath = android.graphics.Path().apply {
+                    moveTo(endX, endY)
+                    lineTo(endX - head * kotlin.math.cos(angle - spread), endY - head * kotlin.math.sin(angle - spread))
+                    moveTo(endX, endY)
+                    lineTo(endX - head * kotlin.math.cos(angle + spread), endY - head * kotlin.math.sin(angle + spread))
+                }
+                canvas.drawPath(arrowPath, paint)
+            }
+            MarkupTool.Rectangle -> canvas.drawRect(minOf(startX, endX), minOf(startY, endY), maxOf(startX, endX), maxOf(startY, endY), paint)
+            MarkupTool.Ellipse -> canvas.drawOval(minOf(startX, endX), minOf(startY, endY), maxOf(startX, endX), maxOf(startY, endY), paint)
+            MarkupTool.Text -> {
+                paint.style = android.graphics.Paint.Style.FILL
+                paint.xfermode = null
+                paint.textSize = (layer.strokeWidthFraction.coerceIn(0.025f, 0.14f) * height).coerceAtLeast(12f)
+                paint.typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                layer.text.split(10.toChar()).forEachIndexed { index, line ->
+                    canvas.drawText(line, startX, startY + index * paint.textSize * 1.18f, paint)
+                }
+            }
+        }
+        paint.xfermode = null
+    }
+}
+
+private fun renderEditorMarkupLayers(source: Bitmap, layers: List<EditorMarkup>): Bitmap {
+    if (layers.isEmpty()) return source
+    val output = source.copy(Bitmap.Config.ARGB_8888, true)
+        ?: throw IOException("Could not allocate a canvas for annotations")
+    try {
+        val canvas = android.graphics.Canvas(output)
+        val checkpoint = canvas.saveLayer(0f, 0f, output.width.toFloat(), output.height.toFloat(), null)
+        drawEditorMarkupLayers(canvas, output.width.toFloat(), output.height.toFloat(), layers)
+        canvas.restoreToCount(checkpoint)
+        return output
+    } catch (failure: Throwable) {
+        if (!output.isRecycled) output.recycle()
+        throw failure
     }
 }
 
@@ -1499,9 +1766,16 @@ private suspend fun exportEditorResult(
     media: MediaItem
 ): MediaItem {
     val transformed = applyEditorRecipe(source, recipe)
-    val output = try {
+    val processedOutput = try {
         if (recipe.removePersonBackground) removePersonBackground(transformed) else transformed
     } catch (failure: Throwable) {
+        if (transformed !== source && !transformed.isRecycled) transformed.recycle()
+        throw failure
+    }
+    val output = try {
+        renderEditorMarkupLayers(processedOutput, recipe.markups)
+    } catch (failure: Throwable) {
+        if (processedOutput !== transformed && processedOutput !== source && !processedOutput.isRecycled) processedOutput.recycle()
         if (transformed !== source && !transformed.isRecycled) transformed.recycle()
         throw failure
     }
@@ -1593,7 +1867,8 @@ private suspend fun exportEditorResult(
         throw t
     } finally {
         tempFile?.let { if (it.exists()) it.delete() }
-        if (output !== source && !output.isRecycled) output.recycle()
-        if (transformed !== output && transformed !== source && !transformed.isRecycled) transformed.recycle()
+        if (output !== processedOutput && output !== source && !output.isRecycled) output.recycle()
+        if (processedOutput !== transformed && processedOutput !== source && !processedOutput.isRecycled) processedOutput.recycle()
+        if (transformed !== source && !transformed.isRecycled) transformed.recycle()
     }
 }

@@ -87,6 +87,7 @@ fun GalleryApp() {
     var editorSource by remember { mutableStateOf<MediaItem?>(null) }
     var editorStartInFilters by remember { mutableStateOf(false) }
     var editorStartInAi by remember { mutableStateOf(false) }
+    var editorStartInDrawing by remember { mutableStateOf(false) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -1202,6 +1203,7 @@ fun GalleryApp() {
                                 editorSource = candidate
                                 editorStartInFilters = false
                                 editorStartInAi = false
+                                editorStartInDrawing = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1221,6 +1223,7 @@ fun GalleryApp() {
                                 editorSource = candidate
                                 editorStartInFilters = true
                                 editorStartInAi = false
+                                editorStartInDrawing = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1240,6 +1243,7 @@ fun GalleryApp() {
                                 editorSource = candidate
                                 editorStartInFilters = false
                                 editorStartInAi = true
+                                editorStartInDrawing = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1247,6 +1251,26 @@ fun GalleryApp() {
                                 )
                             } else {
                                 scope.launch { snackbarHostState.showSnackbar("Select a photo for AI background removal") }
+                            }
+                        },
+                        onOpenDrawing = {
+                            val candidate = selectedMedia?.takeUnless {
+                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
+                            } ?: media.firstOrNull {
+                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
+                            }
+                            if (candidate != null) {
+                                editorSource = candidate
+                                editorStartInFilters = false
+                                editorStartInAi = false
+                                editorStartInDrawing = true
+                                navigateTo(
+                                    Destination.IMAGE_EDITOR,
+                                    rememberPrevious = true,
+                                    newSelectedMedia = candidate
+                                )
+                            } else {
+                                scope.launch { snackbarHostState.showSnackbar("Select a photo to annotate") }
                             }
                         }
                     )
@@ -1276,7 +1300,8 @@ fun GalleryApp() {
                                 }
                             },
                             startInFilters = editorStartInFilters,
-                            startInAi = editorStartInAi
+                            startInAi = editorStartInAi,
+                            startInDrawing = editorStartInDrawing
                         )
                     }
                     Destination.PDF_DOCUMENT_TOOL -> PdfDocumentToolScreen(
@@ -1437,6 +1462,7 @@ fun GalleryApp() {
                         editorSource = currentItem
                         editorStartInFilters = false
                         editorStartInAi = false
+                        editorStartInDrawing = false
                         navigateTo(Destination.IMAGE_EDITOR, rememberPrevious = true, newSelectedMedia = currentItem)
                     }
                 },
