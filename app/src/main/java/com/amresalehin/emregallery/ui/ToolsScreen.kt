@@ -30,11 +30,12 @@ private val toolGroups = listOf(
         "Image editing",
         Icons.Default.Edit,
         listOf(
-            "Open selected image in Emre Editor",
-            "Crop, rotate and flip",
-            "Adjustments and filter workspace",
-            "Layers, text, stickers and shapes",
-            "AI enhancement and background removal"
+            "Open a photo in Emre Editor",
+            "Free crop and aspect-ratio presets",
+            "Rotate by 90 degrees",
+            "Horizontal and vertical flip",
+            "Brightness, contrast and saturation",
+            "Save edited result as a new JPEG copy"
         )
     ),
     ToolGroup(
