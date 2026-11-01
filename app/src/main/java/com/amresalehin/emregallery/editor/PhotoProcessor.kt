@@ -955,6 +955,11 @@ object PhotoProcessor {
             result = applyAiFeatures(result, state.aiSettings)
         }
 
+        // 5b. LightCraft Masking Layers (localized 17 adjustments)
+        if (state.maskLayers.isNotEmpty()) {
+            result = PhotoMaskEngine.applyMaskLayers(result, state.maskLayers)
+        }
+
         // 6. Overlays (frames, borders, shapes, drawings, stickers, text, callouts, flares)
         val finalCanvasBmp = result.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(finalCanvasBmp)

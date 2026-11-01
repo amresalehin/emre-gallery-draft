@@ -450,5 +450,113 @@ class PhotoEditorTest {
             }
         }
     }
+
+    @Test
+    fun testLightcraftMasking_createLayerAndComponent() {
+        val vm = PhotoEditorViewModel()
+        assertTrue(vm.sessionState.value.maskLayers.isEmpty())
+
+        // 1. Create a mask layer
+        val layer = vm.createMaskLayer(MaskComponentType.BRUSH, "Subject Highlight")
+        assertEquals(1, vm.sessionState.value.maskLayers.size)
+        assertEquals("Subject Highlight", vm.sessionState.value.maskLayers[0].name)
+        assertEquals(layer.id, vm.sessionState.value.activeMaskId)
+        assertEquals(1, vm.sessionState.value.maskLayers[0].components.size)
+        assertEquals(MaskComponentType.BRUSH, vm.sessionState.value.maskLayers[0].components[0].type)
+
+        // 2. Add Linear Gradient component
+        vm.addComponentToMask(layer.id, MaskComponentType.LINEAR_GRADIENT, MaskCombineMode.ADD)
+        val updatedLayer = vm.sessionState.value.maskLayers[0]
+        assertEquals(2, updatedLayer.components.size)
+        assertEquals(MaskComponentType.LINEAR_GRADIENT, updatedLayer.components[1].type)
+
+        // 3. Duplicate layer
+        vm.duplicateMaskLayer(layer.id)
+        assertEquals(2, vm.sessionState.value.maskLayers.size)
+        assertTrue(vm.sessionState.value.maskLayers[1].name.contains("Copy"))
+
+        // 4. Toggle layer enabled
+        vm.toggleMaskLayerEnabled(layer.id)
+        assertFalse(vm.sessionState.value.maskLayers[0].isEnabled)
+
+        // 5. Invert layer
+        vm.invertMaskLayer(layer.id)
+        assertTrue(vm.sessionState.value.maskLayers[0].isInverted)
+
+        // 6. Delete layer
+        vm.deleteMaskLayer(layer.id)
+        assertEquals(1, vm.sessionState.value.maskLayers.size)
+    }
+
+    @Test
+    fun testLightcraftMasking_localAdjustmentsAndAmount() {
+        val vm = PhotoEditorViewModel()
+        val layer = vm.createMaskLayer(MaskComponentType.RADIAL_GRADIENT)
+
+        // Adjust Exposure, Contrast, Temp, Clarity
+        vm.updateMaskLocalAdjustment(layer.id, "Exposure", 25f)
+        vm.updateMaskLocalAdjustment(layer.id, "Contrast", 15f)
+        vm.updateMaskLocalAdjustment(layer.id, "Temperature", 30f)
+        vm.updateMaskLocalAdjustment(layer.id, "Clarity", 20f)
+
+        val updated = vm.sessionState.value.maskLayers.first { it.id == layer.id }
+        assertEquals(25f, updated.adjustments.exposure, 0.001f)
+        assertEquals(15f, updated.adjustments.contrast, 0.001f)
+        assertEquals(30f, updated.adjustments.temperature, 0.001f)
+        assertEquals(20f, updated.adjustments.clarity, 0.001f)
+        assertFalse(updated.adjustments.isNeutral())
+
+        // Set Mask Amount
+        vm.setMaskAmount(layer.id, 1.5f)
+        assertEquals(1.5f, vm.sessionState.value.maskLayers.first { it.id == layer.id }.amount, 0.001f)
+
+        // Reset adjustments
+        vm.resetMaskAdjustments(layer.id)
+        val reset = vm.sessionState.value.maskLayers.first { it.id == layer.id }
+        assertTrue(reset.adjustments.isNeutral())
+        assertEquals(1.0f, reset.amount, 0.001f)
+    }
+
+    @Test
+    fun testLightcraftMasking_overlaySettings() {
+        val vm = PhotoEditorViewModel()
+        assertTrue(vm.sessionState.value.maskOverlaySettings.showOverlay)
+        assertEquals(MaskOverlayColor.RUBY_RED, vm.sessionState.value.maskOverlaySettings.overlayColor)
+
+        vm.toggleMaskOverlay()
+        assertFalse(vm.sessionState.value.maskOverlaySettings.showOverlay)
+
+        vm.setMaskOverlayColor(MaskOverlayColor.EMERALD_GREEN)
+        assertEquals(MaskOverlayColor.EMERALD_GREEN, vm.sessionState.value.maskOverlaySettings.overlayColor)
+
+        vm.setMaskOverlayOpacity(0.85f)
+        assertEquals(0.85f, vm.sessionState.value.maskOverlaySettings.opacity, 0.001f)
+    }
+
+    @Test
+    fun testLightcraftMasking_applyMaskLayersEngine() {
+        val src = Bitmap.createBitmap(40, 40, Bitmap.Config.ARGB_8888)
+        val layer = LightcraftMaskLayer(
+            id = "layer1",
+            name = "Test Mask",
+            amount = 1.0f,
+            components = listOf(
+                MaskComponent(
+                    id = "comp1",
+                    type = MaskComponentType.RADIAL_GRADIENT,
+                    combineMode = MaskCombineMode.ADD
+                )
+            ),
+            adjustments = MaskLocalAdjustments(
+                exposure = 30f,
+                contrast = 20f
+            )
+        )
+
+        val processed = PhotoMaskEngine.applyMaskLayers(src, listOf(layer))
+        assertNotNull(processed)
+        assertEquals(40, processed.width)
+        assertEquals(40, processed.height)
+    }
 }
 

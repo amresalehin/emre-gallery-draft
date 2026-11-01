@@ -536,9 +536,31 @@ fun PhotoEditorScreen(
                             onFlowChange = { brushFlow = it },
                             magicWandTolerance = magicWandTolerance,
                             onMagicWandToleranceChange = { magicWandTolerance = it },
-                            isSelectionActive = sessionState.drawingStrokes.isNotEmpty(),
+                            isSelectionActive = sessionState.drawingStrokes.isNotEmpty() || sessionState.maskLayers.isNotEmpty(),
                             onInvertMask = { viewModel.invertMask() },
-                            onClearMask = { viewModel.clearMask() }
+                            onClearMask = { viewModel.clearMask() },
+
+                            maskLayers = sessionState.maskLayers,
+                            activeMaskId = sessionState.activeMaskId,
+                            activeComponentId = sessionState.activeComponentId,
+                            overlaySettings = sessionState.maskOverlaySettings,
+                            onCreateMaskLayer = { viewModel.createMaskLayer(it) },
+                            onSelectMaskLayer = { viewModel.selectMaskLayer(it) },
+                            onDeleteMaskLayer = { viewModel.deleteMaskLayer(it) },
+                            onDuplicateMaskLayer = { viewModel.duplicateMaskLayer(it) },
+                            onToggleMaskEnabled = { viewModel.toggleMaskLayerEnabled(it) },
+                            onInvertMaskLayer = { viewModel.invertMaskLayer(it) },
+                            onSetMaskAmount = { id, amt -> viewModel.setMaskAmount(id, amt) },
+                            onAddComponent = { maskId, type, mode -> viewModel.addComponentToMask(maskId, type, mode) },
+                            onRemoveComponent = { maskId, compId -> viewModel.removeComponentFromMask(maskId, compId) },
+                            onSelectComponent = { maskId, compId -> viewModel.selectMaskComponent(maskId, compId) },
+                            onUpdateComponent = { maskId, comp -> viewModel.updateMaskComponent(maskId, comp) },
+                            onUpdateAdjustment = { maskId, prop, val_ -> viewModel.updateMaskLocalAdjustment(maskId, prop, val_) },
+                            onSetColorTint = { maskId, col -> viewModel.setMaskColorTint(maskId, col) },
+                            onResetAdjustments = { maskId -> viewModel.resetMaskAdjustments(maskId) },
+                            onToggleOverlay = { viewModel.toggleMaskOverlay() },
+                            onSetOverlayColor = { viewModel.setMaskOverlayColor(it) },
+                            onSetOverlayOpacity = { viewModel.setMaskOverlayOpacity(it) }
                         )
                     }
                     MainBottomTab.HEALING -> {
@@ -640,10 +662,18 @@ fun PhotoEditorScreen(
                             onCurvePointAdded = { channel, inVal, outVal ->
                                 viewModel.addCurvePoint(channel, inVal, outVal)
                             },
-                            onDrawingStrokeFinished = { viewModel.addDrawingStroke(it) },
+                            onDrawingStrokeFinished = { stroke ->
+                                if (currentBottomTab == MainBottomTab.MASKING) {
+                                    viewModel.addStrokeToActiveMask(stroke)
+                                } else {
+                                    viewModel.addDrawingStroke(stroke)
+                                }
+                            },
                             onRetouchStrokeFinished = { viewModel.addRetouchStroke(it) },
                             onCropRectPreview = { viewModel.updateCropPreview(it) },
-                            onCropRectChanged = { viewModel.commitCrop(it) }
+                            onCropRectChanged = { viewModel.commitCrop(it) },
+                            maskOverlaySettings = sessionState.maskOverlaySettings,
+                            activeMaskLayer = sessionState.maskLayers.firstOrNull { it.id == sessionState.activeMaskId }
                         )
 
                         // Top-Left floating overlay action bar in landscape
@@ -914,10 +944,18 @@ fun PhotoEditorScreen(
                             onCurvePointAdded = { channel, inVal, outVal ->
                                 viewModel.addCurvePoint(channel, inVal, outVal)
                             },
-                            onDrawingStrokeFinished = { viewModel.addDrawingStroke(it) },
+                            onDrawingStrokeFinished = { stroke ->
+                                if (currentBottomTab == MainBottomTab.MASKING) {
+                                    viewModel.addStrokeToActiveMask(stroke)
+                                } else {
+                                    viewModel.addDrawingStroke(stroke)
+                                }
+                            },
                             onRetouchStrokeFinished = { viewModel.addRetouchStroke(it) },
                             onCropRectPreview = { viewModel.updateCropPreview(it) },
-                            onCropRectChanged = { viewModel.commitCrop(it) }
+                            onCropRectChanged = { viewModel.commitCrop(it) },
+                            maskOverlaySettings = sessionState.maskOverlaySettings,
+                            activeMaskLayer = sessionState.maskLayers.firstOrNull { it.id == sessionState.activeMaskId }
                         )
 
                         // Floating Slider HUD Banner at Top

@@ -729,5 +729,9 @@ data class EditSessionState(
     val aiSettings: AiEditSettings = AiEditSettings(),
     val activeSelectionPath: List<Offset> = emptyList(),
     val isSelectionActive: Boolean = false,
+    val maskLayers: List<LightcraftMaskLayer> = emptyList(),
+    val activeMaskId: String? = null,
+    val activeComponentId: String? = null,
+    val maskOverlaySettings: MaskOverlaySettings = MaskOverlaySettings(),
     val description: String = "Initial Image"
 )

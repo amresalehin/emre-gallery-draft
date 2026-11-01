@@ -939,6 +939,11 @@ class PhotoEditorViewModel : ViewModel() {
 
     // --- Masking Helpers ---
     fun invertMask() {
+        val activeMask = _sessionState.value.maskLayers.firstOrNull { it.id == _sessionState.value.activeMaskId }
+        if (activeMask != null) {
+            invertMaskLayer(activeMask.id)
+            return
+        }
         val strokes = _sessionState.value.drawingStrokes
         if (strokes.isEmpty()) return
         pushState(_sessionState.value.copy(
@@ -950,7 +955,262 @@ class PhotoEditorViewModel : ViewModel() {
         updateLivePreview()
     }
 
-    fun clearMask() = clearDrawingStrokes()
+    fun clearMask() {
+        val activeMaskId = _sessionState.value.activeMaskId
+        if (activeMaskId != null) {
+            deleteMaskLayer(activeMaskId)
+        }
+        clearDrawingStrokes()
+    }
+
+    // --- LightCraft Masking Layer Management ---
+    fun createMaskLayer(initialType: MaskComponentType = MaskComponentType.BRUSH, name: String? = null): LightcraftMaskLayer {
+        val existing = _sessionState.value.maskLayers
+        val layerNum = existing.size + 1
+        val layerName = name ?: "Mask $layerNum"
+        val layerId = java.util.UUID.randomUUID().toString()
+        val initialComp = MaskComponent(
+            id = "${layerId}_c1",
+            type = initialType,
+            combineMode = MaskCombineMode.ADD
+        )
+        val newLayer = LightcraftMaskLayer(
+            id = layerId,
+            name = layerName,
+            components = listOf(initialComp)
+        )
+        val updated = existing + newLayer
+        pushState(_sessionState.value.copy(
+            maskLayers = updated,
+            activeMaskId = layerId,
+            activeComponentId = initialComp.id,
+            description = "New $layerName"
+        ))
+        return newLayer
+    }
+
+    fun selectMaskLayer(id: String) {
+        val layer = _sessionState.value.maskLayers.firstOrNull { it.id == id } ?: return
+        _sessionState.value = _sessionState.value.copy(
+            activeMaskId = id,
+            activeComponentId = layer.components.firstOrNull()?.id
+        )
+    }
+
+    fun deleteMaskLayer(id: String) {
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.filterNot { it.id == id }
+        val newActiveId = if (_sessionState.value.activeMaskId == id) updated.firstOrNull()?.id else _sessionState.value.activeMaskId
+        pushState(_sessionState.value.copy(
+            maskLayers = updated,
+            activeMaskId = newActiveId,
+            description = "Delete Mask"
+        ))
+    }
+
+    fun duplicateMaskLayer(id: String) {
+        val existing = _sessionState.value.maskLayers
+        val target = existing.firstOrNull { it.id == id } ?: return
+        val newId = java.util.UUID.randomUUID().toString()
+        val copyLayer = target.copy(
+            id = newId,
+            name = "${target.name} Copy"
+        )
+        pushState(_sessionState.value.copy(
+            maskLayers = existing + copyLayer,
+            activeMaskId = newId,
+            description = "Duplicate Mask"
+        ))
+    }
+
+    fun toggleMaskLayerEnabled(id: String) {
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.map { if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it }
+        pushState(_sessionState.value.copy(
+            maskLayers = updated,
+            description = "Toggle Mask Visibility"
+        ))
+    }
+
+    fun invertMaskLayer(id: String) {
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.map { if (it.id == id) it.copy(isInverted = !it.isInverted) else it }
+        pushState(_sessionState.value.copy(
+            maskLayers = updated,
+            description = "Invert Mask Layer"
+        ))
+    }
+
+    fun setMaskAmount(id: String, amount: Float) {
+        if (sliderBaselineState == null) {
+            sliderBaselineState = _sessionState.value
+        }
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.map { if (it.id == id) it.copy(amount = amount.coerceIn(0f, 2f)) else it }
+        _sessionState.value = _sessionState.value.copy(maskLayers = updated)
+        updateLivePreview()
+    }
+
+    fun addComponentToMask(maskId: String, type: MaskComponentType, combineMode: MaskCombineMode = MaskCombineMode.ADD) {
+        val existing = _sessionState.value.maskLayers
+        val target = existing.firstOrNull { it.id == maskId } ?: return
+        val compId = java.util.UUID.randomUUID().toString()
+        val newComp = MaskComponent(
+            id = compId,
+            type = type,
+            combineMode = combineMode
+        )
+        val updated = existing.map {
+            if (it.id == maskId) it.copy(components = it.components + newComp) else it
+        }
+        pushState(_sessionState.value.copy(
+            maskLayers = updated,
+            activeMaskId = maskId,
+            activeComponentId = compId,
+            description = "Add ${type.label}"
+        ))
+    }
+
+    fun removeComponentFromMask(maskId: String, componentId: String) {
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.map {
+            if (it.id == maskId) it.copy(components = it.components.filterNot { c -> c.id == componentId }) else it
+        }
+        pushState(_sessionState.value.copy(
+            maskLayers = updated,
+            description = "Remove Component"
+        ))
+    }
+
+    fun selectMaskComponent(maskId: String, componentId: String) {
+        _sessionState.value = _sessionState.value.copy(
+            activeMaskId = maskId,
+            activeComponentId = componentId
+        )
+    }
+
+    fun updateMaskComponent(maskId: String, updatedComp: MaskComponent) {
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.map { layer ->
+            if (layer.id == maskId) {
+                val newComps = layer.components.map { if (it.id == updatedComp.id) updatedComp else it }
+                layer.copy(components = newComps)
+            } else layer
+        }
+        _sessionState.value = _sessionState.value.copy(maskLayers = updated)
+        updateLivePreview()
+    }
+
+    fun updateMaskLocalAdjustment(maskId: String, prop: String, value: Float) {
+        if (sliderBaselineState == null) {
+            sliderBaselineState = _sessionState.value
+        }
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.map { layer ->
+            if (layer.id == maskId) {
+                val adj = layer.adjustments
+                val newAdj = when (prop) {
+                    "Exposure" -> adj.copy(exposure = value)
+                    "Contrast" -> adj.copy(contrast = value)
+                    "Highlights" -> adj.copy(highlights = value)
+                    "Shadows" -> adj.copy(shadows = value)
+                    "Whites" -> adj.copy(whites = value)
+                    "Blacks" -> adj.copy(blacks = value)
+                    "Temperature", "Temp" -> adj.copy(temperature = value)
+                    "Tint" -> adj.copy(tint = value)
+                    "Saturation" -> adj.copy(saturation = value)
+                    "Vibrance" -> adj.copy(vibrance = value)
+                    "Texture" -> adj.copy(texture = value)
+                    "Clarity" -> adj.copy(clarity = value)
+                    "Dehaze" -> adj.copy(dehaze = value)
+                    "Sharpness" -> adj.copy(sharpness = value)
+                    "Blur" -> adj.copy(blur = value)
+                    "Noise Reduction", "Noise" -> adj.copy(noiseReduction = value)
+                    else -> adj
+                }
+                layer.copy(adjustments = newAdj)
+            } else layer
+        }
+        _sessionState.value = _sessionState.value.copy(maskLayers = updated)
+        updateLivePreview()
+    }
+
+    fun setMaskColorTint(maskId: String, color: Color?) {
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.map { layer ->
+            if (layer.id == maskId) {
+                layer.copy(adjustments = layer.adjustments.copy(colorTint = color))
+            } else layer
+        }
+        pushState(_sessionState.value.copy(
+            maskLayers = updated,
+            description = "Mask Color Tint"
+        ))
+    }
+
+    fun resetMaskAdjustments(maskId: String) {
+        val existing = _sessionState.value.maskLayers
+        val updated = existing.map { layer ->
+            if (layer.id == maskId) {
+                layer.copy(adjustments = MaskLocalAdjustments(), amount = 1.0f)
+            } else layer
+        }
+        pushState(_sessionState.value.copy(
+            maskLayers = updated,
+            description = "Reset Mask Adjustments"
+        ))
+    }
+
+    fun setMaskOverlaySettings(settings: MaskOverlaySettings) {
+        _sessionState.value = _sessionState.value.copy(maskOverlaySettings = settings)
+    }
+
+    fun toggleMaskOverlay(enabled: Boolean? = null) {
+        val current = _sessionState.value.maskOverlaySettings
+        val next = enabled ?: !current.showOverlay
+        _sessionState.value = _sessionState.value.copy(
+            maskOverlaySettings = current.copy(showOverlay = next)
+        )
+    }
+
+    fun setMaskOverlayColor(color: MaskOverlayColor) {
+        val current = _sessionState.value.maskOverlaySettings
+        _sessionState.value = _sessionState.value.copy(
+            maskOverlaySettings = current.copy(overlayColor = color)
+        )
+    }
+
+    fun setMaskOverlayOpacity(opacity: Float) {
+        val current = _sessionState.value.maskOverlaySettings
+        _sessionState.value = _sessionState.value.copy(
+            maskOverlaySettings = current.copy(opacity = opacity.coerceIn(0.1f, 1f))
+        )
+    }
+
+    fun addStrokeToActiveMask(stroke: DrawingStroke) {
+        val activeMaskId = _sessionState.value.activeMaskId
+        if (activeMaskId == null) {
+            val layer = createMaskLayer(MaskComponentType.BRUSH)
+            val comp = layer.components.first()
+            updateMaskComponent(layer.id, comp.copy(brushStrokes = comp.brushStrokes + stroke))
+        } else {
+            val mask = _sessionState.value.maskLayers.firstOrNull { it.id == activeMaskId }
+            val activeCompId = _sessionState.value.activeComponentId
+            val comp = mask?.components?.firstOrNull { it.id == activeCompId && it.type == MaskComponentType.BRUSH }
+                ?: mask?.components?.firstOrNull { it.type == MaskComponentType.BRUSH }
+
+            if (comp != null) {
+                updateMaskComponent(activeMaskId, comp.copy(brushStrokes = comp.brushStrokes + stroke))
+            } else {
+                addComponentToMask(activeMaskId, MaskComponentType.BRUSH)
+                val updatedMask = _sessionState.value.maskLayers.firstOrNull { it.id == activeMaskId }
+                val newComp = updatedMask?.components?.lastOrNull()
+                if (newComp != null) {
+                    updateMaskComponent(activeMaskId, newComp.copy(brushStrokes = listOf(stroke)))
+                }
+            }
+        }
+    }
 
     fun setScaleFactor(scale: Float) {
         pushState(_sessionState.value.copy(

@@ -91,6 +91,8 @@ fun PhotoEditorCanvas(
     onRetouchStrokeFinished: (RetouchStroke) -> Unit,
     onCropRectPreview: (RectF?) -> Unit = {},
     onCropRectChanged: (RectF?) -> Unit,
+    maskOverlaySettings: MaskOverlaySettings = MaskOverlaySettings(),
+    activeMaskLayer: LightcraftMaskLayer? = null,
     modifier: Modifier = Modifier
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
@@ -459,21 +461,93 @@ fun PhotoEditorCanvas(
                 )
             }
 
-            // Draw in-progress live retouch points and live brush circle footprint
+            // Draw in-progress live retouch points and live brush circle footprint with LightCraft feather ring
             if (isRetouchMode || isDrawingMode) {
                 val radiusPx = brushWidth * (if (isRetouchMode) 1.5f else 1.0f) * density
                 liveFingerPos?.let { pos ->
                     drawCircle(
-                        color = Color.White.copy(alpha = 0.5f),
+                        color = Color.White.copy(alpha = 0.65f),
                         radius = radiusPx,
                         center = pos,
                         style = Stroke(width = 1.5.dp.toPx())
+                    )
+                    drawCircle(
+                        color = Color.White.copy(alpha = 0.35f),
+                        radius = radiusPx * 0.5f,
+                        center = pos,
+                        style = Stroke(width = 1.dp.toPx())
                     )
                     drawCircle(
                         color = Color.White,
                         radius = 2.dp.toPx(),
                         center = pos
                     )
+                }
+            }
+
+            // LightCraft Mask Overlay & Interactive Guides (Gradients / Ellipses)
+            if (isDrawingMode && maskOverlaySettings.showOverlay && activeMaskLayer != null) {
+                val overlayCol = maskOverlaySettings.overlayColor.color.copy(alpha = (maskOverlaySettings.opacity * 0.5f).coerceIn(0.1f, 0.9f))
+                for (comp in activeMaskLayer.components) {
+                    when (comp.type) {
+                        MaskComponentType.LINEAR_GRADIENT -> {
+                            val sx = imgLeft + comp.linearStart.x * drawW
+                            val sy = imgTop + comp.linearStart.y * drawH
+                            val ex = imgLeft + comp.linearEnd.x * drawW
+                            val ey = imgTop + comp.linearEnd.y * drawH
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.9f),
+                                start = Offset(sx, sy),
+                                end = Offset(ex, ey),
+                                strokeWidth = 2.dp.toPx()
+                            )
+                            drawCircle(color = overlayCol, radius = 9.dp.toPx(), center = Offset(sx, sy))
+                            drawCircle(color = Color.White, radius = 9.dp.toPx(), center = Offset(sx, sy), style = Stroke(2.dp.toPx()))
+                            drawCircle(color = Color.White, radius = 6.dp.toPx(), center = Offset(ex, ey))
+                        }
+                        MaskComponentType.RADIAL_GRADIENT -> {
+                            val cx = imgLeft + comp.radialCenter.x * drawW
+                            val cy = imgTop + comp.radialCenter.y * drawH
+                            val rx = comp.radialRadiusX * drawW
+                            val ry = comp.radialRadiusY * drawH
+                            drawOval(
+                                color = overlayCol,
+                                topLeft = Offset(cx - rx, cy - ry),
+                                size = Size(rx * 2, ry * 2),
+                                style = Stroke(2.dp.toPx())
+                            )
+                            val featherFactor = (1f - comp.radialFeather / 100f * 0.5f).coerceIn(0.2f, 1f)
+                            drawOval(
+                                color = Color.White.copy(alpha = 0.45f),
+                                topLeft = Offset(cx - rx * featherFactor, cy - ry * featherFactor),
+                                size = Size(rx * 2 * featherFactor, ry * 2 * featherFactor),
+                                style = Stroke(1.dp.toPx())
+                            )
+                            drawCircle(color = Color.White, radius = 5.dp.toPx(), center = Offset(cx, cy))
+                        }
+                        MaskComponentType.SELECT_SUBJECT -> {
+                            drawOval(
+                                color = overlayCol.copy(alpha = 0.25f),
+                                topLeft = Offset(imgLeft + drawW * 0.18f, imgTop + drawH * 0.15f),
+                                size = Size(drawW * 0.64f, drawH * 0.8f)
+                            )
+                        }
+                        MaskComponentType.SELECT_SKY -> {
+                            drawRect(
+                                color = overlayCol.copy(alpha = 0.25f),
+                                topLeft = Offset(imgLeft, imgTop),
+                                size = Size(drawW, drawH * 0.45f)
+                            )
+                        }
+                        MaskComponentType.SELECT_BACKGROUND -> {
+                            drawRect(
+                                color = overlayCol.copy(alpha = 0.20f),
+                                topLeft = Offset(imgLeft, imgTop),
+                                size = Size(drawW, drawH)
+                            )
+                        }
+                        else -> {}
+                    }
                 }
             }
 
