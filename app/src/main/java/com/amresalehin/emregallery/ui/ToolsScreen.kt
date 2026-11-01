@@ -42,12 +42,13 @@ private val toolGroups = listOf(
         "Filters and effects",
         Icons.Default.Tune,
         listOf(
-            "Original, monochrome and sepia looks",
-            "Warm and cool colour tints",
-            "Vivid and matte looks",
-            "Brightness, contrast and saturation adjustments",
-            "Non-destructive preview before export",
-            "Save an edited image as a separate JPEG copy"
+            "19 colour and monochrome filter presets",
+            "Portrait, film, vintage, monochrome and colour categories",
+            "Adjustable filter strength",
+            "Vignette, film grain and fade effects",
+            "Brightness, contrast and saturation controls",
+            "Non-destructive preview with undo and redo",
+            "Export a new JPEG copy with preserved photo metadata"
         )
     ),
     ToolGroup(
@@ -374,7 +375,12 @@ private val toolGroups = listOf(
 )
 
 @Composable
-fun ToolsScreen(onBack: () -> Unit, onOpenPdfTool: (PdfDocumentTool) -> Unit, onOpenEditor: () -> Unit = {}) {
+fun ToolsScreen(
+    onBack: () -> Unit,
+    onOpenPdfTool: (PdfDocumentTool) -> Unit,
+    onOpenEditor: () -> Unit = {},
+    onOpenFilters: () -> Unit = {}
+) {
     var query by remember { mutableStateOf("") }
     var expandedGroups by remember { mutableStateOf(setOf("Image editing")) }
 
@@ -514,6 +520,27 @@ fun ToolsScreen(onBack: () -> Unit, onOpenPdfTool: (PdfDocumentTool) -> Unit, on
                         Column(Modifier.weight(1f)) {
                             Text("Open Emre Editor", fontWeight = FontWeight.SemiBold)
                             Text("Edit a photo with Emre's native workspace", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ArrowForward, contentDescription = null)
+                    }
+                }
+            }
+            item {
+                ElevatedCard(
+                    onClick = onOpenFilters,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(26.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Open Filters & Effects", fontWeight = FontWeight.SemiBold)
+                            Text("19 filters, film grain, fade and vignette", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Default.ArrowForward, contentDescription = null)
                     }
