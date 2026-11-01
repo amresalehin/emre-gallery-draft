@@ -57,28 +57,10 @@ private val toolGroups = listOf(
         "AI tools",
         Icons.Default.AutoAwesome,
         listOf(
-            "100+ AI models across image, segmentation and depth workflows",
-            "AI upscaling",
-            "Background removal",
-            "JPEG artifact reduction (DeJPEG)",
-            "AI denoising",
-            "Photo enhancement and restoration",
-            "Old-photo colorization",
-            "Anime enhancement",
-            "Style transfer",
-            "AI image detection",
-            "Depth estimation",
-            "Depth maps, masks and cutouts",
-            "Portrait focus and background blur",
-            "Lens blur and cinematic depth grading",
-            "Relighting and fog effects",
-            "Normal maps and stereo effects",
-            "Depth-edge effects",
-            "Background models: U2Net, U2NetP, RMBG, InSPyReNet",
-            "Background models: BiRefNet, ISNet, YOLO and MODNet",
-            "MobileSAM point-based subject selection",
-            "ML Kit segmentation",
-            "Model downloads, verification and management"
+            "People-only background segmentation with the on-device ML Kit Selfie Segmenter",
+            "Transparent PNG export to Pictures/Emre",
+            "Original photo remains unchanged",
+            "Works offline after installation; no photo upload"
         )
     ),
     ToolGroup(
@@ -381,7 +363,8 @@ fun ToolsScreen(
     onBack: () -> Unit,
     onOpenPdfTool: (PdfDocumentTool) -> Unit,
     onOpenEditor: () -> Unit = {},
-    onOpenFilters: () -> Unit = {}
+    onOpenFilters: () -> Unit = {},
+    onOpenAiTools: () -> Unit = {}
 ) {
     var query by remember { mutableStateOf("") }
     var expandedGroups by remember { mutableStateOf(setOf("Image editing")) }
@@ -543,6 +526,27 @@ fun ToolsScreen(
                         Column(Modifier.weight(1f)) {
                             Text("Open Filters & Effects", fontWeight = FontWeight.SemiBold)
                             Text("40 filters, colour grading and six image effects", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ArrowForward, contentDescription = null)
+                    }
+                }
+            }
+            item {
+                ElevatedCard(
+                    onClick = onOpenAiTools,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(26.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Open AI Background Removal", fontWeight = FontWeight.SemiBold)
+                            Text("Person cutout with transparent PNG export", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Default.ArrowForward, contentDescription = null)
                     }

@@ -91,22 +91,27 @@ import coil.Coil
 import coil.request.ImageRequest
 import coil.size.Size as CoilSize
 import com.amresalehin.emregallery.data.MediaItem
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.Segmentation
+import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.File
+import java.nio.ByteOrder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-private enum class EditorMode { Crop, Adjust, Filters, Effects }
+private enum class EditorMode { Crop, Adjust, Filters, Effects, AI }
 private enum class FilterCategory(val title: String) {
     All("All"),
     Portrait("Portrait"),
@@ -188,7 +193,8 @@ private data class EditorRecipe(
     val fade: Float = 0f,
     val softFocus: Float = 0f,
     val sharpen: Float = 0f,
-    val pixelate: Float = 0f
+    val pixelate: Float = 0f,
+    val removePersonBackground: Boolean = false
 )
 
 @Composable
@@ -196,7 +202,8 @@ fun ImageEditorScreen(
     source: MediaItem,
     onBack: () -> Unit,
     onSaved: (MediaItem) -> Unit,
-    startInFilters: Boolean = false
+    startInFilters: Boolean = false,
+    startInAi: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -222,8 +229,12 @@ fun ImageEditorScreen(
         redoStack = redoStack.dropLast(1)
         recipe = next
     }
-    var mode by remember(source.uri, startInFilters) {
-        mutableStateOf(if (startInFilters) EditorMode.Filters else EditorMode.Crop)
+    var mode by remember(source.uri, startInFilters, startInAi) {
+        mutableStateOf(when {
+            startInAi -> EditorMode.AI
+            startInFilters -> EditorMode.Filters
+            else -> EditorMode.Crop
+        })
     }
     var selectedFilterCategory by remember(source.uri) { mutableStateOf(FilterCategory.All) }
     var loading by remember(source.uri) { mutableStateOf(true) }
@@ -282,8 +293,23 @@ fun ImageEditorScreen(
             preview = null
             return@LaunchedEffect
         }
-        val rendered = withContext(Dispatchers.Default) {
-            runCatching { applyEditorRecipe(renderSource, recipe, maxPreviewDimension = 2048) }.getOrNull()
+        val renderResult = withContext(Dispatchers.Default) {
+            runCatching {
+                val base = applyEditorRecipe(renderSource, recipe, maxPreviewDimension = 2048)
+                if (!recipe.removePersonBackground) {
+                    base
+                } else {
+                    try {
+                        removePersonBackground(base)
+                    } finally {
+                        if (base !== renderSource && !base.isRecycled) base.recycle()
+                    }
+                }
+            }
+        }
+        val rendered = renderResult.getOrNull()
+        if (renderResult.isFailure) {
+            error = renderResult.exceptionOrNull()?.message ?: "AI preview could not be generated"
         }
         val previous = preview
         preview = rendered
@@ -346,7 +372,7 @@ fun ImageEditorScreen(
                 enabled = image != null && !loading && !saving
             ) {
                 if (saving) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Default.Save, contentDescription = "Save copy")
+                else Icon(Icons.Default.Save, contentDescription = if (recipe.removePersonBackground) "Save transparent PNG copy" else "Save JPEG copy")
             }
         }
 
@@ -428,6 +454,7 @@ fun ImageEditorScreen(
                                 EditorMode.Adjust -> Icons.Default.Tune
                                 EditorMode.Filters -> Icons.Default.AutoAwesome
                                 EditorMode.Effects -> Icons.Default.FilterVintage
+                                EditorMode.AI -> Icons.Default.AutoAwesome
                             },
                             contentDescription = null,
                             modifier = Modifier.size(17.dp),
@@ -439,6 +466,7 @@ fun ImageEditorScreen(
                                 EditorMode.Adjust -> "Adjust"
                                 EditorMode.Filters -> "Filters"
                                 EditorMode.Effects -> "Effects"
+                                EditorMode.AI -> "AI"
                             },
                             modifier = Modifier.padding(start = 7.dp),
                             color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface,
@@ -608,6 +636,45 @@ fun ImageEditorScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+        } else if (mode == EditorMode.AI) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .heightIn(max = 260.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 18.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    "Person background removal",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "Runs on this device with the bundled ML Kit Selfie Segmenter. It isolates people; it is not a general object-removal model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                EditorAction(
+                    if (recipe.removePersonBackground) "Restore background" else "Remove person background",
+                    Icons.Default.AutoAwesome
+                ) {
+                    showOriginalPreview = false
+                    updateRecipe(recipe.copy(removePersonBackground = !recipe.removePersonBackground))
+                }
+                if (recipe.removePersonBackground) {
+                    Text(
+                        "Transparent preview enabled. Saving creates a PNG copy in Pictures/Emre; the source photo is not changed.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        "Best results: a clearly visible person, good lighting and an image at least 256 × 256 pixels.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         } else {
             Column(
@@ -1313,12 +1380,107 @@ private fun copyExifMetadata(
     }
 }
 
-private suspend fun scanMediaFile(context: Context, file: File): Uri =
+private suspend fun removePersonBackground(source: Bitmap): Bitmap {
+    require(source.width >= 256 && source.height >= 256) {
+        "Person segmentation requires an image at least 256 × 256 pixels"
+    }
+    val options = SelfieSegmenterOptions.Builder()
+        .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+        .enableRawSizeMask()
+        .build()
+    val segmenter = Segmentation.getClient(options)
+    val closed = AtomicBoolean(false)
+    fun closeSegmenter() {
+        if (closed.compareAndSet(false, true)) segmenter.close()
+    }
+
+    val mask = try {
+        suspendCancellableCoroutine { continuation ->
+            try {
+                segmenter.process(InputImage.fromBitmap(source, 0))
+                    .addOnSuccessListener { result ->
+                        if (continuation.isActive) continuation.resume(result)
+                    }
+                    .addOnFailureListener { failure ->
+                        if (continuation.isActive) continuation.resumeWithException(failure)
+                    }
+            } catch (failure: Throwable) {
+                if (continuation.isActive) continuation.resumeWithException(failure)
+            }
+        }
+    } catch (failure: Throwable) {
+        closeSegmenter()
+        throw failure
+    }
+
+    try {
+        val maskWidth = mask.width
+        val maskHeight = mask.height
+        if (maskWidth <= 0 || maskHeight <= 0) {
+            throw IOException("The segmentation model returned an empty mask")
+        }
+        val confidence = mask.buffer.duplicate()
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        if (confidence.remaining() < maskWidth * maskHeight) {
+            throw IOException("The segmentation mask is incomplete")
+        }
+
+        val width = source.width
+        val height = source.height
+        val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        var completed = false
+        try {
+            val sourceRow = IntArray(width)
+            val outputRow = IntArray(width)
+            val xScale = if (width <= 1) 0f else (maskWidth - 1).toFloat() / (width - 1)
+            val yScale = if (height <= 1) 0f else (maskHeight - 1).toFloat() / (height - 1)
+
+            for (y in 0 until height) {
+                source.getPixels(sourceRow, 0, width, 0, y, width, 1)
+                val mappedY = y * yScale
+                val y0 = mappedY.toInt().coerceIn(0, maskHeight - 1)
+                val y1 = (y0 + 1).coerceAtMost(maskHeight - 1)
+                val fy = mappedY - y0
+                for (x in 0 until width) {
+                    val mappedX = x * xScale
+                    val x0 = mappedX.toInt().coerceIn(0, maskWidth - 1)
+                    val x1 = (x0 + 1).coerceAtMost(maskWidth - 1)
+                    val fx = mappedX - x0
+                    val m00 = confidence.get(y0 * maskWidth + x0)
+                    val m10 = confidence.get(y0 * maskWidth + x1)
+                    val m01 = confidence.get(y1 * maskWidth + x0)
+                    val m11 = confidence.get(y1 * maskWidth + x1)
+                    val top = m00 + (m10 - m00) * fx
+                    val bottom = m01 + (m11 - m01) * fx
+                    val alphaMask = (top + (bottom - top) * fy).coerceIn(0f, 1f)
+                    val pixel = sourceRow[x]
+                    val alpha = (android.graphics.Color.alpha(pixel) * alphaMask).roundToInt().coerceIn(0, 255)
+                    outputRow[x] = android.graphics.Color.argb(
+                        alpha,
+                        android.graphics.Color.red(pixel),
+                        android.graphics.Color.green(pixel),
+                        android.graphics.Color.blue(pixel)
+                    )
+                }
+                output.setPixels(outputRow, 0, width, 0, y, width, 1)
+            }
+            completed = true
+            return output
+        } finally {
+            if (!completed && !output.isRecycled) output.recycle()
+        }
+    } finally {
+        closeSegmenter()
+    }
+}
+
+private suspend fun scanMediaFile(context: Context, file: File, mimeType: String): Uri =
     suspendCancellableCoroutine { continuation ->
         android.media.MediaScannerConnection.scanFile(
             context,
             arrayOf(file.absolutePath),
-            arrayOf("image/jpeg")
+            arrayOf(mimeType)
         ) { _, scannedUri ->
             if (!continuation.isActive) return@scanFile
             if (scannedUri != null) {
@@ -1335,26 +1497,37 @@ private suspend fun exportEditorResult(
     recipe: EditorRecipe,
     media: MediaItem
 ): MediaItem {
-    val output = applyEditorRecipe(source, recipe)
-    val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())}.jpg"
+    val transformed = applyEditorRecipe(source, recipe)
+    val output = try {
+        if (recipe.removePersonBackground) removePersonBackground(transformed) else transformed
+    } catch (failure: Throwable) {
+        if (transformed !== source && !transformed.isRecycled) transformed.recycle()
+        throw failure
+    }
+    val outputMimeType = if (recipe.removePersonBackground) "image/png" else "image/jpeg"
+    val extension = if (recipe.removePersonBackground) "png" else "jpg"
+    val outputFormat = if (recipe.removePersonBackground) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+    val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())}.$extension"
     var uri: Uri? = null
     var legacyFile: File? = null
     var tempFile: File? = null
     try {
-        tempFile = File.createTempFile("emre-edit-", ".jpg", context.cacheDir)
+        tempFile = File.createTempFile("emre-edit-", ".$extension", context.cacheDir)
         tempFile.outputStream().use { stream ->
-            if (!output.compress(Bitmap.CompressFormat.JPEG, 95, stream)) {
+            if (!output.compress(outputFormat, if (recipe.removePersonBackground) 100 else 95, stream)) {
                 throw IOException("Image encoding failed")
             }
             stream.flush()
         }
-        copyExifMetadata(context, Uri.parse(media.uri), tempFile, output.width, output.height)
+        if (!recipe.removePersonBackground) {
+            copyExifMetadata(context, Uri.parse(media.uri), tempFile, output.width, output.height)
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.MIME_TYPE, outputMimeType)
                 put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Emre")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
@@ -1378,7 +1551,7 @@ private suspend fun exportEditorResult(
             }
             legacyFile = File(directory, name)
             tempFile.copyTo(legacyFile, overwrite = false)
-            uri = scanMediaFile(context, legacyFile)
+            uri = scanMediaFile(context, legacyFile, outputMimeType)
         }
 
         val outputUri = uri ?: throw IOException("Image export did not produce a URI")
@@ -1400,7 +1573,7 @@ private suspend fun exportEditorResult(
             },
             uri = outputUri.toString(),
             name = name,
-            mimeType = "image/jpeg",
+            mimeType = outputMimeType,
             dateAddedSeconds = now / 1000L,
             dateTakenMillis = media.dateTakenMillis,
             sizeBytes = sizeBytes,
@@ -1420,5 +1593,6 @@ private suspend fun exportEditorResult(
     } finally {
         tempFile?.let { if (it.exists()) it.delete() }
         if (output !== source && !output.isRecycled) output.recycle()
+        if (transformed !== output && transformed !== source && !transformed.isRecycled) transformed.recycle()
     }
 }

@@ -11,6 +11,7 @@ The editor is a native Compose destination and uses Emre's existing Coil 2 image
 - Brightness, exposure (EV), contrast, saturation, temperature and tint controls.
 - Forty colour presets across portrait, film, vintage, monochrome and colour families, with adjustable filter strength.
 - Vignette, film grain, fade, soft-focus, sharpening and pixelation effects.
+- On-device **person** background segmentation via the bundled ML Kit Selfie Segmenter, with transparent PNG export; this model is not a general object segmenter.
 - Original-versus-edited preview comparison.
 - A 30-state undo / redo history for crop, transform, adjustment, filter and effect changes.
 - A bounded 2048-pixel working preview; full-resolution decoding is deferred until export.
@@ -25,7 +26,7 @@ The viewer's Edit action and the Tools shortcut open this native editor. Video i
 The upstream source snapshot is not a complete application module. The following are **not** provided by the current Emre editor slice:
 
 - The full upstream filter/effect catalogue, LUT import, GPU shader studio or shader pipeline.
-- Background removal model selection / execution.
+- General-purpose object/background removal model selection and execution (the current implementation is limited to people segmentation).
 - Image format conversion and the full upstream compression backends.
 - OpenCV stitching, photomosaic, collage and image compositing tools.
 - The upstream OCR and PDF implementations (Emre has its own OCR and PDF code paths).
@@ -38,7 +39,7 @@ Do not describe these as available Emre features until they have been adapted, c
 
 All exports are separate JPEG files. Metadata transfer is best-effort: unsupported tags, provider restrictions, or malformed source EXIF do not block the pixel export. Since the output pixels are transformed, the orientation flag is reset to Normal and image pixel dimensions are updated. GPS tags are retained when present in the source; users should be aware that the edited file may therefore retain location metadata.
 
-The preview is intentionally bounded to reduce memory pressure. Export re-decodes the original URI at full resolution and runs image processing off the main thread. Filter matrices are blended with identity at the selected strength. Vignette, grain, fade, sharpening and pixelation are processed row-by-row; soft-focus uses a reduced-resolution intermediate and bilinear sampling instead of a full-size blur buffer. Very large source images can still require substantial temporary memory during export.
+The AI cutout uses Google's bundled ML Kit Selfie Segmenter (beta API); the bundled model adds approximately 4.5 MB to the app. It runs on-device and exports transparent PNG; PNG output does not copy EXIF metadata in this slice. Segmentation is designed for people and should not be advertised as arbitrary object removal. The preview is intentionally bounded to reduce memory pressure. Export re-decodes the original URI at full resolution and runs image processing off the main thread. Filter matrices are blended with identity at the selected strength. Vignette, grain, fade, sharpening and pixelation are processed row-by-row; soft-focus uses a reduced-resolution intermediate and bilinear sampling instead of a full-size blur buffer. Very large source images can still require substantial temporary memory during export.
 
 ## Verification
 

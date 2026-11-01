@@ -86,6 +86,7 @@ fun GalleryApp() {
     var selectedPdfTool by remember { mutableStateOf(PdfDocumentTool.SCAN) }
     var editorSource by remember { mutableStateOf<MediaItem?>(null) }
     var editorStartInFilters by remember { mutableStateOf(false) }
+    var editorStartInAi by remember { mutableStateOf(false) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -1200,6 +1201,7 @@ fun GalleryApp() {
                             if (candidate != null) {
                                 editorSource = candidate
                                 editorStartInFilters = false
+                                editorStartInAi = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1218,6 +1220,7 @@ fun GalleryApp() {
                             if (candidate != null) {
                                 editorSource = candidate
                                 editorStartInFilters = true
+                                editorStartInAi = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1225,6 +1228,25 @@ fun GalleryApp() {
                                 )
                             } else {
                                 scope.launch { snackbarHostState.showSnackbar("Select a photo to apply filters") }
+                            }
+                        },
+                        onOpenAiTools = {
+                            val candidate = selectedMedia?.takeUnless {
+                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
+                            } ?: media.firstOrNull {
+                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
+                            }
+                            if (candidate != null) {
+                                editorSource = candidate
+                                editorStartInFilters = false
+                                editorStartInAi = true
+                                navigateTo(
+                                    Destination.IMAGE_EDITOR,
+                                    rememberPrevious = true,
+                                    newSelectedMedia = candidate
+                                )
+                            } else {
+                                scope.launch { snackbarHostState.showSnackbar("Select a photo for AI background removal") }
                             }
                         }
                     )
@@ -1253,7 +1275,8 @@ fun GalleryApp() {
                                     showViewerControls = true
                                 }
                             },
-                            startInFilters = editorStartInFilters
+                            startInFilters = editorStartInFilters,
+                            startInAi = editorStartInAi
                         )
                     }
                     Destination.PDF_DOCUMENT_TOOL -> PdfDocumentToolScreen(
@@ -1413,6 +1436,7 @@ fun GalleryApp() {
                     } else {
                         editorSource = currentItem
                         editorStartInFilters = false
+                        editorStartInAi = false
                         navigateTo(Destination.IMAGE_EDITOR, rememberPrevious = true, newSelectedMedia = currentItem)
                     }
                 },
