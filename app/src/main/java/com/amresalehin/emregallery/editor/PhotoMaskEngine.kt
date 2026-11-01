@@ -124,6 +124,27 @@ object PhotoMaskEngine {
             MaskComponentType.SELECT_BACKGROUND -> {
                 renderBackgroundHeuristic(canvas, width, height)
             }
+            MaskComponentType.PEOPLE_ALL -> {
+                renderPersonHeuristic(canvas, width, height)
+            }
+            MaskComponentType.PEOPLE_FACIAL_SKIN -> {
+                renderFacialSkinHeuristic(canvas, width, height, mask, srcBitmap)
+            }
+            MaskComponentType.PEOPLE_BODY_SKIN -> {
+                renderBodySkinHeuristic(canvas, width, height)
+            }
+            MaskComponentType.PEOPLE_EYES -> {
+                renderEyesHeuristic(canvas, width, height)
+            }
+            MaskComponentType.PEOPLE_LIPS -> {
+                renderLipsHeuristic(canvas, width, height)
+            }
+            MaskComponentType.PEOPLE_TEETH -> {
+                renderTeethHeuristic(canvas, width, height, mask, srcBitmap)
+            }
+            MaskComponentType.PEOPLE_HAIR -> {
+                renderHairHeuristic(canvas, width, height)
+            }
             MaskComponentType.LASSO, MaskComponentType.POLYGON -> {
                 renderPathSelection(canvas, width, height, comp)
             }
@@ -308,6 +329,211 @@ object PhotoMaskEngine {
             xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
         }
         canvas.drawOval(RectF(cx - rx, cy - ry, cx + rx, cy + ry), paint)
+    }
+
+    private fun renderPersonHeuristic(canvas: Canvas, width: Int, height: Int) {
+        // Person silhouette: Head oval + Torso trapezoid
+        val cx = width * 0.5f
+        val headY = height * 0.35f
+        val headRx = width * 0.20f
+        val headRy = height * 0.22f
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            style = Paint.Style.FILL
+        }
+        // Head
+        canvas.drawOval(RectF(cx - headRx, headY - headRy, cx + headRx, headY + headRy), paint)
+
+        // Shoulders & Torso
+        val bodyPath = Path().apply {
+            moveTo(cx - width * 0.38f, height.toFloat())
+            lineTo(cx - width * 0.30f, headY + headRy * 0.65f)
+            quadTo(cx, headY + headRy * 0.85f, cx + width * 0.30f, headY + headRy * 0.65f)
+            lineTo(cx + width * 0.38f, height.toFloat())
+            close()
+        }
+        canvas.drawPath(bodyPath, paint)
+    }
+
+    private fun renderFacialSkinHeuristic(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        maskBitmap: Bitmap,
+        srcBitmap: Bitmap?
+    ) {
+        val cx = width * 0.5f
+        val cy = height * 0.38f
+        val rx = width * 0.20f
+        val ry = height * 0.22f
+
+        // Draw soft feathered face oval
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(
+                cx, cy, max(rx, ry),
+                intArrayOf(android.graphics.Color.WHITE, android.graphics.Color.WHITE, android.graphics.Color.TRANSPARENT),
+                floatArrayOf(0f, 0.60f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawOval(RectF(cx - rx, cy - ry, cx + rx, cy + ry), paint)
+
+        // If source bitmap is available, refine by checking warm skin tone hues (HSV hue 0..50 or 330..360)
+        if (srcBitmap != null) {
+            val w = min(maskBitmap.width, srcBitmap.width)
+            val h = min(maskBitmap.height, srcBitmap.height)
+            val maskPixels = IntArray(w * h)
+            val srcPixels = IntArray(w * h)
+            maskBitmap.getPixels(maskPixels, 0, w, 0, 0, w, h)
+            srcBitmap.getPixels(srcPixels, 0, w, 0, 0, w, h)
+            val hsv = FloatArray(3)
+
+            for (i in maskPixels.indices) {
+                val origA = (maskPixels[i] shr 24) and 0xFF
+                if (origA > 10) {
+                    val p = srcPixels[i]
+                    val r = (p shr 16) and 0xFF
+                    val g = (p shr 8) and 0xFF
+                    val b = p and 0xFF
+                    android.graphics.Color.RGBToHSV(r, g, b, hsv)
+                    val hue = hsv[0]
+                    val sat = hsv[1]
+                    val isSkinTone = (hue in 0f..50f || hue in 330f..360f) && sat in 0.12f..0.85f
+                    val mult = if (isSkinTone) 1.0f else 0.45f
+                    val newA = (origA * mult).toInt().coerceIn(0, 255)
+                    maskPixels[i] = (newA shl 24) or 0x00FFFFFF
+                }
+            }
+            maskBitmap.setPixels(maskPixels, 0, w, 0, 0, w, h)
+        }
+    }
+
+    private fun renderBodySkinHeuristic(canvas: Canvas, width: Int, height: Int) {
+        val cx = width * 0.5f
+        val neckY = height * 0.58f
+        val rx = width * 0.28f
+        val ry = height * 0.25f
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(
+                cx, neckY, max(rx, ry),
+                intArrayOf(android.graphics.Color.WHITE, android.graphics.Color.WHITE, android.graphics.Color.TRANSPARENT),
+                floatArrayOf(0f, 0.50f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawOval(RectF(cx - rx, neckY - ry * 0.4f, cx + rx, neckY + ry), paint)
+    }
+
+    private fun renderEyesHeuristic(canvas: Canvas, width: Int, height: Int) {
+        val cx = width * 0.5f
+        val eyeY = height * 0.36f
+        val eyeSpan = width * 0.09f
+        val eyeRx = width * 0.05f
+        val eyeRy = height * 0.035f
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(
+                0f, 0f, max(eyeRx, eyeRy) * 1.2f,
+                intArrayOf(android.graphics.Color.WHITE, android.graphics.Color.WHITE, android.graphics.Color.TRANSPARENT),
+                floatArrayOf(0f, 0.45f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+
+        // Left Eye
+        canvas.save()
+        canvas.translate(cx - eyeSpan, eyeY)
+        canvas.drawOval(RectF(-eyeRx, -eyeRy, eyeRx, eyeRy), paint)
+        canvas.restore()
+
+        // Right Eye
+        canvas.save()
+        canvas.translate(cx + eyeSpan, eyeY)
+        canvas.drawOval(RectF(-eyeRx, -eyeRy, eyeRx, eyeRy), paint)
+        canvas.restore()
+    }
+
+    private fun renderLipsHeuristic(canvas: Canvas, width: Int, height: Int) {
+        val cx = width * 0.5f
+        val mouthY = height * 0.47f
+        val mouthRx = width * 0.075f
+        val mouthRy = height * 0.035f
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(
+                cx, mouthY, max(mouthRx, mouthRy),
+                intArrayOf(android.graphics.Color.WHITE, android.graphics.Color.WHITE, android.graphics.Color.TRANSPARENT),
+                floatArrayOf(0f, 0.55f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawOval(RectF(cx - mouthRx, mouthY - mouthRy, cx + mouthRx, mouthY + mouthRy), paint)
+    }
+
+    private fun renderTeethHeuristic(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        maskBitmap: Bitmap,
+        srcBitmap: Bitmap?
+    ) {
+        val cx = width * 0.5f
+        val mouthY = height * 0.465f
+        val mouthRx = width * 0.05f
+        val mouthRy = height * 0.022f
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            style = Paint.Style.FILL
+        }
+        canvas.drawOval(RectF(cx - mouthRx, mouthY - mouthRy, cx + mouthRx, mouthY + mouthRy), paint)
+
+        // Threshold brightness: teeth are high luminance in the mouth region
+        if (srcBitmap != null) {
+            val w = min(maskBitmap.width, srcBitmap.width)
+            val h = min(maskBitmap.height, srcBitmap.height)
+            val maskPixels = IntArray(w * h)
+            val srcPixels = IntArray(w * h)
+            maskBitmap.getPixels(maskPixels, 0, w, 0, 0, w, h)
+            srcBitmap.getPixels(srcPixels, 0, w, 0, 0, w, h)
+
+            for (i in maskPixels.indices) {
+                val origA = (maskPixels[i] shr 24) and 0xFF
+                if (origA > 10) {
+                    val p = srcPixels[i]
+                    val r = (p shr 16) and 0xFF
+                    val g = (p shr 8) and 0xFF
+                    val b = p and 0xFF
+                    val lum = (0.299f * r + 0.587f * g + 0.114f * b)
+                    val newA = if (lum > 115) origA else (origA * 0.2f).toInt()
+                    maskPixels[i] = (newA shl 24) or 0x00FFFFFF
+                }
+            }
+            maskBitmap.setPixels(maskPixels, 0, w, 0, 0, w, h)
+        }
+    }
+
+    private fun renderHairHeuristic(canvas: Canvas, width: Int, height: Int) {
+        val cx = width * 0.5f
+        val cy = height * 0.32f
+        val rx = width * 0.25f
+        val ry = height * 0.24f
+
+        val hairPath = Path().apply {
+            // Crown arch over the top of the head
+            addOval(RectF(cx - rx, cy - ry, cx + rx, cy + ry * 0.35f), Path.Direction.CW)
+        }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = android.graphics.RadialGradient(
+                cx, cy, max(rx, ry),
+                intArrayOf(android.graphics.Color.WHITE, android.graphics.Color.WHITE, android.graphics.Color.TRANSPARENT),
+                floatArrayOf(0f, 0.70f, 1f),
+                Shader.TileMode.CLAMP
+            )
+        }
+        canvas.drawPath(hairPath, paint)
     }
 
     private fun renderPathSelection(canvas: Canvas, width: Int, height: Int, comp: MaskComponent) {

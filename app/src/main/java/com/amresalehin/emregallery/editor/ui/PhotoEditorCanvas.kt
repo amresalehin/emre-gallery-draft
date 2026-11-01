@@ -647,25 +647,74 @@ fun PhotoEditorCanvas(
                             )
                             drawCircle(color = Color.White, radius = 5.dp.toPx(), center = Offset(cx, cy))
                         }
-                        MaskComponentType.SELECT_SUBJECT -> {
+                        MaskComponentType.SELECT_SUBJECT, MaskComponentType.PEOPLE_ALL -> {
                             drawOval(
-                                color = overlayCol.copy(alpha = 0.25f),
+                                color = overlayCol.copy(alpha = 0.35f),
                                 topLeft = Offset(imgLeft + drawW * 0.18f, imgTop + drawH * 0.15f),
                                 size = Size(drawW * 0.64f, drawH * 0.8f)
                             )
                         }
                         MaskComponentType.SELECT_SKY -> {
                             drawRect(
-                                color = overlayCol.copy(alpha = 0.25f),
+                                color = overlayCol.copy(alpha = 0.35f),
                                 topLeft = Offset(imgLeft, imgTop),
                                 size = Size(drawW, drawH * 0.45f)
                             )
                         }
                         MaskComponentType.SELECT_BACKGROUND -> {
                             drawRect(
-                                color = overlayCol.copy(alpha = 0.20f),
+                                color = overlayCol.copy(alpha = 0.25f),
                                 topLeft = Offset(imgLeft, imgTop),
                                 size = Size(drawW, drawH)
+                            )
+                        }
+                        MaskComponentType.PEOPLE_FACIAL_SKIN -> {
+                            drawOval(
+                                color = overlayCol.copy(alpha = 0.40f),
+                                topLeft = Offset(imgLeft + drawW * 0.28f, imgTop + drawH * 0.20f),
+                                size = Size(drawW * 0.44f, drawH * 0.40f)
+                            )
+                        }
+                        MaskComponentType.PEOPLE_BODY_SKIN -> {
+                            drawOval(
+                                color = overlayCol.copy(alpha = 0.35f),
+                                topLeft = Offset(imgLeft + drawW * 0.22f, imgTop + drawH * 0.45f),
+                                size = Size(drawW * 0.56f, drawH * 0.50f)
+                            )
+                        }
+                        MaskComponentType.PEOPLE_EYES -> {
+                            val eyeY = imgTop + drawH * 0.36f
+                            val eyeSpan = drawW * 0.09f
+                            val cx = imgLeft + drawW * 0.5f
+                            val eyeRx = drawW * 0.05f
+                            val eyeRy = drawH * 0.035f
+                            drawOval(
+                                color = overlayCol.copy(alpha = 0.55f),
+                                topLeft = Offset(cx - eyeSpan - eyeRx, eyeY - eyeRy),
+                                size = Size(eyeRx * 2, eyeRy * 2)
+                            )
+                            drawOval(
+                                color = overlayCol.copy(alpha = 0.55f),
+                                topLeft = Offset(cx + eyeSpan - eyeRx, eyeY - eyeRy),
+                                size = Size(eyeRx * 2, eyeRy * 2)
+                            )
+                        }
+                        MaskComponentType.PEOPLE_LIPS, MaskComponentType.PEOPLE_TEETH -> {
+                            val mouthY = imgTop + drawH * 0.47f
+                            val cx = imgLeft + drawW * 0.5f
+                            val mouthRx = drawW * 0.075f
+                            val mouthRy = drawH * 0.035f
+                            drawOval(
+                                color = overlayCol.copy(alpha = 0.55f),
+                                topLeft = Offset(cx - mouthRx, mouthY - mouthRy),
+                                size = Size(mouthRx * 2, mouthRy * 2)
+                            )
+                        }
+                        MaskComponentType.PEOPLE_HAIR -> {
+                            drawOval(
+                                color = overlayCol.copy(alpha = 0.45f),
+                                topLeft = Offset(imgLeft + drawW * 0.22f, imgTop + drawH * 0.12f),
+                                size = Size(drawW * 0.56f, drawH * 0.28f)
                             )
                         }
                         else -> {}

@@ -71,17 +71,151 @@ data class MaskLocalAdjustments(
 /**
  * Mask component types supported in LightCraft.
  */
-enum class MaskComponentType(val label: String) {
-    BRUSH("Brush"),
-    LINEAR_GRADIENT("Linear Gradient"),
-    RADIAL_GRADIENT("Radial Gradient"),
-    LUMINANCE_RANGE("Luminance Range"),
-    COLOR_RANGE("Color Range"),
-    SELECT_SUBJECT("Select Subject"),
-    SELECT_SKY("Select Sky"),
-    SELECT_BACKGROUND("Select Background"),
-    LASSO("Lasso Loop"),
-    POLYGON("Polygon")
+/**
+ * Mask component types supported in LightCraft & Emre Gallery.
+ * Includes Adobe Lightroom's core selections (Subject, Sky, Background, People & Features)
+ * as well as Manual (Brush, Linear/Radial Gradients) and Range (Luminance, Color).
+ */
+enum class MaskComponentType(val label: String, val iconName: String = "AutoFixNormal") {
+    // Adobe Lightroom AI & Intelligent Selections
+    SELECT_SUBJECT("Select Subject", "Person"),
+    SELECT_SKY("Select Sky", "Cloud"),
+    SELECT_BACKGROUND("Select Background", "Landscape"),
+
+    // People & Portrait Features
+    PEOPLE_ALL("Select Person", "Face"),
+    PEOPLE_FACIAL_SKIN("Facial Skin", "FaceRetouching"),
+    PEOPLE_BODY_SKIN("Body Skin", "Accessibility"),
+    PEOPLE_EYES("Eyes", "Visibility"),
+    PEOPLE_LIPS("Lips", "Favorite"),
+    PEOPLE_TEETH("Teeth", "SentimentSatisfied"),
+    PEOPLE_HAIR("Hair", "Spa"),
+
+    // Manual Precision Tools
+    BRUSH("Brush", "Brush"),
+    LINEAR_GRADIENT("Linear Gradient", "LinearScale"),
+    RADIAL_GRADIENT("Radial Gradient", "RadioButtonUnchecked"),
+
+    // Range Masks
+    COLOR_RANGE("Color Range", "Palette"),
+    LUMINANCE_RANGE("Luminance Range", "WbSunny"),
+
+    // Freehand / Polygon
+    LASSO("Lasso Loop", "Gesture"),
+    POLYGON("Polygon", "Polyline")
+}
+
+/**
+ * PicsArt-inspired 1-tap Smart Mask Recipes.
+ * Instantly creates a targeted mask with pre-configured, professional adjustments.
+ */
+enum class MaskQuickRecipe(
+    val title: String,
+    val subtitle: String,
+    val componentType: MaskComponentType,
+    val defaultAdjustments: MaskLocalAdjustments
+) {
+    SMOOTH_FACIAL_SKIN(
+        title = "Smooth Facial Skin",
+        subtitle = "Soften pores, reduce blemishes & enhance skin glow",
+        componentType = MaskComponentType.PEOPLE_FACIAL_SKIN,
+        defaultAdjustments = MaskLocalAdjustments(
+            texture = -35f,
+            clarity = -20f,
+            sharpness = 12f,
+            highlights = 8f,
+            temperature = 4f
+        )
+    ),
+    ENHANCE_EYES(
+        title = "Pop & Enhance Eyes",
+        subtitle = "Sharpen irises, boost clarity & brighten eye catchlights",
+        componentType = MaskComponentType.PEOPLE_EYES,
+        defaultAdjustments = MaskLocalAdjustments(
+            exposure = 22f,
+            clarity = 45f,
+            sharpness = 50f,
+            saturation = 15f,
+            highlights = 15f
+        )
+    ),
+    WHITEN_TEETH(
+        title = "Whiten Teeth",
+        subtitle = "Brighten smile & neutralize yellow discoloration",
+        componentType = MaskComponentType.PEOPLE_TEETH,
+        defaultAdjustments = MaskLocalAdjustments(
+            exposure = 25f,
+            saturation = -40f,
+            whites = 25f
+        )
+    ),
+    HAIR_GLOSS(
+        title = "Hair Shine & Depth",
+        subtitle = "Deepen contrast, enrich rich tones & add glossy sheen",
+        componentType = MaskComponentType.PEOPLE_HAIR,
+        defaultAdjustments = MaskLocalAdjustments(
+            contrast = 25f,
+            texture = 20f,
+            saturation = 15f,
+            blacks = -15f
+        )
+    ),
+    SELECT_SUBJECT_POP(
+        title = "Subject Spotlight",
+        subtitle = "Separate subject from background with exposure & clarity boost",
+        componentType = MaskComponentType.SELECT_SUBJECT,
+        defaultAdjustments = MaskLocalAdjustments(
+            exposure = 16f,
+            contrast = 15f,
+            clarity = 22f,
+            vibrance = 15f,
+            texture = 10f
+        )
+    ),
+    DARKEN_DRAMATIC_SKY(
+        title = "Dramatic Deep Sky",
+        subtitle = "Bring out cloud contours, reduce exposure & boost dehaze",
+        componentType = MaskComponentType.SELECT_SKY,
+        defaultAdjustments = MaskLocalAdjustments(
+            exposure = -30f,
+            contrast = 25f,
+            dehaze = 35f,
+            saturation = 20f,
+            highlights = -20f
+        )
+    ),
+    PORTRAIT_BACKGROUND_BLUR(
+        title = "Portrait Depth Blur",
+        subtitle = "Create creamy DSLR shallow depth of field behind subject",
+        componentType = MaskComponentType.SELECT_BACKGROUND,
+        defaultAdjustments = MaskLocalAdjustments(
+            blur = 55f,
+            exposure = -15f,
+            texture = -25f,
+            clarity = -15f
+        )
+    ),
+    GOLDEN_HOUR_GRADIENT(
+        title = "Golden Hour Sunlight",
+        subtitle = "Gradual warm sunlight wash across the horizon",
+        componentType = MaskComponentType.LINEAR_GRADIENT,
+        defaultAdjustments = MaskLocalAdjustments(
+            temperature = 40f,
+            tint = 15f,
+            exposure = 12f,
+            highlights = 15f
+        )
+    ),
+    SPOTLIGHT_FOCUS(
+        title = "Radial Center Spotlight",
+        subtitle = "Focus bright lighting on center with subtle surrounding falloff",
+        componentType = MaskComponentType.RADIAL_GRADIENT,
+        defaultAdjustments = MaskLocalAdjustments(
+            exposure = 20f,
+            contrast = 12f,
+            clarity = 15f
+        )
+    )
 }
 
 /**

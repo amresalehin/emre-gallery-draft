@@ -1232,7 +1232,11 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     // --- LightCraft Masking Layer Management ---
-    fun createMaskLayer(initialType: MaskComponentType = MaskComponentType.BRUSH, name: String? = null): LightcraftMaskLayer {
+    fun createMaskLayer(
+        initialType: MaskComponentType = MaskComponentType.BRUSH,
+        name: String? = null,
+        initialAdjustments: MaskLocalAdjustments? = null
+    ): LightcraftMaskLayer {
         val existing = _sessionState.value.maskLayers
         val layerNum = existing.size + 1
         val layerName = name ?: "Mask $layerNum"
@@ -1245,7 +1249,8 @@ class PhotoEditorViewModel : ViewModel() {
         val newLayer = LightcraftMaskLayer(
             id = layerId,
             name = layerName,
-            components = listOf(initialComp)
+            components = listOf(initialComp),
+            adjustments = initialAdjustments ?: MaskLocalAdjustments()
         )
         val updated = existing + newLayer
         pushState(_sessionState.value.copy(
@@ -1255,6 +1260,32 @@ class PhotoEditorViewModel : ViewModel() {
             description = "New $layerName"
         ))
         return newLayer
+    }
+
+    fun applyMaskRecipe(recipe: MaskQuickRecipe): LightcraftMaskLayer {
+        return createMaskLayer(
+            initialType = recipe.componentType,
+            name = recipe.title,
+            initialAdjustments = recipe.defaultAdjustments
+        )
+    }
+
+    fun addRecipeComponentToMask(
+        maskId: String,
+        recipe: MaskQuickRecipe,
+        combineMode: MaskCombineMode = MaskCombineMode.ADD
+    ) {
+        addComponentToMask(maskId, recipe.componentType, combineMode)
+        val target = _sessionState.value.maskLayers.firstOrNull { it.id == maskId }
+        if (target != null && target.adjustments.isNeutral()) {
+            val updated = _sessionState.value.maskLayers.map {
+                if (it.id == maskId) it.copy(adjustments = recipe.defaultAdjustments) else it
+            }
+            pushState(_sessionState.value.copy(
+                maskLayers = updated,
+                description = "Apply ${recipe.title}"
+            ))
+        }
     }
 
     fun selectMaskLayer(id: String) {

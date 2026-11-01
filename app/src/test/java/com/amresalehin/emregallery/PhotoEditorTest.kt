@@ -535,6 +535,35 @@ class PhotoEditorTest {
     }
 
     @Test
+    fun testMaskQuickRecipes_smoothSkinAndEnhanceEyes() {
+        val vm = PhotoEditorViewModel()
+        
+        // 1. Apply Smooth Skin recipe
+        val skinLayer = vm.applyMaskRecipe(MaskQuickRecipe.SMOOTH_FACIAL_SKIN)
+        assertEquals(1, vm.sessionState.value.maskLayers.size)
+        assertEquals("Smooth Facial Skin", skinLayer.name)
+        assertEquals(MaskComponentType.PEOPLE_FACIAL_SKIN, skinLayer.components[0].type)
+        assertEquals(-35f, skinLayer.adjustments.texture, 0.001f)
+        assertEquals(-20f, skinLayer.adjustments.clarity, 0.001f)
+
+        // 2. Apply Enhance Eyes recipe
+        val eyesLayer = vm.applyMaskRecipe(MaskQuickRecipe.ENHANCE_EYES)
+        assertEquals(2, vm.sessionState.value.maskLayers.size)
+        assertEquals("Pop & Enhance Eyes", eyesLayer.name)
+        assertEquals(MaskComponentType.PEOPLE_EYES, eyesLayer.components[0].type)
+        assertEquals(22f, eyesLayer.adjustments.exposure, 0.001f)
+        assertEquals(45f, eyesLayer.adjustments.clarity, 0.001f)
+        assertEquals(50f, eyesLayer.adjustments.sharpness, 0.001f)
+
+        // 3. Subtract Teeth from skin layer
+        vm.addRecipeComponentToMask(skinLayer.id, MaskQuickRecipe.WHITEN_TEETH, MaskCombineMode.SUBTRACT)
+        val updatedSkin = vm.sessionState.value.maskLayers.first { it.id == skinLayer.id }
+        assertEquals(2, updatedSkin.components.size)
+        assertEquals(MaskCombineMode.SUBTRACT, updatedSkin.components[1].combineMode)
+        assertEquals(MaskComponentType.PEOPLE_TEETH, updatedSkin.components[1].type)
+    }
+
+    @Test
     fun testLightcraftMasking_applyMaskLayersEngine() {
         val src = Bitmap.createBitmap(40, 40, Bitmap.Config.ARGB_8888)
         val layer = LightcraftMaskLayer(

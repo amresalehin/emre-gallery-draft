@@ -119,6 +119,7 @@ fun PhotoEditorScreen(
     var showExportSheet by remember { mutableStateOf(false) }
     var showDiscardDialog by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
+    var showLrMaskCreationSheet by remember { mutableStateOf(false) }
 
     // Back Handler: Respects history dialog, active mode Cancel first, then tool tab, then discard confirmation
     BackHandler {
@@ -601,6 +602,7 @@ fun PhotoEditorScreen(
                             activeComponentId = sessionState.activeComponentId,
                             overlaySettings = sessionState.maskOverlaySettings,
                             onCreateMaskLayer = { viewModel.createMaskLayer(it) },
+                            onApplyRecipe = { viewModel.applyMaskRecipe(it) },
                             onSelectMaskLayer = { viewModel.selectMaskLayer(it) },
                             onDeleteMaskLayer = { viewModel.deleteMaskLayer(it) },
                             onDuplicateMaskLayer = { viewModel.duplicateMaskLayer(it) },
@@ -608,6 +610,7 @@ fun PhotoEditorScreen(
                             onInvertMaskLayer = { viewModel.invertMaskLayer(it) },
                             onSetMaskAmount = { id, amt -> viewModel.setMaskAmount(id, amt) },
                             onAddComponent = { maskId, type, mode -> viewModel.addComponentToMask(maskId, type, mode) },
+                            onAddRecipeComponent = { maskId, recipe, mode -> viewModel.addRecipeComponentToMask(maskId, recipe, mode) },
                             onRemoveComponent = { maskId, compId -> viewModel.removeComponentFromMask(maskId, compId) },
                             onSelectComponent = { maskId, compId -> viewModel.selectMaskComponent(maskId, compId) },
                             onUpdateComponent = { maskId, comp -> viewModel.updateMaskComponent(maskId, comp) },
@@ -616,7 +619,14 @@ fun PhotoEditorScreen(
                             onResetAdjustments = { maskId -> viewModel.resetMaskAdjustments(maskId) },
                             onToggleOverlay = { viewModel.toggleMaskOverlay() },
                             onSetOverlayColor = { viewModel.setMaskOverlayColor(it) },
-                            onSetOverlayOpacity = { viewModel.setMaskOverlayOpacity(it) }
+                            onSetOverlayOpacity = { viewModel.setMaskOverlayOpacity(it) },
+                            onSliderDragStart = { name, formatted ->
+                                startSliderDrag(name, formatted, 0f)
+                            },
+                            onSliderDragFinished = { finishSliderDrag() },
+                            showCreationSheet = showLrMaskCreationSheet,
+                            onDismissCreationSheet = { showLrMaskCreationSheet = false },
+                            onOpenCreationSheet = { showLrMaskCreationSheet = true }
                         )
                     }
                     MainBottomTab.HEALING -> {
@@ -728,7 +738,11 @@ fun PhotoEditorScreen(
                             onRetouchStrokeFinished = { viewModel.addRetouchStroke(it) },
                             onCropRectPreview = { viewModel.updateCropPreview(it) },
                             onCropRectChanged = { viewModel.commitCrop(it) },
-                            maskOverlaySettings = sessionState.maskOverlaySettings,
+                            maskOverlaySettings = if (activeDraggingSliderName != null) {
+                                sessionState.maskOverlaySettings.copy(showOverlay = false)
+                            } else {
+                                sessionState.maskOverlaySettings
+                            },
                             activeMaskLayer = sessionState.maskLayers.firstOrNull { it.id == sessionState.activeMaskId },
                             brushOpacity = brushOpacity,
                             brushHardness = brushHardness,
@@ -740,6 +754,30 @@ fun PhotoEditorScreen(
                             },
                             activeDrawLayerId = sessionState.activeDrawLayerId
                         )
+
+                        // Lightroom Canvas Masking Controls in Landscape
+                        if (currentBottomTab == MainBottomTab.MASKING) {
+                            LightroomCanvasMaskingOverlay(
+                                maskLayers = sessionState.maskLayers,
+                                activeMaskId = sessionState.activeMaskId,
+                                onSelectMaskLayer = { viewModel.selectMaskLayer(it) },
+                                onAddMaskClick = { showLrMaskCreationSheet = true },
+                                onAddComponent = { _, _ -> showLrMaskCreationSheet = true },
+                                onInvertMask = { viewModel.invertMaskLayer(it) },
+                                onDeleteMask = { viewModel.deleteMaskLayer(it) },
+                                isBrushActive = true,
+                                brushWidth = brushWidth,
+                                onBrushWidthChange = { brushWidth = it },
+                                brushFeather = brushHardness,
+                                onBrushFeatherChange = { brushHardness = it },
+                                brushFlow = brushFlow,
+                                onBrushFlowChange = { brushFlow = it },
+                                isEraser = selectedBrushType == BrushType.ERASER,
+                                onToggleEraser = { isEraser ->
+                                    selectedBrushType = if (isEraser) BrushType.ERASER else BrushType.PEN
+                                }
+                            )
+                        }
 
                         // Top-Left floating overlay action bar in landscape
                         Row(
@@ -1020,7 +1058,11 @@ fun PhotoEditorScreen(
                             onRetouchStrokeFinished = { viewModel.addRetouchStroke(it) },
                             onCropRectPreview = { viewModel.updateCropPreview(it) },
                             onCropRectChanged = { viewModel.commitCrop(it) },
-                            maskOverlaySettings = sessionState.maskOverlaySettings,
+                            maskOverlaySettings = if (activeDraggingSliderName != null) {
+                                sessionState.maskOverlaySettings.copy(showOverlay = false)
+                            } else {
+                                sessionState.maskOverlaySettings
+                            },
                             activeMaskLayer = sessionState.maskLayers.firstOrNull { it.id == sessionState.activeMaskId },
                             brushOpacity = brushOpacity,
                             brushHardness = brushHardness,
@@ -1032,6 +1074,30 @@ fun PhotoEditorScreen(
                             },
                             activeDrawLayerId = sessionState.activeDrawLayerId
                         )
+
+                        // Lightroom Canvas Masking Controls in Portrait (Right FAB, Card Stack, Left Brush Strip, Delete Button)
+                        if (currentBottomTab == MainBottomTab.MASKING) {
+                            LightroomCanvasMaskingOverlay(
+                                maskLayers = sessionState.maskLayers,
+                                activeMaskId = sessionState.activeMaskId,
+                                onSelectMaskLayer = { viewModel.selectMaskLayer(it) },
+                                onAddMaskClick = { showLrMaskCreationSheet = true },
+                                onAddComponent = { _, _ -> showLrMaskCreationSheet = true },
+                                onInvertMask = { viewModel.invertMaskLayer(it) },
+                                onDeleteMask = { viewModel.deleteMaskLayer(it) },
+                                isBrushActive = true,
+                                brushWidth = brushWidth,
+                                onBrushWidthChange = { brushWidth = it },
+                                brushFeather = brushHardness,
+                                onBrushFeatherChange = { brushHardness = it },
+                                brushFlow = brushFlow,
+                                onBrushFlowChange = { brushFlow = it },
+                                isEraser = selectedBrushType == BrushType.ERASER,
+                                onToggleEraser = { isEraser ->
+                                    selectedBrushType = if (isEraser) BrushType.ERASER else BrushType.PEN
+                                }
+                            )
+                        }
 
                         // Floating Slider HUD Banner at Top
                         if (activeDraggingSliderName != null) {
