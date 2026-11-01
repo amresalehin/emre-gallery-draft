@@ -593,11 +593,6 @@ fun GalleryApp() {
                 mapFocusItem = null
                 viewerStoryTitle = null
             }
-            destination == Destination.IMAGE_EDITOR -> {
-                destination = Destination.VIEWER
-                selectedMedia = editorSource ?: selectedMedia
-                showViewerControls = true
-            }
             destination == Destination.PDF_DOCUMENT_TOOL -> {
                 destination = Destination.TOOLS
                 viewerStoryTitle = null
@@ -1215,10 +1210,25 @@ fun GalleryApp() {
                             source = source,
                             onBack = { performBackNavigation() },
                             onSaved = { saved ->
-                                editorSource = saved
-                                selectedMedia = saved
+                                val returnEntry = backStack.lastOrNull()
+                                val returningToViewer = returnEntry?.destination == Destination.VIEWER
+                                if (returningToViewer) {
+                                    val originalUri = returnEntry.selectedMedia?.uri
+                                    selectedMedia = saved
+                                    viewerMediaList = returnEntry.viewerMediaList.map {
+                                        if (it.uri == originalUri) saved else it
+                                    }.ifEmpty { listOf(saved) }
+                                    editorSource = saved
+                                }
                                 refreshMedia()
                                 performBackNavigation()
+                                if (returningToViewer) {
+                                    selectedMedia = saved
+                                    viewerMediaList = viewerMediaList.map {
+                                        if (it.uri == returnEntry?.selectedMedia?.uri) saved else it
+                                    }.ifEmpty { listOf(saved) }
+                                    showViewerControls = true
+                                }
                             }
                         )
                     }
