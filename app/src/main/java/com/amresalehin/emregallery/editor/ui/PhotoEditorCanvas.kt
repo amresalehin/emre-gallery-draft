@@ -79,6 +79,8 @@ fun PhotoEditorCanvas(
     brushColor: Color,
     brushWidth: Float,
     activeRetouchType: RetouchType,
+    retouchIntensity: Float = 1.0f,
+    retouchTintColor: Color = Color(0xFF2979FF),
     cropAspectRatio: Float?,
     isCurveMode: Boolean = false,
     activeCurveChannel: CurveChannel = CurveChannel.RGB,
@@ -204,7 +206,9 @@ fun PhotoEditorCanvas(
                                                 RetouchStroke(
                                                     type = activeRetouchType,
                                                     points = pts,
-                                                    radius = brushWidth * 1.5f
+                                                    radius = brushWidth * 1.5f,
+                                                    intensity = retouchIntensity,
+                                                    tintColor = retouchTintColor
                                                 )
                                             )
                                         }

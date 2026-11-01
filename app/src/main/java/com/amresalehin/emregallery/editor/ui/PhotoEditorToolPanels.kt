@@ -596,7 +596,7 @@ fun MinimalSingleSliderRow(
  * [Adjust], [Presets], [Crop], [Masking], [Healing]
  */
 enum class MainBottomTab {
-    ADJUST, PRESETS, CROP, MASKING, HEALING
+    ADJUST, PRESETS, CROP, MASKING, HEALING, OVERLAYS, AI_TOOLS
 }
 
 /**
@@ -614,7 +614,7 @@ fun MainBottomTierBar(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Surface(
@@ -630,8 +630,9 @@ fun MainBottomTierBar(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
+                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val tabs = listOf(
@@ -639,7 +640,9 @@ fun MainBottomTierBar(
                     Triple(MainBottomTab.PRESETS, "Presets", Icons.Default.FilterVintage),
                     Triple(MainBottomTab.CROP, "Crop", Icons.Default.Crop),
                     Triple(MainBottomTab.MASKING, "Masking", Icons.Default.Brush),
-                    Triple(MainBottomTab.HEALING, "Healing", Icons.Default.Healing)
+                    Triple(MainBottomTab.HEALING, "Healing", Icons.Default.Healing),
+                    Triple(MainBottomTab.OVERLAYS, "Overlays", Icons.Default.Layers),
+                    Triple(MainBottomTab.AI_TOOLS, "AI Magic", Icons.Default.AutoAwesome)
                 )
 
                 tabs.forEach { (tab, label, icon) ->
@@ -657,7 +660,7 @@ fun MainBottomTierBar(
                     )
 
                     val pillWidth by animateDpAsState(
-                        targetValue = if (selected) 46.dp else 36.dp,
+                        targetValue = if (selected) 44.dp else 34.dp,
                         animationSpec = spring(
                             dampingRatio = Spring.DampingRatioMediumBouncy,
                             stiffness = Spring.StiffnessMedium
@@ -677,7 +680,7 @@ fun MainBottomTierBar(
 
                     Box(
                         modifier = Modifier
-                            .weight(1f)
+                            .widthIn(min = 48.dp)
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
@@ -688,7 +691,7 @@ fun MainBottomTierBar(
                                 indication = null,
                                 onClick = { onSelectTab(tab) }
                             )
-                            .padding(vertical = 4.dp)
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
                             .testTag(
                                 when (tab) {
                                     MainBottomTab.PRESETS -> "bottom_tab_presets"
@@ -696,6 +699,8 @@ fun MainBottomTierBar(
                                     MainBottomTab.ADJUST -> "bottom_tab_adjust"
                                     MainBottomTab.MASKING -> "bottom_tab_masking"
                                     MainBottomTab.HEALING -> "bottom_tab_healing"
+                                    MainBottomTab.OVERLAYS -> "bottom_tab_overlays"
+                                    MainBottomTab.AI_TOOLS -> "bottom_tab_ai_tools"
                                 }
                             ),
                         contentAlignment = Alignment.Center
@@ -708,7 +713,7 @@ fun MainBottomTierBar(
                                 shape = CircleShape,
                                 color = pillBg,
                                 modifier = Modifier
-                                    .height(30.dp)
+                                    .height(28.dp)
                                     .width(pillWidth)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -716,14 +721,14 @@ fun MainBottomTierBar(
                                         imageVector = icon,
                                         contentDescription = label,
                                         tint = iconTint,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
                             Spacer(Modifier.height(2.dp))
                             Text(
                                 text = label,
-                                fontSize = 10.sp,
+                                fontSize = 9.5.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (selected) Color.White else Color(0xFF8E8E93),
                                 maxLines = 1
@@ -744,6 +749,9 @@ enum class AdjustCategory(val label: String) {
     AUTO("Auto"),
     LIGHT("Light"),
     COLOR("Color"),
+    LEVELS("Levels"),
+    COLOR_BAL("Balance"),
+    COLOR_FX("Color FX"),
     BLUR("Blur"),
     EFFECTS("Effects"),
     DETAIL("Detail"),
@@ -773,6 +781,9 @@ fun AdjustCategoryStrip(
             AdjustCategory.AUTO to Icons.Default.AutoAwesome,
             AdjustCategory.LIGHT to Icons.Default.WbSunny,
             AdjustCategory.COLOR to Icons.Default.DeviceThermostat,
+            AdjustCategory.LEVELS to Icons.Default.Equalizer,
+            AdjustCategory.COLOR_BAL to Icons.Default.Balance,
+            AdjustCategory.COLOR_FX to Icons.Default.Gradient,
             AdjustCategory.BLUR to Icons.Default.WaterDrop,
             AdjustCategory.EFFECTS to Icons.Default.CropSquare,
             AdjustCategory.DETAIL to Icons.Default.ChangeHistory,
@@ -1902,6 +1913,13 @@ fun EffectsPanel(
     dehaze: Float,
     vignette: Float,
     grain: Float,
+    dodge: Float = 0f,
+    burn: Float = 0f,
+    vignetteMidpoint: Float = 50f,
+    vignetteFeather: Float = 50f,
+    vignetteRoundness: Float = 0f,
+    grainSize: Float = 25f,
+    grainRoughness: Float = 50f,
     onSliderDragStart: (name: String, formattedVal: String) -> Unit,
     onSliderChange: (prop: String, value: Float) -> Unit,
     onSliderChangeFinished: () -> Unit,
@@ -1997,6 +2015,32 @@ fun EffectsPanel(
                     onValueChange = { onSliderChange("Dehaze", it) },
                     onValueChangeFinished = onSliderChangeFinished
                 )
+
+                val dodgeStr = "${dodge.toInt()}"
+                LrSliderRow(
+                    title = "Global Dodge",
+                    value = dodge,
+                    displayValue = dodgeStr,
+                    valueRange = 0f..100f,
+                    minLabel = "0",
+                    maxLabel = "+100",
+                    onDragStart = { onSliderDragStart("Dodge", dodgeStr) },
+                    onValueChange = { onSliderChange("Dodge", it) },
+                    onValueChangeFinished = onSliderChangeFinished
+                )
+
+                val burnStr = "${burn.toInt()}"
+                LrSliderRow(
+                    title = "Global Burn",
+                    value = burn,
+                    displayValue = burnStr,
+                    valueRange = 0f..100f,
+                    minLabel = "0",
+                    maxLabel = "+100",
+                    onDragStart = { onSliderDragStart("Burn", burnStr) },
+                    onValueChange = { onSliderChange("Burn", it) },
+                    onValueChangeFinished = onSliderChangeFinished
+                )
             }
             EffectsTab.VIGNETTE -> {
                 val vigStr = when {
@@ -2015,6 +2059,45 @@ fun EffectsPanel(
                     onValueChange = { onSliderChange("Vignette", it) },
                     onValueChangeFinished = onSliderChangeFinished
                 )
+
+                val midStr = "${vignetteMidpoint.toInt()}"
+                LrSliderRow(
+                    title = "Midpoint",
+                    value = vignetteMidpoint,
+                    displayValue = midStr,
+                    valueRange = 0f..100f,
+                    minLabel = "0",
+                    maxLabel = "100",
+                    onDragStart = { onSliderDragStart("Midpoint", midStr) },
+                    onValueChange = { onSliderChange("vignetteMidpoint", it) },
+                    onValueChangeFinished = onSliderChangeFinished
+                )
+
+                val featherStr = "${vignetteFeather.toInt()}"
+                LrSliderRow(
+                    title = "Feather",
+                    value = vignetteFeather,
+                    displayValue = featherStr,
+                    valueRange = 0f..100f,
+                    minLabel = "0",
+                    maxLabel = "100",
+                    onDragStart = { onSliderDragStart("Feather", featherStr) },
+                    onValueChange = { onSliderChange("vignetteFeather", it) },
+                    onValueChangeFinished = onSliderChangeFinished
+                )
+
+                val roundStr = "${vignetteRoundness.toInt()}"
+                LrSliderRow(
+                    title = "Roundness",
+                    value = vignetteRoundness,
+                    displayValue = roundStr,
+                    valueRange = -100f..100f,
+                    minLabel = "−100",
+                    maxLabel = "+100",
+                    onDragStart = { onSliderDragStart("Roundness", roundStr) },
+                    onValueChange = { onSliderChange("vignetteRoundness", it) },
+                    onValueChangeFinished = onSliderChangeFinished
+                )
             }
             EffectsTab.GRAIN -> {
                 val grainStr = "${grain.toInt()}"
@@ -2027,6 +2110,32 @@ fun EffectsPanel(
                     maxLabel = "+100",
                     onDragStart = { onSliderDragStart("Amount", grainStr) },
                     onValueChange = { onSliderChange("Grain", it) },
+                    onValueChangeFinished = onSliderChangeFinished
+                )
+
+                val sizeStr = "${grainSize.toInt()}"
+                LrSliderRow(
+                    title = "Size",
+                    value = grainSize,
+                    displayValue = sizeStr,
+                    valueRange = 0f..100f,
+                    minLabel = "0",
+                    maxLabel = "+100",
+                    onDragStart = { onSliderDragStart("Size", sizeStr) },
+                    onValueChange = { onSliderChange("grainSize", it) },
+                    onValueChangeFinished = onSliderChangeFinished
+                )
+
+                val roughStr = "${grainRoughness.toInt()}"
+                LrSliderRow(
+                    title = "Roughness",
+                    value = grainRoughness,
+                    displayValue = roughStr,
+                    valueRange = 0f..100f,
+                    minLabel = "0",
+                    maxLabel = "+100",
+                    onDragStart = { onSliderDragStart("Roughness", roughStr) },
+                    onValueChange = { onSliderChange("grainRoughness", it) },
                     onValueChangeFinished = onSliderChangeFinished
                 )
             }
@@ -2172,6 +2281,7 @@ fun OpticsPanel(
     removeChromaticAberration: Boolean,
     enableLensCorrections: Boolean,
     distortionCorrection: Float,
+    vignettingCorrection: Float = 100f,
     onToggleChromaticAberration: (Boolean) -> Unit,
     onToggleLensCorrections: (Boolean) -> Unit,
     onSliderDragStart: (name: String, formattedVal: String) -> Unit,
@@ -2249,6 +2359,19 @@ fun OpticsPanel(
                 maxLabel = "+200",
                 onDragStart = { onSliderDragStart("Distortion", distStr) },
                 onValueChange = { onSliderChange("Distortion Correction", it) },
+                onValueChangeFinished = onSliderChangeFinished
+            )
+
+            val vigCorrStr = "+${vignettingCorrection.toInt()}"
+            LrSliderRow(
+                title = "Vignetting Correction",
+                value = vignettingCorrection,
+                displayValue = vigCorrStr,
+                valueRange = 0f..200f,
+                minLabel = "0",
+                maxLabel = "+200",
+                onDragStart = { onSliderDragStart("Vignetting Correction", vigCorrStr) },
+                onValueChange = { onSliderChange("Vignetting Correction", it) },
                 onValueChangeFinished = onSliderChangeFinished
             )
         }

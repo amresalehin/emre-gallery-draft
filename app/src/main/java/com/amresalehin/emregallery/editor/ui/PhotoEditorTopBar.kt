@@ -14,7 +14,9 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -44,6 +46,8 @@ fun PhotoEditorTopBar(
     canPasteSettings: Boolean,
     onContinueExport: () -> Unit,
     onEditWithAi: () -> Unit = {},
+    onStartReplay: () -> Unit = {},
+    onOpenHistory: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -83,24 +87,24 @@ fun PhotoEditorTopBar(
                 )
             }
 
-            // Right-side actions: Undo, Redo, Share, Save, Overflow
+            // Right-side actions: Undo, Redo, Replay, History, Share, Save, Overflow
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 // Undo
                 IconButton(
                     onClick = onUndo,
                     enabled = canUndo,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(38.dp)
                         .testTag("editor_undo_button")
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Undo,
                         contentDescription = "Undo",
                         tint = if (canUndo) Color.White else Color.White.copy(alpha = 0.28f),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
 
@@ -109,13 +113,43 @@ fun PhotoEditorTopBar(
                     onClick = onRedo,
                     enabled = canRedo,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(38.dp)
                         .testTag("editor_redo_button")
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Redo,
                         contentDescription = "Redo",
                         tint = if (canRedo) Color.White else Color.White.copy(alpha = 0.28f),
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
+                // Edit History
+                IconButton(
+                    onClick = onOpenHistory,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .testTag("editor_history_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Restore,
+                        contentDescription = "Edit History",
+                        tint = Color.White,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+
+                // Animated Replay
+                IconButton(
+                    onClick = onStartReplay,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .testTag("editor_replay_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Animated Replay",
+                        tint = Color.White,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -124,14 +158,14 @@ fun PhotoEditorTopBar(
                 IconButton(
                     onClick = onShare,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(38.dp)
                         .testTag("editor_share_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Share,
                         contentDescription = "Share",
                         tint = Color.White,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
 
@@ -142,7 +176,7 @@ fun PhotoEditorTopBar(
                     color = Color.White,
                     contentColor = Color.Black,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(34.dp)
                         .testTag("editor_save_button")
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -150,7 +184,7 @@ fun PhotoEditorTopBar(
                             imageVector = Icons.Default.Check,
                             contentDescription = "Save photo",
                             tint = Color.Black,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -160,14 +194,14 @@ fun PhotoEditorTopBar(
                     IconButton(
                         onClick = { showMenu = true },
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(38.dp)
                             .testTag("editor_overflow_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
                             contentDescription = "More options",
                             tint = Color.White,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -178,6 +212,23 @@ fun PhotoEditorTopBar(
                         containerColor = Color(0xFF1E1E1E),
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Animated Replay", color = Color.White) },
+                            leadingIcon = { Icon(Icons.Default.PlayArrow, null, tint = Color.White) },
+                            onClick = {
+                                showMenu = false
+                                onStartReplay()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Edit History", color = Color.White) },
+                            leadingIcon = { Icon(Icons.Default.Restore, null, tint = Color.White) },
+                            onClick = {
+                                showMenu = false
+                                onOpenHistory()
+                            }
+                        )
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
                         DropdownMenuItem(
                             text = { Text("Save copy to gallery", color = Color.White) },
                             leadingIcon = { Icon(Icons.Default.Check, null, tint = Color.White) },

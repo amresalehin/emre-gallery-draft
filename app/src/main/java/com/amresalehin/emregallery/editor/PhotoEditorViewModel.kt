@@ -804,6 +804,16 @@ class PhotoEditorViewModel : ViewModel() {
         pushState(_sessionState.value.copy(textOverlays = list, description = "Remove text"))
     }
 
+    fun duplicateTextOverlay(id: String) {
+        val existing = _sessionState.value.textOverlays.firstOrNull { it.id == id } ?: return
+        val dup = existing.copy(
+            id = System.currentTimeMillis().toString(),
+            xRatio = (existing.xRatio + 0.05f).coerceIn(0.1f, 0.9f),
+            yRatio = (existing.yRatio + 0.05f).coerceIn(0.1f, 0.9f)
+        )
+        pushState(_sessionState.value.copy(textOverlays = _sessionState.value.textOverlays + dup, description = "Duplicate text"))
+    }
+
     // --- Stickers ---
     fun addSticker(emoji: String) {
         val item = StickerItem(
@@ -819,6 +829,21 @@ class PhotoEditorViewModel : ViewModel() {
         updateLivePreview()
     }
 
+    fun removeSticker(id: String) {
+        val list = _sessionState.value.stickers.filterNot { it.id == id }
+        pushState(_sessionState.value.copy(stickers = list, description = "Remove sticker"))
+    }
+
+    fun duplicateSticker(id: String) {
+        val existing = _sessionState.value.stickers.firstOrNull { it.id == id } ?: return
+        val dup = existing.copy(
+            id = System.currentTimeMillis().toString(),
+            xRatio = (existing.xRatio + 0.05f).coerceIn(0.1f, 0.9f),
+            yRatio = (existing.yRatio + 0.05f).coerceIn(0.1f, 0.9f)
+        )
+        pushState(_sessionState.value.copy(stickers = _sessionState.value.stickers + dup, description = "Duplicate sticker"))
+    }
+
     // --- Shapes ---
     fun addShape(shapeType: ShapeType, strokeColor: Color = Color.White, fillColor: Color = Color.Transparent, isMask: Boolean = false) {
         val item = ShapeItem(
@@ -829,6 +854,27 @@ class PhotoEditorViewModel : ViewModel() {
             isMask = isMask
         )
         pushState(_sessionState.value.copy(shapes = _sessionState.value.shapes + item, description = "Add shape"))
+    }
+
+    fun updateShape(updated: ShapeItem) {
+        val list = _sessionState.value.shapes.map { if (it.id == updated.id) updated else it }
+        _sessionState.value = _sessionState.value.copy(shapes = list)
+        updateLivePreview()
+    }
+
+    fun removeShape(id: String) {
+        val list = _sessionState.value.shapes.filterNot { it.id == id }
+        pushState(_sessionState.value.copy(shapes = list, description = "Remove shape"))
+    }
+
+    fun duplicateShape(id: String) {
+        val existing = _sessionState.value.shapes.firstOrNull { it.id == id } ?: return
+        val dup = existing.copy(
+            id = System.currentTimeMillis().toString(),
+            xRatio = (existing.xRatio + 0.05f).coerceIn(0.1f, 0.9f),
+            yRatio = (existing.yRatio + 0.05f).coerceIn(0.1f, 0.9f)
+        )
+        pushState(_sessionState.value.copy(shapes = _sessionState.value.shapes + dup, description = "Duplicate shape"))
     }
 
     // --- Frames & Borders ---
@@ -850,6 +896,27 @@ class PhotoEditorViewModel : ViewModel() {
         pushState(_sessionState.value.copy(callouts = _sessionState.value.callouts + item, description = "Add callout"))
     }
 
+    fun addCalloutWithStyle(text: String, style: CalloutStyle) {
+        val item = CalloutItem(
+            id = System.currentTimeMillis().toString(),
+            text = text,
+            style = style,
+            isThoughtBubble = style == CalloutStyle.THOUGHT_BUBBLE || style == CalloutStyle.CLOUD_BUBBLE
+        )
+        pushState(_sessionState.value.copy(callouts = _sessionState.value.callouts + item, description = "Add callout"))
+    }
+
+    fun updateCallout(updated: CalloutItem) {
+        val list = _sessionState.value.callouts.map { if (it.id == updated.id) updated else it }
+        _sessionState.value = _sessionState.value.copy(callouts = list)
+        updateLivePreview()
+    }
+
+    fun removeCallout(id: String) {
+        val list = _sessionState.value.callouts.filterNot { it.id == id }
+        pushState(_sessionState.value.copy(callouts = list, description = "Remove callout"))
+    }
+
     // --- Lens Flare ---
     fun addLensFlare(flareType: LensFlareType) {
         val item = LensFlareItem(
@@ -859,16 +926,74 @@ class PhotoEditorViewModel : ViewModel() {
         pushState(_sessionState.value.copy(lensFlares = _sessionState.value.lensFlares + item, description = "Add flare"))
     }
 
+    fun updateLensFlare(updated: LensFlareItem) {
+        val list = _sessionState.value.lensFlares.map { if (it.id == updated.id) updated else it }
+        _sessionState.value = _sessionState.value.copy(lensFlares = list)
+        updateLivePreview()
+    }
+
+    fun removeLensFlare(id: String) {
+        val list = _sessionState.value.lensFlares.filterNot { it.id == id }
+        pushState(_sessionState.value.copy(lensFlares = list, description = "Remove flare"))
+    }
+
+    // --- Overlay Deletion Aliases ---
+    fun deleteTextOverlay(id: String) = removeTextOverlay(id)
+    fun deleteSticker(id: String) = removeSticker(id)
+    fun deleteShape(id: String) = removeShape(id)
+    fun deleteCallout(id: String) = removeCallout(id)
+    fun deleteLensFlare(id: String) = removeLensFlare(id)
+
+    // --- Transform & Liquify Helpers ---
+    fun clearLiquify() = clearLiquifyPoints()
+    fun clearLiquifyPoints() {
+        pushState(_sessionState.value.copy(
+            transform = _sessionState.value.transform.copy(liquifyPoints = emptyList()),
+            description = "Clear Liquify"
+        ))
+    }
+
+    fun setMotionBlur(amount: Float, angle: Float) = setMotion(amount, angle)
+
+    // --- Masking Helpers ---
+    fun invertMask() {
+        val strokes = _sessionState.value.drawingStrokes
+        if (strokes.isEmpty()) return
+        pushState(_sessionState.value.copy(
+            drawingStrokes = strokes.map { s ->
+                s.copy(color = if (s.color.alpha > 0.5f) s.color.copy(alpha = 0.2f) else s.color.copy(alpha = 1.0f))
+            },
+            description = "Invert Mask"
+        ))
+        updateLivePreview()
+    }
+
+    fun clearMask() = clearDrawingStrokes()
+
+    fun setScaleFactor(scale: Float) {
+        pushState(_sessionState.value.copy(
+            transform = _sessionState.value.transform.copy(scaleFactor = scale),
+            description = "Scale ${(scale * 100).toInt()}%"
+        ))
+    }
+
     // --- AI Tools ---
     fun toggleAiAutoEnhance(enabled: Boolean) {
         val updated = _sessionState.value.aiSettings.copy(autoEnhanceEnabled = enabled)
         pushState(_sessionState.value.copy(aiSettings = updated, description = "AI Auto Enhance"))
     }
 
+    fun setAiAutoEnhanceIntensity(intensity: Float) {
+        val updated = _sessionState.value.aiSettings.copy(autoEnhanceIntensity = intensity)
+        pushState(_sessionState.value.copy(aiSettings = updated, description = "Auto Enhance ${(intensity * 100).toInt()}%"))
+    }
+
     fun setAiStyleTransfer(style: AiStyleTransfer?) {
         val updated = _sessionState.value.aiSettings.copy(activeStyleTransfer = style)
         pushState(_sessionState.value.copy(aiSettings = updated, description = style?.label ?: "Remove style"))
     }
+
+    fun setAiTryOnStyle(style: AiTryOnStyle?) = setAiTryOn(style)
 
     fun setAiTryOn(style: AiTryOnStyle?) {
         val updated = _sessionState.value.aiSettings.copy(activeTryOn = style)
@@ -902,13 +1027,46 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     /**
+     * Returns the full list of operation descriptions up to current state.
+     */
+    fun getHistoryList(): List<String> {
+        val list = undoStack.map { it.description } + listOf(_sessionState.value.description)
+        return list
+    }
+
+    fun getCurrentHistoryIndex(): Int = undoStack.size
+
+    /**
+     * Jumps back to a specific step in the history stack.
+     */
+    fun jumpToHistoryStep(targetIndex: Int) {
+        val fullHistory = undoStack + listOf(_sessionState.value)
+        if (targetIndex !in fullHistory.indices) return
+        commitSliderChange()
+        val targetState = fullHistory[targetIndex]
+        undoStack.clear()
+        for (i in 0 until targetIndex) {
+            undoStack.add(fullHistory[i])
+        }
+        redoStack.clear()
+        for (i in fullHistory.lastIndex downTo targetIndex + 1) {
+            redoStack.add(fullHistory[i])
+        }
+        _sessionState.value = targetState
+        _canUndo.value = undoStack.isNotEmpty()
+        _canRedo.value = redoStack.isNotEmpty()
+        updateLivePreview()
+    }
+
+    /**
      * Cinematic step-by-step replay of editing history.
      */
     fun startReplay() {
         if (undoStack.isEmpty()) return
         viewModelScope.launch {
             _isReplaying.value = true
-            val fullHistory = undoStack + listOf(_sessionState.value)
+            val activeState = _sessionState.value
+            val fullHistory = undoStack + listOf(activeState)
             val total = fullHistory.size
             for ((idx, step) in fullHistory.withIndex()) {
                 _sessionState.value = step
@@ -917,6 +1075,8 @@ class PhotoEditorViewModel : ViewModel() {
                 delay(650)
             }
             delay(400)
+            _sessionState.value = activeState
+            updateLivePreview()
             _isReplaying.value = false
             _replayProgress.value = 1f
         }

@@ -337,12 +337,85 @@ class PhotoEditorTest {
     @Test
     fun testMainBottomTabs_autoRemoved() {
         val tabs = com.amresalehin.emregallery.editor.ui.MainBottomTab.entries
-        assertEquals(5, tabs.size)
+        assertEquals(7, tabs.size)
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.ADJUST))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.PRESETS))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.CROP))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.MASKING))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.HEALING))
+        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.OVERLAYS))
+        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.AI_TOOLS))
+    }
+
+    @Test
+    fun testEditHistory_andJumpToStep() {
+        val vm = PhotoEditorViewModel()
+        val initialHistory = vm.getHistoryList()
+        assertEquals(1, initialHistory.size)
+        assertEquals(0, vm.getCurrentHistoryIndex())
+
+        vm.rotate90()
+        assertEquals(2, vm.getHistoryList().size)
+        assertEquals(1, vm.getCurrentHistoryIndex())
+
+        vm.rotate90()
+        assertEquals(3, vm.getHistoryList().size)
+        assertEquals(2, vm.getCurrentHistoryIndex())
+        assertEquals(180, vm.sessionState.value.transform.rotationDegrees)
+
+        // Jump to step 1
+        vm.jumpToHistoryStep(1)
+        assertEquals(1, vm.getCurrentHistoryIndex())
+        assertEquals(90, vm.sessionState.value.transform.rotationDegrees)
+
+        // Jump back to original step 0
+        vm.jumpToHistoryStep(0)
+        assertEquals(0, vm.getCurrentHistoryIndex())
+        assertEquals(0, vm.sessionState.value.transform.rotationDegrees)
+    }
+
+    @Test
+    fun testOverlaysManagement_addDuplicateDelete() {
+        val vm = PhotoEditorViewModel()
+        val textItem = TextOverlayItem(id = "txt1", text = "Watermark")
+        vm.addTextOverlay(textItem)
+        assertEquals(1, vm.sessionState.value.textOverlays.size)
+        assertEquals("Watermark", vm.sessionState.value.textOverlays[0].text)
+
+        vm.duplicateTextOverlay("txt1")
+        assertEquals(2, vm.sessionState.value.textOverlays.size)
+
+        vm.deleteTextOverlay("txt1")
+        assertEquals(1, vm.sessionState.value.textOverlays.size)
+
+        val sticker = StickerItem(id = "stk1", stickerId = "star")
+        vm.addSticker(sticker)
+        assertEquals(1, vm.sessionState.value.stickers.size)
+        vm.duplicateSticker("stk1")
+        assertEquals(2, vm.sessionState.value.stickers.size)
+        vm.deleteSticker("stk1")
+        assertEquals(1, vm.sessionState.value.stickers.size)
+    }
+
+    @Test
+    fun testAiToolsSettings() {
+        val vm = PhotoEditorViewModel()
+        assertFalse(vm.sessionState.value.aiSettings.autoEnhance)
+
+        vm.toggleAiAutoEnhance(true)
+        assertTrue(vm.sessionState.value.aiSettings.autoEnhance)
+
+        vm.setAiAutoEnhanceIntensity(1.5f)
+        assertEquals(1.5f, vm.sessionState.value.aiSettings.autoEnhanceIntensity, 0.001f)
+
+        vm.setAiExpand(0.35f)
+        assertEquals(0.35f, vm.sessionState.value.aiSettings.generativeExpandRatio, 0.001f)
+
+        vm.setAiStyleTransfer(AiStyleTransfer.CYBERPUNK)
+        assertEquals(AiStyleTransfer.CYBERPUNK, vm.sessionState.value.aiSettings.styleTransfer)
+
+        vm.setAiTryOnStyle(AiTryOnStyle.BIKER_LEATHER)
+        assertEquals(AiTryOnStyle.BIKER_LEATHER, vm.sessionState.value.aiSettings.tryOnStyle)
     }
 
     @Test
