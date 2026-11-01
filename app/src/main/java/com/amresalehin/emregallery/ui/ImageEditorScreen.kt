@@ -1,6 +1,8 @@
 package com.amresalehin.emregallery.ui
 
+import android.Manifest
 import android.content.ContentValues
+import android.content.pm.PackageManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -10,6 +12,8 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -71,6 +75,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -157,6 +162,35 @@ fun ImageEditorScreen(
     BackHandler(enabled = !saving) { onBack() }
 
     val image = sourceBitmap
+    fun saveEditedImage() {
+        if (image == null || saving || loading) return
+        val currentRecipe = recipe
+        saving = true
+        error = null
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val fullResolution = decodeEditorBitmap(context, source.uri, maxDimension = null)
+                        ?: throw IOException("Unable to decode the original image for export")
+                    try {
+                        exportEditorResult(context, fullResolution, currentRecipe, source)
+                    } finally {
+                        if (!fullResolution.isRecycled) fullResolution.recycle()
+                    }
+                }
+            }
+            saving = false
+            saved.onSuccess(onSaved).onFailure {
+                error = it.message ?: "Could not save the edited image"
+            }
+        }
+    }
+    val writePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) saveEditedImage()
+        else error = "Storage permission is required to save into Pictures/Emre"
+    }
     var preview by remember(image) { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(image, recipe) {
         val renderSource = image ?: run {
@@ -208,25 +242,14 @@ fun ImageEditorScreen(
             ) { Text("Reset") }
             IconButton(
                 onClick = {
-                    image ?: return@IconButton
-                    saving = true
-                    error = null
-                    scope.launch {
-                        val saved = withContext(Dispatchers.IO) {
-                            runCatching {
-                                val fullResolution = decodeEditorBitmap(context, source.uri, maxDimension = null)
-                                    ?: throw IOException("Unable to decode the original image for export")
-                                try {
-                                    exportEditorResult(context, fullResolution, recipe, source)
-                                } finally {
-                                    if (!fullResolution.isRecycled) fullResolution.recycle()
-                                }
-                            }
-                        }
-                        saving = false
-                        saved.onSuccess(onSaved).onFailure {
-                            error = it.message ?: "Could not save the edited image"
-                        }
+                    if (image == null) return@IconButton
+                    if (
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                        ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        writePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    } else {
+                        saveEditedImage()
                     }
                 },
                 enabled = image != null && !loading && !saving
