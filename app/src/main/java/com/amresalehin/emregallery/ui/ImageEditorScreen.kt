@@ -901,8 +901,8 @@ private fun DrawMarkupOverlay(
                     detectDragGestures(
                         onDragStart = { offset ->
                             val point = MarkupPoint(
-                                (offset.x / size.width.coerceAtLeast(1f)).coerceIn(0f, 1f),
-                                (offset.y / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                (offset.x / size.width.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f),
+                                (offset.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
                             )
                             inProgress = EditorMarkup(tool, listOf(point, point), colorArgb = currentColor, strokeWidthFraction = currentWidth)
                         },
@@ -910,8 +910,8 @@ private fun DrawMarkupOverlay(
                             change.consume()
                             val current = inProgress ?: return@detectDragGestures
                             val point = MarkupPoint(
-                                (change.position.x / size.width.coerceAtLeast(1f)).coerceIn(0f, 1f),
-                                (change.position.y / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                (change.position.x / size.width.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f),
+                                (change.position.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
                             )
                             val points = when (tool) {
                                 MarkupTool.Pen, MarkupTool.Highlighter, MarkupTool.Eraser -> current.points + point
