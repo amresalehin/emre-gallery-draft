@@ -1191,8 +1191,11 @@ fun GalleryApp() {
                             navigateTo(Destination.PDF_DOCUMENT_TOOL, rememberPrevious = true)
                         },
                         onOpenEditor = {
-                            val candidate = selectedMedia
-                                ?: media.firstOrNull { !it.isVideo && it.uri !in hidden && !it.isTrashed }
+                            val candidate = selectedMedia?.takeUnless {
+                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
+                            } ?: media.firstOrNull {
+                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
+                            }
                             if (candidate != null) {
                                 editorSource = candidate
                                 navigateTo(
@@ -1384,8 +1387,12 @@ fun GalleryApp() {
                     navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = currentItem)
                 },
                 onEdit = {
-                    editorSource = currentItem
-                    navigateTo(Destination.IMAGE_EDITOR, rememberPrevious = true, newSelectedMedia = currentItem)
+                    if (currentItem.isVideo) {
+                        scope.launch { snackbarHostState.showSnackbar("Video editing is not available yet") }
+                    } else {
+                        editorSource = currentItem
+                        navigateTo(Destination.IMAGE_EDITOR, rememberPrevious = true, newSelectedMedia = currentItem)
+                    }
                 },
                 onOpenPerson = { personId, engineId ->
                     showDetails = false
