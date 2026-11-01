@@ -72,7 +72,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.ImageLoader
+import coil.Coil
 import coil.request.ImageRequest
 import coil.size.Size as CoilSize
 import com.amresalehin.emregallery.data.MediaItem
@@ -131,16 +131,15 @@ fun ImageEditorScreen(
         error = null
         val decoded = withContext(Dispatchers.IO) {
             runCatching {
-                val loader = ImageLoader(context)
                 val request = ImageRequest.Builder(context)
                     .data(Uri.parse(source.uri))
                     .size(CoilSize.ORIGINAL)
                     .allowHardware(false)
                     .build()
-                loader.execute(request).drawable?.let { drawable ->
+                Coil.imageLoader(context).execute(request).drawable?.let { drawable ->
                     val bitmapDrawable = drawable as? android.graphics.drawable.BitmapDrawable
                     bitmapDrawable?.bitmap ?: throw IOException("Unsupported image decoder output")
-                } ?: BitmapFactory.decodeStream(context.contentResolver.openInputStream(Uri.parse(source.uri)))
+                } ?: context.contentResolver.openInputStream(Uri.parse(source.uri))?.use(BitmapFactory::decodeStream)
             }.getOrNull()
         }
         sourceBitmap = decoded
