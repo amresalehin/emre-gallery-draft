@@ -93,6 +93,7 @@ import coil.size.Size as CoilSize
 import com.amresalehin.emregallery.data.MediaItem
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.Segmentation
+import com.google.mlkit.vision.segmentation.SegmentationMask
 import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1395,7 +1396,7 @@ private suspend fun removePersonBackground(source: Bitmap): Bitmap {
     }
 
     val mask = try {
-        suspendCancellableCoroutine { continuation ->
+        suspendCancellableCoroutine<SegmentationMask> { continuation ->
             try {
                 segmenter.process(InputImage.fromBitmap(source, 0))
                     .addOnSuccessListener { result ->
