@@ -58,6 +58,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,6 +91,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 private enum class EditorMode { Crop, Adjust }
+private enum class CropEdge { Left, Top, Right, Bottom }
 private enum class CropPreset(val title: String, val ratio: Float?) {
     Free("Free", null),
     Square("1:1", 1f),
@@ -140,7 +142,8 @@ fun ImageEditorScreen(
                     .build()
                 Coil.imageLoader(context).execute(request).drawable?.let { drawable ->
                     val bitmapDrawable = drawable as? android.graphics.drawable.BitmapDrawable
-                    bitmapDrawable?.bitmap ?: throw IOException("Unsupported image decoder output")
+                    bitmapDrawable?.bitmap?.copy(Bitmap.Config.ARGB_8888, false)
+                        ?: throw IOException("Unsupported image decoder output")
                 } ?: context.contentResolver.openInputStream(Uri.parse(source.uri))?.use(BitmapFactory::decodeStream)
             }.getOrNull()
         }
@@ -208,7 +211,7 @@ fun ImageEditorScreen(
                     error = null
                     scope.launch {
                         val saved = withContext(Dispatchers.IO) {
-                            runCatching { exportEditorResult(context, current, recipe, source) }
+                            runCatching { exportEditorResult(context, current, recipe) }
                         }
                         saving = false
                         saved.onSuccess(onSaved).onFailure {
@@ -227,20 +230,21 @@ fun ImageEditorScreen(
             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
+            val currentPreview = preview
             when {
                 loading -> CircularProgressIndicator()
-                preview != null -> {
+                currentPreview != null -> {
                     BoxWithConstraints(
                         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(18.dp)).background(Color(0xFF202020)),
                         contentAlignment = Alignment.Center
                     ) {
-                        val imageAspect = preview.width.toFloat() / preview.height
+                        val imageAspect = currentPreview.width.toFloat() / currentPreview.height
                         val boundsAspect = maxWidth.value / maxHeight.value.coerceAtLeast(1f)
                         val displayWidth = if (imageAspect > boundsAspect) maxWidth else maxHeight * imageAspect
                         val displayHeight = if (imageAspect > boundsAspect) maxWidth / imageAspect else maxHeight
                         Box(Modifier.width(displayWidth).height(displayHeight)) {
                             androidx.compose.foundation.Image(
-                                bitmap = preview.asImageBitmap(),
+                                bitmap = currentPreview.asImageBitmap(),
                                 contentDescription = "Edited image preview",
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = ContentScale.FillBounds
@@ -314,7 +318,9 @@ fun ImageEditorScreen(
                     Surface(
                         modifier = Modifier.clip(CircleShape).clickable {
                             cropPreset = preset
-                            recipe = applyCropPreset(recipe, preset.ratio)
+                            val sourceAspect = image?.let { it.width.toFloat() / it.height.toFloat() } ?: 1f
+                            val rotatedAspect = if (recipe.rotation % 180 == 0) sourceAspect else 1f / sourceAspect
+                            recipe = applyCropPreset(recipe, preset.ratio, rotatedAspect)
                             showCropHandles = true
                         },
                         color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -385,27 +391,49 @@ private fun CropOverlay(
     onRecipeChange: (EditorRecipe) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val currentRecipe by rememberUpdatedState(recipe)
+    val currentOnRecipeChange by rememberUpdatedState(onRecipeChange)
     Canvas(
-        modifier = modifier.pointerInput(recipe) {
-            detectDragGestures { change, drag ->
-                change.consume()
-                val dx = drag.x / size.width
-                val dy = drag.y / size.height
-                val leftGap = recipe.cropLeft
-                val rightGap = 1f - recipe.cropRight
-                val topGap = recipe.cropTop
-                val bottomGap = 1f - recipe.cropBottom
-                val next = when {
-                    leftGap <= rightGap && leftGap <= topGap && leftGap <= bottomGap ->
-                        recipe.copy(cropLeft = (recipe.cropLeft + dx).coerceIn(0f, recipe.cropRight - 0.1f))
-                    rightGap <= topGap && rightGap <= bottomGap ->
-                        recipe.copy(cropRight = (recipe.cropRight + dx).coerceIn(recipe.cropLeft + 0.1f, 1f))
-                    topGap <= bottomGap ->
-                        recipe.copy(cropTop = (recipe.cropTop + dy).coerceIn(0f, recipe.cropBottom - 0.1f))
-                    else -> recipe.copy(cropBottom = (recipe.cropBottom + dy).coerceIn(recipe.cropTop + 0.1f, 1f))
+        modifier = modifier.pointerInput(Unit) {
+            var activeEdge: CropEdge? = null
+            detectDragGestures(
+                onDragStart = { offset ->
+                    val current = currentRecipe
+                    val positions = listOf(
+                        CropEdge.Left to kotlin.math.abs(offset.x - size.width * current.cropLeft),
+                        CropEdge.Top to kotlin.math.abs(offset.y - size.height * current.cropTop),
+                        CropEdge.Right to kotlin.math.abs(offset.x - size.width * current.cropRight),
+                        CropEdge.Bottom to kotlin.math.abs(offset.y - size.height * current.cropBottom)
+                    )
+                    val nearest = positions.minByOrNull { it.second }
+                    activeEdge = nearest?.takeIf { it.second <= 36.dp.toPx() }?.first
+                },
+                onDragEnd = { activeEdge = null },
+                onDragCancel = { activeEdge = null },
+                onDrag = { change, drag ->
+                    val edge = activeEdge ?: return@detectDragGestures
+                    change.consume()
+                    val current = currentRecipe
+                    val dx = drag.x / size.width
+                    val dy = drag.y / size.height
+                    val minimumCropSize = 0.08f
+                    val next = when (edge) {
+                        CropEdge.Left -> current.copy(
+                            cropLeft = (current.cropLeft + dx).coerceIn(0f, current.cropRight - minimumCropSize)
+                        )
+                        CropEdge.Top -> current.copy(
+                            cropTop = (current.cropTop + dy).coerceIn(0f, current.cropBottom - minimumCropSize)
+                        )
+                        CropEdge.Right -> current.copy(
+                            cropRight = (current.cropRight + dx).coerceIn(current.cropLeft + minimumCropSize, 1f)
+                        )
+                        CropEdge.Bottom -> current.copy(
+                            cropBottom = (current.cropBottom + dy).coerceIn(current.cropTop + minimumCropSize, 1f)
+                        )
+                    }
+                    currentOnRecipeChange(next)
                 }
-                onRecipeChange(next)
-            }
+            )
         }
     ) {
         val l = size.width * recipe.cropLeft
@@ -417,33 +445,36 @@ private fun CropOverlay(
         drawRect(dim, topLeft = Offset(0f, t), size = Size(l, b - t))
         drawRect(dim, topLeft = Offset(r, t), size = Size(size.width - r, b - t))
         drawRect(dim, topLeft = Offset(0f, b), size = Size(size.width, size.height - b))
-        drawRect(Color.White, topLeft = Offset(l, t), size = Size(r-l,b-t), style = Stroke(width = 2.dp.toPx()))
+        drawRect(Color.White, topLeft = Offset(l, t), size = Size(r - l, b - t), style = Stroke(width = 2.dp.toPx()))
         for (i in 1..2) {
-            val x = l + (r-l) * i / 3f
-            val y = t + (b-t) * i / 3f
-            drawLine(Color.White.copy(alpha = 0.55f), Offset(x,t), Offset(x,b), strokeWidth = 1.dp.toPx())
-            drawLine(Color.White.copy(alpha = 0.55f), Offset(l,y), Offset(r,y), strokeWidth = 1.dp.toPx())
+            val x = l + (r - l) * i / 3f
+            val y = t + (b - t) * i / 3f
+            drawLine(Color.White.copy(alpha = 0.55f), Offset(x, t), Offset(x, b), strokeWidth = 1.dp.toPx())
+            drawLine(Color.White.copy(alpha = 0.55f), Offset(l, y), Offset(r, y), strokeWidth = 1.dp.toPx())
         }
         val handle = 10.dp.toPx()
-        listOf(Offset(l,t),Offset(r,t),Offset(l,b),Offset(r,b)).forEach {
+        listOf(Offset(l, t), Offset(r, t), Offset(l, b), Offset(r, b)).forEach {
             drawCircle(Color.White, handle, it)
         }
     }
 }
 
-private fun applyCropPreset(recipe: EditorRecipe, ratio: Float?): EditorRecipe {
-    if (ratio == null) return recipe.copy(cropLeft = 0f, cropTop = 0f, cropRight = 1f, cropBottom = 1f)
+private fun applyCropPreset(recipe: EditorRecipe, ratio: Float?, imageAspect: Float): EditorRecipe {
+    if (ratio == null) {
+        return recipe.copy(cropLeft = 0f, cropTop = 0f, cropRight = 1f, cropBottom = 1f)
+    }
+    val targetNormalizedRatio = ratio / imageAspect.coerceAtLeast(0.0001f)
     val currentWidth = recipe.cropRight - recipe.cropLeft
     val currentHeight = recipe.cropBottom - recipe.cropTop
     val currentRatio = currentWidth / currentHeight
     val width: Float
     val height: Float
-    if (currentRatio > ratio) {
+    if (currentRatio > targetNormalizedRatio) {
         height = currentHeight
-        width = (height * ratio).coerceAtMost(1f)
+        width = height * targetNormalizedRatio
     } else {
         width = currentWidth
-        height = (width / ratio).coerceAtMost(1f)
+        height = width / targetNormalizedRatio
     }
     val centerX = (recipe.cropLeft + recipe.cropRight) / 2f
     val centerY = (recipe.cropTop + recipe.cropBottom) / 2f
@@ -466,48 +497,55 @@ private fun applyEditorRecipe(
             true
         )
     } else source
-    val matrix = Matrix().apply {
-        postRotate(recipe.rotation.toFloat())
-        postScale(
-            if (recipe.flipHorizontal) -1f else 1f,
-            if (recipe.flipVertical) -1f else 1f
+
+    // Keep each geometric operation centered. In particular, mirroring around the
+    // bitmap center prevents a negative scale from moving the image off-canvas.
+    var transformed = working
+    if (recipe.rotation % 360 != 0) {
+        val rotationMatrix = Matrix().apply { setRotate(recipe.rotation.toFloat()) }
+        val rotated = Bitmap.createBitmap(
+            transformed, 0, 0, transformed.width, transformed.height, rotationMatrix, true
         )
+        if (rotated !== transformed && transformed !== source && !transformed.isRecycled) {
+            transformed.recycle()
+        }
+        transformed = rotated
     }
-    val rotated = if (recipe.rotation % 360 == 0 && !recipe.flipHorizontal && !recipe.flipVertical) {
-        working
+    if (recipe.flipHorizontal || recipe.flipVertical) {
+        val flipMatrix = Matrix().apply {
+            setScale(
+                if (recipe.flipHorizontal) -1f else 1f,
+                if (recipe.flipVertical) -1f else 1f,
+                transformed.width / 2f,
+                transformed.height / 2f
+            )
+        }
+        val flipped = Bitmap.createBitmap(
+            transformed, 0, 0, transformed.width, transformed.height, flipMatrix, true
+        )
+        if (flipped !== transformed && transformed !== source && !transformed.isRecycled) {
+            transformed.recycle()
+        }
+        transformed = flipped
+    }
+
+    val left = (transformed.width * recipe.cropLeft).roundToInt().coerceIn(0, transformed.width - 1)
+    val top = (transformed.height * recipe.cropTop).roundToInt().coerceIn(0, transformed.height - 1)
+    val right = (transformed.width * recipe.cropRight).roundToInt().coerceIn(left + 1, transformed.width)
+    val bottom = (transformed.height * recipe.cropBottom).roundToInt().coerceIn(top + 1, transformed.height)
+    val cropped = if (left == 0 && top == 0 && right == transformed.width && bottom == transformed.height) {
+        transformed
     } else {
-        // Matrix output bounds expand for quarter turns so the full image is retained.
-        val values = FloatArray(9)
-        matrix.getValues(values)
-        val radians = Math.toRadians(recipe.rotation.toDouble())
-        val boundWidth = kotlin.math.ceil(
-            kotlin.math.abs(working.width * kotlin.math.cos(radians)) +
-                kotlin.math.abs(working.height * kotlin.math.sin(radians))
-        ).toInt().coerceAtLeast(1)
-        val boundHeight = kotlin.math.ceil(
-            kotlin.math.abs(working.width * kotlin.math.sin(radians)) +
-                kotlin.math.abs(working.height * kotlin.math.cos(radians))
-        ).toInt().coerceAtLeast(1)
-        val centered = Matrix(matrix).apply {
-            postTranslate((boundWidth - working.width) / 2f, (boundHeight - working.height) / 2f)
-        }
-        Bitmap.createBitmap(boundWidth, boundHeight, Bitmap.Config.ARGB_8888).also { target ->
-            android.graphics.Canvas(target).drawBitmap(working, centered, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG))
-        }
+        Bitmap.createBitmap(transformed, left, top, right - left, bottom - top)
     }
-    val left = (rotated.width * recipe.cropLeft).roundToInt().coerceIn(0, rotated.width - 1)
-    val top = (rotated.height * recipe.cropTop).roundToInt().coerceIn(0, rotated.height - 1)
-    val right = (rotated.width * recipe.cropRight).roundToInt().coerceIn(left + 1, rotated.width)
-    val bottom = (rotated.height * recipe.cropBottom).roundToInt().coerceIn(top + 1, rotated.height)
-    val cropped = if (left == 0 && top == 0 && right == rotated.width && bottom == rotated.height) {
-        rotated
-    } else Bitmap.createBitmap(rotated, left, top, right-left, bottom-top)
+    if (cropped !== transformed && transformed !== source && !transformed.isRecycled) {
+        transformed.recycle()
+    }
 
     if (recipe.brightness == 0f && recipe.contrast == 1f && recipe.saturation == 1f) {
-        if (cropped !== rotated && rotated !== working && !rotated.isRecycled) rotated.recycle()
-        if (working !== source && !working.isRecycled) working.recycle()
         return cropped
     }
+
     val result = Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888)
     val brightnessOffset = recipe.brightness * 255f
     val contrast = recipe.contrast
@@ -515,27 +553,24 @@ private fun applyEditorRecipe(
     val lumR = 0.213f * (1f - saturation)
     val lumG = 0.715f * (1f - saturation)
     val lumB = 0.072f * (1f - saturation)
-    val matrix = android.graphics.ColorMatrix(floatArrayOf(
+    val colorMatrix = android.graphics.ColorMatrix(floatArrayOf(
         contrast * (lumR + saturation), contrast * lumG, contrast * lumB, 0f, brightnessOffset,
         contrast * lumR, contrast * (lumG + saturation), contrast * lumB, 0f, brightnessOffset,
         contrast * lumR, contrast * lumG, contrast * (lumB + saturation), 0f, brightnessOffset,
         0f, 0f, 0f, 1f, 0f
     ))
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
+        colorFilter = android.graphics.ColorMatrixColorFilter(colorMatrix)
     }
-    android.graphics.Canvas(result).drawBitmap(cropped,0f,0f,paint)
-    if (cropped !== rotated && !cropped.isRecycled) cropped.recycle()
-    if (rotated !== working && rotated !== cropped && !rotated.isRecycled) rotated.recycle()
-    if (working !== source && !working.isRecycled) working.recycle()
+    android.graphics.Canvas(result).drawBitmap(cropped, 0f, 0f, paint)
+    if (cropped !== source && !cropped.isRecycled) cropped.recycle()
     return result
 }
 
 private fun exportEditorResult(
     context: Context,
     source: Bitmap,
-    recipe: EditorRecipe,
-    media: MediaItem
+    recipe: EditorRecipe
 ): MediaItem {
     val output = applyEditorRecipe(source, recipe)
     val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())}.jpg"
