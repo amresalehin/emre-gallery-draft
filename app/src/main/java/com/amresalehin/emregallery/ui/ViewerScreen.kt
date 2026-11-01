@@ -114,6 +114,7 @@ fun ViewerScreen(
     onOpenNeighbor: (MediaItem) -> Unit,
     onOpenMap: () -> Unit,
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
+    onEdit: () -> Unit = {},
     transitionProgress: Animatable<Float, AnimationVector1D> = remember { Animatable(0f) }
 ) {
     val context = LocalContext.current
