@@ -42,15 +42,21 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle
+        id: gradle_setup
         uses: gradle/actions/setup-gradle@v4
 
       - name: Run debug unit tests
         run: bash ./gradlew --no-daemon testDebugUnitTest
 
       - name: Assemble debug APK
+        id: assemble_apk
+        # Keep producing an installable APK even when a network-dependent unit
+        # test fails; the test step still leaves the overall job marked failed.
+        if: ${{ always() && steps.gradle_setup.outcome == 'success' }}
         run: bash ./gradlew --no-daemon assembleDebug
 
       - name: Upload debug APK
+        if: ${{ always() && steps.assemble_apk.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: emre-gallery-debug-${{ github.sha }}
