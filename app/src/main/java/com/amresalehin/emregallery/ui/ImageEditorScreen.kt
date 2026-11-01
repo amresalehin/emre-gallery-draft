@@ -150,12 +150,25 @@ fun ImageEditorScreen(
     BackHandler(enabled = true) { onBack() }
 
     val image = sourceBitmap
-    val preview = remember(image, recipe) {
-        image?.let { applyEditorRecipe(it, recipe) }
+    var preview by remember(image) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(image, recipe) {
+        val renderSource = image ?: run {
+            preview = null
+            return@LaunchedEffect
+        }
+        val rendered = withContext(Dispatchers.Default) {
+            runCatching { applyEditorRecipe(renderSource, recipe, maxPreviewDimension = 2048) }.getOrNull()
+        }
+        val previous = preview
+        preview = rendered
+        if (previous != null && previous !== image && previous !== rendered && !previous.isRecycled) {
+            previous.recycle()
+        }
     }
-    androidx.compose.runtime.DisposableEffect(preview) {
+    androidx.compose.runtime.DisposableEffect(preview, image) {
         onDispose {
-            if (preview != null && preview !== image && !preview.isRecycled) preview.recycle()
+            val bitmap = preview
+            if (bitmap != null && bitmap !== image && !bitmap.isRecycled) bitmap.recycle()
         }
     }
     androidx.compose.runtime.DisposableEffect(image) {
@@ -437,7 +450,20 @@ private fun applyCropPreset(recipe: EditorRecipe, ratio: Float?): EditorRecipe {
     return recipe.copy(cropLeft = left, cropTop = top, cropRight = left + width, cropBottom = top + height)
 }
 
-private fun applyEditorRecipe(source: Bitmap, recipe: EditorRecipe): Bitmap {
+private fun applyEditorRecipe(
+    source: Bitmap,
+    recipe: EditorRecipe,
+    maxPreviewDimension: Int? = null
+): Bitmap {
+    val working = if (maxPreviewDimension != null && maxOf(source.width, source.height) > maxPreviewDimension) {
+        val ratio = maxPreviewDimension.toFloat() / maxOf(source.width, source.height)
+        Bitmap.createScaledBitmap(
+            source,
+            (source.width * ratio).roundToInt().coerceAtLeast(1),
+            (source.height * ratio).roundToInt().coerceAtLeast(1),
+            true
+        )
+    } else source
     val matrix = Matrix().apply {
         postRotate(recipe.rotation.toFloat())
         postScale(
@@ -446,25 +472,25 @@ private fun applyEditorRecipe(source: Bitmap, recipe: EditorRecipe): Bitmap {
         )
     }
     val rotated = if (recipe.rotation % 360 == 0 && !recipe.flipHorizontal && !recipe.flipVertical) {
-        source
+        working
     } else {
         // Matrix output bounds expand for quarter turns so the full image is retained.
         val values = FloatArray(9)
         matrix.getValues(values)
         val radians = Math.toRadians(recipe.rotation.toDouble())
         val boundWidth = kotlin.math.ceil(
-            kotlin.math.abs(source.width * kotlin.math.cos(radians)) +
-                kotlin.math.abs(source.height * kotlin.math.sin(radians))
+            kotlin.math.abs(working.width * kotlin.math.cos(radians)) +
+                kotlin.math.abs(working.height * kotlin.math.sin(radians))
         ).toInt().coerceAtLeast(1)
         val boundHeight = kotlin.math.ceil(
-            kotlin.math.abs(source.width * kotlin.math.sin(radians)) +
-                kotlin.math.abs(source.height * kotlin.math.cos(radians))
+            kotlin.math.abs(working.width * kotlin.math.sin(radians)) +
+                kotlin.math.abs(working.height * kotlin.math.cos(radians))
         ).toInt().coerceAtLeast(1)
         val centered = Matrix(matrix).apply {
-            postTranslate((boundWidth - source.width) / 2f, (boundHeight - source.height) / 2f)
+            postTranslate((boundWidth - working.width) / 2f, (boundHeight - working.height) / 2f)
         }
         Bitmap.createBitmap(boundWidth, boundHeight, Bitmap.Config.ARGB_8888).also { target ->
-            android.graphics.Canvas(target).drawBitmap(source, centered, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG))
+            android.graphics.Canvas(target).drawBitmap(working, centered, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG))
         }
     }
     val left = (rotated.width * recipe.cropLeft).roundToInt().coerceIn(0, rotated.width - 1)
@@ -475,7 +501,11 @@ private fun applyEditorRecipe(source: Bitmap, recipe: EditorRecipe): Bitmap {
         rotated
     } else Bitmap.createBitmap(rotated, left, top, right-left, bottom-top)
 
-    if (recipe.brightness == 0f && recipe.contrast == 1f && recipe.saturation == 1f) return cropped
+    if (recipe.brightness == 0f && recipe.contrast == 1f && recipe.saturation == 1f) {
+        if (cropped !== rotated && rotated !== working && !rotated.isRecycled) rotated.recycle()
+        if (working !== source && !working.isRecycled) working.recycle()
+        return cropped
+    }
     val result = Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888)
     val values = FloatArray(20)
     val b = recipe.brightness * 255f
@@ -500,8 +530,9 @@ private fun applyEditorRecipe(source: Bitmap, recipe: EditorRecipe): Bitmap {
         )).apply { postConcat(android.graphics.ColorMatrix(values)) })
     }
     android.graphics.Canvas(result).drawBitmap(cropped,0f,0f,paint)
-    if(cropped !== source && cropped !== rotated) cropped.recycle()
-    if(rotated !== source && rotated !== cropped) rotated.recycle()
+    if (cropped !== rotated && !cropped.isRecycled) cropped.recycle()
+    if (rotated !== working && rotated !== cropped && !rotated.isRecycled) rotated.recycle()
+    if (working !== source && !working.isRecycled) working.recycle()
     return result
 }
 
