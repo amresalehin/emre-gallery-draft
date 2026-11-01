@@ -29,6 +29,9 @@ class PhotoEditorViewModel : ViewModel() {
     private val _previewBitmap = MutableStateFlow<Bitmap?>(null)
     val previewBitmap: StateFlow<Bitmap?> = _previewBitmap.asStateFlow()
 
+    private val _thumbnailBitmap = MutableStateFlow<Bitmap?>(null)
+    val thumbnailBitmap: StateFlow<Bitmap?> = _thumbnailBitmap.asStateFlow()
+
     private val _sessionState = MutableStateFlow(EditSessionState())
     val sessionState: StateFlow<EditSessionState> = _sessionState.asStateFlow()
 
@@ -90,9 +93,25 @@ class PhotoEditorViewModel : ViewModel() {
             val bmp = PhotoProcessor.loadSampledBitmap(context, Uri.parse(item.uri), 1920)
             _originalBitmap.value = bmp
             _previewBitmap.value = bmp
+            if (bmp != null) {
+                try {
+                    val targetSize = 120
+                    val minDim = minOf(bmp.width, bmp.height)
+                    val startX = (bmp.width - minDim) / 2
+                    val startY = (bmp.height - minDim) / 2
+                    val square = Bitmap.createBitmap(bmp, startX, startY, minDim, minDim)
+                    _thumbnailBitmap.value = Bitmap.createScaledBitmap(square, targetSize, targetSize, true)
+                } catch (_: Exception) {
+                    _thumbnailBitmap.value = null
+                }
+            }
             _isProcessing.value = false
             _processingMessage.value = ""
         }
+    }
+
+    fun setThumbnailBitmapForTesting(bitmap: Bitmap?) {
+        _thumbnailBitmap.value = bitmap
     }
 
     private fun pushState(newState: EditSessionState) {
@@ -618,19 +637,36 @@ class PhotoEditorViewModel : ViewModel() {
         commitSliderChange()
         val cur = _sessionState.value.adjustments
         val updated = cur.copy(
-            exposure = cur.exposure + profile.exposureOffset,
-            contrast = cur.contrast + profile.contrastOffset,
-            temperature = cur.temperature + profile.tempOffset,
-            tint = cur.tint + profile.tintOffset,
-            vibrance = cur.vibrance + profile.vibranceOffset,
-            saturation = cur.saturation + profile.saturationOffset
+            exposure = profile.exposureOffset,
+            contrast = profile.contrastOffset,
+            brightness = profile.brightnessOffset,
+            temperature = profile.tempOffset,
+            tint = profile.tintOffset,
+            vibrance = profile.vibranceOffset,
+            saturation = profile.saturationOffset
         )
+        val intensity = if (profile.fadeOffset > 0f) (100f - profile.fadeOffset) / 100f else 1.0f
         pushState(_sessionState.value.copy(
             adjustments = updated,
             filter = profile.filterType,
-            filterIntensity = 1.0f,
-            description = "Profile ${profile.name}"
+            filterIntensity = intensity,
+            filterBlendMode = profile.blendMode,
+            description = "Preset ${profile.name}"
         ))
+    }
+
+    fun updatePresetIntensity(intensity: Float) {
+        _sessionState.value = _sessionState.value.copy(
+            filterIntensity = intensity.coerceIn(0f, 1f)
+        )
+        updateLivePreview()
+    }
+
+    fun updatePresetBlendMode(blendMode: String) {
+        _sessionState.value = _sessionState.value.copy(
+            filterBlendMode = blendMode
+        )
+        updateLivePreview()
     }
 
     // --- Adjustments ---

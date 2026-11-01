@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.editor.ui
 
+import android.graphics.Bitmap
 import androidx.compose.animation.*
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -7,6 +8,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,10 +38,14 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -586,10 +593,10 @@ fun MinimalSingleSliderRow(
 
 /**
  * Primary editing tool categories in Lightcraft & Emre Gallery:
- * [Auto], [Presets], [Crop], [Adjust], [Masking], [Healing]
+ * [Adjust], [Presets], [Crop], [Masking], [Healing]
  */
 enum class MainBottomTab {
-    AUTO, PRESETS, CROP, ADJUST, MASKING, HEALING
+    ADJUST, PRESETS, CROP, MASKING, HEALING
 }
 
 /**
@@ -632,8 +639,7 @@ fun MainBottomTierBar(
                     Triple(MainBottomTab.PRESETS, "Presets", Icons.Default.FilterVintage),
                     Triple(MainBottomTab.CROP, "Crop", Icons.Default.Crop),
                     Triple(MainBottomTab.MASKING, "Masking", Icons.Default.Brush),
-                    Triple(MainBottomTab.HEALING, "Healing", Icons.Default.Healing),
-                    Triple(MainBottomTab.AUTO, "Auto", Icons.Default.AutoFixHigh)
+                    Triple(MainBottomTab.HEALING, "Healing", Icons.Default.Healing)
                 )
 
                 tabs.forEach { (tab, label, icon) ->
@@ -685,7 +691,6 @@ fun MainBottomTierBar(
                             .padding(vertical = 4.dp)
                             .testTag(
                                 when (tab) {
-                                    MainBottomTab.AUTO -> "bottom_tab_auto"
                                     MainBottomTab.PRESETS -> "bottom_tab_presets"
                                     MainBottomTab.CROP -> "bottom_tab_crop"
                                     MainBottomTab.ADJUST -> "bottom_tab_adjust"
@@ -2254,212 +2259,549 @@ fun OpticsPanel(
  * 7. PROFILES & PRESETS
  * Clean monochrome preview cards and group selection.
  */
-val PresetCategoriesWithCounts = listOf(
-    Pair("Favorites", 2),
-    Pair("Basic", 2),
-    Pair("Artistic", 8),
-    Pair("B&W", 17),
-    Pair("Film-Inspired", 12),
-    Pair("Modern", 10),
-    Pair("Vintage", 10)
+val PresetTier3Tabs = listOf(
+    "SIMPLE",
+    "FX",
+    "B&W",
+    "BLUR",
+    "SKETCH",
+    "COLORS",
+    "ARTISTIC",
+    "MAGIC",
+    "CANVAS"
 )
 
-fun generatePresetsForCategory(cat: String): List<ProfilePreset> = when (cat) {
-    "Favorites" -> listOf(
-        ProfilePreset("fav_color", "Color", "Favorites", FilterType.VIVID, isFavorite = true),
-        ProfilePreset("fav_bw", "Monochrome", "Favorites", FilterType.BW, isFavorite = true)
+val PresetBlendModes = listOf(
+    "Normal",
+    "Multiply",
+    "Color Burn",
+    "Darken",
+    "Lighten",
+    "Screen",
+    "Overlay"
+)
+
+fun generatePresetsForCategory(cat: String): List<ProfilePreset> = when (cat.uppercase()) {
+    "SIMPLE" -> listOf(
+        ProfilePreset("simple_none", "None", "SIMPLE", FilterType.NONE),
+        ProfilePreset("simple_dodger", "Dodger", "SIMPLE", FilterType.DODGER),
+        ProfilePreset("simple_brl2", "BRL2", "SIMPLE", FilterType.BRL2),
+        ProfilePreset("simple_brl4", "BRL4", "SIMPLE", FilterType.BRL4),
+        ProfilePreset("simple_apr2", "APR2", "SIMPLE", FilterType.APR2),
+        ProfilePreset("simple_warm_color", "Warm Color", "SIMPLE", FilterType.WARM_COLOR),
+        ProfilePreset("simple_light_cross", "Light Cross", "SIMPLE", FilterType.LIGHT_CROSS, contrastOffset = 50f, brightnessOffset = 50f, fadeOffset = 25f),
+        ProfilePreset("simple_crisp", "Crisp", "SIMPLE", FilterType.CRISP),
+        ProfilePreset("simple_sharpen", "Sharpen", "SIMPLE", FilterType.SHARPEN),
+        ProfilePreset("simple_vibrant", "Vibrant", "SIMPLE", FilterType.VIVID),
+        ProfilePreset("simple_retro", "Retro", "SIMPLE", FilterType.RETRO),
+        ProfilePreset("simple_sunny", "Sunny", "SIMPLE", FilterType.SUNNY, fadeOffset = 0f),
+        ProfilePreset("simple_vintage", "Vintage", "SIMPLE", FilterType.VINTAGE),
+        ProfilePreset("simple_warm_amber", "Warm Amber", "SIMPLE", FilterType.WARM_AMBER)
     )
-    "Basic" -> listOf(
-        ProfilePreset("basic_color", "Color", "Basic", FilterType.VIVID, isFavorite = true),
-        ProfilePreset("basic_mono", "Monochrome", "Basic", FilterType.BW)
+    "FX" -> listOf(
+        ProfilePreset("fx_none", "None", "FX", FilterType.NONE),
+        ProfilePreset("fx_hdr1", "HDR1", "FX", FilterType.HDR1),
+        ProfilePreset("fx_noise", "Noise", "FX", FilterType.NOISE),
+        ProfilePreset("fx_film", "Film", "FX", FilterType.FILM),
+        ProfilePreset("fx_film2", "Film2", "FX", FilterType.FILM2),
+        ProfilePreset("fx_film3", "Film3", "FX", FilterType.FILM3),
+        ProfilePreset("fx_holga2", "Holga2", "FX", FilterType.HOLGA2),
+        ProfilePreset("fx_vnyl3", "VNYL3", "FX", FilterType.VNYL3),
+        ProfilePreset("fx_indie1", "INDIE1", "FX", FilterType.INDIE1, isNew = true),
+        ProfilePreset("fx_glitch", "Glitch", "FX", FilterType.GLITCH),
+        ProfilePreset("fx_cyber", "Cyber", "FX", FilterType.CYBER)
     )
-    "Artistic" -> (1..8).map {
-        ProfilePreset("art_$it", "Artistic %02d".format(it), "Artistic", FilterType.entries[it % FilterType.entries.size])
-    }
-    "B&W" -> (1..17).map {
-        ProfilePreset("bw_$it", "B&W %02d".format(it), "B&W", if (it % 2 == 0) FilterType.NOIR else FilterType.BW)
-    }
-    "Film-Inspired" -> (1..12).map {
-        ProfilePreset("film_$it", "Film %02d".format(it), "Film-Inspired", FilterType.FILM)
-    }
-    "Modern" -> (1..10).map {
-        ProfilePreset("mod_$it", "Modern %02d".format(it), "Modern", FilterType.CYBER)
-    }
-    "Vintage" -> (1..10).map {
-        ProfilePreset("vin_$it", "Vintage %02d".format(it), "Vintage", FilterType.VINTAGE)
-    }
-    else -> listOf(ProfilePreset("def", "Color", cat, FilterType.VIVID))
+    "B&W" -> listOf(
+        ProfilePreset("bw_none", "None", "B&W", FilterType.NONE),
+        ProfilePreset("bw_classic", "B&W", "B&W", FilterType.BW),
+        ProfilePreset("bw_hicon", "B&W HiCon", "B&W", FilterType.BW_HICON),
+        ProfilePreset("bw_lowcon", "B&W LowCon", "B&W", FilterType.BW_LOWCON),
+        ProfilePreset("bw_filmbw", "Film B&W", "B&W", FilterType.FILM_BW),
+        ProfilePreset("bw_noir", "Noir", "B&W", FilterType.NOIR),
+        ProfilePreset("bw_sepia", "Sepia", "B&W", FilterType.SEPIA)
+    )
+    "BLUR" -> listOf(
+        ProfilePreset("blur_none", "None", "BLUR", FilterType.NONE),
+        ProfilePreset("blur_blur", "Blur", "BLUR", FilterType.BLUR),
+        ProfilePreset("blur_focal", "Focal Zoom", "BLUR", FilterType.FOCAL_ZOOM),
+        ProfilePreset("blur_radial", "Radial Blur", "BLUR", FilterType.RADIAL_BLUR),
+        ProfilePreset("blur_motion", "Motion Blur", "BLUR", FilterType.MOTION_BLUR),
+        ProfilePreset("blur_smart", "Smart Blur", "BLUR", FilterType.SMART_BLUR)
+    )
+    "SKETCH" -> listOf(
+        ProfilePreset("sketch_none", "None", "SKETCH", FilterType.NONE),
+        ProfilePreset("sketch_cartoon1", "Cartoon1", "SKETCH", FilterType.CARTOON1),
+        ProfilePreset("sketch_cartoon2", "Cartoon2", "SKETCH", FilterType.CARTOON2),
+        ProfilePreset("sketch_sktch1", "SKTCH1", "SKETCH", FilterType.SKTCH1),
+        ProfilePreset("sketch_pencil", "Pencil", "SKETCH", FilterType.PENCIL_SKETCH),
+        ProfilePreset("sketch_ink", "Ink Contour", "SKETCH", FilterType.INK_CONTOUR)
+    )
+    "COLORS" -> listOf(
+        ProfilePreset("colors_none", "None", "COLORS", FilterType.NONE),
+        ProfilePreset("colors_splash", "Color Splash", "COLORS", FilterType.COLOR_SPLASH),
+        ProfilePreset("colors_hue", "Hue Shift", "COLORS", FilterType.HUE_SHIFT),
+        ProfilePreset("colors_invert", "Invert", "COLORS", FilterType.INVERT),
+        ProfilePreset("colors_colorize", "Colorize", "COLORS", FilterType.COLORIZE),
+        ProfilePreset("colors_duotone", "Duotone", "COLORS", FilterType.VIVID),
+        ProfilePreset("colors_popart", "Pop Art", "COLORS", FilterType.POP_ART)
+    )
+    "ARTISTIC" -> listOf(
+        ProfilePreset("art_none", "None", "ARTISTIC", FilterType.NONE),
+        ProfilePreset("art_cnv1", "CNV1", "ARTISTIC", FilterType.CNV1),
+        ProfilePreset("art_oil", "OilPainting", "ARTISTIC", FilterType.OIL_PAINTING),
+        ProfilePreset("art_polygon", "Polygon", "ARTISTIC", FilterType.POLYGON),
+        ProfilePreset("art_poster", "Poster", "ARTISTIC", FilterType.POSTER),
+        ProfilePreset("art_halftone", "Halftone Dots", "ARTISTIC", FilterType.HALFTONE_DOTS),
+        ProfilePreset("art_water", "Watercolor", "ARTISTIC", FilterType.WATERCOLOR),
+        ProfilePreset("art_impressionist", "Impressionist", "ARTISTIC", FilterType.OIL_PAINTING)
+    )
+    "MAGIC" -> listOf(
+        ProfilePreset("magic_none", "None", "MAGIC", FilterType.NONE),
+        ProfilePreset("magic_flora", "Flora", "MAGIC", FilterType.FLORA),
+        ProfilePreset("magic_pastel", "Pastel", "MAGIC", FilterType.PASTEL),
+        ProfilePreset("magic_undead", "Undead", "MAGIC", FilterType.UNDEAD),
+        ProfilePreset("magic_ice", "White Ice", "MAGIC", FilterType.WHITE_ICE),
+        ProfilePreset("magic_geode", "Geode", "MAGIC", FilterType.GEODE),
+        ProfilePreset("magic_sketchy", "Sketchy", "MAGIC", FilterType.SKETCHY),
+        ProfilePreset("magic_pow", "Pow", "MAGIC", FilterType.POW),
+        ProfilePreset("magic_flare", "Flare", "MAGIC", FilterType.FLARE),
+        ProfilePreset("magic_animation", "Animation", "MAGIC", FilterType.ANIMATION)
+    )
+    "CANVAS" -> listOf(
+        ProfilePreset("canvas_none", "None", "CANVAS", FilterType.NONE),
+        ProfilePreset("canvas_1", "Canvas 1", "CANVAS", FilterType.CANVAS1),
+        ProfilePreset("canvas_2", "Canvas 2", "CANVAS", FilterType.CANVAS2),
+        ProfilePreset("canvas_grainy", "Grainy Canvas", "CANVAS", FilterType.GRAINY_CANVAS),
+        ProfilePreset("canvas_linen", "Linen", "CANVAS", FilterType.LINEN),
+        ProfilePreset("canvas_paper", "Paper", "CANVAS", FilterType.PAPER),
+        ProfilePreset("canvas_grunge", "Grunge", "CANVAS", FilterType.GRUNGE)
+    )
+    else -> listOf(
+        ProfilePreset("def_none", "None", cat, FilterType.NONE),
+        ProfilePreset("def_vivid", "Vivid", cat, FilterType.VIVID)
+    )
 }
 
+/**
+ * 7. PROFILES & PRESETS (TIER 2 & TIER 3 ARCHITECTURE)
+ *
+ * Tier 3: Bottom horizontal category strip:
+ * [SIMPLE] [FX] [B&W] [BLUR] [SKETCH] [COLORS] [ARTISTIC] [MAGIC] [CANVAS]
+ *
+ * Tier 2: Directly above Tier 3, horizontal carousel of thumbnail preview cards
+ * with live filter styling, title strip, cyan active selection border, and tune icon.
+ *
+ * Above Tier 2: Interactive slider controls (Contrast, Brightness, Fade) and Blend Modes
+ * as displayed in Screenshots 11 & 12 when an adjustable preset is selected.
+ */
 @Composable
 fun ProfilesPanel(
     selectedCategory: String,
     onSelectCategory: (String) -> Unit,
     onApplyProfile: (ProfilePreset) -> Unit,
-    onClose: () -> Unit,
-    onConfirm: () -> Unit,
-    modifier: Modifier = Modifier
+    onClose: () -> Unit = {},
+    onConfirm: () -> Unit = {},
+    modifier: Modifier = Modifier,
+    thumbnailBitmap: Bitmap? = null,
+    onPresetAdjust: ((contrast: Float, brightness: Float, fade: Float, blendMode: String) -> Unit)? = null
 ) {
-    var showCategorySheet by remember { mutableStateOf(false) }
-    var activeProfileId by remember { mutableStateOf("basic_color") }
+    // Current category (defaults to SIMPLE)
+    val activeCat = if (PresetTier3Tabs.any { it.equals(selectedCategory, ignoreCase = true) }) {
+        selectedCategory.uppercase()
+    } else {
+        "SIMPLE"
+    }
 
-    val presets = remember(selectedCategory) { generatePresetsForCategory(selectedCategory) }
+    var activeProfileId by remember(activeCat) {
+        val initialList = generatePresetsForCategory(activeCat)
+        mutableStateOf(initialList.firstOrNull()?.id ?: "")
+    }
+
+    // Interactive slider & blend adjustments for active preset
+    var showAdjustSliders by remember { mutableStateOf(false) }
+    var contrastValue by remember { mutableFloatStateOf(50f) }
+    var brightnessValue by remember { mutableFloatStateOf(50f) }
+    var fadeValue by remember { mutableFloatStateOf(0f) }
+    var activeBlendMode by remember { mutableStateOf("Normal") }
+
+    val presets = remember(activeCat) { generatePresetsForCategory(activeCat) }
+    val currentPreset = presets.find { it.id == activeProfileId }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFF141414))
-            .padding(vertical = 8.dp)
+            .background(Color(0xFF0F0F0F))
     ) {
-        // Group dropdown chip
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                onClick = { showCategorySheet = true },
-                shape = CircleShape,
-                color = Color(0xFF1E1E1E),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = selectedCategory,
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Select category",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
+        // --- PRESET ADJUSTMENT PANEL (Above Tier 2) ---
+        // Visible when an active preset (non-None) is selected, matching screenshots 11 and 12
+        if (showAdjustSliders && currentPreset != null && currentPreset.filterType != FilterType.NONE) {
+            PresetAdjustmentsPanel(
+                presetName = currentPreset.name,
+                hasMultiSliders = currentPreset.name.equals("Light Cross", ignoreCase = true) ||
+                                 currentPreset.contrastOffset > 0f ||
+                                 currentPreset.brightnessOffset > 0f,
+                contrast = contrastValue,
+                brightness = brightnessValue,
+                fade = fadeValue,
+                activeBlendMode = activeBlendMode,
+                onContrastChange = {
+                    contrastValue = it
+                    onPresetAdjust?.invoke(contrastValue, brightnessValue, fadeValue, activeBlendMode)
+                },
+                onBrightnessChange = {
+                    brightnessValue = it
+                    onPresetAdjust?.invoke(contrastValue, brightnessValue, fadeValue, activeBlendMode)
+                },
+                onFadeChange = {
+                    fadeValue = it
+                    onPresetAdjust?.invoke(contrastValue, brightnessValue, fadeValue, activeBlendMode)
+                },
+                onBlendModeSelect = {
+                    activeBlendMode = it
+                    onPresetAdjust?.invoke(contrastValue, brightnessValue, fadeValue, activeBlendMode)
                 }
-            }
+            )
         }
 
-        // Horizontal Carousel of Profile Cards
+        // --- TIER 2: PRESET ITEMS CAROUSEL ---
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 10.dp, horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(top = 10.dp, bottom = 6.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(presets) { preset ->
+            items(presets, key = { it.id }) { preset ->
                 val isSelected = activeProfileId == preset.id
-                ProfilePreviewCard(
+                PresetPreviewCard(
                     preset = preset,
                     isSelected = isSelected,
+                    showTuneIcon = isSelected && preset.filterType != FilterType.NONE,
+                    thumbnailBitmap = thumbnailBitmap,
                     onClick = {
-                        activeProfileId = preset.id
-                        onApplyProfile(preset)
+                        if (activeProfileId == preset.id && preset.filterType != FilterType.NONE) {
+                            // Tapping an already selected preset toggles the adjustment panel
+                            showAdjustSliders = !showAdjustSliders
+                        } else {
+                            activeProfileId = preset.id
+                            // Set initial values based on preset defaults
+                            contrastValue = if (preset.contrastOffset > 0f) preset.contrastOffset else 50f
+                            brightnessValue = if (preset.brightnessOffset > 0f) preset.brightnessOffset else 50f
+                            fadeValue = preset.fadeOffset
+                            activeBlendMode = preset.blendMode
+                            showAdjustSliders = preset.filterType != FilterType.NONE
+                            onApplyProfile(preset)
+                            onPresetAdjust?.invoke(contrastValue, brightnessValue, fadeValue, activeBlendMode)
+                        }
                     }
                 )
             }
         }
-    }
 
-    if (showCategorySheet) {
-        AlertDialog(
-            onDismissRequest = { showCategorySheet = false },
-            confirmButton = {},
-            containerColor = Color(0xFF1E1E1E),
-            shape = RoundedCornerShape(20.dp),
-            title = {
-                Text("Select Profile Group", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            },
-            text = {
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(PresetCategoriesWithCounts) { (cat, count) ->
-                        val isCurrent = cat == selectedCategory
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onSelectCategory(cat)
-                                    showCategorySheet = false
-                                }
-                                .padding(vertical = 12.dp, horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = cat,
-                                color = if (isCurrent) Color.White else Color(0xFFCCCCCC),
-                                fontSize = 14.sp,
-                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
-                            )
-                            Text(
-                                text = count.toString(),
-                                color = Color(0xFF888888),
-                                fontSize = 13.sp
-                            )
-                        }
-                    }
+        // --- TIER 3: BOTTOM CATEGORY STRIP ---
+        PresetTier3CategoryStrip(
+            categories = PresetTier3Tabs,
+            activeCategory = activeCat,
+            onSelectCategory = { cat ->
+                onSelectCategory(cat)
+                val newPresets = generatePresetsForCategory(cat)
+                val firstPreset = newPresets.firstOrNull()
+                if (firstPreset != null) {
+                    activeProfileId = firstPreset.id
+                    showAdjustSliders = false
+                    onApplyProfile(firstPreset)
                 }
             }
         )
     }
 }
 
+/**
+ * Tier 3 Category Navigation Strip.
+ * Scrollable row of ALL CAPS category text tabs:
+ * [SIMPLE] [FX] [B&W] [BLUR] [SKETCH] [COLORS] [ARTISTIC] [MAGIC] [CANVAS]
+ */
 @Composable
-private fun ProfilePreviewCard(
+fun PresetTier3CategoryStrip(
+    categories: List<String>,
+    activeCategory: String,
+    onSelectCategory: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = Color(0xFF0D0D0D),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(22.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items(categories) { cat ->
+                val isSelected = cat.equals(activeCategory, ignoreCase = true)
+                Text(
+                    text = cat,
+                    color = if (isSelected) Color(0xFF00E5FF) else Color(0xFFDDDDDD),
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            onSelectCategory(cat)
+                        }
+                        .testTag("preset_tier3_${cat.lowercase()}")
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Tier 2 Preset Thumbnail Preview Card.
+ * Displays preview image of the photo with preset matrix applied live, cyan selection border,
+ * tune sliders icon overlay when active, NEW badge, and dark label strip.
+ */
+@Composable
+fun PresetPreviewCard(
     preset: ProfilePreset,
     isSelected: Boolean,
+    showTuneIcon: Boolean,
+    thumbnailBitmap: Bitmap? = null,
     onClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
-            .width(100.dp)
+            .width(68.dp)
             .clickable(onClick = onClick)
             .border(
                 width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.08f),
-                shape = RoundedCornerShape(12.dp)
+                color = if (isSelected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.08f),
+                shape = RoundedCornerShape(6.dp)
             )
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1E1E1E))
+            .clip(RoundedCornerShape(6.dp))
+            .background(Color(0xFF161616))
+            .testTag("preset_card_${preset.id}")
     ) {
-        // Thumbnail gradient simulation
+        // Thumbnail preview box displaying actual photo with preset applied
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(72.dp)
-                .background(
-                    when (preset.category) {
-                        "B&W" -> Brush.verticalGradient(listOf(Color(0xFF444444), Color(0xFF111111)))
-                        "Vintage" -> Brush.linearGradient(listOf(Color(0xFF7D6E63), Color(0xFF5D4037)))
-                        "Film-Inspired" -> Brush.linearGradient(listOf(Color(0xFF4A5568), Color(0xFF2D3748)))
-                        "Artistic" -> Brush.linearGradient(listOf(Color(0xFF6B46C1), Color(0xFF319795)))
-                        else -> Brush.linearGradient(listOf(Color(0xFF555555), Color(0xFF222222)))
-                    }
+                .height(52.dp)
+                .background(Color(0xFF1C1C1E))
+        ) {
+            if (thumbnailBitmap != null) {
+                val matrix = remember(preset.filterType) {
+                    PhotoProcessor.getFilterMatrix(preset.filterType)
+                }
+                val colorFilter = remember(matrix) {
+                    matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it.array)) }
+                }
+                Image(
+                    bitmap = thumbnailBitmap.asImageBitmap(),
+                    contentDescription = preset.name,
+                    contentScale = ContentScale.Crop,
+                    colorFilter = if (preset.filterType == FilterType.NONE) null else colorFilter,
+                    modifier = Modifier.fillMaxSize()
                 )
-        )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF242424))
+                )
+            }
 
-        // Title bar
+            // "NEW" Badge (Screenshot 10 - INDIE1)
+            if (preset.isNew) {
+                Surface(
+                    color = Color(0xFFD81B60),
+                    shape = RoundedCornerShape(topEnd = 6.dp, bottomStart = 4.dp),
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Text(
+                        text = "NEW",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
+
+            // Tune Sliders Icon on selected card (Screenshots 11 & 12)
+            if (showTuneIcon) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.35f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = "Adjust preset",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+
+        // Bottom label strip
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(if (isSelected) Color.White else Color(0xFF161616))
-                .padding(vertical = 6.dp, horizontal = 6.dp),
+                .height(22.dp)
+                .background(if (isSelected) Color(0xFF181818) else Color(0xFF121212))
+                .padding(horizontal = 3.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = preset.name,
-                color = if (isSelected) Color.Black else Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
+                color = if (isSelected) Color(0xFF00E5FF) else Color.White,
+                fontSize = 10.sp,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                textAlign = TextAlign.Center
             )
         }
+    }
+}
+
+/**
+ * Adjustment Sliders & Blend Modes Bar
+ * Replicates the exact fine-tuning controls shown in Screenshots 11 and 12:
+ * Contrast (50), Brightness (50), Fade (25/0) +
+ * Blend modes: Normal, Multiply, Color Burn, Darken, Lighten, Screen, Overlay
+ */
+@Composable
+fun PresetAdjustmentsPanel(
+    presetName: String,
+    hasMultiSliders: Boolean,
+    contrast: Float,
+    brightness: Float,
+    fade: Float,
+    activeBlendMode: String,
+    onContrastChange: (Float) -> Unit,
+    onBrightnessChange: (Float) -> Unit,
+    onFadeChange: (Float) -> Unit,
+    onBlendModeSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xFF121212))
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        // Multi-sliders (Contrast, Brightness, Fade) or Single Fade Slider
+        if (hasMultiSliders) {
+            PresetSliderRow(
+                label = "Contrast",
+                value = contrast,
+                onValueChange = onContrastChange
+            )
+            Spacer(Modifier.height(4.dp))
+            PresetSliderRow(
+                label = "Brightness",
+                value = brightness,
+                onValueChange = onBrightnessChange
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+
+        // Fade Slider (Screenshots 11 & 12)
+        PresetSliderRow(
+            label = "Fade",
+            value = fade,
+            onValueChange = onFadeChange
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // Blend Modes Row (Normal, Multiply, Color Burn, Darken, Lighten, Screen, Overlay)
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items(PresetBlendModes) { mode ->
+                val isSelected = mode.equals(activeBlendMode, ignoreCase = true)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        onBlendModeSelect(mode)
+                    }
+                ) {
+                    Text(
+                        text = mode,
+                        color = if (isSelected) Color.White else Color(0xFF888888),
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                    if (isSelected) {
+                        Spacer(Modifier.height(2.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(18.dp)
+                                .height(2.dp)
+                                .background(Color.White)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PresetSliderRow(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(72.dp)
+        )
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0f..100f,
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.White,
+                inactiveTrackColor = Color(0xFF333333)
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .height(24.dp)
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = value.toInt().toString(),
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(28.dp),
+            textAlign = TextAlign.End
+        )
     }
 }
 
@@ -2477,7 +2819,7 @@ fun CropControlsPanel(
     onFlipV: () -> Unit,
     onStraightenChange: (Float) -> Unit,
     onStraightenFinished: (() -> Unit)? = null,
-    onApply: () -> Unit,
+    onApply: () -> Unit = {},
     onAutoLevel: (() -> Unit)? = null,
     onResetCrop: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -2505,7 +2847,7 @@ fun CropControlsPanel(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.RotateRight, null, Modifier.size(16.dp), tint = Color.White)
+                        Icon(Icons.AutoMirrored.Filled.RotateRight, null, Modifier.size(16.dp), tint = Color.White)
                         Spacer(Modifier.width(6.dp))
                         Text("Rotate 90°", color = Color.White, fontSize = 12.sp)
                     }

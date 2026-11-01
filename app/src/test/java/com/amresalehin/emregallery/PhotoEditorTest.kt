@@ -263,5 +263,119 @@ class PhotoEditorTest {
         vm.resetColorMix()
         assertTrue(vm.sessionState.value.adjustments.hslAdjustments.isEmpty())
     }
+
+    @Test
+    fun testPresetTier3Categories_andTier2Presets() {
+        val categories = com.amresalehin.emregallery.editor.ui.PresetTier3Tabs
+        assertEquals(9, categories.size)
+        assertTrue(categories.contains("SIMPLE"))
+        assertTrue(categories.contains("FX"))
+        assertTrue(categories.contains("B&W"))
+        assertTrue(categories.contains("BLUR"))
+        assertTrue(categories.contains("SKETCH"))
+        assertTrue(categories.contains("COLORS"))
+        assertTrue(categories.contains("ARTISTIC"))
+        assertTrue(categories.contains("MAGIC"))
+        assertTrue(categories.contains("CANVAS"))
+
+        // Verify presets exist for all categories
+        categories.forEach { cat ->
+            val presets = com.amresalehin.emregallery.editor.ui.generatePresetsForCategory(cat)
+            assertTrue("Category $cat should have presets", presets.isNotEmpty())
+            assertEquals("First item should be None", "None", presets.first().name)
+        }
+
+        // Verify specific presets from screenshots
+        val simplePresets = com.amresalehin.emregallery.editor.ui.generatePresetsForCategory("SIMPLE").map { it.name }
+        assertTrue(simplePresets.contains("Dodger"))
+        assertTrue(simplePresets.contains("BRL2"))
+        assertTrue(simplePresets.contains("BRL4"))
+        assertTrue(simplePresets.contains("APR2"))
+        assertTrue(simplePresets.contains("Light Cross"))
+        assertTrue(simplePresets.contains("Sunny"))
+
+        val fxPresets = com.amresalehin.emregallery.editor.ui.generatePresetsForCategory("FX").map { it.name }
+        assertTrue(fxPresets.contains("HDR1"))
+        assertTrue(fxPresets.contains("Noise"))
+        assertTrue(fxPresets.contains("Film"))
+        assertTrue(fxPresets.contains("Film2"))
+        assertTrue(fxPresets.contains("Film3"))
+        assertTrue(fxPresets.contains("Holga2"))
+        assertTrue(fxPresets.contains("VNYL3"))
+        assertTrue(fxPresets.contains("INDIE1"))
+
+        val magicPresets = com.amresalehin.emregallery.editor.ui.generatePresetsForCategory("MAGIC").map { it.name }
+        assertTrue(magicPresets.contains("Flora"))
+        assertTrue(magicPresets.contains("Pastel"))
+        assertTrue(magicPresets.contains("Undead"))
+        assertTrue(magicPresets.contains("White Ice"))
+        assertTrue(magicPresets.contains("Geode"))
+        assertTrue(magicPresets.contains("Sketchy"))
+        assertTrue(magicPresets.contains("Pow"))
+        assertTrue(magicPresets.contains("Flare"))
+        assertTrue(magicPresets.contains("Animation"))
+    }
+
+    @Test
+    fun testPresetApplication_viewModelUpdatesState() {
+        val vm = PhotoEditorViewModel()
+        val simplePresets = com.amresalehin.emregallery.editor.ui.generatePresetsForCategory("SIMPLE")
+        val lightCross = simplePresets.first { it.name == "Light Cross" }
+
+        vm.applyProfile(lightCross)
+        assertEquals(FilterType.LIGHT_CROSS, vm.sessionState.value.filter)
+
+        // Update intensity / fade
+        vm.updatePresetIntensity(0.75f)
+        assertEquals(0.75f, vm.sessionState.value.filterIntensity, 0.001f)
+
+        // Update blend mode
+        vm.updatePresetBlendMode("Multiply")
+        assertEquals("Multiply", vm.sessionState.value.filterBlendMode)
+    }
+
+    @Test
+    fun testMainBottomTabs_autoRemoved() {
+        val tabs = com.amresalehin.emregallery.editor.ui.MainBottomTab.entries
+        assertEquals(5, tabs.size)
+        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.ADJUST))
+        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.PRESETS))
+        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.CROP))
+        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.MASKING))
+        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.HEALING))
+    }
+
+    @Test
+    fun testThumbnailBitmap_stateFlow() {
+        val vm = PhotoEditorViewModel()
+        assertNull(vm.thumbnailBitmap.value)
+        val dummy = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+        vm.setThumbnailBitmapForTesting(dummy)
+        assertEquals(dummy, vm.thumbnailBitmap.value)
+    }
+
+    @Test
+    fun testFilterColorMatrix_validForPresets() {
+        val testPresets = listOf(
+            FilterType.VIVID, FilterType.FILM, FilterType.DODGER, FilterType.BRL2,
+            FilterType.BRL4, FilterType.APR2, FilterType.LIGHT_CROSS, FilterType.NOIR,
+            FilterType.SEPIA, FilterType.VINTAGE, FilterType.CYBER, FilterType.FLORA
+        )
+        testPresets.forEach { filter ->
+            val matrix = PhotoProcessor.getFilterMatrix(filter)
+            assertNotNull("Matrix for $filter should not be null", matrix)
+            assertEquals(20, matrix!!.array.size)
+        }
+
+        com.amresalehin.emregallery.editor.ui.PresetTier3Tabs.forEach { cat ->
+            val presets = com.amresalehin.emregallery.editor.ui.generatePresetsForCategory(cat)
+            presets.forEach { preset ->
+                val matrix = PhotoProcessor.getFilterMatrix(preset.filterType)
+                if (matrix != null) {
+                    assertEquals(20, matrix.array.size)
+                }
+            }
+        }
+    }
 }
 

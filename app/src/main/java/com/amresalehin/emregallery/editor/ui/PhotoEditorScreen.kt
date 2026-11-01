@@ -80,12 +80,13 @@ fun PhotoEditorScreen(
     val processingMessage by viewModel.processingMessage.collectAsStateWithLifecycle()
     val isReplaying by viewModel.isReplaying.collectAsStateWithLifecycle()
     val replayProgress by viewModel.replayProgress.collectAsStateWithLifecycle()
+    val thumbnailBitmap by viewModel.thumbnailBitmap.collectAsStateWithLifecycle()
 
     // Navigation & Tool State
     var currentBottomTab by remember { mutableStateOf(MainBottomTab.ADJUST) }
     var activeAdjustCategory by remember { mutableStateOf(AdjustCategory.LIGHT) }
     var activeCurveChannel by remember { mutableStateOf(CurveChannel.RGB) }
-    var selectedProfileCategory by remember { mutableStateOf("Favorites") }
+    var selectedProfileCategory by remember { mutableStateOf("SIMPLE") }
     var selectedColorMixBand by remember { mutableStateOf(ColorBand.RED) }
 
     // Floating HUD slider state for interactive drag feedback
@@ -106,15 +107,17 @@ fun PhotoEditorScreen(
     var showDiscardDialog by remember { mutableStateOf(false) }
     var numericInputTarget by remember { mutableStateOf<NumericInputTarget?>(null) }
 
-    // Back Handler: Respects numeric dialog, active mode Cancel first, then discard confirmation
+    // Back Handler: Respects numeric dialog, active mode Cancel first, then tool tab, then discard confirmation
     BackHandler {
         when {
             numericInputTarget != null -> numericInputTarget = null
             currentMode != EditorMode.NONE -> viewModel.cancelModeChanges()
             showAiSheet -> showAiSheet = false
             showExportSheet -> showExportSheet = false
-            currentBottomTab == MainBottomTab.PRESETS -> currentBottomTab = MainBottomTab.ADJUST
-            currentBottomTab != MainBottomTab.ADJUST -> currentBottomTab = MainBottomTab.ADJUST
+            currentBottomTab != MainBottomTab.ADJUST -> {
+                currentBottomTab = MainBottomTab.ADJUST
+                viewModel.setActiveTool(EditorTool.ADJUST)
+            }
             canUndo -> showDiscardDialog = true
             else -> onBack()
         }
@@ -205,17 +208,9 @@ fun PhotoEditorScreen(
                         else -> "+100"
                     }
                 )
-            } else if (currentMode != EditorMode.NONE) {
-                // Proper Editing Mode Container: Pinned Cancel / Title / Apply Header + Scrollable Tools
+            } else if (currentMode in listOf(EditorMode.CURVES, EditorMode.COLOR_MIX, EditorMode.COLOR_GRADING)) {
+                // Tone Curves, Color Mix, and Color Grading sub-inspectors
                 when (currentMode) {
-                    EditorMode.CROP -> {
-                        EditorModeHeader(
-                            title = "Crop & Geometry",
-                            onCancel = { viewModel.cancelModeChanges() },
-                            onApply = { viewModel.applyModeChanges("Crop & Geometry") },
-                            onReset = { viewModel.resetCrop() }
-                        )
-                    }
                     EditorMode.CURVES -> {
                         EditorModeHeader(
                             title = "Tone Curves",
@@ -223,6 +218,19 @@ fun PhotoEditorScreen(
                             onApply = { viewModel.applyModeChanges("Tone Curves") },
                             onReset = { viewModel.resetCurves() }
                         )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            CurveControlsBar(
+                                activeChannel = activeCurveChannel,
+                                onSelectChannel = { activeCurveChannel = it },
+                                onResetCurve = { viewModel.resetCurve(activeCurveChannel) },
+                                onDone = { viewModel.applyModeChanges("Tone Curves") }
+                            )
+                        }
                     }
                     EditorMode.COLOR_MIX -> {
                         EditorModeHeader(
@@ -231,75 +239,12 @@ fun PhotoEditorScreen(
                             onApply = { viewModel.applyModeChanges("Color Mix") },
                             onReset = { viewModel.resetColorMix() }
                         )
-                    }
-                    EditorMode.COLOR_GRADING -> {
-                        EditorModeHeader(
-                            title = "Color Grading",
-                            onCancel = { viewModel.cancelModeChanges() },
-                            onApply = { viewModel.applyModeChanges("Color Grading") },
-                            onReset = {
-                                viewModel.setSplitToning(SplitToningParams())
-                            }
-                        )
-                    }
-                    EditorMode.PRESETS -> {
-                        EditorModeHeader(
-                            title = "Presets & Profiles",
-                            onCancel = { viewModel.cancelModeChanges() },
-                            onApply = { viewModel.applyModeChanges("Preset Applied") }
-                        )
-                    }
-                    EditorMode.BRUSHES -> {
-                        EditorModeHeader(
-                            title = "Masking & Draw",
-                            onCancel = { viewModel.cancelModeChanges() },
-                            onApply = { viewModel.applyModeChanges("Brush Strokes") },
-                            onReset = { viewModel.clearDrawingStrokes() }
-                        )
-                    }
-                    EditorMode.RETOUCH -> {
-                        EditorModeHeader(
-                            title = "Healing & Retouch",
-                            onCancel = { viewModel.cancelModeChanges() },
-                            onApply = { viewModel.applyModeChanges("Healing Retouch") },
-                            onReset = { viewModel.clearRetouchStrokes() }
-                        )
-                    }
-                    else -> {}
-                }
-
-                // Scrollable content area for mode controls
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = false)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    when (currentMode) {
-                        EditorMode.CROP -> {
-                            CropControlsPanel(
-                                selectedPreset = selectedCropPreset,
-                                straightenAngle = sessionState.transform.straightenAngle,
-                                onSelectPreset = { selectedCropPreset = it },
-                                onRotate90 = { viewModel.rotate90() },
-                                onFlipH = { viewModel.flipHorizontal() },
-                                onFlipV = { viewModel.flipVertical() },
-                                onStraightenChange = { viewModel.setStraighten(it) },
-                                onStraightenFinished = { viewModel.commitSliderChange() },
-                                onApply = { viewModel.applyModeChanges("Crop & Geometry") },
-                                onAutoLevel = { viewModel.autoLevelStraighten() },
-                                onResetCrop = { viewModel.resetCrop() }
-                            )
-                        }
-                        EditorMode.CURVES -> {
-                            CurveControlsBar(
-                                activeChannel = activeCurveChannel,
-                                onSelectChannel = { activeCurveChannel = it },
-                                onResetCurve = { viewModel.resetCurve(activeCurveChannel) },
-                                onDone = { viewModel.applyModeChanges("Tone Curves") }
-                            )
-                        }
-                        EditorMode.COLOR_MIX -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .verticalScroll(rememberScrollState())
+                        ) {
                             val currentHsl = sessionState.adjustments.hslAdjustments[selectedColorMixBand] ?: HslBandAdjustment()
                             ColorMixPanel(
                                 selectedBand = selectedColorMixBand,
@@ -319,7 +264,22 @@ fun PhotoEditorScreen(
                                 }
                             )
                         }
-                        EditorMode.COLOR_GRADING -> {
+                    }
+                    EditorMode.COLOR_GRADING -> {
+                        EditorModeHeader(
+                            title = "Color Grading",
+                            onCancel = { viewModel.cancelModeChanges() },
+                            onApply = { viewModel.applyModeChanges("Color Grading") },
+                            onReset = {
+                                viewModel.setSplitToning(SplitToningParams())
+                            }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .verticalScroll(rememberScrollState())
+                        ) {
                             val split = sessionState.adjustments.splitToning
                             ColorGradingPanel(
                                 splitToning = split,
@@ -331,212 +291,240 @@ fun PhotoEditorScreen(
                                 onReset = { viewModel.setSplitToning(SplitToningParams()) }
                             )
                         }
-                        EditorMode.PRESETS -> {
-                            ProfilesPanel(
-                                selectedCategory = selectedProfileCategory,
-                                onSelectCategory = { selectedProfileCategory = it },
-                                onApplyProfile = { viewModel.applyProfile(it) },
-                                onClose = { viewModel.cancelModeChanges() },
-                                onConfirm = { viewModel.applyModeChanges("Preset Applied") }
-                            )
-                        }
-                        EditorMode.BRUSHES -> {
-                            BrushesPanel(
-                                selectedBrush = selectedBrushType,
-                                brushColor = selectedBrushColor,
-                                brushWidth = brushWidth,
-                                onSelectBrush = { selectedBrushType = it },
-                                onColorSelect = { selectedBrushColor = it },
-                                onWidthChange = { brushWidth = it }
-                            )
-                        }
-                        EditorMode.RETOUCH -> {
-                            RetouchPanel(
-                                activeType = activeRetouchType,
-                                brushRadius = brushWidth * 1.5f,
-                                onSelectType = { activeRetouchType = it },
-                                onRadiusChange = { brushWidth = it / 1.5f }
-                            )
-                        }
-                        else -> {}
                     }
+                    else -> {}
                 }
             } else {
-                // Root view: Adjustment Panels inside content-sized scrolling container
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f, fill = false)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    when (activeAdjustCategory) {
-                        AdjustCategory.LIGHT -> {
-                            val adj = sessionState.adjustments
-                            LightPanel(
-                                exposure = adj.exposure,
-                                contrast = adj.contrast,
-                                highlights = adj.highlights,
-                                shadows = adj.shadows,
-                                whites = adj.whites,
-                                blacks = adj.blacks,
-                                onOpenCurve = { viewModel.enterMode(EditorMode.CURVES) },
-                                onSliderDragStart = { name, formatted ->
-                                    val initVal = when (name) {
-                                        "Exposure" -> adj.exposure
-                                        "Contrast" -> adj.contrast
-                                        "Highlights" -> adj.highlights
-                                        "Shadows" -> adj.shadows
-                                        "Whites" -> adj.whites
-                                        else -> adj.blacks
+                // Tier 1 Active Panel (Adjust, Presets, Crop, Masking, Healing)
+                when (currentBottomTab) {
+                    MainBottomTab.ADJUST -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            when (activeAdjustCategory) {
+                                AdjustCategory.LIGHT -> {
+                                    val adj = sessionState.adjustments
+                                    LightPanel(
+                                        exposure = adj.exposure,
+                                        contrast = adj.contrast,
+                                        highlights = adj.highlights,
+                                        shadows = adj.shadows,
+                                        whites = adj.whites,
+                                        blacks = adj.blacks,
+                                        onOpenCurve = { viewModel.enterMode(EditorMode.CURVES) },
+                                        onSliderDragStart = { name, formatted ->
+                                            val initVal = when (name) {
+                                                "Exposure" -> adj.exposure
+                                                "Contrast" -> adj.contrast
+                                                "Highlights" -> adj.highlights
+                                                "Shadows" -> adj.shadows
+                                                "Whites" -> adj.whites
+                                                else -> adj.blacks
+                                            }
+                                            startSliderDrag(name, formatted, initVal)
+                                        },
+                                        onSliderChange = { prop, val_ ->
+                                            viewModel.updateAdjustmentValue(prop, val_)
+                                        },
+                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                    )
+                                }
+                                AdjustCategory.COLOR -> {
+                                    val adj = sessionState.adjustments
+                                    ColorPanel(
+                                        isBlackAndWhite = adj.isBlackAndWhite,
+                                        whiteBalancePreset = adj.whiteBalancePreset,
+                                        temperature = adj.temperature,
+                                        tint = adj.tint,
+                                        vibrance = adj.vibrance,
+                                        saturation = adj.saturation,
+                                        onToggleBw = { viewModel.toggleBlackAndWhite() },
+                                        onOpenGrading = { viewModel.enterMode(EditorMode.COLOR_GRADING) },
+                                        onOpenMix = { viewModel.enterMode(EditorMode.COLOR_MIX) },
+                                        onSelectWbPreset = { viewModel.setWhiteBalancePreset(it) },
+                                        onSliderDragStart = { name, formatted ->
+                                            val initVal = when (name) {
+                                                "Temp" -> adj.temperature
+                                                "Tint" -> adj.tint
+                                                "Vibrance" -> adj.vibrance
+                                                else -> adj.saturation
+                                            }
+                                            startSliderDrag(name, formatted, initVal)
+                                        },
+                                        onSliderChange = { prop, val_ ->
+                                            viewModel.updateAdjustmentValue(prop, val_)
+                                        },
+                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                    )
+                                }
+                                AdjustCategory.EFFECTS -> {
+                                    val adj = sessionState.adjustments
+                                    EffectsPanel(
+                                        texture = adj.texture,
+                                        clarity = adj.clarity,
+                                        dehaze = adj.dehaze,
+                                        vignette = adj.vignette,
+                                        grain = adj.grain,
+                                        onSliderDragStart = { name, formatted ->
+                                            val initVal = when (name) {
+                                                "Texture" -> adj.texture
+                                                "Clarity" -> adj.clarity
+                                                "Dehaze" -> adj.dehaze
+                                                "Vignette" -> adj.vignette
+                                                else -> adj.grain
+                                            }
+                                            startSliderDrag(name, formatted, initVal)
+                                        },
+                                        onSliderChange = { prop, val_ ->
+                                            viewModel.updateAdjustmentValue(prop, val_)
+                                        },
+                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                    )
+                                }
+                                AdjustCategory.DETAIL -> {
+                                    val adj = sessionState.adjustments
+                                    DetailPanel(
+                                        sharpness = adj.sharpness,
+                                        radius = adj.sharpnessRadius,
+                                        detail = adj.sharpnessDetail,
+                                        noiseReduction = adj.noiseReduction,
+                                        colorNoiseReduction = adj.colorNoiseReduction,
+                                        onSliderDragStart = { name, formatted ->
+                                            val initVal = when (name) {
+                                                "Sharpening" -> adj.sharpness
+                                                "Radius" -> adj.sharpnessRadius
+                                                "Detail" -> adj.sharpnessDetail
+                                                "Noise Reduction" -> adj.noiseReduction
+                                                else -> adj.colorNoiseReduction
+                                            }
+                                            startSliderDrag(name, formatted, initVal)
+                                        },
+                                        onSliderChange = { prop, val_ ->
+                                            viewModel.updateAdjustmentValue(prop, val_)
+                                        },
+                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                    )
+                                }
+                                AdjustCategory.OPTICS -> {
+                                    val adj = sessionState.adjustments
+                                    OpticsPanel(
+                                        removeChromaticAberration = adj.removeChromaticAberration,
+                                        enableLensCorrections = adj.enableLensCorrections,
+                                        distortionCorrection = adj.distortionCorrection,
+                                        onToggleChromaticAberration = { viewModel.setRemoveChromaticAberration(it) },
+                                        onToggleLensCorrections = { viewModel.setEnableLensCorrections(it) },
+                                        onSliderDragStart = { name, formatted ->
+                                            startSliderDrag(name, formatted, adj.distortionCorrection)
+                                        },
+                                        onSliderChange = { prop, val_ ->
+                                            viewModel.updateAdjustmentValue(prop, val_)
+                                        },
+                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                    )
+                                }
+                                AdjustCategory.BLUR -> {
+                                    val adj = sessionState.adjustments
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(Color(0xFF141414))
+                                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                                    ) {
+                                        val blurStr = "${adj.blur.toInt()}"
+                                        LrSliderRow(
+                                            title = "Blur Amount",
+                                            value = adj.blur,
+                                            displayValue = blurStr,
+                                            valueRange = 0f..100f,
+                                            minLabel = "0",
+                                            maxLabel = "+100",
+                                            onDragStart = { startSliderDrag("Blur", blurStr, adj.blur) },
+                                            onValueChange = { viewModel.updateAdjustmentValue("Blur", it) },
+                                            onValueChangeFinished = { viewModel.commitSliderChange() }
+                                        )
                                     }
-                                    startSliderDrag(name, formatted, initVal)
-                                },
-                                onSliderChange = { prop, val_ ->
-                                    viewModel.updateAdjustmentValue(prop, val_)
-                                },
-                                onSliderChangeFinished = { viewModel.commitSliderChange() }
-                            )
-                        }
-                        AdjustCategory.COLOR -> {
-                            val adj = sessionState.adjustments
-                            ColorPanel(
-                                isBlackAndWhite = adj.isBlackAndWhite,
-                                whiteBalancePreset = adj.whiteBalancePreset,
-                                temperature = adj.temperature,
-                                tint = adj.tint,
-                                vibrance = adj.vibrance,
-                                saturation = adj.saturation,
-                                onToggleBw = { viewModel.toggleBlackAndWhite() },
-                                onOpenGrading = { viewModel.enterMode(EditorMode.COLOR_GRADING) },
-                                onOpenMix = { viewModel.enterMode(EditorMode.COLOR_MIX) },
-                                onSelectWbPreset = { viewModel.setWhiteBalancePreset(it) },
-                                onSliderDragStart = { name, formatted ->
-                                    val initVal = when (name) {
-                                        "Temp" -> adj.temperature
-                                        "Tint" -> adj.tint
-                                        "Vibrance" -> adj.vibrance
-                                        else -> adj.saturation
-                                    }
-                                    startSliderDrag(name, formatted, initVal)
-                                },
-                                onSliderChange = { prop, val_ ->
-                                    viewModel.updateAdjustmentValue(prop, val_)
-                                },
-                                onSliderChangeFinished = { viewModel.commitSliderChange() }
-                            )
-                        }
-                        AdjustCategory.EFFECTS -> {
-                            val adj = sessionState.adjustments
-                            EffectsPanel(
-                                texture = adj.texture,
-                                clarity = adj.clarity,
-                                dehaze = adj.dehaze,
-                                vignette = adj.vignette,
-                                grain = adj.grain,
-                                onSliderDragStart = { name, formatted ->
-                                    val initVal = when (name) {
-                                        "Texture" -> adj.texture
-                                        "Clarity" -> adj.clarity
-                                        "Dehaze" -> adj.dehaze
-                                        "Vignette" -> adj.vignette
-                                        else -> adj.grain
-                                    }
-                                    startSliderDrag(name, formatted, initVal)
-                                },
-                                onSliderChange = { prop, val_ ->
-                                    viewModel.updateAdjustmentValue(prop, val_)
-                                },
-                                onSliderChangeFinished = { viewModel.commitSliderChange() }
-                            )
-                        }
-                        AdjustCategory.DETAIL -> {
-                            val adj = sessionState.adjustments
-                            DetailPanel(
-                                sharpness = adj.sharpness,
-                                radius = adj.sharpnessRadius,
-                                detail = adj.sharpnessDetail,
-                                noiseReduction = adj.noiseReduction,
-                                colorNoiseReduction = adj.colorNoiseReduction,
-                                onSliderDragStart = { name, formatted ->
-                                    val initVal = when (name) {
-                                        "Sharpening" -> adj.sharpness
-                                        "Radius" -> adj.sharpnessRadius
-                                        "Detail" -> adj.sharpnessDetail
-                                        "Noise Reduction" -> adj.noiseReduction
-                                        else -> adj.colorNoiseReduction
-                                    }
-                                    startSliderDrag(name, formatted, initVal)
-                                },
-                                onSliderChange = { prop, val_ ->
-                                    viewModel.updateAdjustmentValue(prop, val_)
-                                },
-                                onSliderChangeFinished = { viewModel.commitSliderChange() }
-                            )
-                        }
-                        AdjustCategory.OPTICS -> {
-                            val adj = sessionState.adjustments
-                            OpticsPanel(
-                                removeChromaticAberration = adj.removeChromaticAberration,
-                                enableLensCorrections = adj.enableLensCorrections,
-                                distortionCorrection = adj.distortionCorrection,
-                                onToggleChromaticAberration = { viewModel.setRemoveChromaticAberration(it) },
-                                onToggleLensCorrections = { viewModel.setEnableLensCorrections(it) },
-                                onSliderDragStart = { name, formatted ->
-                                    startSliderDrag(name, formatted, adj.distortionCorrection)
-                                },
-                                onSliderChange = { prop, val_ ->
-                                    viewModel.updateAdjustmentValue(prop, val_)
-                                },
-                                onSliderChangeFinished = { viewModel.commitSliderChange() }
-                            )
-                        }
-                        AdjustCategory.BLUR -> {
-                            val adj = sessionState.adjustments
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0xFF141414))
-                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                            ) {
-                                val blurStr = "${adj.blur.toInt()}"
-                                LrSliderRow(
-                                    title = "Blur Amount",
-                                    value = adj.blur,
-                                    displayValue = blurStr,
-                                    valueRange = 0f..100f,
-                                    minLabel = "0",
-                                    maxLabel = "+100",
-                                    onDragStart = { startSliderDrag("Blur", blurStr, adj.blur) },
-                                    onValueChange = { viewModel.updateAdjustmentValue("Blur", it) },
-                                    onValueChangeFinished = { viewModel.commitSliderChange() }
-                                )
+                                }
+                                AdjustCategory.PROFILES -> {
+                                    ProfilesPanel(
+                                        selectedCategory = selectedProfileCategory,
+                                        onSelectCategory = { selectedProfileCategory = it },
+                                        onApplyProfile = { viewModel.applyProfile(it) },
+                                        thumbnailBitmap = thumbnailBitmap,
+                                        onClose = { activeAdjustCategory = AdjustCategory.LIGHT },
+                                        onConfirm = { activeAdjustCategory = AdjustCategory.LIGHT }
+                                    )
+                                }
+                                else -> {}
                             }
                         }
-                        AdjustCategory.PROFILES -> {
-                            ProfilesPanel(
-                                selectedCategory = selectedProfileCategory,
-                                onSelectCategory = { selectedProfileCategory = it },
-                                onApplyProfile = { viewModel.applyProfile(it) },
-                                onClose = { activeAdjustCategory = AdjustCategory.LIGHT },
-                                onConfirm = { activeAdjustCategory = AdjustCategory.LIGHT }
-                            )
-                        }
-                        else -> {}
+
+                        // Category Strip under Adjust (docked above bottom dock)
+                        AdjustCategoryStrip(
+                            activeCategory = activeAdjustCategory,
+                            onSelectCategory = { cat ->
+                                if (cat == AdjustCategory.AUTO) {
+                                    viewModel.applyAutoTone()
+                                    Toast.makeText(context, "Auto Tone Applied", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    activeAdjustCategory = cat
+                                }
+                            }
+                        )
+                    }
+                    MainBottomTab.PRESETS -> {
+                        // Presets Panel: Tier 2 (Live preview cards) + Tier 3 (Category pills)
+                        ProfilesPanel(
+                            selectedCategory = selectedProfileCategory,
+                            onSelectCategory = { selectedProfileCategory = it },
+                            onApplyProfile = { viewModel.applyProfile(it) },
+                            thumbnailBitmap = thumbnailBitmap,
+                            onPresetAdjust = { contrast, brightness, fade, blend ->
+                                viewModel.updateAdjustmentValue("Contrast", contrast - 50f)
+                                viewModel.updateAdjustmentValue("Brightness", brightness - 50f)
+                                viewModel.updatePresetIntensity((100f - fade) / 100f)
+                                viewModel.updatePresetBlendMode(blend)
+                            }
+                        )
+                    }
+                    MainBottomTab.CROP -> {
+                        // Crop Panel: Straighten slider + Aspect Ratio pills + Rotate/Flip
+                        CropControlsPanel(
+                            selectedPreset = selectedCropPreset,
+                            straightenAngle = sessionState.transform.straightenAngle,
+                            onSelectPreset = { selectedCropPreset = it },
+                            onRotate90 = { viewModel.rotate90() },
+                            onFlipH = { viewModel.flipHorizontal() },
+                            onFlipV = { viewModel.flipVertical() },
+                            onStraightenChange = { viewModel.setStraighten(it) },
+                            onStraightenFinished = { viewModel.commitSliderChange() },
+                            onAutoLevel = { viewModel.autoLevelStraighten() },
+                            onResetCrop = { viewModel.resetCrop() }
+                        )
+                    }
+                    MainBottomTab.MASKING -> {
+                        // Masking & Brush Panel: Brush Size slider + Monochrome swatches + Brush type pills
+                        BrushesPanel(
+                            selectedBrush = selectedBrushType,
+                            brushColor = selectedBrushColor,
+                            brushWidth = brushWidth,
+                            onSelectBrush = { selectedBrushType = it },
+                            onColorSelect = { selectedBrushColor = it },
+                            onWidthChange = { brushWidth = it }
+                        )
+                    }
+                    MainBottomTab.HEALING -> {
+                        // Healing & Retouch Panel: Size slider + Retouch type pills
+                        RetouchPanel(
+                            activeType = activeRetouchType,
+                            brushRadius = brushWidth * 1.5f,
+                            onSelectType = { activeRetouchType = it },
+                            onRadiusChange = { brushWidth = it / 1.5f }
+                        )
                     }
                 }
-
-                // Category Strip under Adjust (docked above bottom dock)
-                AdjustCategoryStrip(
-                    activeCategory = activeAdjustCategory,
-                    onSelectCategory = { cat ->
-                        if (cat == AdjustCategory.AUTO) {
-                            viewModel.applyAutoTone()
-                            Toast.makeText(context, "Auto Tone Applied", Toast.LENGTH_SHORT).show()
-                        } else {
-                            activeAdjustCategory = cat
-                        }
-                    }
-                )
             }
         }
     }
@@ -567,7 +555,7 @@ fun PhotoEditorScreen(
                             brushColor = selectedBrushColor,
                             brushWidth = brushWidth,
                             activeRetouchType = activeRetouchType,
-                            cropAspectRatio = if (currentMode == EditorMode.CROP) selectedCropPreset.ratio else null,
+                            cropAspectRatio = if (currentBottomTab == MainBottomTab.CROP) selectedCropPreset.ratio else null,
                             isCurveMode = currentMode == EditorMode.CURVES,
                             activeCurveChannel = activeCurveChannel,
                             curvePoints = when (activeCurveChannel) {
@@ -763,35 +751,20 @@ fun PhotoEditorScreen(
                                 PanelContent(modifier = Modifier.fillMaxSize())
                             }
 
-                            if (currentMode == EditorMode.NONE) {
-                                // Bottom Mode Selectors in Landscape
-                                MainBottomTierBar(
-                                    currentTab = currentBottomTab,
-                                    onSelectTab = { tab ->
-                                        when (tab) {
-                                            MainBottomTab.AUTO -> {
-                                                viewModel.applyAutoTone()
-                                                Toast.makeText(context, "Auto-enhanced", Toast.LENGTH_SHORT).show()
-                                            }
-                                            MainBottomTab.PRESETS -> {
-                                                viewModel.enterMode(EditorMode.PRESETS)
-                                            }
-                                            MainBottomTab.CROP -> {
-                                                viewModel.enterMode(EditorMode.CROP)
-                                            }
-                                            MainBottomTab.ADJUST -> {
-                                                currentBottomTab = MainBottomTab.ADJUST
-                                            }
-                                            MainBottomTab.MASKING -> {
-                                                viewModel.enterMode(EditorMode.BRUSHES)
-                                            }
-                                            MainBottomTab.HEALING -> {
-                                                viewModel.enterMode(EditorMode.RETOUCH)
-                                            }
-                                        }
+                            // Bottom Mode Selectors in Landscape
+                            MainBottomTierBar(
+                                currentTab = currentBottomTab,
+                                onSelectTab = { tab ->
+                                    currentBottomTab = tab
+                                    when (tab) {
+                                        MainBottomTab.ADJUST -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                        MainBottomTab.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
+                                        MainBottomTab.CROP -> viewModel.setActiveTool(EditorTool.CROP)
+                                        MainBottomTab.MASKING -> viewModel.setActiveTool(EditorTool.BRUSHES)
+                                        MainBottomTab.HEALING -> viewModel.setActiveTool(EditorTool.RETOUCH)
                                     }
-                                )
-                            }
+                                }
+                            )
                         }
                     }
                 }
@@ -850,7 +823,7 @@ fun PhotoEditorScreen(
                             brushColor = selectedBrushColor,
                             brushWidth = brushWidth,
                             activeRetouchType = activeRetouchType,
-                            cropAspectRatio = if (currentMode == EditorMode.CROP) selectedCropPreset.ratio else null,
+                            cropAspectRatio = if (currentBottomTab == MainBottomTab.CROP) selectedCropPreset.ratio else null,
                             isCurveMode = currentMode == EditorMode.CURVES,
                             activeCurveChannel = activeCurveChannel,
                             curvePoints = when (activeCurveChannel) {
@@ -915,7 +888,11 @@ fun PhotoEditorScreen(
 
                     // Contextual Tool Panels Container (Content-sized sheet with maximum height)
                     val configuration = LocalConfiguration.current
-                    val maxSheetHeight = (configuration.screenHeightDp * 0.44f).dp.coerceIn(240.dp, 360.dp)
+                    val maxSheetHeight = if (currentBottomTab == MainBottomTab.PRESETS) {
+                        (configuration.screenHeightDp * 0.50f).dp.coerceIn(280.dp, 400.dp)
+                    } else {
+                        (configuration.screenHeightDp * 0.44f).dp.coerceIn(240.dp, 360.dp)
+                    }
 
                     Surface(
                         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -928,35 +905,20 @@ fun PhotoEditorScreen(
                         Column(modifier = Modifier.fillMaxWidth()) {
                             PanelContent(modifier = Modifier.weight(1f, fill = false))
 
-                            if (currentMode == EditorMode.NONE) {
-                                // Clean Floating Navigation Dock
-                                MainBottomTierBar(
-                                    currentTab = currentBottomTab,
-                                    onSelectTab = { tab ->
-                                        when (tab) {
-                                            MainBottomTab.AUTO -> {
-                                                viewModel.applyAutoTone()
-                                                Toast.makeText(context, "Auto-enhanced", Toast.LENGTH_SHORT).show()
-                                            }
-                                            MainBottomTab.PRESETS -> {
-                                                viewModel.enterMode(EditorMode.PRESETS)
-                                            }
-                                            MainBottomTab.CROP -> {
-                                                viewModel.enterMode(EditorMode.CROP)
-                                            }
-                                            MainBottomTab.ADJUST -> {
-                                                currentBottomTab = MainBottomTab.ADJUST
-                                            }
-                                            MainBottomTab.MASKING -> {
-                                                viewModel.enterMode(EditorMode.BRUSHES)
-                                            }
-                                            MainBottomTab.HEALING -> {
-                                                viewModel.enterMode(EditorMode.RETOUCH)
-                                            }
-                                        }
+                            // Clean Floating Navigation Dock
+                            MainBottomTierBar(
+                                currentTab = currentBottomTab,
+                                onSelectTab = { tab ->
+                                    currentBottomTab = tab
+                                    when (tab) {
+                                        MainBottomTab.ADJUST -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                        MainBottomTab.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
+                                        MainBottomTab.CROP -> viewModel.setActiveTool(EditorTool.CROP)
+                                        MainBottomTab.MASKING -> viewModel.setActiveTool(EditorTool.BRUSHES)
+                                        MainBottomTab.HEALING -> viewModel.setActiveTool(EditorTool.RETOUCH)
                                     }
-                                )
-                            }
+                                }
+                            )
                         }
                     }
                 }

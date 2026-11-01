@@ -291,13 +291,29 @@ data class ProfilePreset(
     val category: String,
     val filterType: FilterType,
     val isFavorite: Boolean = false,
+    val isNew: Boolean = false,
     val exposureOffset: Float = 0f,
     val contrastOffset: Float = 0f,
+    val brightnessOffset: Float = 0f,
+    val fadeOffset: Float = 0f,
     val tempOffset: Float = 0f,
     val tintOffset: Float = 0f,
     val vibranceOffset: Float = 0f,
-    val saturationOffset: Float = 0f
+    val saturationOffset: Float = 0f,
+    val blendMode: String = "Normal"
 )
+
+enum class PresetTier3Category(val displayName: String) {
+    SIMPLE("SIMPLE"),
+    FX("FX"),
+    BW("B&W"),
+    BLUR("BLUR"),
+    SKETCH("SKETCH"),
+    COLORS("COLORS"),
+    ARTISTIC("ARTISTIC"),
+    MAGIC("MAGIC"),
+    CANVAS("CANVAS")
+}
 
 enum class FilterType(val displayName: String) {
     NONE("Original"),
@@ -314,8 +330,58 @@ enum class FilterType(val displayName: String) {
     EMERALD("Emerald"),
     COLD_MIST("Cold Mist"),
 
+    // Simple / Tonal Filters
+    DODGER("Dodger"),
+    BRL2("BRL2"),
+    BRL4("BRL4"),
+    APR2("APR2"),
+    WARM_COLOR("Warm Color"),
+    LIGHT_CROSS("Light Cross"),
+    CRISP("Crisp"),
+    SHARPEN("Sharpen"),
+    RETRO("Retro"),
+    SUNNY("Sunny"),
+    WARM_AMBER("Warm Amber"),
+
+    // FX Filters
+    HDR1("HDR1"),
+    NOISE("Noise"),
+    FILM2("Film2"),
+    FILM3("Film3"),
+    HOLGA2("Holga2"),
+    VNYL3("VNYL3"),
+    INDIE1("INDIE1"),
+    GLITCH("Glitch"),
+
+    // B&W Filters
+    BW_HICON("B&W HiCon"),
+    BW_LOWCON("B&W LowCon"),
+    FILM_BW("Film B&W"),
+
+    // Blur Filters
+    BLUR("Blur"),
+    FOCAL_ZOOM("Focal Zoom"),
+    SMART_BLUR("Smart Blur"),
+
+    // Sketch Filters
+    CARTOON1("Cartoon1"),
+    CARTOON2("Cartoon2"),
+    SKTCH1("SKTCH1"),
+    INK_CONTOUR("Ink Contour"),
+
+    // Colors Filters
+    COLOR_SPLASH("Color Splash"),
+    HUE_SHIFT("Hue Shift"),
+    INVERT("Invert"),
+    COLORIZE("Colorize"),
+    POP_ART("Pop Art"),
+
     // Artistic Effects
+    CNV1("CNV1"),
     OIL_PAINTING("Oil Painting"),
+    POLYGON("Polygon"),
+    POSTER("Poster"),
+    HALFTONE_DOTS("Halftone Dots"),
     WATERCOLOR("Watercolor"),
     PENCIL_SKETCH("Pencil Sketch"),
     CARTOON("Cartoon"),
@@ -334,7 +400,25 @@ enum class FilterType(val displayName: String) {
     MOTION_BLUR("Motion Blur"),
     TEXTURE_OVERLAY("Vintage Texture"),
     PATTERN_OVERLAY("Pattern Screen"),
-    COLOR_HALATION("Color Halation")
+    COLOR_HALATION("Color Halation"),
+
+    // Magic Filters
+    FLORA("Flora"),
+    UNDEAD("Undead"),
+    WHITE_ICE("White Ice"),
+    GEODE("Geode"),
+    SKETCHY("Sketchy"),
+    POW("Pow"),
+    FLARE("Flare"),
+    ANIMATION("Animation"),
+
+    // Canvas Filters
+    CANVAS1("Canvas 1"),
+    CANVAS2("Canvas 2"),
+    GRAINY_CANVAS("Grainy Canvas"),
+    LINEN("Linen"),
+    PAPER("Paper"),
+    GRUNGE("Grunge")
 }
 
 enum class RetouchType(val label: String) {
@@ -648,6 +732,7 @@ data class EditSessionState(
     val adjustments: AdjustmentParams = AdjustmentParams(),
     val filter: FilterType = FilterType.NONE,
     val filterIntensity: Float = 1.0f,
+    val filterBlendMode: String = "Normal",
     val retouchStrokes: List<RetouchStroke> = emptyList(),
     val background: BackgroundSettings = BackgroundSettings(),
     val drawingStrokes: List<DrawingStroke> = emptyList(),
