@@ -88,6 +88,7 @@ fun GalleryApp() {
     var editorStartInFilters by remember { mutableStateOf(false) }
     var editorStartInAi by remember { mutableStateOf(false) }
     var editorStartInDrawing by remember { mutableStateOf(false) }
+    var editorStartInResize by remember { mutableStateOf(false) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -1204,6 +1205,7 @@ fun GalleryApp() {
                                 editorStartInFilters = false
                                 editorStartInAi = false
                                 editorStartInDrawing = false
+                                editorStartInResize = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1224,6 +1226,7 @@ fun GalleryApp() {
                                 editorStartInFilters = true
                                 editorStartInAi = false
                                 editorStartInDrawing = false
+                                editorStartInResize = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1244,6 +1247,7 @@ fun GalleryApp() {
                                 editorStartInFilters = false
                                 editorStartInAi = true
                                 editorStartInDrawing = false
+                                editorStartInResize = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1264,6 +1268,7 @@ fun GalleryApp() {
                                 editorStartInFilters = false
                                 editorStartInAi = false
                                 editorStartInDrawing = true
+                                editorStartInResize = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1271,6 +1276,27 @@ fun GalleryApp() {
                                 )
                             } else {
                                 scope.launch { snackbarHostState.showSnackbar("Select a photo to annotate") }
+                            }
+                        },
+                        onOpenResize = {
+                            val candidate = selectedMedia?.takeUnless {
+                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
+                            } ?: media.firstOrNull {
+                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
+                            }
+                            if (candidate != null) {
+                                editorSource = candidate
+                                editorStartInFilters = false
+                                editorStartInAi = false
+                                editorStartInDrawing = false
+                                editorStartInResize = true
+                                navigateTo(
+                                    Destination.IMAGE_EDITOR,
+                                    rememberPrevious = true,
+                                    newSelectedMedia = candidate
+                                )
+                            } else {
+                                scope.launch { snackbarHostState.showSnackbar("Select a photo to resize or convert") }
                             }
                         }
                     )
@@ -1301,7 +1327,8 @@ fun GalleryApp() {
                             },
                             startInFilters = editorStartInFilters,
                             startInAi = editorStartInAi,
-                            startInDrawing = editorStartInDrawing
+                            startInDrawing = editorStartInDrawing,
+                            startInResize = editorStartInResize
                         )
                     }
                     Destination.PDF_DOCUMENT_TOOL -> PdfDocumentToolScreen(
@@ -1463,6 +1490,7 @@ fun GalleryApp() {
                         editorStartInFilters = false
                         editorStartInAi = false
                         editorStartInDrawing = false
+                        editorStartInResize = false
                         navigateTo(Destination.IMAGE_EDITOR, rememberPrevious = true, newSelectedMedia = currentItem)
                     }
                 },

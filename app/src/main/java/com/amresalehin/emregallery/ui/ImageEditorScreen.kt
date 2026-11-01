@@ -62,8 +62,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -91,6 +93,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.exifinterface.media.ExifInterface
@@ -119,7 +122,22 @@ import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-private enum class EditorMode { Crop, Adjust, Filters, Effects, Drawing, AI }
+private enum class EditorMode { Crop, Adjust, Filters, Effects, Drawing, Resize, AI }
+
+private enum class EditorOutputFormat(val title: String, val extension: String, val mimeType: String) {
+    JPEG("JPEG", "jpg", "image/jpeg"),
+    PNG("PNG", "png", "image/png"),
+    WEBP("WebP", "webp", "image/webp")
+}
+
+private data class EditorExportSettings(
+    val resizeEnabled: Boolean,
+    val width: Int,
+    val height: Int,
+    val format: EditorOutputFormat,
+    val quality: Int,
+    val targetSizeBytes: Long?
+)
 
 private enum class MarkupTool(val title: String) {
     Pen("Pen"), Highlighter("Highlight"), Eraser("Erase"), Line("Line"),
@@ -235,7 +253,8 @@ fun ImageEditorScreen(
     onSaved: (MediaItem) -> Unit,
     startInFilters: Boolean = false,
     startInAi: Boolean = false,
-    startInDrawing: Boolean = false
+    startInDrawing: Boolean = false,
+    startInResize: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -261,8 +280,9 @@ fun ImageEditorScreen(
         redoStack = redoStack.dropLast(1)
         recipe = next
     }
-    var mode by remember(source.uri, startInFilters, startInAi, startInDrawing) {
+    var mode by remember(source.uri, startInFilters, startInAi, startInDrawing, startInResize) {
         mutableStateOf(when {
+            startInResize -> EditorMode.Resize
             startInDrawing -> EditorMode.Drawing
             startInAi -> EditorMode.AI
             startInFilters -> EditorMode.Filters
@@ -274,6 +294,14 @@ fun ImageEditorScreen(
     var markupColor by remember(source.uri) { mutableIntStateOf(android.graphics.Color.WHITE) }
     var markupStrokeWidth by remember(source.uri) { mutableFloatStateOf(0.008f) }
     var markupText by remember(source.uri) { mutableStateOf("Your text") }
+    var resizeEnabled by remember(source.uri) { mutableStateOf(false) }
+    var exportWidthText by remember(source.uri) { mutableStateOf(source.width.coerceAtLeast(1).toString()) }
+    var exportHeightText by remember(source.uri) { mutableStateOf(source.height.coerceAtLeast(1).toString()) }
+    var lockExportAspect by remember(source.uri) { mutableStateOf(true) }
+    var exportFormat by remember(source.uri, startInAi) { mutableStateOf(if (startInAi) EditorOutputFormat.PNG else EditorOutputFormat.JPEG) }
+    var exportQuality by remember(source.uri) { mutableFloatStateOf(92f) }
+    var fitTargetSize by remember(source.uri) { mutableStateOf(false) }
+    var targetSizeMbText by remember(source.uri) { mutableStateOf("2") }
     var loading by remember(source.uri) { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -288,6 +316,8 @@ fun ImageEditorScreen(
             runCatching { decodeEditorBitmap(context, source.uri, maxDimension = 2048) }.getOrNull()
         }
         sourceBitmap = decoded
+        if (source.width <= 0 && decoded != null) exportWidthText = decoded.width.toString()
+        if (source.height <= 0 && decoded != null) exportHeightText = decoded.height.toString()
         loading = false
         if (decoded == null) error = "Unable to decode this image"
     }
@@ -298,6 +328,28 @@ fun ImageEditorScreen(
     fun saveEditedImage() {
         if (image == null || saving || loading) return
         val currentRecipe = recipe
+        val requestedWidth = exportWidthText.toIntOrNull()
+        val requestedHeight = exportHeightText.toIntOrNull()
+        if (resizeEnabled && (requestedWidth == null || requestedHeight == null || requestedWidth <= 0 || requestedHeight <= 0)) {
+            error = "Enter valid positive output dimensions"
+            return
+        }
+        val targetBytes = if (fitTargetSize && exportFormat != EditorOutputFormat.PNG) {
+            val targetMb = targetSizeMbText.toDoubleOrNull()
+            if (targetMb == null || !targetMb.isFinite() || targetMb !in 0.05..200.0) {
+                error = "Target size must be between 0.05 and 200 MB"
+                return
+            }
+            (targetMb * 1024.0 * 1024.0).roundToInt().toLong()
+        } else null
+        val exportSettings = EditorExportSettings(
+            resizeEnabled = resizeEnabled,
+            width = requestedWidth ?: source.width.coerceAtLeast(1),
+            height = requestedHeight ?: source.height.coerceAtLeast(1),
+            format = exportFormat,
+            quality = exportQuality.roundToInt().coerceIn(10, 100),
+            targetSizeBytes = targetBytes
+        )
         saving = true
         error = null
         scope.launch {
@@ -306,7 +358,7 @@ fun ImageEditorScreen(
                     val fullResolution = decodeEditorBitmap(context, source.uri, maxDimension = null)
                         ?: throw IOException("Unable to decode the original image for export")
                     try {
-                        exportEditorResult(context, fullResolution, currentRecipe, source)
+                        exportEditorResult(context, fullResolution, currentRecipe, source, exportSettings)
                     } finally {
                         if (!fullResolution.isRecycled) fullResolution.recycle()
                     }
@@ -361,6 +413,17 @@ fun ImageEditorScreen(
             if (bitmap != null && bitmap !== image && !bitmap.isRecycled) bitmap.recycle()
         }
     }
+    LaunchedEffect(preview, image, resizeEnabled) {
+        val rendered = preview
+        val original = image
+        if (!resizeEnabled && rendered != null && original != null) {
+            val baseWidth = source.width.takeIf { it > 0 } ?: original.width
+            val baseHeight = source.height.takeIf { it > 0 } ?: original.height
+            exportWidthText = (rendered.width.toFloat() * baseWidth / original.width.coerceAtLeast(1)).roundToInt().coerceAtLeast(1).toString()
+            exportHeightText = (rendered.height.toFloat() * baseHeight / original.height.coerceAtLeast(1)).roundToInt().coerceAtLeast(1).toString()
+        }
+    }
+
     androidx.compose.runtime.DisposableEffect(image) {
         onDispose {
             if (image != null && !image.isRecycled) image.recycle()
@@ -410,7 +473,7 @@ fun ImageEditorScreen(
                 enabled = image != null && !loading && !saving
             ) {
                 if (saving) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Default.Save, contentDescription = if (recipe.removePersonBackground) "Save transparent PNG copy" else "Save JPEG copy")
+                else Icon(Icons.Default.Save, contentDescription = "Save ${exportFormat.title} copy")
             }
         }
 
@@ -514,6 +577,7 @@ fun ImageEditorScreen(
                                 EditorMode.Filters -> Icons.Default.AutoAwesome
                                 EditorMode.Effects -> Icons.Default.FilterVintage
                                 EditorMode.Drawing -> Icons.Default.Brush
+                                EditorMode.Resize -> Icons.Default.Save
                                 EditorMode.AI -> Icons.Default.AutoAwesome
                             },
                             contentDescription = null,
@@ -527,6 +591,7 @@ fun ImageEditorScreen(
                                 EditorMode.Filters -> "Filters"
                                 EditorMode.Effects -> "Effects"
                                 EditorMode.Drawing -> "Draw"
+                                EditorMode.Resize -> "Export"
                                 EditorMode.AI -> "AI"
                             },
                             modifier = Modifier.padding(start = 7.dp),
@@ -746,6 +811,103 @@ fun ImageEditorScreen(
                     TextButton(onClick = { updateRecipe(recipe.copy(markups = recipe.markups.dropLast(1))) }, enabled = recipe.markups.isNotEmpty() && !saving) { Text("Remove last") }
                     TextButton(onClick = { updateRecipe(recipe.copy(markups = emptyList())) }, enabled = recipe.markups.isNotEmpty() && !saving) { Text("Clear all") }
                 }
+            }
+        } else if (mode == EditorMode.Resize) {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 5.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Resize output", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text("Keep the edited dimensions or set a custom pixel size", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = resizeEnabled, onCheckedChange = { resizeEnabled = it })
+                }
+                if (resizeEnabled) {
+                    val sourceAspect = (preview?.width ?: source.width.coerceAtLeast(1)).toFloat() / (preview?.height ?: source.height.coerceAtLeast(1)).coerceAtLeast(1)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = exportWidthText,
+                            onValueChange = { value ->
+                                exportWidthText = value.filter { it.isDigit() }.take(5)
+                                val parsed = exportWidthText.toIntOrNull()
+                                if (lockExportAspect && parsed != null && sourceAspect > 0f) exportHeightText = (parsed / sourceAspect).roundToInt().coerceAtLeast(1).toString()
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Width (px)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        OutlinedTextField(
+                            value = exportHeightText,
+                            onValueChange = { value ->
+                                exportHeightText = value.filter { it.isDigit() }.take(5)
+                                val parsed = exportHeightText.toIntOrNull()
+                                if (lockExportAspect && parsed != null && sourceAspect > 0f) exportWidthText = (parsed * sourceAspect).roundToInt().coerceAtLeast(1).toString()
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            label = { Text("Height (px)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Lock aspect ratio", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                        Switch(checked = lockExportAspect, onCheckedChange = { lockExportAspect = it })
+                    }
+                    Text("Large dimensions are automatically capped at 40 megapixels to protect device memory.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("Output format", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(EditorOutputFormat.entries.size) { index ->
+                        val format = EditorOutputFormat.entries[index]
+                        val selected = exportFormat == format
+                        Surface(
+                            modifier = Modifier.clip(CircleShape).clickable {
+                                exportFormat = format
+                                if (format == EditorOutputFormat.PNG) fitTargetSize = false
+                            },
+                            shape = CircleShape,
+                            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh
+                        ) {
+                            Text(format.title, modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp), color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+                if (exportFormat != EditorOutputFormat.PNG) {
+                    AdjustmentSlider("Quality", exportQuality, 10f..100f, valueLabel = { "${it.roundToInt()}%" }) { exportQuality = it }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Compress to target size", style = MaterialTheme.typography.labelMedium)
+                            Text("Finds the highest quality that fits, where possible", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(checked = fitTargetSize, onCheckedChange = { fitTargetSize = it })
+                    }
+                    if (fitTargetSize) {
+                        OutlinedTextField(
+                            value = targetSizeMbText,
+                            onValueChange = { targetSizeMbText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(7) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            label = { Text("Target file size (MB)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            supportingText = { Text("Allowed range: 0.05–200 MB. Complex images may not reach the target at minimum quality.") }
+                        )
+                    }
+                } else {
+                    Text("PNG is lossless. Quality and target-size compression are not applied; resizing still works.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                val estimateSourceWidth = source.width.takeIf { it > 0 } ?: (image?.width ?: 1)
+                val estimateSourceHeight = source.height.takeIf { it > 0 } ?: (image?.height ?: 1)
+                val naturalWidth = if (preview != null && image != null) (preview!!.width.toFloat() * estimateSourceWidth / image.width.coerceAtLeast(1)).roundToInt() else estimateSourceWidth
+                val naturalHeight = if (preview != null && image != null) (preview!!.height.toFloat() * estimateSourceHeight / image.height.coerceAtLeast(1)).roundToInt() else estimateSourceHeight
+                val estimateWidth = if (resizeEnabled) exportWidthText.toIntOrNull()?.coerceAtLeast(1) ?: naturalWidth else naturalWidth
+                val estimateHeight = if (resizeEnabled) exportHeightText.toIntOrNull()?.coerceAtLeast(1) ?: naturalHeight else naturalHeight
+                val estimatedBytes = estimateEditorOutputBytes(source.sizeBytes, estimateSourceWidth, estimateSourceHeight, estimateWidth, estimateHeight, exportFormat, exportQuality.roundToInt())
+                Text("Estimated size: ${String.format(Locale.US, "%.2f MB", estimatedBytes / (1024f * 1024f))} (rough estimate)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Source: ${source.width} × ${source.height} px • ${(source.sizeBytes / (1024f * 1024f)).let { String.format(Locale.US, "%.2f MB", it) }}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Export creates a new file in Pictures/Emre. The original image is not overwritten.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else if (mode == EditorMode.AI) {
             Column(
@@ -1760,11 +1922,132 @@ private suspend fun scanMediaFile(context: Context, file: File, mimeType: String
         }
     }
 
+private fun estimateEditorOutputBytes(
+    sourceBytes: Long,
+    sourceWidth: Int,
+    sourceHeight: Int,
+    outputWidth: Int,
+    outputHeight: Int,
+    format: EditorOutputFormat,
+    quality: Int
+): Long {
+    if (sourceBytes <= 0L || sourceWidth <= 0 || sourceHeight <= 0) return 0L
+    val pixelRatio = (outputWidth.coerceAtLeast(1).toDouble() * outputHeight.coerceAtLeast(1)) /
+        (sourceWidth.toDouble() * sourceHeight.toDouble())
+    val formatFactor = when (format) {
+        EditorOutputFormat.JPEG -> 0.9
+        EditorOutputFormat.WEBP -> 0.68
+        EditorOutputFormat.PNG -> 1.35
+    }
+    val qualityFactor = if (format == EditorOutputFormat.PNG) 1.0 else
+        (quality.coerceIn(10, 100) / 92.0).pow(1.5)
+    return (sourceBytes * pixelRatio * formatFactor * qualityFactor).toLong().coerceAtLeast(1L)
+}
+
+internal fun normalizedExportDimensions(
+    requestedWidth: Int,
+    requestedHeight: Int
+): Pair<Int, Int> {
+    require(requestedWidth > 0 && requestedHeight > 0) {
+        "Output dimensions must be positive"
+    }
+    val maxDimension = 16_384f
+    val maxPixels = 40_000_000.0
+    val width = requestedWidth.toDouble()
+    val height = requestedHeight.toDouble()
+    val pixelScale = minOf(1.0, kotlin.math.sqrt(maxPixels / (width * height)))
+    val scale = minOf(pixelScale, maxDimension / width, maxDimension / height)
+    return Pair(
+        (width * scale).toInt().coerceAtLeast(1),
+        (height * scale).toInt().coerceAtLeast(1)
+    )
+}
+
+private fun resizeEditorBitmap(source: Bitmap, settings: EditorExportSettings): Bitmap {
+    if (!settings.resizeEnabled) return source
+    val (width, height) = normalizedExportDimensions(settings.width, settings.height)
+    if (width == source.width && height == source.height) return source
+    return Bitmap.createScaledBitmap(source, width, height, true)
+}
+
+private fun flattenBitmapOnWhite(source: Bitmap): Bitmap {
+    if (!source.hasAlpha()) return source
+    val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    try {
+        val canvas = android.graphics.Canvas(output)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        canvas.drawBitmap(source, 0f, 0f, null)
+        output.setHasAlpha(false)
+        return output
+    } catch (failure: Throwable) {
+        if (!output.isRecycled) output.recycle()
+        throw failure
+    }
+}
+
+private fun writeCompressedBitmap(
+    bitmap: Bitmap,
+    format: Bitmap.CompressFormat,
+    quality: Int,
+    destination: File
+) {
+    destination.outputStream().buffered().use { stream ->
+        if (!bitmap.compress(format, quality.coerceIn(10, 100), stream)) {
+            throw IOException("Image encoding failed")
+        }
+        stream.flush()
+    }
+}
+
+private data class CompressionOutcome(
+    val quality: Int,
+    val targetReached: Boolean
+)
+
+private fun encodeBitmapWithTargetSize(
+    bitmap: Bitmap,
+    format: Bitmap.CompressFormat,
+    quality: Int,
+    targetSizeBytes: Long?,
+    destination: File
+): CompressionOutcome {
+    val requestedQuality = quality.coerceIn(10, 100)
+    if (targetSizeBytes == null) {
+        writeCompressedBitmap(bitmap, format, requestedQuality, destination)
+        return CompressionOutcome(requestedQuality, true)
+    }
+    var low = 10
+    var high = requestedQuality
+    var bestQuality = -1
+    var lastQuality = -1
+    var attempts = 0
+    while (low <= high && attempts < 9) {
+        val candidate = (low + high) / 2
+        writeCompressedBitmap(bitmap, format, candidate, destination)
+        lastQuality = candidate
+        attempts += 1
+        val withinTarget = destination.length() > 0L && destination.length() <= targetSizeBytes
+        if (withinTarget) {
+            bestQuality = candidate
+            low = candidate + 1
+        } else {
+            high = candidate - 1
+        }
+    }
+    val chosenQuality = if (bestQuality >= 10) bestQuality else 10
+    if (chosenQuality != lastQuality || destination.length() == 0L) {
+        writeCompressedBitmap(bitmap, format, chosenQuality, destination)
+    }
+    val targetReached = destination.length() > 0L && destination.length() <= targetSizeBytes
+    return CompressionOutcome(chosenQuality, targetReached)
+}
+
 private suspend fun exportEditorResult(
     context: Context,
     source: Bitmap,
     recipe: EditorRecipe,
-    media: MediaItem
+    media: MediaItem,
+    settings: EditorExportSettings
 ): MediaItem {
     val transformed = applyEditorRecipe(source, recipe)
     val processedOutput = try {
@@ -1773,30 +2056,44 @@ private suspend fun exportEditorResult(
         if (transformed !== source && !transformed.isRecycled) transformed.recycle()
         throw failure
     }
-    val output = try {
-        renderEditorMarkupLayers(processedOutput, recipe.markups)
-    } catch (failure: Throwable) {
-        if (processedOutput !== transformed && processedOutput !== source && !processedOutput.isRecycled) processedOutput.recycle()
-        if (transformed !== source && !transformed.isRecycled) transformed.recycle()
-        throw failure
-    }
-    val outputMimeType = if (recipe.removePersonBackground) "image/png" else "image/jpeg"
-    val extension = if (recipe.removePersonBackground) "png" else "jpg"
-    val outputFormat = if (recipe.removePersonBackground) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
-    val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())}.$extension"
+
+    var annotatedOutput: Bitmap? = null
+    var resizedOutput: Bitmap? = null
+    var encodedOutput: Bitmap? = null
     var uri: Uri? = null
     var legacyFile: File? = null
     var tempFile: File? = null
     try {
-        tempFile = File.createTempFile("emre-edit-", ".$extension", context.cacheDir)
-        tempFile.outputStream().use { stream ->
-            if (!output.compress(outputFormat, if (recipe.removePersonBackground) 100 else 95, stream)) {
-                throw IOException("Image encoding failed")
-            }
-            stream.flush()
+        annotatedOutput = renderEditorMarkupLayers(processedOutput, recipe.markups)
+        resizedOutput = resizeEditorBitmap(annotatedOutput, settings)
+        encodedOutput = if (settings.format == EditorOutputFormat.JPEG && resizedOutput.hasAlpha()) {
+            flattenBitmapOnWhite(resizedOutput)
+        } else {
+            resizedOutput
         }
-        if (!recipe.removePersonBackground) {
-            copyExifMetadata(context, Uri.parse(media.uri), tempFile, output.width, output.height)
+
+        val outputMimeType = settings.format.mimeType
+        val extension = settings.format.extension
+        val outputFormat = when (settings.format) {
+            EditorOutputFormat.JPEG -> Bitmap.CompressFormat.JPEG
+            EditorOutputFormat.PNG -> Bitmap.CompressFormat.PNG
+            EditorOutputFormat.WEBP -> Bitmap.CompressFormat.WEBP
+        }
+        val outputQuality = if (settings.format == EditorOutputFormat.PNG) 100 else settings.quality
+        val targetBytes = settings.targetSizeBytes.takeIf { settings.format != EditorOutputFormat.PNG }
+        val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())}.$extension"
+
+        tempFile = File.createTempFile("emre-export-", ".$extension", context.cacheDir)
+        encodeBitmapWithTargetSize(
+            bitmap = encodedOutput,
+            format = outputFormat,
+            quality = outputQuality,
+            targetSizeBytes = targetBytes,
+            destination = tempFile
+        )
+
+        if (settings.format == EditorOutputFormat.JPEG && !recipe.removePersonBackground) {
+            copyExifMetadata(context, Uri.parse(media.uri), tempFile, encodedOutput.width, encodedOutput.height)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1831,8 +2128,8 @@ private suspend fun exportEditorResult(
         }
 
         val outputUri = uri ?: throw IOException("Image export did not produce a URI")
-        val width = output.width
-        val height = output.height
+        val width = encodedOutput.width
+        val height = encodedOutput.height
         val sizeBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {
                 context.contentResolver.openFileDescriptor(outputUri, "r")?.use { it.statSize } ?: 0L
@@ -1858,17 +2155,25 @@ private suspend fun exportEditorResult(
             relativePath = "Pictures/Emre/",
             isVideo = false
         )
-    } catch (t: Throwable) {
+    } catch (failure: Throwable) {
         uri?.let { outputUri ->
             if (outputUri.scheme == "content") {
                 runCatching { context.contentResolver.delete(outputUri, null, null) }
             }
         }
         legacyFile?.let { if (it.exists()) it.delete() }
-        throw t
+        throw failure
     } finally {
         tempFile?.let { if (it.exists()) it.delete() }
-        if (output !== processedOutput && output !== source && !output.isRecycled) output.recycle()
+        encodedOutput?.let {
+            if (it !== resizedOutput && it !== annotatedOutput && it !== processedOutput && it !== transformed && it !== source && !it.isRecycled) it.recycle()
+        }
+        resizedOutput?.let {
+            if (it !== annotatedOutput && it !== processedOutput && it !== transformed && it !== source && !it.isRecycled) it.recycle()
+        }
+        annotatedOutput?.let {
+            if (it !== processedOutput && it !== transformed && it !== source && !it.isRecycled) it.recycle()
+        }
         if (processedOutput !== transformed && processedOutput !== source && !processedOutput.isRecycled) processedOutput.recycle()
         if (transformed !== source && !transformed.isRecycled) transformed.recycle()
     }

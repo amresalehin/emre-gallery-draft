@@ -139,29 +139,17 @@ private val toolGroups = listOf(
         )
     ),
     ToolGroup(
-        "Format conversion",
+        "Resize, conversion and compression",
         Icons.Default.Image,
         listOf(
-            "JPEG and JPG",
-            "PNG: lossless and lossy",
-            "AVIF, HEIC and HEIF",
-            "WebP and animated WebP",
-            "JPEG XL (JXL)",
-            "TIFF and QOI",
-            "PSD and RAW rasterization",
-            "SVG rasterization",
-            "JPEG 2000 (JP2/J2K)",
-            "ICO generation with multiple resolutions",
-            "GIF and animated formats",
-            "OxiPNG and ImageQuant",
-            "MozJPEG and Jpegli",
-            "Telegram sticker PNG conversion",
-            "GIF to images and images to GIF",
-            "GIF to WebP and WebP to GIF",
-            "APNG and JXL conversion",
-            "Animated format conversion",
-            "Combine multiple animations",
-            "Compression quality and output-size controls"
+            "Custom output width and height in pixels",
+            "Aspect-ratio lock for proportional resizing",
+            "Resize after crop, adjustments, filters and annotations",
+            "Convert to JPEG, PNG or WebP",
+            "Adjustable JPEG and WebP quality",
+            "Best-effort target file-size compression for JPEG and WebP",
+            "Automatic output dimension safety limit (40 megapixels)",
+            "Save a new file in Pictures/Emre without changing the original"
         )
     ),
     ToolGroup(
@@ -360,7 +348,8 @@ fun ToolsScreen(
     onOpenEditor: () -> Unit = {},
     onOpenFilters: () -> Unit = {},
     onOpenAiTools: () -> Unit = {},
-    onOpenDrawing: () -> Unit = {}
+    onOpenDrawing: () -> Unit = {},
+    onOpenResize: () -> Unit = {}
 ) {
     var query by remember { mutableStateOf("") }
     var expandedGroups by remember { mutableStateOf(setOf("Image editing")) }
@@ -564,6 +553,27 @@ fun ToolsScreen(
                         Column(Modifier.weight(1f)) {
                             Text("Open Drawing & Annotation", fontWeight = FontWeight.SemiBold)
                             Text("Brush, highlighter, shapes, arrows and text layers", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ArrowForward, contentDescription = null)
+                    }
+                }
+            }
+            item {
+                ElevatedCard(
+                    onClick = onOpenResize,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(26.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Open Resize & Export", fontWeight = FontWeight.SemiBold)
+                            Text("Pixel dimensions, JPEG / PNG / WebP and target-size compression", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Icon(Icons.Default.ArrowForward, contentDescription = null)
                     }

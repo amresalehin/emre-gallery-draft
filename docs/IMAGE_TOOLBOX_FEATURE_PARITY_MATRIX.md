@@ -6,7 +6,7 @@
 
 This matrix accounts for **all 69 upstream feature Gradle modules**, all 10 upstream core modules and all 18 supporting library modules. "Disposition" describes how the feature should be delivered in Emre; it does not claim the feature is implemented.
 
-**Current implementation state:** The Tools catalogue is searchable and grouped into feature categories. Connected initial vertical slices include the native editor (crop/transform/adjust), 40 Emre ColorMatrix filter looks and six CPU effects, ML Kit person segmentation with transparent PNG export, and layered drawing annotations (pen, highlighter, annotation-only eraser, line, arrow, rectangle, ellipse and text). The remaining upstream modules are planned/discovery entries until their UI, backend, export and tests are connected.
+**Current implementation state:** The Tools catalogue is searchable and grouped into feature categories. Connected initial vertical slices include the native editor (crop/transform/adjust), 40 Emre ColorMatrix filter looks and six CPU effects, ML Kit person segmentation with transparent PNG export, and layered drawing annotations (pen, highlighter, annotation-only eraser, line, arrow, rectangle, ellipse and text), plus resize/conversion/compression (custom dimensions, JPEG/PNG/WebP output, lossy quality control and target-size search). The remaining upstream modules are planned/discovery entries until their UI, backend, export and tests are connected.
 
 ## A. Feature modules — all 69 accounted for
 

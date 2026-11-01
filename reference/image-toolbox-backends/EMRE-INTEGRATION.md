@@ -13,11 +13,13 @@ The editor is a native Compose destination and uses Emre's existing Coil 2 image
 - Vignette, film grain, fade, soft-focus, sharpening and pixelation effects.
 - On-device **person** background segmentation via the bundled ML Kit Selfie Segmenter, with transparent PNG export; this model is not a general object segmenter.
 - Drawing & Annotation: non-destructive pen/highlighter strokes, annotation-only eraser, lines, arrows, rectangle/ellipse outlines and tap-positioned text layers.
-- Eight annotation colours, adjustable stroke width, per-markup undo/redo, remove-last and clear-all controls; annotation layers render in preview and are composited into JPEG/PNG export.
+- Resize, conversion and compression: optional custom pixel dimensions with aspect-ratio lock, JPEG/PNG/WebP output, JPEG/WebP quality selection, rough pre-export size estimate and best-effort target-size compression by iterative quality search (10–100). Resizing runs after crop, image adjustments, effects, AI segmentation and annotations.
+- Output dimensions are bounded to 40 megapixels and a 16,384-pixel maximum side to reduce export memory risk.
+- Eight annotation colours, adjustable stroke width, per-markup undo/redo, remove-last and clear-all controls; annotation layers render in preview and are composited into JPEG/PNG/WebP export.
 - Original-versus-edited preview comparison.
 - A 30-state undo / redo history for crop, transform, adjustment, filter and effect changes.
 - A bounded 2048-pixel working preview; full-resolution decoding is deferred until export.
-- Save ordinary edits as a new JPEG in `Pictures/Emre`; person cutouts are saved as transparent PNG. The source is never overwritten.
+- Save edits as new files in `Pictures/Emre` using the selected JPEG, PNG or WebP format; person cutouts default to transparent PNG. The source is never overwritten.
 - Best-effort EXIF transfer for capture date, camera/lens, exposure and GPS fields; output orientation and pixel dimensions are normalized to the exported pixels.
 - MediaStore pending-row export on Android 10+, with a legacy public-folder path and runtime write-permission request on Android 8–9.
 
@@ -30,17 +32,17 @@ The upstream source snapshot is not a complete application module. The following
 - The full upstream filter/effect catalogue, LUT import, GPU shader studio or shader pipeline.
 - General-purpose object/background removal model selection and execution (the current implementation is limited to people segmentation).
 - Advanced drawing tools not included in the current slice: stickers/images, flood fill, spray/neon brushes, lasso/freeform selection, brush transforms, spot healing and generative inpainting.
-- Image format conversion and the full upstream compression backends.
+- Batch conversion, animated formats and the full upstream native codec set (AVIF, HEIC, TIFF, JPEG XL and RAW formats).
 - OpenCV stitching, photomosaic, collage and image compositing tools.
 - The upstream OCR and PDF implementations (Emre has its own OCR and PDF code paths).
-- Batch editing, animation editing, RAW/HEIC/AVIF/PSD workflows, or non-JPEG export formats.
+- Batch editing, animation editing, RAW/HEIC/AVIF/PSD workflows, or codecs beyond the current JPEG/PNG/WebP export set.
 - A complete preset marketplace or hundreds of ready-made effects.
 
 Do not describe these as available Emre features until they have been adapted, connected to Emre's dependencies and UI, and verified.
 
 ## Export and metadata notes
 
-All exports are separate JPEG files. Metadata transfer is best-effort: unsupported tags, provider restrictions, or malformed source EXIF do not block the pixel export. Since the output pixels are transformed, the orientation flag is reset to Normal and image pixel dimensions are updated. GPS tags are retained when present in the source; users should be aware that the edited file may therefore retain location metadata.
+Exports are separate files in the selected JPEG, PNG or WebP format. Best-effort EXIF transfer is performed for ordinary JPEG edits; PNG/WebP and transparent AI cutouts do not currently copy source EXIF. Metadata transfer is best-effort: unsupported tags, provider restrictions, or malformed source EXIF do not block the pixel export. Since the output pixels are transformed, the orientation flag is reset to Normal and image pixel dimensions are updated. GPS tags are retained when present in the source; users should be aware that the edited file may therefore retain location metadata.
 
 The annotation renderer keeps markup separate from the source bitmap until export; its eraser clears only the annotation compositing layer. Markups use normalized coordinates against the transformed/cropped preview and are rendered at export resolution. Annotation layers are held in the current in-memory 30-state undo/redo recipe and are not yet persisted as reopenable project files.
 

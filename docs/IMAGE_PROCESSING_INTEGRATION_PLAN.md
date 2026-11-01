@@ -21,6 +21,7 @@ The following work has now been committed on `research/image-toolbox-backends`:
 | Crop / transform | Initial implementation | Free crop, aspect presets, quarter-turn rotation and horizontal/vertical flip. |
 | Adjust / Filters & Effects | Initial implementation | Six tonal controls, 40 Emre ColorMatrix looks and six CPU effects; not the full upstream catalogue. |
 | Drawing & Annotation | Initial implementation | Non-destructive pen/highlighter/eraser, line/arrow/rectangle/ellipse and text layers; preview and export compositing. |
+| Resize / Conversion / Compression | Initial implementation | Optional custom pixel dimensions with aspect lock; JPEG/PNG/WebP output; JPEG/WebP quality and best-effort target-size search; rough size estimate; 40 MP output cap. |
 | AI background removal | Initial implementation | Bundled on-device ML Kit Selfie Segmenter for people with transparent PNG export; not general object segmentation. |
 | Preview | Initial implementation | Reuses Coil 2; bounded 2048-pixel working preview, with markup rendered as a separate overlay. |
 | Export | Initial implementation | JPEG for standard edits; transparent PNG for person cutouts. MediaStore pending-row export on Android 10+ and legacy folder export on Android 8–9. |
@@ -29,7 +30,7 @@ The following work has now been committed on `research/image-toolbox-backends`:
 | Verification | CI passed | Unit tests and debug APK assembly passed on commit `09084e1`; device QA remains outstanding. |
 
 Known limitations of the current slices:
-- No shared codec registry, format conversion UI, target-size compression or animated/RAW workflows.
+- No shared codec registry, batch conversion, target-size lab/codec comparison, animated formats or AVIF/HEIC/TIFF/JXL/RAW workflows. Current conversion is single-image JPEG/PNG/WebP export.
 - EXIF transfer is best-effort for ordinary JPEG edits; transparent PNG cutouts do not copy source EXIF.
 - Drawing layers are in-memory edit-recipe data and are not yet saved as reopenable project files.
 - Stickers/image overlays, flood-fill/spray/transform brushes, spot healing, lasso selection and generative inpainting remain unimplemented.
