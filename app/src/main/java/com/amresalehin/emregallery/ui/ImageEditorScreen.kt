@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -80,6 +81,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -536,43 +538,75 @@ private fun exportEditorResult(
     media: MediaItem
 ): MediaItem {
     val output = applyEditorRecipe(source, recipe)
-    val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
-    val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-    val values = ContentValues().apply {
-        put(MediaStore.Images.Media.DISPLAY_NAME, name)
-        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Emre")
-        put(MediaStore.Images.Media.IS_PENDING, 1)
-    }
-    val uri = context.contentResolver.insert(collection, values) ?: throw IOException("Could not create output image")
+    val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())}.jpg"
+    var uri: Uri? = null
+    var legacyFile: File? = null
     try {
-        context.contentResolver.openOutputStream(uri, "w")?.use { stream ->
-            if (!output.compress(Bitmap.CompressFormat.JPEG, 95, stream)) throw IOException("Image encoding failed")
-            stream.flush()
-        } ?: throw IOException("Could not open output stream")
-        val finalValues = ContentValues().apply {
-            put(MediaStore.Images.Media.IS_PENDING, 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Emre")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            uri = context.contentResolver.insert(collection, values)
+                ?: throw IOException("Could not create output image")
+            context.contentResolver.openOutputStream(uri, "w")?.use { stream ->
+                if (!output.compress(Bitmap.CompressFormat.JPEG, 95, stream)) throw IOException("Image encoding failed")
+                stream.flush()
+            } ?: throw IOException("Could not open output stream")
+            context.contentResolver.update(
+                uri,
+                ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+                null,
+                null
+            )
+        } else {
+            val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+            val directory = File(pictures, "Emre")
+            if (!directory.exists() && !directory.mkdirs()) throw IOException("Could not create Pictures/Emre")
+            legacyFile = File(directory, name)
+            legacyFile!!.outputStream().use { stream ->
+                if (!output.compress(Bitmap.CompressFormat.JPEG, 95, stream)) throw IOException("Image encoding failed")
+                stream.flush()
+            }
+            val scanned = android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(legacyFile!!.absolutePath),
+                arrayOf("image/jpeg"),
+                null
+            )
+            uri = Uri.fromFile(legacyFile)
         }
-        context.contentResolver.update(uri, finalValues, null, null)
+        val outputUri = uri ?: throw IOException("Image export did not produce a URI")
         val width = output.width
         val height = output.height
+        val sizeBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching { context.contentResolver.openFileDescriptor(outputUri, "r")?.use { it.statSize } ?: 0L }.getOrDefault(0L)
+        } else {
+            legacyFile?.length() ?: 0L
+        }
         return MediaItem(
-            id = android.content.ContentUris.parseId(uri),
-            uri = uri.toString(),
+            id = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) android.content.ContentUris.parseId(outputUri) else legacyFile?.lastModified() ?: System.currentTimeMillis(),
+            uri = outputUri.toString(),
             name = name,
             mimeType = "image/jpeg",
-            dateAddedSeconds = System.currentTimeMillis()/1000L,
+            dateAddedSeconds = System.currentTimeMillis() / 1000L,
             dateTakenMillis = System.currentTimeMillis(),
-            sizeBytes = runCatching { context.contentResolver.openFileDescriptor(uri,"r")?.use { it.statSize } ?: 0L }.getOrDefault(0L),
+            sizeBytes = sizeBytes,
             width = width,
             height = height,
             relativePath = "Pictures/Emre/",
             isVideo = false
         )
     } catch (t: Throwable) {
-        runCatching { context.contentResolver.delete(uri,null,null) }
+        uri?.let { outputUri ->
+            if (outputUri.scheme == "content") runCatching { context.contentResolver.delete(outputUri, null, null) }
+        }
+        legacyFile?.let { if (it.exists()) it.delete() }
         throw t
     } finally {
-        if(output !== source) output.recycle()
+        if (output !== source && !output.isRecycled) output.recycle()
     }
 }
