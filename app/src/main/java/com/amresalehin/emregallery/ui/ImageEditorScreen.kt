@@ -507,27 +507,20 @@ private fun applyEditorRecipe(
         return cropped
     }
     val result = Bitmap.createBitmap(cropped.width, cropped.height, Bitmap.Config.ARGB_8888)
-    val values = FloatArray(20)
-    val b = recipe.brightness * 255f
-    val c = recipe.contrast
-    val s = recipe.saturation
-    val lumR = 0.213f * (1-s)
-    val lumG = 0.715f * (1-s)
-    val lumB = 0.072f * (1-s)
-    val sat = floatArrayOf(
-        lumR+s,lumG,lumB,0f,b,
-        lumR,lumG+s,lumB,0f,b,
-        lumR,lumG,lumB+s,0f,b,
-        0f,0f,0f,1f,0f
-    )
-    for(i in sat.indices) values[i]=sat[i]
-    val paint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        colorFilter=android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix(floatArrayOf(
-            c,0f,0f,0f,b,
-            0f,c,0f,0f,b,
-            0f,0f,c,0f,b,
-            0f,0f,0f,1f,0f
-        )).apply { postConcat(android.graphics.ColorMatrix(values)) })
+    val brightnessOffset = recipe.brightness * 255f
+    val contrast = recipe.contrast
+    val saturation = recipe.saturation
+    val lumR = 0.213f * (1f - saturation)
+    val lumG = 0.715f * (1f - saturation)
+    val lumB = 0.072f * (1f - saturation)
+    val matrix = android.graphics.ColorMatrix(floatArrayOf(
+        contrast * (lumR + saturation), contrast * lumG, contrast * lumB, 0f, brightnessOffset,
+        contrast * lumR, contrast * (lumG + saturation), contrast * lumB, 0f, brightnessOffset,
+        contrast * lumR, contrast * lumG, contrast * (lumB + saturation), 0f, brightnessOffset,
+        0f, 0f, 0f, 1f, 0f
+    ))
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
     }
     android.graphics.Canvas(result).drawBitmap(cropped,0f,0f,paint)
     if (cropped !== rotated && !cropped.isRecycled) cropped.recycle()
