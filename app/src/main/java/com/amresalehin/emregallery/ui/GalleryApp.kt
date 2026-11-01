@@ -58,6 +58,7 @@ import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.data.StoryGroup
 import com.amresalehin.emregallery.documents.PdfDocumentTool
 import com.amresalehin.emregallery.documents.PdfDocumentToolScreen
+import com.amresalehin.emregallery.ui.ImageEditorScreen
 
 data class NavBackStackEntry(
     val destination: Destination,
@@ -83,6 +84,7 @@ fun GalleryApp() {
     val lockedVaultManager = remember { LockedVaultManager(context.applicationContext) }
     var destination by remember { mutableStateOf(Destination.HOME) }
     var selectedPdfTool by remember { mutableStateOf(PdfDocumentTool.SCAN) }
+    var editorSource by remember { mutableStateOf<MediaItem?>(null) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -590,6 +592,11 @@ fun GalleryApp() {
                 destination = Destination.ALBUMS
                 mapFocusItem = null
                 viewerStoryTitle = null
+            }
+            destination == Destination.IMAGE_EDITOR -> {
+                destination = Destination.VIEWER
+                selectedMedia = editorSource ?: selectedMedia
+                showViewerControls = true
             }
             destination == Destination.PDF_DOCUMENT_TOOL -> {
                 destination = Destination.TOOLS
@@ -1189,6 +1196,18 @@ fun GalleryApp() {
                             navigateTo(Destination.PDF_DOCUMENT_TOOL, rememberPrevious = true)
                         }
                     )
+                    Destination.IMAGE_EDITOR -> editorSource?.let { source ->
+                        ImageEditorScreen(
+                            source = source,
+                            onBack = { performBackNavigation() },
+                            onSaved = { saved ->
+                                editorSource = saved
+                                selectedMedia = saved
+                                refreshMedia()
+                                performBackNavigation()
+                            }
+                        )
+                    }
                     Destination.PDF_DOCUMENT_TOOL -> PdfDocumentToolScreen(
                         tool = selectedPdfTool,
                         onBack = { performBackNavigation() }
@@ -1339,6 +1358,10 @@ fun GalleryApp() {
                 onOpenMap = {
                     showDetails = false
                     navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = currentItem)
+                },
+                onEdit = {
+                    editorSource = currentItem
+                    navigateTo(Destination.IMAGE_EDITOR, rememberPrevious = true, newSelectedMedia = currentItem)
                 },
                 onOpenPerson = { personId, engineId ->
                     showDetails = false
