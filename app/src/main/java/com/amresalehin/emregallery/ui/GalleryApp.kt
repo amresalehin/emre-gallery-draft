@@ -85,6 +85,7 @@ fun GalleryApp() {
     var destination by remember { mutableStateOf(Destination.HOME) }
     var selectedPdfTool by remember { mutableStateOf(PdfDocumentTool.SCAN) }
     var editorSource by remember { mutableStateOf<MediaItem?>(null) }
+    var editorStartInFilters by remember { mutableStateOf(false) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
     var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -1198,6 +1199,7 @@ fun GalleryApp() {
                             }
                             if (candidate != null) {
                                 editorSource = candidate
+                                editorStartInFilters = false
                                 navigateTo(
                                     Destination.IMAGE_EDITOR,
                                     rememberPrevious = true,
@@ -1205,6 +1207,24 @@ fun GalleryApp() {
                                 )
                             } else {
                                 scope.launch { snackbarHostState.showSnackbar("Select a photo to edit") }
+                            }
+                        },
+                        onOpenFilters = {
+                            val candidate = selectedMedia?.takeUnless {
+                                it.isVideo || it.uri in hidden || it.uri in inBin || it.isTrashed
+                            } ?: media.firstOrNull {
+                                !it.isVideo && it.uri !in hidden && it.uri !in inBin && !it.isTrashed
+                            }
+                            if (candidate != null) {
+                                editorSource = candidate
+                                editorStartInFilters = true
+                                navigateTo(
+                                    Destination.IMAGE_EDITOR,
+                                    rememberPrevious = true,
+                                    newSelectedMedia = candidate
+                                )
+                            } else {
+                                scope.launch { snackbarHostState.showSnackbar("Select a photo to apply filters") }
                             }
                         }
                     )
@@ -1232,7 +1252,8 @@ fun GalleryApp() {
                                     }.ifEmpty { listOf(saved) }
                                     showViewerControls = true
                                 }
-                            }
+                            },
+                            startInFilters = editorStartInFilters
                         )
                     }
                     Destination.PDF_DOCUMENT_TOOL -> PdfDocumentToolScreen(
@@ -1391,6 +1412,7 @@ fun GalleryApp() {
                         scope.launch { snackbarHostState.showSnackbar("Video editing is not available yet") }
                     } else {
                         editorSource = currentItem
+                        editorStartInFilters = false
                         navigateTo(Destination.IMAGE_EDITOR, rememberPrevious = true, newSelectedMedia = currentItem)
                     }
                 },
