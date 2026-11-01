@@ -1,6 +1,6 @@
 # Emre Gallery — Complete ImageToolbox Integration Roadmap
 
-**Status:** Planning only. No production integration has been performed by this document.
+**Status:** Active integration branch. The first Emre-native editor vertical slice is implemented; build/CI verification is still required.
 **Target branch:** `research/image-toolbox-backends`
 **Pinned upstream:** `T8RIN/ImageToolbox` at `f78bc23f52d863e97cd0af061c603ac654dedc48`
 **Source location:** `vendor/ImageToolbox`
@@ -10,6 +10,29 @@ Related inventory: [IMAGE_TOOLBOX_FULL_SOURCE_INVENTORY.md](IMAGE_TOOLBOX_FULL_S
 Feature-by-feature disposition: [IMAGE_TOOLBOX_FEATURE_PARITY_MATRIX.md](IMAGE_TOOLBOX_FEATURE_PARITY_MATRIX.md)
 
 ---
+
+## Current branch implementation status (2026-11-01)
+
+The following work has now been committed on `research/image-toolbox-backends`:
+
+| Area | Branch state | Notes |
+|---|---|---|
+| Native editor navigation | Implemented | Viewer Edit and Tools shortcut route to an Emre Compose editor destination. |
+| Crop / transform | Initial implementation | Free crop, 1:1, 4:3, 3:2 and 16:9 presets; quarter-turn rotation; horizontal/vertical flip. |
+| Basic adjustments | Initial implementation | Brightness, contrast and saturation controls use a composed Android ColorMatrix. |
+| Preview | Initial implementation | Reuses Emre's Coil 2 loader; preview work is bounded to 2048 px and dispatched off the main thread. |
+| Export | Initial implementation | Saves a new JPEG copy in Pictures/Emre. Android 10+ uses a pending MediaStore row; Android 8–9 uses a file plus MediaScanner. |
+| Source preservation | Implemented for this slice | The source URI is never overwritten. |
+| ImageToolbox codec/filter/AI reference sources | Research only | The 44-file backend snapshot remains uncompiled reference material. It is not yet the live engine in Emre. |
+| Verification | Pending | No local Gradle build or Android device test has been run from this editing session. |
+
+Known limitations of this first slice:
+- JPEG-only output; output format/quality selection is not yet exposed.
+- EXIF/XMP metadata is not copied to the edited output.
+- Crop handle interaction and transforms require device validation, especially unusual image dimensions/orientations.
+- Full ImageToolbox filter catalog, editable markup layers, drawing, background-removal models, advanced codecs and AI model registry are not yet integrated.
+
+Do not describe the 44 reference files as a functioning backend. The roadmap below remains the target architecture for subsequent vertical slices.
 
 ## 1. Product and engineering decision
 
