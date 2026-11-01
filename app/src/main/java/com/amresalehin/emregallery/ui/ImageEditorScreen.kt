@@ -5,7 +5,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
-import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -17,19 +16,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.CircleShape
@@ -66,7 +64,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -133,8 +130,8 @@ fun ImageEditorScreen(
                     .allowHardware(false)
                     .build()
                 loader.execute(request).drawable?.let { drawable ->
-                    val bitmap = android.graphics.drawable.DrawableToBitmap.toBitmap(drawable)
-                    bitmap
+                    val bitmapDrawable = drawable as? android.graphics.drawable.BitmapDrawable
+                    bitmapDrawable?.bitmap ?: throw IOException("Unsupported image decoder output")
                 } ?: BitmapFactory.decodeStream(context.contentResolver.openInputStream(Uri.parse(source.uri)))
             }.getOrNull()
         }
@@ -147,7 +144,17 @@ fun ImageEditorScreen(
 
     val image = sourceBitmap
     val preview = remember(image, recipe) {
-        image?.let { applyEditorRecipe(it, recipe, preview = true) }
+        image?.let { applyEditorRecipe(it, recipe) }
+    }
+    androidx.compose.runtime.DisposableEffect(preview) {
+        onDispose {
+            if (preview != null && preview !== image && !preview.isRecycled) preview.recycle()
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(image) {
+        onDispose {
+            if (image != null && !image.isRecycled) image.recycle()
+        }
     }
 
     Column(
@@ -200,22 +207,28 @@ fun ImageEditorScreen(
             when {
                 loading -> CircularProgressIndicator()
                 preview != null -> {
-                    Box(
+                    BoxWithConstraints(
                         modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(18.dp)).background(Color(0xFF202020)),
                         contentAlignment = Alignment.Center
                     ) {
-                        androidx.compose.foundation.Image(
-                            bitmap = preview.asImageBitmap(),
-                            contentDescription = "Edited image preview",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
-                        )
-                        if (mode == EditorMode.Crop && showCropHandles) {
-                            CropOverlay(
-                                recipe = recipe,
-                                onRecipeChange = { recipe = it },
-                                modifier = Modifier.fillMaxSize()
+                        val imageAspect = preview.width.toFloat() / preview.height
+                        val boundsAspect = maxWidth.value / maxHeight.value.coerceAtLeast(1f)
+                        val displayWidth = if (imageAspect > boundsAspect) maxWidth else maxHeight * imageAspect
+                        val displayHeight = if (imageAspect > boundsAspect) maxWidth / imageAspect else maxHeight
+                        Box(Modifier.width(displayWidth).height(displayHeight)) {
+                            androidx.compose.foundation.Image(
+                                bitmap = preview.asImageBitmap(),
+                                contentDescription = "Edited image preview",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.FillBounds
                             )
+                            if (mode == EditorMode.Crop && showCropHandles) {
+                                CropOverlay(
+                                    recipe = recipe,
+                                    onRecipeChange = { recipe = it },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                         }
                     }
                 }
@@ -370,12 +383,14 @@ private fun CropOverlay(
     }
 }
 
-private fun applyEditorRecipe(source: Bitmap, recipe: EditorRecipe, preview: Boolean): Bitmap {
+private fun applyEditorRecipe(source: Bitmap, recipe: EditorRecipe): Bitmap {
     val matrix = Matrix().apply {
-        postRotate(recipe.rotation.toFloat())
+        postRotate(recipe.rotation.toFloat(), source.width / 2f, source.height / 2f)
         postScale(
             if (recipe.flipHorizontal) -1f else 1f,
-            if (recipe.flipVertical) -1f else 1f
+            if (recipe.flipVertical) -1f else 1f,
+            source.width / 2f,
+            source.height / 2f
         )
     }
     val rotated = if (recipe.rotation % 360 == 0 && !recipe.flipHorizontal && !recipe.flipVertical) {
@@ -427,7 +442,7 @@ private fun exportEditorResult(
     recipe: EditorRecipe,
     media: MediaItem
 ): MediaItem {
-    val output = applyEditorRecipe(source, recipe, preview = false)
+    val output = applyEditorRecipe(source, recipe)
     val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
     val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
     val values = ContentValues().apply {
