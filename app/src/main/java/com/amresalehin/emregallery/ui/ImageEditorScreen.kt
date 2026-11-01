@@ -43,6 +43,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
@@ -891,8 +892,8 @@ private fun DrawMarkupOverlay(
                     detectTapGestures { offset ->
                         currentOnTextTap(
                             MarkupPoint(
-                                (offset.x / size.width.coerceAtLeast(1f)).coerceIn(0f, 1f),
-                                (offset.y / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                (offset.x / size.width.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f),
+                                (offset.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
                             )
                         )
                     }
@@ -948,11 +949,11 @@ private fun drawEditorMarkupLayers(
         val startY = first.y.coerceIn(0f, 1f) * height
         val endX = last.x.coerceIn(0f, 1f) * width
         val endY = last.y.coerceIn(0f, 1f) * height
-        val strokeWidth = (layer.strokeWidthFraction.coerceIn(0.002f, 0.08f) * minOf(width, height)).coerceAtLeast(1f)
+        val baseStrokeWidth = (layer.strokeWidthFraction.coerceIn(0.002f, 0.08f) * minOf(width, height)).coerceAtLeast(1f)
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = layer.colorArgb
             style = android.graphics.Paint.Style.STROKE
-            strokeWidth = strokeWidth
+            strokeWidth = baseStrokeWidth
             strokeCap = android.graphics.Paint.Cap.ROUND
             strokeJoin = android.graphics.Paint.Join.ROUND
             isDither = true
@@ -961,10 +962,10 @@ private fun drawEditorMarkupLayers(
             MarkupTool.Pen, MarkupTool.Highlighter, MarkupTool.Eraser -> {
                 if (layer.tool == MarkupTool.Highlighter) {
                     paint.alpha = (android.graphics.Color.alpha(layer.colorArgb) * 0.34f).roundToInt()
-                    paint.strokeWidth = strokeWidth * 3.2f
+                    paint.strokeWidth = baseStrokeWidth * 3.2f
                 } else if (layer.tool == MarkupTool.Eraser) {
                     paint.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
-                    paint.strokeWidth = strokeWidth * 3.8f
+                    paint.strokeWidth = baseStrokeWidth * 3.8f
                 }
                 if (layer.points.size == 1 || (layer.points.size == 2 && first == last)) {
                     canvas.drawCircle(startX, startY, paint.strokeWidth / 2f, paint)
@@ -982,7 +983,7 @@ private fun drawEditorMarkupLayers(
             MarkupTool.Arrow -> {
                 canvas.drawLine(startX, startY, endX, endY, paint)
                 val angle = kotlin.math.atan2(endY - startY, endX - startX)
-                val head = (strokeWidth * 4.5f).coerceAtLeast(12f)
+                val head = (baseStrokeWidth * 4.5f).coerceAtLeast(12f)
                 val spread = Math.PI.toFloat() / 6f
                 val arrowPath = android.graphics.Path().apply {
                     moveTo(endX, endY)
