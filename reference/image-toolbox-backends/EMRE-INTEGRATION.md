@@ -9,8 +9,9 @@ The editor is a native Compose destination and uses Emre's existing Coil 2 image
 - Free crop and aspect-ratio presets: 1:1, 4:3, 3:2, 16:9 and 9:16.
 - 90-degree rotation and horizontal / vertical mirroring.
 - Brightness, contrast and saturation controls.
-- Looks: Original, Mono, Sepia, Warm, Cool, Vivid and Matte.
-- A 30-state undo / redo history for crop, transform, adjustment and look changes.
+- Nineteen colour presets across portrait, film, vintage, monochrome and colour families, with adjustable filter strength.
+- Vignette, film grain and fade effects.
+- A 30-state undo / redo history for crop, transform, adjustment, filter and effect changes.
 - A bounded 2048-pixel working preview; full-resolution decoding is deferred until export.
 - Save as a new JPEG in `Pictures/Emre`, without overwriting the source.
 - Best-effort EXIF transfer for capture date, camera/lens, exposure and GPS fields; output orientation and pixel dimensions are normalized to the exported pixels.
@@ -36,7 +37,7 @@ Do not describe these as available Emre features until they have been adapted, c
 
 All exports are separate JPEG files. Metadata transfer is best-effort: unsupported tags, provider restrictions, or malformed source EXIF do not block the pixel export. Since the output pixels are transformed, the orientation flag is reset to Normal and image pixel dimensions are updated. GPS tags are retained when present in the source; users should be aware that the edited file may therefore retain location metadata.
 
-The preview is intentionally bounded to reduce memory pressure. Export re-decodes the original URI at full resolution and runs image processing off the main thread. Very large source images can still require substantial temporary memory during export.
+The preview is intentionally bounded to reduce memory pressure. Export re-decodes the original URI at full resolution and runs image processing off the main thread. Filter matrices are blended with identity at the selected strength; vignette, grain and fade are processed row-by-row to avoid allocating a full-image pixel array. Very large source images can still require substantial temporary memory during export.
 
 ## Verification
 
