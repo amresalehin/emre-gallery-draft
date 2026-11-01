@@ -74,18 +74,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.exifinterface.media.ExifInterface
 import coil.Coil
 import coil.request.ImageRequest
 import coil.size.Size as CoilSize
 import com.amresalehin.emregallery.data.MediaItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -150,7 +154,7 @@ fun ImageEditorScreen(
         if (decoded == null) error = "Unable to decode this image"
     }
 
-    BackHandler(enabled = true) { onBack() }
+    BackHandler(enabled = !saving) { onBack() }
 
     val image = sourceBitmap
     var preview by remember(image) { mutableStateOf<Bitmap?>(null) }
@@ -213,7 +217,7 @@ fun ImageEditorScreen(
                                 val fullResolution = decodeEditorBitmap(context, source.uri, maxDimension = null)
                                     ?: throw IOException("Unable to decode the original image for export")
                                 try {
-                                    exportEditorResult(context, fullResolution, recipe)
+                                    exportEditorResult(context, fullResolution, recipe, source)
                                 } finally {
                                     if (!fullResolution.isRecycled) fullResolution.recycle()
                                 }
@@ -682,16 +686,106 @@ private fun decodeEditorBitmap(
     }
 }
 
-private fun exportEditorResult(
+private fun copyExifMetadata(
+    context: Context,
+    sourceUri: Uri,
+    destinationFile: File,
+    width: Int,
+    height: Int
+) {
+    val sourceExif = runCatching {
+        context.contentResolver.openInputStream(sourceUri)?.use { ExifInterface(it) }
+    }.getOrNull() ?: return
+
+    runCatching {
+        val destinationExif = ExifInterface(destinationFile.absolutePath)
+        // Retain useful capture, camera and location metadata while avoiding the
+        // source orientation flag because the edited pixels are already upright.
+        val preservedTags = listOf(
+            "DateTime",
+            "DateTimeOriginal",
+            "DateTimeDigitized",
+            "SubSecTime",
+            "SubSecTimeOriginal",
+            "SubSecTimeDigitized",
+            "Make",
+            "Model",
+            "Software",
+            "ImageDescription",
+            "UserComment",
+            "Copyright",
+            "ExposureTime",
+            "FNumber",
+            "ISOSpeedRatings",
+            "FocalLength",
+            "Flash",
+            "WhiteBalance",
+            "MeteringMode",
+            "ExposureProgram",
+            "ExposureBiasValue",
+            "LensMake",
+            "LensModel",
+            "GPSLatitude",
+            "GPSLatitudeRef",
+            "GPSLongitude",
+            "GPSLongitudeRef",
+            "GPSAltitude",
+            "GPSAltitudeRef",
+            "GPSTimeStamp",
+            "GPSDateStamp",
+            "GPSProcessingMethod"
+        )
+        preservedTags.forEach { tag ->
+            sourceExif.getAttribute(tag)?.takeIf { it.isNotBlank() }?.let {
+                destinationExif.setAttribute(tag, it)
+            }
+        }
+        destinationExif.setAttribute("Orientation", ExifInterface.ORIENTATION_NORMAL.toString())
+        destinationExif.setAttribute("ImageWidth", width.toString())
+        destinationExif.setAttribute("ImageLength", height.toString())
+        destinationExif.setAttribute("PixelXDimension", width.toString())
+        destinationExif.setAttribute("PixelYDimension", height.toString())
+        destinationExif.saveAttributes()
+    }
+}
+
+private suspend fun scanMediaFile(context: Context, file: File): Uri =
+    suspendCancellableCoroutine { continuation ->
+        android.media.MediaScannerConnection.scanFile(
+            context,
+            arrayOf(file.absolutePath),
+            arrayOf("image/jpeg")
+        ) { _, scannedUri ->
+            if (!continuation.isActive) return@scanFile
+            if (scannedUri != null) {
+                continuation.resume(scannedUri)
+            } else {
+                continuation.resumeWithException(IOException("Media scanner could not index the exported image"))
+            }
+        }
+    }
+
+private suspend fun exportEditorResult(
     context: Context,
     source: Bitmap,
-    recipe: EditorRecipe
+    recipe: EditorRecipe,
+    media: MediaItem
 ): MediaItem {
     val output = applyEditorRecipe(source, recipe)
     val name = "EMRE_${SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())}.jpg"
     var uri: Uri? = null
     var legacyFile: File? = null
+    var tempFile: File? = null
     try {
+        tempFile = File.createTempFile("emre-edit-", ".jpg", context.cacheDir)
+        tempFile.outputStream().use { stream ->
+            if (!output.compress(Bitmap.CompressFormat.JPEG, 95, stream)) {
+                throw IOException("Image encoding failed")
+            }
+            stream.flush()
+        }
+        copyExifMetadata(context, Uri.parse(media.uri), tempFile, output.width, output.height)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             val values = ContentValues().apply {
@@ -702,48 +796,49 @@ private fun exportEditorResult(
             }
             uri = context.contentResolver.insert(collection, values)
                 ?: throw IOException("Could not create output image")
-            context.contentResolver.openOutputStream(uri, "w")?.use { stream ->
-                if (!output.compress(Bitmap.CompressFormat.JPEG, 95, stream)) throw IOException("Image encoding failed")
-                stream.flush()
+            context.contentResolver.openOutputStream(uri, "w")?.use { destination ->
+                tempFile.inputStream().use { input -> input.copyTo(destination) }
             } ?: throw IOException("Could not open output stream")
-            context.contentResolver.update(
+            val updated = context.contentResolver.update(
                 uri,
                 ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
                 null,
                 null
             )
+            if (updated <= 0) throw IOException("Could not finalize the exported image")
         } else {
             val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
             val directory = File(pictures, "Emre")
-            if (!directory.exists() && !directory.mkdirs()) throw IOException("Could not create Pictures/Emre")
-            legacyFile = File(directory, name)
-            legacyFile!!.outputStream().use { stream ->
-                if (!output.compress(Bitmap.CompressFormat.JPEG, 95, stream)) throw IOException("Image encoding failed")
-                stream.flush()
+            if (!directory.exists() && !directory.mkdirs()) {
+                throw IOException("Could not create Pictures/Emre")
             }
-            val scanned = android.media.MediaScannerConnection.scanFile(
-                context,
-                arrayOf(legacyFile!!.absolutePath),
-                arrayOf("image/jpeg"),
-                null
-            )
-            uri = Uri.fromFile(legacyFile)
+            legacyFile = File(directory, name)
+            tempFile.copyTo(legacyFile, overwrite = false)
+            uri = scanMediaFile(context, legacyFile)
         }
+
         val outputUri = uri ?: throw IOException("Image export did not produce a URI")
         val width = output.width
         val height = output.height
         val sizeBytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            runCatching { context.contentResolver.openFileDescriptor(outputUri, "r")?.use { it.statSize } ?: 0L }.getOrDefault(0L)
+            runCatching {
+                context.contentResolver.openFileDescriptor(outputUri, "r")?.use { it.statSize } ?: 0L
+            }.getOrDefault(0L)
         } else {
             legacyFile?.length() ?: 0L
         }
+        val now = System.currentTimeMillis()
         return MediaItem(
-            id = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) android.content.ContentUris.parseId(outputUri) else legacyFile?.lastModified() ?: System.currentTimeMillis(),
+            id = if (outputUri.authority == MediaStore.AUTHORITY) {
+                android.content.ContentUris.parseId(outputUri)
+            } else {
+                legacyFile?.lastModified() ?: now
+            },
             uri = outputUri.toString(),
             name = name,
             mimeType = "image/jpeg",
-            dateAddedSeconds = System.currentTimeMillis() / 1000L,
-            dateTakenMillis = System.currentTimeMillis(),
+            dateAddedSeconds = now / 1000L,
+            dateTakenMillis = media.dateTakenMillis,
             sizeBytes = sizeBytes,
             width = width,
             height = height,
@@ -752,11 +847,14 @@ private fun exportEditorResult(
         )
     } catch (t: Throwable) {
         uri?.let { outputUri ->
-            if (outputUri.scheme == "content") runCatching { context.contentResolver.delete(outputUri, null, null) }
+            if (outputUri.scheme == "content") {
+                runCatching { context.contentResolver.delete(outputUri, null, null) }
+            }
         }
         legacyFile?.let { if (it.exists()) it.delete() }
         throw t
     } finally {
+        tempFile?.let { if (it.exists()) it.delete() }
         if (output !== source && !output.isRecycled) output.recycle()
     }
 }
