@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Flip
@@ -46,6 +47,8 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Rotate90DegreesCcw
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.filled.Redo
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -114,7 +117,8 @@ private enum class CropPreset(val title: String, val ratio: Float?) {
     Square("1:1", 1f),
     FourThree("4:3", 4f / 3f),
     ThreeTwo("3:2", 3f / 2f),
-    SixteenNine("16:9", 16f / 9f)
+    SixteenNine("16:9", 16f / 9f),
+    NineSixteen("9:16", 9f / 16f)
 }
 
 private data class EditorRecipe(
@@ -141,6 +145,26 @@ fun ImageEditorScreen(
     val scope = rememberCoroutineScope()
     var sourceBitmap by remember(source.uri) { mutableStateOf<Bitmap?>(null) }
     var recipe by remember(source.uri) { mutableStateOf(EditorRecipe()) }
+    var undoStack by remember(source.uri) { mutableStateOf(emptyList<EditorRecipe>()) }
+    var redoStack by remember(source.uri) { mutableStateOf(emptyList<EditorRecipe>()) }
+    fun updateRecipe(next: EditorRecipe) {
+        if (next == recipe) return
+        undoStack = (undoStack + recipe).takeLast(30)
+        redoStack = emptyList()
+        recipe = next
+    }
+    fun undoRecipe() {
+        val previous = undoStack.lastOrNull() ?: return
+        redoStack = (redoStack + recipe).takeLast(30)
+        undoStack = undoStack.dropLast(1)
+        recipe = previous
+    }
+    fun redoRecipe() {
+        val next = redoStack.lastOrNull() ?: return
+        undoStack = (undoStack + recipe).takeLast(30)
+        redoStack = redoStack.dropLast(1)
+        recipe = next
+    }
     var mode by remember { mutableStateOf(EditorMode.Crop) }
     var loading by remember(source.uri) { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
@@ -232,9 +256,15 @@ fun ImageEditorScreen(
                 Text("Editor", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(source.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
+            IconButton(onClick = ::undoRecipe, enabled = !saving && undoStack.isNotEmpty()) {
+                Icon(Icons.Default.Undo, contentDescription = "Undo")
+            }
+            IconButton(onClick = ::redoRecipe, enabled = !saving && redoStack.isNotEmpty()) {
+                Icon(Icons.Default.Redo, contentDescription = "Redo")
+            }
             TextButton(
                 onClick = {
-                    recipe = EditorRecipe()
+                    updateRecipe(EditorRecipe())
                     cropPreset = CropPreset.Free
                     showCropHandles = true
                 },
@@ -285,7 +315,7 @@ fun ImageEditorScreen(
                             if (mode == EditorMode.Crop && showCropHandles) {
                                 CropOverlay(
                                     recipe = recipe,
-                                    onRecipeChange = { recipe = it },
+                                    onRecipeChange = ::updateRecipe,
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
@@ -343,10 +373,10 @@ fun ImageEditorScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp)
             ) {
-                item { EditorAction("90°", Icons.Default.Rotate90DegreesCcw) { recipe = recipe.copy(rotation = (recipe.rotation + 90) % 360) } }
-                item { EditorAction("Flip H", Icons.Default.Flip) { recipe = recipe.copy(flipHorizontal = !recipe.flipHorizontal) } }
-                item { EditorAction("Flip V", Icons.Default.Flip) { recipe = recipe.copy(flipVertical = !recipe.flipVertical) } }
-                item { EditorAction("Reset crop", Icons.Default.Refresh) { recipe = recipe.copy(cropLeft=0f,cropTop=0f,cropRight=1f,cropBottom=1f); cropPreset = CropPreset.Free } }
+                item { EditorAction("90°", Icons.Default.Rotate90DegreesCcw) { updateRecipe(recipe.copy(rotation = (recipe.rotation + 90) % 360)) } }
+                item { EditorAction("Flip H", Icons.Default.Flip) { updateRecipe(recipe.copy(flipHorizontal = !recipe.flipHorizontal)) } }
+                item { EditorAction("Flip V", Icons.Default.Flip) { updateRecipe(recipe.copy(flipVertical = !recipe.flipVertical)) } }
+                item { EditorAction("Reset crop", Icons.Default.Refresh) { updateRecipe(recipe.copy(cropLeft=0f,cropTop=0f,cropRight=1f,cropBottom=1f)); cropPreset = CropPreset.Free } }
                 item { EditorAction("Apply crop", Icons.Default.Check) { showCropHandles = false } }
             }
             LazyRow(
@@ -361,7 +391,7 @@ fun ImageEditorScreen(
                             cropPreset = preset
                             val sourceAspect = image?.let { it.width.toFloat() / it.height.toFloat() } ?: 1f
                             val rotatedAspect = if (recipe.rotation % 180 == 0) sourceAspect else 1f / sourceAspect
-                            recipe = applyCropPreset(recipe, preset.ratio, rotatedAspect)
+                            updateRecipe(applyCropPreset(recipe, preset.ratio, rotatedAspect))
                             showCropHandles = true
                         },
                         color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -384,9 +414,9 @@ fun ImageEditorScreen(
             )
         } else if (mode == EditorMode.Adjust) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                AdjustmentSlider("Brightness", recipe.brightness, -0.5f..0.5f) { recipe = recipe.copy(brightness = it) }
-                AdjustmentSlider("Contrast", recipe.contrast, 0.5f..1.8f) { recipe = recipe.copy(contrast = it) }
-                AdjustmentSlider("Saturation", recipe.saturation, 0f..2f) { recipe = recipe.copy(saturation = it) }
+                AdjustmentSlider("Brightness", recipe.brightness, -0.5f..0.5f) { updateRecipe(recipe.copy(brightness = it)) }
+                AdjustmentSlider("Contrast", recipe.contrast, 0.5f..1.8f) { updateRecipe(recipe.copy(contrast = it)) }
+                AdjustmentSlider("Saturation", recipe.saturation, 0f..2f) { updateRecipe(recipe.copy(saturation = it)) }
             }
         } else {
             LazyRow(
@@ -397,7 +427,7 @@ fun ImageEditorScreen(
                     val look = EditorLook.entries[index]
                     val selected = recipe.look == look
                     Surface(
-                        modifier = Modifier.clip(CircleShape).clickable { recipe = recipe.copy(look = look) },
+                        modifier = Modifier.clip(CircleShape).clickable { updateRecipe(recipe.copy(look = look)) },
                         color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.surfaceContainerHigh,
                         shape = CircleShape
                     ) {
