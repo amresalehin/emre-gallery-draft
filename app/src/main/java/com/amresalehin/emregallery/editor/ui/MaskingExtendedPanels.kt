@@ -63,79 +63,39 @@ fun MaskingExtendedPanel(
             .background(Color(0xFF141414))
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // Selection Mode Switcher Pills: Brush, Magic Wand, Lasso, Polygon, Ellipse
-        LazyRow(
+        // Invert Mask & Clear Actions at Top
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(MaskingSelectionType.entries) { type ->
-                val isSelected = selectedType == type
-                val icon = when (type) {
-                    MaskingSelectionType.BRUSH -> Icons.Default.Brush
-                    MaskingSelectionType.MAGIC_WAND -> Icons.Default.AutoFixNormal
-                    MaskingSelectionType.LASSO -> Icons.Default.Gesture
-                    MaskingSelectionType.POLYGON -> Icons.Default.Polyline
-                    MaskingSelectionType.ELLIPSE -> Icons.Default.PanoramaFishEye
-                }
-                Surface(
-                    onClick = { onSelectType(type) },
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isSelected) Color.White else Color(0xFF222222),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = type.label,
-                            tint = if (isSelected) Color.Black else Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = type.label,
-                            color = if (isSelected) Color.Black else Color.White,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
+            OutlinedButton(
+                onClick = onInvertMask,
+                modifier = Modifier.weight(1f).height(36.dp),
+                shape = CircleShape,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+            ) {
+                Icon(Icons.Default.InvertColors, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Invert Mask", color = Color.White, fontSize = 12.sp)
+            }
+
+            OutlinedButton(
+                onClick = onClearMask,
+                modifier = Modifier.weight(1f).height(36.dp),
+                shape = CircleShape,
+                border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.4f))
+            ) {
+                Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Clear Mask", color = Color(0xFFFF5252), fontSize = 12.sp)
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
 
+        // Tool-specific parameter controls
         when (selectedType) {
             MaskingSelectionType.BRUSH -> {
-                // Brush Types Row
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(BrushType.entries) { brush ->
-                        val isSelected = selectedBrush == brush
-                        Surface(
-                            onClick = { onSelectBrush(brush) },
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (isSelected) Color.White else Color(0xFF222222),
-                            modifier = Modifier.height(32.dp)
-                        ) {
-                            Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = brush.label,
-                                    color = if (isSelected) Color.Black else Color.White,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(10.dp))
-
                 // Brush Width Slider
                 LrSliderRow(
                     title = "Brush Size",
@@ -212,6 +172,33 @@ fun MaskingExtendedPanel(
                         }
                     }
                 }
+
+                Spacer(Modifier.height(10.dp))
+
+                // Tier 3: Brush Types Row (situated directly above Tier 2)
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(BrushType.entries) { brush ->
+                        val isSelected = selectedBrush == brush
+                        Surface(
+                            onClick = { onSelectBrush(brush) },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isSelected) Color.White else Color(0xFF222222),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = brush.label,
+                                    color = if (isSelected) Color.Black else Color.White,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                }
             }
             MaskingSelectionType.MAGIC_WAND -> {
                 Text("Magic Wand Color Selector", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -265,31 +252,45 @@ fun MaskingExtendedPanel(
 
         Spacer(Modifier.height(12.dp))
 
-        // Invert Mask & Clear Actions
-        Row(
+        // Tier 2: Selection Mode Switcher Pills (Brush, Magic Wand, Lasso, Polygon, Ellipse) - docked right above bottom bar
+        LazyRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            OutlinedButton(
-                onClick = onInvertMask,
-                modifier = Modifier.weight(1f).height(38.dp),
-                shape = CircleShape,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-            ) {
-                Icon(Icons.Default.InvertColors, null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Invert Mask", color = Color.White, fontSize = 12.sp)
-            }
-
-            OutlinedButton(
-                onClick = onClearMask,
-                modifier = Modifier.weight(1f).height(38.dp),
-                shape = CircleShape,
-                border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.4f))
-            ) {
-                Icon(Icons.Default.DeleteOutline, null, tint = Color(0xFFFF5252), modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Clear Mask", color = Color(0xFFFF5252), fontSize = 12.sp)
+            items(MaskingSelectionType.entries) { type ->
+                val isSelected = selectedType == type
+                val icon = when (type) {
+                    MaskingSelectionType.BRUSH -> Icons.Default.Brush
+                    MaskingSelectionType.MAGIC_WAND -> Icons.Default.AutoFixNormal
+                    MaskingSelectionType.LASSO -> Icons.Default.Gesture
+                    MaskingSelectionType.POLYGON -> Icons.Default.Polyline
+                    MaskingSelectionType.ELLIPSE -> Icons.Default.PanoramaFishEye
+                }
+                Surface(
+                    onClick = { onSelectType(type) },
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isSelected) Color.White else Color(0xFF222222),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = type.label,
+                            tint = if (isSelected) Color.Black else Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = type.label,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
         }
     }

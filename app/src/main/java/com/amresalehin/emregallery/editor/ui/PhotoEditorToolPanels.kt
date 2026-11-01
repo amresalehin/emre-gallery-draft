@@ -618,21 +618,21 @@ fun MainBottomTierBar(
         contentAlignment = Alignment.Center
     ) {
         Surface(
-            shape = RoundedCornerShape(32.dp),
+            shape = RoundedCornerShape(28.dp),
             color = Color(0xF2161616),
             tonalElevation = 6.dp,
             shadowElevation = 12.dp,
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(52.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 val tabs = listOf(
@@ -660,7 +660,7 @@ fun MainBottomTierBar(
                     )
 
                     val pillWidth by animateDpAsState(
-                        targetValue = if (selected) 44.dp else 34.dp,
+                        targetValue = if (selected) 48.dp else 38.dp,
                         animationSpec = spring(
                             dampingRatio = Spring.DampingRatioMediumBouncy,
                             stiffness = Spring.StiffnessMedium
@@ -680,7 +680,6 @@ fun MainBottomTierBar(
 
                     Box(
                         modifier = Modifier
-                            .widthIn(min = 48.dp)
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
@@ -691,7 +690,7 @@ fun MainBottomTierBar(
                                 indication = null,
                                 onClick = { onSelectTab(tab) }
                             )
-                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                            .padding(horizontal = 2.dp, vertical = 2.dp)
                             .testTag(
                                 when (tab) {
                                     MainBottomTab.PRESETS -> "bottom_tab_presets"
@@ -705,34 +704,21 @@ fun MainBottomTierBar(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                        Surface(
+                            shape = CircleShape,
+                            color = pillBg,
+                            modifier = Modifier
+                                .height(36.dp)
+                                .width(pillWidth)
                         ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = pillBg,
-                                modifier = Modifier
-                                    .height(28.dp)
-                                    .width(pillWidth)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = label,
-                                        tint = iconTint,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = label,
+                                    tint = iconTint,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = label,
-                                fontSize = 9.5.sp,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (selected) Color.White else Color(0xFF8E8E93),
-                                maxLines = 1
-                            )
                         }
                     }
                 }
@@ -778,7 +764,6 @@ fun AdjustCategoryStrip(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         val categories = listOf(
-            AdjustCategory.AUTO to Icons.Default.AutoAwesome,
             AdjustCategory.LIGHT to Icons.Default.WbSunny,
             AdjustCategory.COLOR to Icons.Default.DeviceThermostat,
             AdjustCategory.LEVELS to Icons.Default.Equalizer,
@@ -857,8 +842,6 @@ fun LrSliderRow(
 ) {
     val haptic = LocalHapticFeedback.current
     val isBipolar = valueRange.start < 0f && valueRange.endInclusive > 0f
-    val numericRequester = LocalNumericInputRequester.current
-
     val isModified = abs(value - defaultValue) > (if (isEv) 0.05f else 0.4f)
     val isNearZero = isBipolar && abs(value) <= (if (isEv) 0.8f else 1.2f)
 
@@ -869,25 +852,6 @@ fun LrSliderRow(
         onDragStart()
         onValueChange(defaultValue)
         onValueChangeFinished()
-    }
-
-    val openNumericInput: () -> Unit = {
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        numericRequester(
-            NumericInputTarget(
-                title = title,
-                currentValue = value,
-                valueRange = valueRange,
-                defaultValue = defaultValue,
-                isEv = isEv,
-                unit = unit,
-                onApply = { newVal ->
-                    onDragStart()
-                    onValueChange(newVal)
-                    onValueChangeFinished()
-                }
-            )
-        )
     }
 
     val interactionSource = remember { MutableInteractionSource() }
@@ -1108,9 +1072,9 @@ fun LrSliderRow(
 
         Spacer(Modifier.width(6.dp))
 
-        // 3. Right numeric value button: Tap for precise numeric input, Double-tap to reset
+        // 3. Right numeric value indicator: Tap or click to reset to default
         Surface(
-            onClick = openNumericInput,
+            onClick = resetToDefault,
             shape = RoundedCornerShape(6.dp),
             color = if (isModified) Color(0x33FFFFFF) else Color(0x18FFFFFF),
             border = BorderStroke(
@@ -1123,18 +1087,12 @@ fun LrSliderRow(
         ) {
             Box(
                 modifier = Modifier
-                    .padding(horizontal = 4.dp, vertical = 4.dp)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = { openNumericInput() },
-                            onDoubleTap = { resetToDefault() }
-                        )
-                    },
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = displayValue,
-                    color = Color.White,
+                    color = if (isModified) Color.White else Color(0xFFAAAAAA),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
@@ -3009,26 +2967,6 @@ fun CropControlsPanel(
                         Icon(Icons.Default.Flip, null, Modifier.size(16.dp), tint = Color.White)
                         Spacer(Modifier.width(6.dp))
                         Text("Flip V", color = Color.White, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            if (onAutoLevel != null) {
-                item {
-                    Surface(
-                        onClick = onAutoLevel,
-                        shape = CircleShape,
-                        color = Color(0xFF1E1E1E),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.AutoAwesome, null, Modifier.size(16.dp), tint = Color.White)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Auto-Level", color = Color.White, fontSize = 12.sp)
-                        }
                     }
                 }
             }

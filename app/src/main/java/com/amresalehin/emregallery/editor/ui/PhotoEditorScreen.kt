@@ -117,13 +117,11 @@ fun PhotoEditorScreen(
     var showExportSheet by remember { mutableStateOf(false) }
     var showDiscardDialog by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
-    var numericInputTarget by remember { mutableStateOf<NumericInputTarget?>(null) }
 
-    // Back Handler: Respects numeric dialog, history dialog, active mode Cancel first, then tool tab, then discard confirmation
+    // Back Handler: Respects history dialog, active mode Cancel first, then tool tab, then discard confirmation
     BackHandler {
         when {
             showHistoryDialog -> showHistoryDialog = false
-            numericInputTarget != null -> numericInputTarget = null
             currentMode != EditorMode.NONE -> viewModel.cancelModeChanges()
             showAiSheet -> showAiSheet = false
             showExportSheet -> showExportSheet = false
@@ -167,61 +165,16 @@ fun PhotoEditorScreen(
         activeDraggingSliderCurrentValue = initialVal
     }
 
+    fun finishSliderDrag() {
+        activeDraggingSliderName = null
+        viewModel.commitSliderChange()
+    }
+
     // Adaptive Panel Content Composable used in both Portrait & Landscape
     @Composable
     fun PanelContent(modifier: Modifier = Modifier) {
         Column(modifier = modifier.fillMaxWidth()) {
-            if (activeDraggingSliderName != null) {
-                // Minimal single slider row while actively scrubbing
-                val name = activeDraggingSliderName!!
-                val range = when (name) {
-                    "Radius" -> 0.5f..3.0f
-                    "Sharpening" -> 0f..150f
-                    "Grain", "Noise Reduction", "Color Noise" -> 0f..100f
-                    "Distortion" -> 0f..200f
-                    else -> -100f..100f
-                }
-                val gradient = when (name) {
-                    "Temp" -> Brush.horizontalGradient(listOf(Color(0xFF2979FF), Color(0xFF90CAF9), Color(0xFFFFD54F), Color(0xFFFF9100)))
-                    "Tint" -> Brush.horizontalGradient(listOf(Color(0xFF00E676), Color(0xFFA5D6A7), Color(0xFFF48FB1), Color(0xFFE040FB)))
-                    else -> null
-                }
-
-                MinimalSingleSliderRow(
-                    value = activeDraggingSliderCurrentValue,
-                    onValueChange = { newVal ->
-                        activeDraggingSliderCurrentValue = newVal
-                        activeDraggingSliderValue = formatSliderValue(name, newVal)
-                        viewModel.updateAdjustmentValue(name, newVal)
-                    },
-                    onValueChangeFinished = {
-                        activeDraggingSliderName = null
-                        viewModel.commitSliderChange()
-                    },
-                    valueRange = range,
-                    gradientBrush = gradient,
-                    activeColor = Color.White,
-                    isEv = name == "Exposure",
-                    minLabel = when (name) {
-                        "Exposure" -> "−5.00"
-                        "Temp" -> "2000K"
-                        "Radius" -> "0.50"
-                        "Distortion" -> "0"
-                        "Sharpening" -> "0"
-                        "Grain", "Noise Reduction", "Color Noise" -> "0"
-                        else -> "−100"
-                    },
-                    maxLabel = when (name) {
-                        "Exposure" -> "+5.00"
-                        "Temp" -> "9500K"
-                        "Radius" -> "3.00"
-                        "Distortion" -> "+200"
-                        "Sharpening" -> "+150"
-                        "Grain", "Noise Reduction", "Color Noise" -> "+100"
-                        else -> "+100"
-                    }
-                )
-            } else if (currentMode in listOf(EditorMode.CURVES, EditorMode.COLOR_MIX, EditorMode.COLOR_GRADING)) {
+            if (currentMode in listOf(EditorMode.CURVES, EditorMode.COLOR_MIX, EditorMode.COLOR_GRADING)) {
                 // Tone Curves, Color Mix, and Color Grading sub-inspectors
                 when (currentMode) {
                     EditorMode.CURVES -> {
@@ -342,7 +295,7 @@ fun PhotoEditorScreen(
                                         onSliderChange = { prop, val_ ->
                                             viewModel.updateAdjustmentValue(prop, val_)
                                         },
-                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                        onSliderChangeFinished = { finishSliderDrag() }
                                     )
                                 }
                                 AdjustCategory.COLOR -> {
@@ -370,7 +323,7 @@ fun PhotoEditorScreen(
                                         onSliderChange = { prop, val_ ->
                                             viewModel.updateAdjustmentValue(prop, val_)
                                         },
-                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                        onSliderChangeFinished = { finishSliderDrag() }
                                     )
                                 }
                                 AdjustCategory.EFFECTS -> {
@@ -409,7 +362,7 @@ fun PhotoEditorScreen(
                                         onSliderChange = { prop, val_ ->
                                             viewModel.updateAdjustmentValue(prop, val_)
                                         },
-                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                        onSliderChangeFinished = { finishSliderDrag() }
                                     )
                                 }
                                 AdjustCategory.DETAIL -> {
@@ -433,7 +386,7 @@ fun PhotoEditorScreen(
                                         onSliderChange = { prop, val_ ->
                                             viewModel.updateAdjustmentValue(prop, val_)
                                         },
-                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                        onSliderChangeFinished = { finishSliderDrag() }
                                     )
                                 }
                                 AdjustCategory.OPTICS -> {
@@ -452,7 +405,7 @@ fun PhotoEditorScreen(
                                         onSliderChange = { prop, val_ ->
                                             viewModel.updateAdjustmentValue(prop, val_)
                                         },
-                                        onSliderChangeFinished = { viewModel.commitSliderChange() }
+                                        onSliderChangeFinished = { finishSliderDrag() }
                                     )
                                 }
                                 AdjustCategory.BLUR -> {
@@ -473,7 +426,7 @@ fun PhotoEditorScreen(
                                             maxLabel = "+100",
                                             onDragStart = { startSliderDrag("Blur", blurStr, adj.blur) },
                                             onValueChange = { viewModel.updateAdjustmentValue("Blur", it) },
-                                            onValueChangeFinished = { viewModel.commitSliderChange() }
+                                            onValueChangeFinished = { finishSliderDrag() }
                                         )
                                     }
                                 }
@@ -520,12 +473,7 @@ fun PhotoEditorScreen(
                         AdjustCategoryStrip(
                             activeCategory = activeAdjustCategory,
                             onSelectCategory = { cat ->
-                                if (cat == AdjustCategory.AUTO) {
-                                    viewModel.applyAutoTone()
-                                    Toast.makeText(context, "Auto Tone Applied", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    activeAdjustCategory = cat
-                                }
+                                activeAdjustCategory = cat
                             }
                         )
                     }
@@ -554,7 +502,7 @@ fun PhotoEditorScreen(
                             onFlipV = { viewModel.flipVertical() },
                             onStraightenChange = { viewModel.setStraighten(it) },
                             onStraightenFinished = { viewModel.commitSliderChange() },
-                            onAutoLevel = { viewModel.autoLevelStraighten() },
+                            onAutoLevel = { /* auto-level disabled */ },
                             onShapeCropChange = { viewModel.setShapeCrop(it) },
                             onPerspectiveChange = { x, y -> viewModel.setPerspective(x, y) },
                             onCornerPinReset = { viewModel.resetCrop() },
@@ -640,12 +588,9 @@ fun PhotoEditorScreen(
                     MainBottomTab.AI_TOOLS -> {
                         AiToolsPanel(
                             aiSettings = sessionState.aiSettings,
-                            onToggleAutoEnhance = { viewModel.toggleAiAutoEnhance(it) },
-                            onAutoEnhanceIntensityChange = { viewModel.setAiAutoEnhanceIntensity(it) },
                             onExpandRatioChange = { viewModel.setAiExpand(it) },
                             onSelectStyleTransfer = { viewModel.setAiStyleTransfer(it) },
-                            onSelectTryOn = { viewModel.setAiTryOnStyle(it) },
-                            onAutoTone = { viewModel.applyAutoTone() }
+                            onSelectTryOn = { viewModel.setAiTryOnStyle(it) }
                         )
                     }
                 }
@@ -653,11 +598,10 @@ fun PhotoEditorScreen(
         }
     }
 
-    CompositionLocalProvider(LocalNumericInputRequester provides { numericInputTarget = it }) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Color(0xFF000000)
-        ) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color(0xFF000000)
+    ) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (isLandscape) {
                 // ==========================================
@@ -1211,23 +1155,6 @@ fun PhotoEditorScreen(
                 Text("AI Magic Tools", style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(20.dp))
 
-                Button(
-                    onClick = {
-                        viewModel.toggleAiAutoEnhance(true)
-                        viewModel.applyAutoTone()
-                        showAiSheet = false
-                        Toast.makeText(context, "AI Auto Enhancement applied", Toast.LENGTH_SHORT).show()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.White,
-                        contentColor = Color.Black
-                    ),
-                    shape = CircleShape,
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text("AI Neural Auto-Enhance", fontWeight = FontWeight.SemiBold)
-                }
-                Spacer(Modifier.height(10.dp))
                 OutlinedButton(
                     onClick = {
                         viewModel.setAiExpand(0.25f)
@@ -1245,13 +1172,6 @@ fun PhotoEditorScreen(
         }
     }
 
-    if (numericInputTarget != null) {
-        NumericInputDialog(
-            target = numericInputTarget!!,
-            onDismiss = { numericInputTarget = null }
-        )
-    }
-
     if (showHistoryDialog) {
         EditHistoryDialog(
             historyList = viewModel.getHistoryList(),
@@ -1261,7 +1181,6 @@ fun PhotoEditorScreen(
             onDismiss = { showHistoryDialog = false }
         )
     }
-}
 }
 
 private fun formatSliderValue(prop: String, value: Float): String {

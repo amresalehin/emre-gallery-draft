@@ -27,36 +27,64 @@ import com.amresalehin.emregallery.editor.AiStyleTransfer
 import com.amresalehin.emregallery.editor.AiTryOnStyle
 
 enum class AiSubTool(val label: String) {
-    AUTO_ENHANCE("Auto Enhance"),
     EXPAND("Generative Expand"),
     STYLE_TRANSFER("Style Transfer"),
     TRY_ON("Virtual Try-On")
 }
 
 /**
- * Dedicated Primary AI Tools Workspace exposing Auto Enhance, Generative Expand,
+ * Dedicated Primary AI Tools Workspace exposing Generative Expand,
  * Style Transfer (5 styles), and Virtual Try-On (5 styles) with live previews.
  */
 @Composable
 fun AiToolsPanel(
     aiSettings: AiEditSettings,
-    onToggleAutoEnhance: (Boolean) -> Unit,
-    onAutoEnhanceIntensityChange: (Float) -> Unit,
+    onToggleAutoEnhance: (Boolean) -> Unit = {},
+    onAutoEnhanceIntensityChange: (Float) -> Unit = {},
     onExpandRatioChange: (Float) -> Unit,
     onSelectStyleTransfer: (AiStyleTransfer?) -> Unit,
     onSelectTryOn: (AiTryOnStyle?) -> Unit,
-    onAutoTone: () -> Unit,
+    onAutoTone: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var activeSubTool by remember { mutableStateOf(AiSubTool.AUTO_ENHANCE) }
+    var activeSubTool by remember { mutableStateOf(AiSubTool.EXPAND) }
 
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF141414))
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // AI Sub-tool switcher pills
+        // -------------------------------------------------------------
+        // TOP / TIER 3 & CONTROLS (Above Tier 2)
+        // -------------------------------------------------------------
+        when (activeSubTool) {
+            AiSubTool.EXPAND -> {
+                GenerativeExpandSubPanel(
+                    expandRatio = aiSettings.expandOutpaintRatio,
+                    onExpandRatioChange = onExpandRatioChange
+                )
+            }
+            AiSubTool.STYLE_TRANSFER -> {
+                AiStyleTransferSubPanel(
+                    activeStyle = aiSettings.activeStyleTransfer,
+                    onSelectStyle = onSelectStyleTransfer
+                )
+            }
+            AiSubTool.TRY_ON -> {
+                AiTryOnSubPanel(
+                    activeTryOn = aiSettings.activeTryOn,
+                    onSelectTryOn = onSelectTryOn
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // -------------------------------------------------------------
+        // TIER 2 (Just above bottom bar): AI Sub-tool switcher pills
+        // Generative Expand, Style Transfer, Virtual Try-On
+        // -------------------------------------------------------------
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -64,7 +92,6 @@ fun AiToolsPanel(
             items(AiSubTool.entries) { tool ->
                 val isSelected = activeSubTool == tool
                 val icon = when (tool) {
-                    AiSubTool.AUTO_ENHANCE -> Icons.Default.AutoFixHigh
                     AiSubTool.EXPAND -> Icons.Default.ZoomOutMap
                     AiSubTool.STYLE_TRANSFER -> Icons.Default.Palette
                     AiSubTool.TRY_ON -> Icons.Default.Checkroom
@@ -96,86 +123,6 @@ fun AiToolsPanel(
                 }
             }
         }
-
-        Spacer(Modifier.height(12.dp))
-
-        when (activeSubTool) {
-            AiSubTool.AUTO_ENHANCE -> {
-                AutoEnhanceSubPanel(
-                    isEnabled = aiSettings.autoEnhanceEnabled,
-                    intensity = aiSettings.autoEnhanceIntensity,
-                    onToggle = onToggleAutoEnhance,
-                    onIntensityChange = onAutoEnhanceIntensityChange,
-                    onAutoTone = onAutoTone
-                )
-            }
-            AiSubTool.EXPAND -> {
-                GenerativeExpandSubPanel(
-                    expandRatio = aiSettings.expandOutpaintRatio,
-                    onExpandRatioChange = onExpandRatioChange
-                )
-            }
-            AiSubTool.STYLE_TRANSFER -> {
-                AiStyleTransferSubPanel(
-                    activeStyle = aiSettings.activeStyleTransfer,
-                    onSelectStyle = onSelectStyleTransfer
-                )
-            }
-            AiSubTool.TRY_ON -> {
-                AiTryOnSubPanel(
-                    activeTryOn = aiSettings.activeTryOn,
-                    onSelectTryOn = onSelectTryOn
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun AutoEnhanceSubPanel(
-    isEnabled: Boolean,
-    intensity: Float,
-    onToggle: (Boolean) -> Unit,
-    onIntensityChange: (Float) -> Unit,
-    onAutoTone: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text("AI Neural Auto-Enhance", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Text("Dynamic range, tone curve & clarity equalization", color = Color(0xFFAAAAAA), fontSize = 11.sp)
-            }
-            Switch(
-                checked = isEnabled,
-                onCheckedChange = {
-                    onToggle(it)
-                    if (it) onAutoTone()
-                },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color(0xFF2979FF)
-                )
-            )
-        }
-
-        if (isEnabled) {
-            Spacer(Modifier.height(10.dp))
-            LrSliderRow(
-                title = "Enhancement Intensity",
-                value = intensity * 100f,
-                displayValue = "${(intensity * 100).toInt()}%",
-                valueRange = 20f..200f,
-                minLabel = "20%",
-                maxLabel = "200%",
-                onDragStart = {},
-                onValueChange = { onIntensityChange(it / 100f) },
-                onValueChangeFinished = {}
-            )
-        }
     }
 }
 
@@ -198,9 +145,22 @@ fun GenerativeExpandSubPanel(
             }
         }
 
+        // Top: Expand Slider & Description
+        LrSliderRow(
+            title = "Expand Boundary",
+            value = expandRatio * 100f,
+            displayValue = "${(expandRatio * 100).toInt()}%",
+            valueRange = 0f..50f,
+            minLabel = "0%",
+            maxLabel = "50%",
+            onDragStart = {},
+            onValueChange = { onExpandRatioChange(it / 100f) },
+            onValueChangeFinished = {}
+        )
+
         Spacer(Modifier.height(8.dp))
 
-        // Ratio Expansion Presets
+        // Tier 3 (Above Tier 2): Ratio Expansion Presets
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -231,27 +191,6 @@ fun GenerativeExpandSubPanel(
                 }
             }
         }
-
-        Spacer(Modifier.height(10.dp))
-
-        LrSliderRow(
-            title = "Expand Boundary",
-            value = expandRatio * 100f,
-            displayValue = "${(expandRatio * 100).toInt()}%",
-            valueRange = 0f..50f,
-            minLabel = "0%",
-            maxLabel = "50%",
-            onDragStart = {},
-            onValueChange = { onExpandRatioChange(it / 100f) },
-            onValueChangeFinished = {}
-        )
-
-        Text(
-            text = "Seamlessly outpaints beyond image borders using smooth perimeter extrapolation.",
-            color = Color(0xFF888888),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(top = 4.dp)
-        )
     }
 }
 

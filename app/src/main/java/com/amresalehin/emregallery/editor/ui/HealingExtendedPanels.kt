@@ -96,70 +96,122 @@ fun HealingExtendedPanel(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF141414))
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // Group Header & Clear button
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Healing & Retouch ($strokeCount strokes)",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
+        // -------------------------------------------------------------
+        // TOP: Sliders, Contextual Controls & Tool Parameters
+        // -------------------------------------------------------------
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Group Header & Clear button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${activeType.label} ($strokeCount strokes)",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+                if (strokeCount > 0) {
+                    TextButton(onClick = onClearStrokes) {
+                        Text("Clear Retouch", color = Color(0xFFFF8A80), fontSize = 12.sp)
+                    }
+                }
+            }
+
+            // Brush Radius Slider
+            LrSliderRow(
+                title = "Brush Radius",
+                value = brushRadius,
+                displayValue = "${brushRadius.toInt()} px",
+                valueRange = 4f..120f,
+                minLabel = "4 px",
+                maxLabel = "120 px",
+                onDragStart = {},
+                onValueChange = onRadiusChange,
+                onValueChangeFinished = {}
             )
-            if (strokeCount > 0) {
-                TextButton(onClick = onClearStrokes) {
-                    Text("Clear Retouch", color = Color(0xFFFF8A80), fontSize = 12.sp)
+
+            // Tool-specific parameters: Strength / Intensity
+            LrSliderRow(
+                title = "Strength",
+                value = intensity * 100f,
+                displayValue = "${(intensity * 100).toInt()}%",
+                valueRange = 10f..100f,
+                minLabel = "10%",
+                maxLabel = "100%",
+                onDragStart = {},
+                onValueChange = { onIntensityChange(it / 100f) },
+                onValueChangeFinished = {}
+            )
+
+            // Tint Color row for color-based tools
+            val requiresColor = activeType in listOf(
+                RetouchType.EYE_COLOUR,
+                RetouchType.HAIR_RECOLOUR,
+                RetouchType.MAKEUP_BRUSH,
+                RetouchType.SKIN_TONE
+            )
+
+            if (requiresColor) {
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Tint:", color = Color(0xFFAAAAAA), fontSize = 11.sp)
+                    val tintColors = when (activeType) {
+                        RetouchType.EYE_COLOUR -> listOf(
+                            Color(0xFF2979FF), Color(0xFF00E676), Color(0xFF8D6E63),
+                            Color(0xFF795548), Color(0xFFB0BEC5), Color(0xFFAB47BC)
+                        )
+                        RetouchType.HAIR_RECOLOUR -> listOf(
+                            Color(0xFFD7CCC8), Color(0xFF8D6E63), Color(0xFF3E2723),
+                            Color(0xFFFF8A65), Color(0xFFBA68C8), Color(0xFF4FC3F7), Color(0xFFFF4081)
+                        )
+                        RetouchType.MAKEUP_BRUSH -> listOf(
+                            Color(0xFFE91E63), Color(0xFFFF4081), Color(0xFFFF5252),
+                            Color(0xFFFF8A80), Color(0xFFC2185B), Color(0xFFFF7043)
+                        )
+                        else -> listOf(
+                            Color(0xFFFFE0B2), Color(0xFFFFCC80), Color(0xFFD7CCC8),
+                            Color(0xFFBCAAA4), Color(0xFF8D6E63), Color(0xFF5D4037)
+                        )
+                    }
+
+                    tintColors.forEach { c ->
+                        val isSel = tintColor == c
+                        Surface(
+                            onClick = { onTintColorChange(c) },
+                            shape = CircleShape,
+                            color = c,
+                            border = BorderStroke(if (isSel) 2.dp else 1.dp, Color.White),
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            if (isSel) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = if (c.red + c.green + c.blue > 2f) Color.Black else Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
         Spacer(Modifier.height(8.dp))
 
-        // 4 Category Tabs: Repair, Skin & Beauty, Eyes & Hair, Reshape & Sculpt
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            HealingCategory.entries.forEach { cat ->
-                val isSelected = selectedCategory == cat
-                Surface(
-                    onClick = {
-                        selectedCategory = cat
-                        // Select default tool for that category if current tool isn't in it
-                        val targetList = when (cat) {
-                            HealingCategory.REPAIR -> repairTypes
-                            HealingCategory.SKIN_BEAUTY -> skinBeautyTypes
-                            HealingCategory.EYES_HAIR -> eyesHairTypes
-                            HealingCategory.RESHAPE_SCULPT -> reshapeSculptTypes
-                        }
-                        if (activeType !in targetList) {
-                            onSelectType(targetList.first())
-                        }
-                    },
-                    shape = RoundedCornerShape(18.dp),
-                    color = if (isSelected) Color.White else Color(0xFF222222),
-                    modifier = Modifier.weight(1f).height(34.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = cat.label,
-                            color = if (isSelected) Color.Black else Color.White,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 11.sp,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // Tool Selector Pills for the Active Category
+        // -------------------------------------------------------------
+        // TIER 3 (Above Tier 2): Tool Selector Pills for the Active Category
+        // -------------------------------------------------------------
         val currentTypes = when (selectedCategory) {
             HealingCategory.REPAIR -> repairTypes
             HealingCategory.SKIN_BEAUTY -> skinBeautyTypes
@@ -225,104 +277,46 @@ fun HealingExtendedPanel(
             }
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
 
-        // Tool-specific parameters: Radius
-        LrSliderRow(
-            title = "Brush Radius",
-            value = brushRadius,
-            displayValue = "${brushRadius.toInt()} px",
-            valueRange = 4f..120f,
-            minLabel = "4 px",
-            maxLabel = "120 px",
-            onDragStart = {},
-            onValueChange = onRadiusChange,
-            onValueChangeFinished = {}
-        )
-
-        // Tool-specific parameters: Intensity
-        LrSliderRow(
-            title = "Strength",
-            value = intensity * 100f,
-            displayValue = "${(intensity * 100).toInt()}%",
-            valueRange = 10f..100f,
-            minLabel = "10%",
-            maxLabel = "100%",
-            onDragStart = {},
-            onValueChange = { onIntensityChange(it / 100f) },
-            onValueChangeFinished = {}
-        )
-
-        // Tint Color row for color-based tools
-        val requiresColor = activeType in listOf(
-            RetouchType.EYE_COLOUR,
-            RetouchType.HAIR_RECOLOUR,
-            RetouchType.MAKEUP_BRUSH,
-            RetouchType.SKIN_TONE
-        )
-
-        if (requiresColor) {
-            Spacer(Modifier.height(8.dp))
-            Text("Tint Palette", color = Color(0xFFAAAAAA), fontSize = 12.sp)
-            Spacer(Modifier.height(6.dp))
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val tintColors = when (activeType) {
-                    RetouchType.EYE_COLOUR -> listOf(
-                        Color(0xFF2979FF), Color(0xFF00E676), Color(0xFF8D6E63),
-                        Color(0xFF795548), Color(0xFFB0BEC5), Color(0xFFAB47BC)
-                    )
-                    RetouchType.HAIR_RECOLOUR -> listOf(
-                        Color(0xFFD7CCC8), Color(0xFF8D6E63), Color(0xFF3E2723),
-                        Color(0xFFFF8A65), Color(0xFFBA68C8), Color(0xFF4FC3F7), Color(0xFFFF4081)
-                    )
-                    RetouchType.MAKEUP_BRUSH -> listOf(
-                        Color(0xFFE91E63), Color(0xFFFF4081), Color(0xFFFF5252),
-                        Color(0xFFFF8A80), Color(0xFFC2185B), Color(0xFFFF7043)
-                    )
-                    else -> listOf(
-                        Color(0xFFFFE0B2), Color(0xFFFFCC80), Color(0xFFD7CCC8),
-                        Color(0xFFBCAAA4), Color(0xFF8D6E63), Color(0xFF5D4037)
-                    )
-                }
-
-                items(tintColors) { c ->
-                    val isSel = tintColor == c
-                    Surface(
-                        onClick = { onTintColorChange(c) },
-                        shape = CircleShape,
-                        color = c,
-                        border = BorderStroke(if (isSel) 2.5.dp else 1.dp, Color.White),
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        if (isSel) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = if (c.red + c.green + c.blue > 2f) Color.Black else Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
+        // -------------------------------------------------------------
+        // TIER 2 (Just above bottom bar): 4 Category Tabs
+        // Repair, Skin & Beauty, Eyes & Hair, Reshape & Sculpt
+        // -------------------------------------------------------------
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            HealingCategory.entries.forEach { cat ->
+                val isSelected = selectedCategory == cat
+                Surface(
+                    onClick = {
+                        selectedCategory = cat
+                        val targetList = when (cat) {
+                            HealingCategory.REPAIR -> repairTypes
+                            HealingCategory.SKIN_BEAUTY -> skinBeautyTypes
+                            HealingCategory.EYES_HAIR -> eyesHairTypes
+                            HealingCategory.RESHAPE_SCULPT -> reshapeSculptTypes
                         }
+                        if (activeType !in targetList) {
+                            onSelectType(targetList.first())
+                        }
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (isSelected) Color.White else Color(0xFF222222),
+                    modifier = Modifier.weight(1f).height(34.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = cat.label,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 11.sp,
+                            maxLines = 1
+                        )
                     }
                 }
             }
         }
-
-        val hintText = when (activeType) {
-            RetouchType.CLONE_STAMP -> "Clone Stamp: Tap canvas to sample source, then drag to stamp."
-            RetouchType.PATCH_HEALING -> "Patch Tool: Drag to select imperfection and blend with target patch."
-            RetouchType.BLEMISH -> "Tap spots or blemishes to heal using surrounding texture."
-            RetouchType.TEETH_WHITENING -> "Brush over teeth to whiten and remove yellow cast."
-            RetouchType.EYE_ENHANCEMENT -> "Brush over eyes to sharpen irises and boost contrast."
-            else -> "Brush or sculpt directly over the image to retouch."
-        }
-
-        Text(
-            text = hintText,
-            color = Color(0xFF888888),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(top = 6.dp)
-        )
     }
 }

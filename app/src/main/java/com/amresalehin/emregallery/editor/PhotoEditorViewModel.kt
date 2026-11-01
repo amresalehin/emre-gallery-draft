@@ -356,16 +356,7 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun autoLevelStraighten() {
-        val bmp = _originalBitmap.value ?: return
-        viewModelScope.launch(Dispatchers.Default) {
-            val angle = PhotoTransformEngine.detectHorizonAngle(bmp)
-            withContext(Dispatchers.Main) {
-                pushState(_sessionState.value.copy(
-                    transform = _sessionState.value.transform.copy(straightenAngle = angle),
-                    description = "Auto-Level (${angle.toInt()}°)"
-                ))
-            }
-        }
+        // Disabled per user instruction
     }
 
     fun setShapeCrop(shape: ShapeCropType?) {
@@ -497,20 +488,7 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun applyAutoTone() {
-        val cur = _sessionState.value.adjustments
-        val updated = cur.copy(
-            exposure = if (cur.exposure == 0f) 12f else cur.exposure,
-            contrast = if (cur.contrast == 0f) 16f else cur.contrast,
-            highlights = if (cur.highlights == 0f) -15f else cur.highlights,
-            shadows = if (cur.shadows == 0f) 20f else cur.shadows,
-            whites = if (cur.whites == 0f) 10f else cur.whites,
-            blacks = if (cur.blacks == 0f) -8f else cur.blacks,
-            vibrance = if (cur.vibrance == 0f) 15f else cur.vibrance
-        )
-        pushState(_sessionState.value.copy(
-            adjustments = updated,
-            description = "Auto Tone"
-        ))
+        // Disabled per user instruction
     }
 
     fun toggleBlackAndWhite() {
@@ -979,13 +957,11 @@ class PhotoEditorViewModel : ViewModel() {
 
     // --- AI Tools ---
     fun toggleAiAutoEnhance(enabled: Boolean) {
-        val updated = _sessionState.value.aiSettings.copy(autoEnhanceEnabled = enabled)
-        pushState(_sessionState.value.copy(aiSettings = updated, description = "AI Auto Enhance"))
+        // Disabled per user instruction
     }
 
     fun setAiAutoEnhanceIntensity(intensity: Float) {
-        val updated = _sessionState.value.aiSettings.copy(autoEnhanceIntensity = intensity)
-        pushState(_sessionState.value.copy(aiSettings = updated, description = "Auto Enhance ${(intensity * 100).toInt()}%"))
+        // Disabled per user instruction
     }
 
     fun setAiStyleTransfer(style: AiStyleTransfer?) {

@@ -63,41 +63,6 @@ fun CropExtendedPanel(
             .background(Color(0xFF141414))
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // Sub-tool switcher pills
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val subTools = listOf(
-                "Ratio" to "Crop & Rotate",
-                "Shape" to "Shape Crop",
-                "Perspective" to "Perspective",
-                "Warp" to "Liquify",
-                "Motion" to "Dispersion & Motion",
-                "Resize" to "Resize"
-            )
-            items(subTools) { (id, label) ->
-                val isSelected = activeSubTool == id
-                Surface(
-                    onClick = { activeSubTool = id },
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isSelected) Color.White else Color(0xFF222222),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Box(modifier = Modifier.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = label,
-                            color = if (isSelected) Color.Black else Color.White,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
         when (activeSubTool) {
             "Ratio" -> {
                 CropControlsPanel(
@@ -155,6 +120,43 @@ fun CropExtendedPanel(
                     scaleFactor = transform.scaleFactor,
                     onScaleFactorChange = onScaleFactorChange
                 )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // -------------------------------------------------------------
+        // TIER 2: Sub-tool switcher pills (docked just above bottom bar)
+        // -------------------------------------------------------------
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val subTools = listOf(
+                "Ratio" to "Crop & Rotate",
+                "Shape" to "Shape Crop",
+                "Perspective" to "Perspective",
+                "Warp" to "Liquify",
+                "Motion" to "Dispersion & Motion",
+                "Resize" to "Resize"
+            )
+            items(subTools) { (id, label) ->
+                val isSelected = activeSubTool == id
+                Surface(
+                    onClick = { activeSubTool = id },
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isSelected) Color.White else Color(0xFF222222),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Box(modifier = Modifier.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
         }
     }

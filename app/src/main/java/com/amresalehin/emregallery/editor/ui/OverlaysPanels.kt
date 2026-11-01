@@ -74,55 +74,11 @@ fun OverlaysWorkspacePanel(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF141414))
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // Subcategory Pills Navigation
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(OverlaySubWorkspace.entries) { sub ->
-                val isSelected = activeSubWorkspace == sub
-                val icon = when (sub) {
-                    OverlaySubWorkspace.FRAMES_BORDERS -> Icons.Default.CropPortrait
-                    OverlaySubWorkspace.TEXT -> Icons.Default.TextFields
-                    OverlaySubWorkspace.STICKERS -> Icons.Default.EmojiEmotions
-                    OverlaySubWorkspace.SHAPES -> Icons.Default.Category
-                    OverlaySubWorkspace.CALLOUTS -> Icons.Default.ChatBubbleOutline
-                    OverlaySubWorkspace.LIGHTING -> Icons.Default.Flare
-                    OverlaySubWorkspace.BACKGROUND -> Icons.Default.Wallpaper
-                }
-
-                Surface(
-                    onClick = { activeSubWorkspace = sub },
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isSelected) Color.White else Color(0xFF222222),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = sub.label,
-                            tint = if (isSelected) Color.Black else Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = sub.label,
-                            color = if (isSelected) Color.Black else Color.White,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
+        // -------------------------------------------------------------
+        // TOP / CONTROLS & TIER 3 (Above Tier 2): Subpanel content
+        // -------------------------------------------------------------
         when (activeSubWorkspace) {
             OverlaySubWorkspace.FRAMES_BORDERS -> {
                 FramesBordersSubPanel(
@@ -182,6 +138,56 @@ fun OverlaysWorkspacePanel(
                 )
             }
         }
+
+        Spacer(Modifier.height(8.dp))
+
+        // -------------------------------------------------------------
+        // TIER 2 (Just above bottom bar): Subcategory Pills Navigation
+        // Frames & Borders, Text, Stickers, Shapes, Callouts, Lighting, Background
+        // -------------------------------------------------------------
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(OverlaySubWorkspace.entries) { sub ->
+                val isSelected = activeSubWorkspace == sub
+                val icon = when (sub) {
+                    OverlaySubWorkspace.FRAMES_BORDERS -> Icons.Default.CropPortrait
+                    OverlaySubWorkspace.TEXT -> Icons.Default.TextFields
+                    OverlaySubWorkspace.STICKERS -> Icons.Default.EmojiEmotions
+                    OverlaySubWorkspace.SHAPES -> Icons.Default.Category
+                    OverlaySubWorkspace.CALLOUTS -> Icons.Default.ChatBubbleOutline
+                    OverlaySubWorkspace.LIGHTING -> Icons.Default.Flare
+                    OverlaySubWorkspace.BACKGROUND -> Icons.Default.Wallpaper
+                }
+
+                Surface(
+                    onClick = { activeSubWorkspace = sub },
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isSelected) Color.White else Color(0xFF222222),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = sub.label,
+                            tint = if (isSelected) Color.Black else Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = sub.label,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -198,32 +204,6 @@ fun FramesBordersSubPanel(
     var subTab by remember { mutableStateOf("Frames") }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("Frames", "Border Stroke").forEach { tab ->
-                val isSel = subTab == tab
-                Surface(
-                    onClick = { subTab = tab },
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isSel) Color.White else Color(0xFF222222),
-                    modifier = Modifier.weight(1f).height(32.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = tab,
-                            color = if (isSel) Color.Black else Color.White,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 11.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
         if (subTab == "Frames") {
             Text("Artistic Frames (${FrameStyle.entries.size} styles)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
             Spacer(Modifier.height(8.dp))
@@ -319,6 +299,33 @@ fun FramesBordersSubPanel(
                         border = BorderStroke(if (isSel) 2.5.dp else 1.dp, Color.White),
                         modifier = Modifier.size(32.dp)
                     ) {}
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Tier 3: Sub-tab switcher pills (Frames vs Border Stroke) docked above Tier 2
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("Frames", "Border Stroke").forEach { tab ->
+                val isSel = subTab == tab
+                Surface(
+                    onClick = { subTab = tab },
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSel) Color.White else Color(0xFF222222),
+                    modifier = Modifier.weight(1f).height(32.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = tab,
+                            color = if (isSel) Color.Black else Color.White,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
         }
