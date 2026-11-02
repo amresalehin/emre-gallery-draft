@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
+import com.amresalehin.emregallery.editor.state.EditorHistoryManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,18 +50,14 @@ class PhotoEditorViewModel : ViewModel() {
     private val _activeAdjustment = MutableStateFlow("Brightness")
     val activeAdjustment: StateFlow<String> = _activeAdjustment.asStateFlow()
 
-    // Undo / Redo history stacks
-    private val undoStack = mutableListOf<EditSessionState>()
-    private val redoStack = mutableListOf<EditSessionState>()
+    // History and Undo/Redo Delegate
+    private val historyManager = EditorHistoryManager()
+    val canUndo: StateFlow<Boolean> get() = historyManager.canUndo
+    val canRedo: StateFlow<Boolean> get() = historyManager.canRedo
 
-    // Baseline state before an ongoing slider drag/adjustment started
-    private var sliderBaselineState: EditSessionState? = null
-
-    private val _canUndo = MutableStateFlow(false)
-    val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
-
-    private val _canRedo = MutableStateFlow(false)
-    val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
+    private fun recordSliderBaseline() {
+        historyManager.recordSliderBaseline(_sessionState.value)
+    }
 
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
@@ -80,11 +77,7 @@ class PhotoEditorViewModel : ViewModel() {
     fun initialize(context: Context, item: MediaItem) {
         if (_sourceItem.value?.uri == item.uri && _originalBitmap.value != null) return
         _sourceItem.value = item
-        undoStack.clear()
-        redoStack.clear()
-        sliderBaselineState = null
-        _canUndo.value = false
-        _canRedo.value = false
+        historyManager.clear()
         _sessionState.value = EditSessionState()
 
         viewModelScope.launch {
@@ -115,46 +108,25 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     private fun pushState(newState: EditSessionState) {
-        commitSliderChange()
-        undoStack.add(_sessionState.value)
-        redoStack.clear()
+        historyManager.pushState(_sessionState.value, newState)
         _sessionState.value = newState
-        _canUndo.value = undoStack.isNotEmpty()
-        _canRedo.value = false
         updateLivePreview()
     }
 
     fun commitSliderChange() {
-        val baseline = sliderBaselineState ?: return
-        sliderBaselineState = null
-        if (baseline != _sessionState.value) {
-            undoStack.add(baseline)
-            redoStack.clear()
-            _canUndo.value = undoStack.isNotEmpty()
-            _canRedo.value = false
-        }
+        historyManager.commitSliderChange(_sessionState.value)
     }
 
     fun undo() {
-        commitSliderChange()
-        if (undoStack.isNotEmpty()) {
-            val prev = undoStack.removeAt(undoStack.lastIndex)
-            redoStack.add(_sessionState.value)
+        historyManager.undo(_sessionState.value)?.let { prev ->
             _sessionState.value = prev
-            _canUndo.value = undoStack.isNotEmpty()
-            _canRedo.value = true
             updateLivePreview()
         }
     }
 
     fun redo() {
-        commitSliderChange()
-        if (redoStack.isNotEmpty()) {
-            val next = redoStack.removeAt(redoStack.lastIndex)
-            undoStack.add(_sessionState.value)
+        historyManager.redo(_sessionState.value)?.let { next ->
             _sessionState.value = next
-            _canUndo.value = true
-            _canRedo.value = redoStack.isNotEmpty()
             updateLivePreview()
         }
     }
@@ -199,10 +171,7 @@ class PhotoEditorViewModel : ViewModel() {
         modeBaselineState = null
         val current = _sessionState.value
         if (baseline != null && baseline != current) {
-            undoStack.add(baseline)
-            redoStack.clear()
-            _canUndo.value = true
-            _canRedo.value = false
+            historyManager.pushState(baseline, current)
             val desc = if (description.isNotEmpty()) description else "${_currentMode.value.displayName} applied"
             _sessionState.value = current.copy(description = desc)
         }
@@ -211,7 +180,6 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun cancelModeChanges() {
-        sliderBaselineState = null
         val baseline = modeBaselineState
         modeBaselineState = null
         if (baseline != null) {
@@ -335,9 +303,7 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun setStraighten(angle: Float) {
-        if (sliderBaselineState == null) {
-            sliderBaselineState = _sessionState.value
-        }
+        recordSliderBaseline()
         _sessionState.value = _sessionState.value.copy(
             transform = _sessionState.value.transform.copy(straightenAngle = angle)
         )
@@ -645,9 +611,7 @@ class PhotoEditorViewModel : ViewModel() {
 
     // --- Adjustments ---
     fun updateAdjustmentValue(prop: String, value: Float) {
-        if (sliderBaselineState == null) {
-            sliderBaselineState = _sessionState.value
-        }
+        recordSliderBaseline()
         val cur = _sessionState.value.adjustments
         val updated = when (prop) {
             "Brightness" -> cur.copy(brightness = value)
@@ -700,9 +664,7 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun updateFilterIntensity(intensity: Float) {
-        if (sliderBaselineState == null) {
-            sliderBaselineState = _sessionState.value
-        }
+        recordSliderBaseline()
         _sessionState.value = _sessionState.value.copy(
             filterIntensity = intensity
         )
@@ -727,9 +689,7 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun setBackgroundBlur(radius: Float) {
-        if (sliderBaselineState == null) {
-            sliderBaselineState = _sessionState.value
-        }
+        recordSliderBaseline()
         _sessionState.value = _sessionState.value.copy(
             background = _sessionState.value.background.copy(blurRadius = radius)
         )
@@ -1559,9 +1519,7 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun setMaskAmount(id: String, amount: Float) {
-        if (sliderBaselineState == null) {
-            sliderBaselineState = _sessionState.value
-        }
+        recordSliderBaseline()
         val existing = _sessionState.value.maskLayers
         val updated = existing.map { if (it.id == id) it.copy(amount = amount.coerceIn(0f, 2f)) else it }
         _sessionState.value = _sessionState.value.copy(maskLayers = updated)
@@ -1619,9 +1577,7 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun updateMaskLocalAdjustment(maskId: String, prop: String, value: Float) {
-        if (sliderBaselineState == null) {
-            sliderBaselineState = _sessionState.value
-        }
+        recordSliderBaseline()
         val existing = _sessionState.value.maskLayers
         val updated = existing.map { layer ->
             if (layer.id == maskId) {
@@ -1766,9 +1722,7 @@ class PhotoEditorViewModel : ViewModel() {
     }
 
     fun updateAiExpand(ratio: Float) {
-        if (sliderBaselineState == null) {
-            sliderBaselineState = _sessionState.value
-        }
+        recordSliderBaseline()
         val updated = _sessionState.value.aiSettings.copy(expandOutpaintRatio = ratio)
         _sessionState.value = _sessionState.value.copy(aiSettings = updated)
         updateLivePreview()
@@ -1789,44 +1743,29 @@ class PhotoEditorViewModel : ViewModel() {
     /**
      * Returns the full list of operation descriptions up to current state.
      */
-    fun getHistoryList(): List<String> {
-        val list = undoStack.map { it.description } + listOf(_sessionState.value.description)
-        return list
-    }
+    fun getHistoryList(): List<String> = historyManager.getHistoryList(_sessionState.value)
 
-    fun getCurrentHistoryIndex(): Int = undoStack.size
+    fun getCurrentHistoryIndex(): Int = historyManager.getCurrentHistoryIndex()
 
     /**
      * Jumps back to a specific step in the history stack.
      */
     fun jumpToHistoryStep(targetIndex: Int) {
-        val fullHistory = undoStack + listOf(_sessionState.value)
-        if (targetIndex !in fullHistory.indices) return
-        commitSliderChange()
-        val targetState = fullHistory[targetIndex]
-        undoStack.clear()
-        for (i in 0 until targetIndex) {
-            undoStack.add(fullHistory[i])
+        historyManager.jumpToHistoryStep(_sessionState.value, targetIndex)?.let { targetState ->
+            _sessionState.value = targetState
+            updateLivePreview()
         }
-        redoStack.clear()
-        for (i in fullHistory.lastIndex downTo targetIndex + 1) {
-            redoStack.add(fullHistory[i])
-        }
-        _sessionState.value = targetState
-        _canUndo.value = undoStack.isNotEmpty()
-        _canRedo.value = redoStack.isNotEmpty()
-        updateLivePreview()
     }
 
     /**
      * Cinematic step-by-step replay of editing history.
      */
     fun startReplay() {
-        if (undoStack.isEmpty()) return
+        if (!historyManager.hasHistory()) return
         viewModelScope.launch {
             _isReplaying.value = true
             val activeState = _sessionState.value
-            val fullHistory = undoStack + listOf(activeState)
+            val fullHistory = historyManager.getFullHistory(activeState)
             val total = fullHistory.size
             for ((idx, step) in fullHistory.withIndex()) {
                 _sessionState.value = step
