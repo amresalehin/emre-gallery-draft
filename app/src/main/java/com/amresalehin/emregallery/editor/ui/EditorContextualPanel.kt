@@ -171,15 +171,36 @@ fun EditorContextualPanel(
     onLiquifyRadiusChange: (Float) -> Unit,
     liquifyStrength: Float,
     onLiquifyStrengthChange: (Float) -> Unit,
-    // Retouch domain
-    activeRetouchType: RetouchType,
-    onSelectRetouchType: (RetouchType) -> Unit,
-    healingIntensity: Float,
-    onHealingIntensityChange: (Float) -> Unit,
-    healingTintColor: Color,
-    onHealingTintColorChange: (Color) -> Unit,
-    brushWidth: Float,
-    onBrushWidthChange: (Float) -> Unit,
+    // Retouch domain (default fallbacks)
+    activeRetouchType: RetouchType = RetouchType.BLEMISH,
+    onSelectRetouchType: (RetouchType) -> Unit = {},
+    healingIntensity: Float = 1.0f,
+    onHealingIntensityChange: (Float) -> Unit = {},
+    healingTintColor: Color = Color(0xFFFFCC80),
+    onHealingTintColorChange: (Color) -> Unit = {},
+    brushWidth: Float = 10f,
+    onBrushWidthChange: (Float) -> Unit = {},
+    // Independent retouch domain controls
+    blemishRadius: Float = 24f,
+    onBlemishRadiusChange: (Float) -> Unit = {},
+    blemishIntensity: Float = 1.0f,
+    onBlemishIntensityChange: (Float) -> Unit = {},
+    smoothRadius: Float = 36f,
+    onSmoothRadiusChange: (Float) -> Unit = {},
+    smoothIntensity: Float = 0.6f,
+    onSmoothIntensityChange: (Float) -> Unit = {},
+    healRadius: Float = 30f,
+    onHealRadiusChange: (Float) -> Unit = {},
+    healIntensity: Float = 1.0f,
+    onHealIntensityChange: (Float) -> Unit = {},
+    healRetouchType: RetouchType = RetouchType.PATCH_HEALING,
+    onSelectHealRetouchType: (RetouchType) -> Unit = {},
+    skinToneRadius: Float = 40f,
+    onSkinToneRadiusChange: (Float) -> Unit = {},
+    skinToneIntensity: Float = 0.5f,
+    onSkinToneIntensityChange: (Float) -> Unit = {},
+    skinToneColor: Color = Color(0xFFFFCC80),
+    onSkinToneColorChange: (Color) -> Unit = {},
     // Mask domain
     maskingSelectionType: MaskingSelectionType,
     onSelectMaskingType: (MaskingSelectionType) -> Unit,
@@ -548,49 +569,49 @@ fun EditorContextualPanel(
                     }
                     EditorDomain.BLEMISH -> {
                         BlemishDomainPanel(
-                            brushRadius = brushWidth * 1.5f,
-                            onRadiusChange = { onBrushWidthChange(it / 1.5f) },
-                            intensity = healingIntensity,
-                            onIntensityChange = onHealingIntensityChange,
+                            brushRadius = blemishRadius,
+                            onRadiusChange = onBlemishRadiusChange,
+                            intensity = blemishIntensity,
+                            onIntensityChange = onBlemishIntensityChange,
                             strokeCount = sessionState.retouchStrokes.count { it.type == RetouchType.BLEMISH },
-                            onClearStrokes = { viewModel.clearRetouchStrokes() },
+                            onClearStrokes = { viewModel.clearRetouchStrokes(RetouchType.BLEMISH) },
                             colors = colors
                         )
                     }
                     EditorDomain.SMOOTH -> {
                         SmoothDomainPanel(
-                            brushRadius = brushWidth * 1.5f,
-                            onRadiusChange = { onBrushWidthChange(it / 1.5f) },
-                            intensity = healingIntensity,
-                            onIntensityChange = onHealingIntensityChange,
+                            brushRadius = smoothRadius,
+                            onRadiusChange = onSmoothRadiusChange,
+                            intensity = smoothIntensity,
+                            onIntensityChange = onSmoothIntensityChange,
                             strokeCount = sessionState.retouchStrokes.count { it.type == RetouchType.SKIN_SMOOTH },
-                            onClearStrokes = { viewModel.clearRetouchStrokes() },
+                            onClearStrokes = { viewModel.clearRetouchStrokes(RetouchType.SKIN_SMOOTH) },
                             colors = colors
                         )
                     }
                     EditorDomain.HEAL -> {
                         HealDomainPanel(
-                            activeType = activeRetouchType,
-                            onSelectType = onSelectRetouchType,
-                            brushRadius = brushWidth * 1.5f,
-                            onRadiusChange = { onBrushWidthChange(it / 1.5f) },
-                            intensity = healingIntensity,
-                            onIntensityChange = onHealingIntensityChange,
+                            activeType = healRetouchType,
+                            onSelectType = onSelectHealRetouchType,
+                            brushRadius = healRadius,
+                            onRadiusChange = onHealRadiusChange,
+                            intensity = healIntensity,
+                            onIntensityChange = onHealIntensityChange,
                             strokeCount = sessionState.retouchStrokes.count { it.type in listOf(RetouchType.PATCH_HEALING, RetouchType.CLONE_STAMP, RetouchType.OBJECT_REMOVAL, RetouchType.WRINKLE_REMOVAL) },
-                            onClearStrokes = { viewModel.clearRetouchStrokes() },
+                            onClearStrokes = { viewModel.clearRetouchStrokes(RetouchType.PATCH_HEALING, RetouchType.CLONE_STAMP, RetouchType.OBJECT_REMOVAL, RetouchType.WRINKLE_REMOVAL) },
                             colors = colors
                         )
                     }
                     EditorDomain.SKIN_TONE -> {
                         SkinToneDomainPanel(
-                            brushRadius = brushWidth * 1.5f,
-                            onRadiusChange = { onBrushWidthChange(it / 1.5f) },
-                            intensity = healingIntensity,
-                            onIntensityChange = onHealingIntensityChange,
-                            tintColor = healingTintColor,
-                            onTintColorChange = onHealingTintColorChange,
+                            brushRadius = skinToneRadius,
+                            onRadiusChange = onSkinToneRadiusChange,
+                            intensity = skinToneIntensity,
+                            onIntensityChange = onSkinToneIntensityChange,
+                            tintColor = skinToneColor,
+                            onTintColorChange = onSkinToneColorChange,
                             strokeCount = sessionState.retouchStrokes.count { it.type == RetouchType.SKIN_TONE },
-                            onClearStrokes = { viewModel.clearRetouchStrokes() },
+                            onClearStrokes = { viewModel.clearRetouchStrokes(RetouchType.SKIN_TONE) },
                             colors = colors
                         )
                     }

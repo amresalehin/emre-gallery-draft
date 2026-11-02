@@ -44,12 +44,6 @@ class PhotoEditorViewModel : ViewModel() {
 
     private var modeBaselineState: EditSessionState? = null
 
-    private val _activeSubItem = MutableStateFlow<ToolSheetSubItem?>(ToolSheetSubItem.CROP)
-    val activeSubItem: StateFlow<ToolSheetSubItem?> = _activeSubItem.asStateFlow()
-
-    private val _activeAdjustment = MutableStateFlow("Brightness")
-    val activeAdjustment: StateFlow<String> = _activeAdjustment.asStateFlow()
-
     // History and Undo/Redo Delegate
     private val historyManager = EditorHistoryManager()
     val canUndo: StateFlow<Boolean> get() = historyManager.canUndo
@@ -134,17 +128,6 @@ class PhotoEditorViewModel : ViewModel() {
     fun setActiveTool(tool: EditorTool) {
         commitSliderChange()
         _activeTool.value = tool
-        _activeSubItem.value = null
-    }
-
-    fun setActiveSubItem(subItem: ToolSheetSubItem?) {
-        commitSliderChange()
-        _activeSubItem.value = subItem
-    }
-
-    fun setActiveAdjustment(prop: String) {
-        commitSliderChange()
-        _activeAdjustment.value = prop
     }
 
     // --- Mode Lifecycle (Cancel / Apply Behavior) ---
@@ -253,6 +236,18 @@ class PhotoEditorViewModel : ViewModel() {
     fun clearRetouchStrokes() {
         _sessionState.value = _sessionState.value.copy(retouchStrokes = emptyList())
         updateLivePreview()
+    }
+
+    fun clearRetouchStrokes(vararg types: RetouchType) {
+        if (types.isEmpty()) {
+            clearRetouchStrokes()
+        } else {
+            val typeSet = types.toSet()
+            _sessionState.value = _sessionState.value.copy(
+                retouchStrokes = _sessionState.value.retouchStrokes.filterNot { it.type in typeSet }
+            )
+            updateLivePreview()
+        }
     }
 
     // --- Transformations ---

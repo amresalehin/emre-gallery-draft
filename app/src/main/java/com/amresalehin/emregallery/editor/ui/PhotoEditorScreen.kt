@@ -29,7 +29,6 @@ import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.editor.*
 import kotlinx.coroutines.launch
-import java.util.Locale
 
 /**
  * Gallery — Editor Screen (Emre Design System)
@@ -119,6 +118,50 @@ fun PhotoEditorScreen(
     var healingIntensity by remember { mutableFloatStateOf(1.0f) }
     var healingTintColor by remember { mutableStateOf(Color(0xFF2979FF)) }
 
+    // Independent retouch tool states
+    var blemishRadius by remember { mutableFloatStateOf(24f) }
+    var blemishIntensity by remember { mutableFloatStateOf(1.0f) }
+
+    var smoothRadius by remember { mutableFloatStateOf(36f) }
+    var smoothIntensity by remember { mutableFloatStateOf(0.6f) }
+
+    var healRadius by remember { mutableFloatStateOf(30f) }
+    var healIntensity by remember { mutableFloatStateOf(1.0f) }
+    var healRetouchType by remember { mutableStateOf(RetouchType.PATCH_HEALING) }
+
+    var skinToneRadius by remember { mutableFloatStateOf(40f) }
+    var skinToneIntensity by remember { mutableFloatStateOf(0.5f) }
+    var skinToneColor by remember { mutableStateOf(Color(0xFFFFCC80)) }
+
+    val currentRetouchType = when (selectedDomain) {
+        EditorDomain.BLEMISH -> RetouchType.BLEMISH
+        EditorDomain.SMOOTH -> RetouchType.SKIN_SMOOTH
+        EditorDomain.HEAL -> healRetouchType
+        EditorDomain.SKIN_TONE -> RetouchType.SKIN_TONE
+        else -> activeRetouchType
+    }
+
+    val currentRetouchRadius = when (selectedDomain) {
+        EditorDomain.BLEMISH -> blemishRadius
+        EditorDomain.SMOOTH -> smoothRadius
+        EditorDomain.HEAL -> healRadius
+        EditorDomain.SKIN_TONE -> skinToneRadius
+        else -> brushWidth * 1.5f
+    }
+
+    val currentRetouchIntensity = when (selectedDomain) {
+        EditorDomain.BLEMISH -> blemishIntensity
+        EditorDomain.SMOOTH -> smoothIntensity
+        EditorDomain.HEAL -> healIntensity
+        EditorDomain.SKIN_TONE -> skinToneIntensity
+        else -> healingIntensity
+    }
+
+    val currentRetouchTintColor = when (selectedDomain) {
+        EditorDomain.SKIN_TONE -> skinToneColor
+        else -> healingTintColor
+    }
+
     var currentLiquifyMode by remember { mutableStateOf(LiquifyMode.PUSH) }
     var liquifyRadius by remember { mutableFloatStateOf(40f) }
     var liquifyStrength by remember { mutableFloatStateOf(0.5f) }
@@ -128,7 +171,6 @@ fun PhotoEditorScreen(
     var showExportSheet by remember { mutableStateOf(false) }
     var showDiscardDialog by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
-    var showLrMaskCreationSheet by remember { mutableStateOf(false) }
 
     // Back Handler: Respects history dialog, active mode Cancel first, then tool domain, then discard confirmation
     BackHandler {
@@ -250,12 +292,15 @@ fun PhotoEditorScreen(
             }
             selectedDomain == EditorDomain.CROP -> viewModel.resetCrop()
             selectedDomain == EditorDomain.PRESETS -> viewModel.setFilter(FilterType.NONE)
-            selectedDomain in listOf(
-                EditorDomain.BLEMISH,
-                EditorDomain.SMOOTH,
-                EditorDomain.HEAL,
-                EditorDomain.SKIN_TONE
-            ) -> viewModel.clearRetouchStrokes()
+            selectedDomain == EditorDomain.BLEMISH -> viewModel.clearRetouchStrokes(RetouchType.BLEMISH)
+            selectedDomain == EditorDomain.SMOOTH -> viewModel.clearRetouchStrokes(RetouchType.SKIN_SMOOTH)
+            selectedDomain == EditorDomain.HEAL -> viewModel.clearRetouchStrokes(
+                RetouchType.PATCH_HEALING,
+                RetouchType.CLONE_STAMP,
+                RetouchType.OBJECT_REMOVAL,
+                RetouchType.WRINKLE_REMOVAL
+            )
+            selectedDomain == EditorDomain.SKIN_TONE -> viewModel.clearRetouchStrokes(RetouchType.SKIN_TONE)
             selectedDomain == EditorDomain.MASK -> viewModel.clearMask()
             selectedDomain == EditorDomain.TEXT -> viewModel.clearTextOverlays()
             selectedDomain == EditorDomain.SHAPE -> viewModel.clearShapes()
@@ -281,7 +326,8 @@ fun PhotoEditorScreen(
             modifier = Modifier.fillMaxSize(),
             color = colors.baseSurface
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val editorMaxHeight = maxHeight
                 if (isLandscape) {
                     // ==========================================
                     // LANDSCAPE-SPECIFIC TWO-COLUMN COMPOSITION
@@ -330,14 +376,14 @@ fun PhotoEditorScreen(
                                     activeTool = activeTool,
                                     selectedBrushType = selectedBrushType,
                                     selectedBrushColor = selectedBrushColor,
-                                    brushWidth = brushWidth,
+                                    brushWidth = if (selectedDomain in listOf(EditorDomain.BLEMISH, EditorDomain.SMOOTH, EditorDomain.HEAL, EditorDomain.SKIN_TONE)) (currentRetouchRadius / 1.5f) else brushWidth,
                                     brushOpacity = brushOpacity,
                                     brushHardness = brushHardness,
-                                    activeRetouchType = activeRetouchType,
-                                    healingIntensity = healingIntensity,
-                                    healingTintColor = healingTintColor,
+                                    activeRetouchType = currentRetouchType,
+                                    healingIntensity = currentRetouchIntensity,
+                                    healingTintColor = currentRetouchTintColor,
                                     cropAspectRatio = if (selectedDomain == EditorDomain.CROP) selectedCropPreset.ratio else null,
-                                    isCurveMode = currentMode == EditorMode.CURVES,
+                                    isCurveMode = currentMode == EditorMode.CURVES || selectedDomain == EditorDomain.CURVES,
                                     activeCurveChannel = activeCurveChannel,
                                     sessionState = sessionState,
                                     viewModel = viewModel,
@@ -425,14 +471,34 @@ fun PhotoEditorScreen(
                                     onLiquifyRadiusChange = { liquifyRadius = it },
                                     liquifyStrength = liquifyStrength,
                                     onLiquifyStrengthChange = { liquifyStrength = it },
-                                    activeRetouchType = activeRetouchType,
+                                    activeRetouchType = currentRetouchType,
                                     onSelectRetouchType = { activeRetouchType = it },
-                                    healingIntensity = healingIntensity,
+                                    healingIntensity = currentRetouchIntensity,
                                     onHealingIntensityChange = { healingIntensity = it },
-                                    healingTintColor = healingTintColor,
+                                    healingTintColor = currentRetouchTintColor,
                                     onHealingTintColorChange = { healingTintColor = it },
                                     brushWidth = brushWidth,
                                     onBrushWidthChange = { brushWidth = it },
+                                    blemishRadius = blemishRadius,
+                                    onBlemishRadiusChange = { blemishRadius = it },
+                                    blemishIntensity = blemishIntensity,
+                                    onBlemishIntensityChange = { blemishIntensity = it },
+                                    smoothRadius = smoothRadius,
+                                    onSmoothRadiusChange = { smoothRadius = it },
+                                    smoothIntensity = smoothIntensity,
+                                    onSmoothIntensityChange = { smoothIntensity = it },
+                                    healRadius = healRadius,
+                                    onHealRadiusChange = { healRadius = it },
+                                    healIntensity = healIntensity,
+                                    onHealIntensityChange = { healIntensity = it },
+                                    healRetouchType = healRetouchType,
+                                    onSelectHealRetouchType = { healRetouchType = it },
+                                    skinToneRadius = skinToneRadius,
+                                    onSkinToneRadiusChange = { skinToneRadius = it },
+                                    skinToneIntensity = skinToneIntensity,
+                                    onSkinToneIntensityChange = { skinToneIntensity = it },
+                                    skinToneColor = skinToneColor,
+                                    onSkinToneColorChange = { skinToneColor = it },
                                     maskingSelectionType = maskingSelectionType,
                                     onSelectMaskingType = { maskingSelectionType = it },
                                     brushOpacity = brushOpacity,
@@ -443,7 +509,7 @@ fun PhotoEditorScreen(
                                     onSelectBrushType = { selectedBrushType = it },
                                     selectedBrushColor = selectedBrushColor,
                                     onSelectBrushColor = { selectedBrushColor = it },
-                                    onOpenMaskCreationSheet = { showLrMaskCreationSheet = true },
+                                    onOpenMaskCreationSheet = {},
                                     onFrameChange = { viewModel.setFrame(it) },
                                     onBorderChange = { viewModel.setBorder(it) },
                                     modifier = Modifier
@@ -537,14 +603,14 @@ fun PhotoEditorScreen(
                             activeTool = activeTool,
                             selectedBrushType = selectedBrushType,
                             selectedBrushColor = selectedBrushColor,
-                            brushWidth = brushWidth,
+                            brushWidth = if (selectedDomain in listOf(EditorDomain.BLEMISH, EditorDomain.SMOOTH, EditorDomain.HEAL, EditorDomain.SKIN_TONE)) (currentRetouchRadius / 1.5f) else brushWidth,
                             brushOpacity = brushOpacity,
                             brushHardness = brushHardness,
-                            activeRetouchType = activeRetouchType,
-                            healingIntensity = healingIntensity,
-                            healingTintColor = healingTintColor,
+                            activeRetouchType = currentRetouchType,
+                            healingIntensity = currentRetouchIntensity,
+                            healingTintColor = currentRetouchTintColor,
                             cropAspectRatio = if (selectedDomain == EditorDomain.CROP) selectedCropPreset.ratio else null,
-                            isCurveMode = currentMode == EditorMode.CURVES,
+                            isCurveMode = currentMode == EditorMode.CURVES || selectedDomain == EditorDomain.CURVES,
                             activeCurveChannel = activeCurveChannel,
                             sessionState = sessionState,
                             viewModel = viewModel,
@@ -575,8 +641,8 @@ fun PhotoEditorScreen(
                             colors = colors
                         )
 
-                        // 04. Contextual Editing Panel
-                        val contextualPanelMaxHeight = (configuration.screenHeightDp * 0.40f).dp.coerceIn(220.dp, 340.dp)
+                        // 04. Contextual Editing Panel (capped strictly at 40% maximum height)
+                        val contextualPanelMaxHeight = editorMaxHeight * 0.40f
                         EditorContextualPanel(
                             selectedDomain = selectedDomain,
                             sessionState = sessionState,
@@ -628,14 +694,34 @@ fun PhotoEditorScreen(
                             onLiquifyRadiusChange = { liquifyRadius = it },
                             liquifyStrength = liquifyStrength,
                             onLiquifyStrengthChange = { liquifyStrength = it },
-                            activeRetouchType = activeRetouchType,
+                            activeRetouchType = currentRetouchType,
                             onSelectRetouchType = { activeRetouchType = it },
-                            healingIntensity = healingIntensity,
+                            healingIntensity = currentRetouchIntensity,
                             onHealingIntensityChange = { healingIntensity = it },
-                            healingTintColor = healingTintColor,
+                            healingTintColor = currentRetouchTintColor,
                             onHealingTintColorChange = { healingTintColor = it },
                             brushWidth = brushWidth,
                             onBrushWidthChange = { brushWidth = it },
+                            blemishRadius = blemishRadius,
+                            onBlemishRadiusChange = { blemishRadius = it },
+                            blemishIntensity = blemishIntensity,
+                            onBlemishIntensityChange = { blemishIntensity = it },
+                            smoothRadius = smoothRadius,
+                            onSmoothRadiusChange = { smoothRadius = it },
+                            smoothIntensity = smoothIntensity,
+                            onSmoothIntensityChange = { smoothIntensity = it },
+                            healRadius = healRadius,
+                            onHealRadiusChange = { healRadius = it },
+                            healIntensity = healIntensity,
+                            onHealIntensityChange = { healIntensity = it },
+                            healRetouchType = healRetouchType,
+                            onSelectHealRetouchType = { healRetouchType = it },
+                            skinToneRadius = skinToneRadius,
+                            onSkinToneRadiusChange = { skinToneRadius = it },
+                            skinToneIntensity = skinToneIntensity,
+                            onSkinToneIntensityChange = { skinToneIntensity = it },
+                            skinToneColor = skinToneColor,
+                            onSkinToneColorChange = { skinToneColor = it },
                             maskingSelectionType = maskingSelectionType,
                             onSelectMaskingType = { maskingSelectionType = it },
                             brushOpacity = brushOpacity,
@@ -646,7 +732,7 @@ fun PhotoEditorScreen(
                             onSelectBrushType = { selectedBrushType = it },
                             selectedBrushColor = selectedBrushColor,
                             onSelectBrushColor = { selectedBrushColor = it },
-                            onOpenMaskCreationSheet = { showLrMaskCreationSheet = true },
+                            onOpenMaskCreationSheet = {},
                             onFrameChange = { viewModel.setFrame(it) },
                             onBorderChange = { viewModel.setBorder(it) },
                             modifier = Modifier

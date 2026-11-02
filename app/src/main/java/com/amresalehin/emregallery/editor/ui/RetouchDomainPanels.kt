@@ -69,21 +69,6 @@ fun BlemishDomainPanel(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )
-                if (strokeCount > 0) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = AccentBlue.copy(alpha = 0.2f),
-                        border = BorderStroke(1.dp, AccentBlue)
-                    ) {
-                        Text(
-                            text = "$strokeCount applied",
-                            color = AccentBlue,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
             }
             if (strokeCount > 0) {
                 TextButton(
@@ -120,32 +105,6 @@ fun BlemishDomainPanel(
             onValueChange = { onIntensityChange(it / 100f) },
             onValueChangeFinished = {}
         )
-
-        // Helper instruction card
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = colors.elevatedSurface,
-            border = BorderStroke(1.dp, colors.border),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "Tap directly on pimples, spots, or skin marks to erase them seamlessly.",
-                    color = colors.secondaryText,
-                    fontSize = 11.sp
-                )
-            }
-        }
     }
 }
 
@@ -191,21 +150,6 @@ fun SmoothDomainPanel(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )
-                if (strokeCount > 0) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = AccentBlue.copy(alpha = 0.2f),
-                        border = BorderStroke(1.dp, AccentBlue)
-                    ) {
-                        Text(
-                            text = "$strokeCount applied",
-                            color = AccentBlue,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
             }
             if (strokeCount > 0) {
                 TextButton(
@@ -242,32 +186,6 @@ fun SmoothDomainPanel(
             onValueChange = { onIntensityChange(it / 100f) },
             onValueChangeFinished = {}
         )
-
-        // Helper instruction card
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = colors.elevatedSurface,
-            border = BorderStroke(1.dp, colors.border),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier.padding(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = colors.secondaryText,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "Brush gently over skin areas to soften wrinkles while preserving natural texture.",
-                    color = colors.secondaryText,
-                    fontSize = 11.sp
-                )
-            }
-        }
     }
 }
 
@@ -276,8 +194,6 @@ fun SmoothDomainPanel(
  */
 @Composable
 fun HealDomainPanel(
-    activeType: RetouchType,
-    onSelectType: (RetouchType) -> Unit,
     brushRadius: Float,
     onRadiusChange: (Float) -> Unit,
     intensity: Float,
@@ -285,15 +201,10 @@ fun HealDomainPanel(
     strokeCount: Int,
     onClearStrokes: () -> Unit,
     modifier: Modifier = Modifier,
+    activeType: RetouchType = RetouchType.PATCH_HEALING,
+    onSelectType: (RetouchType) -> Unit = {},
     colors: EmreEditorColors = LocalEmreEditorColors.current
 ) {
-    val healModes = listOf(
-        RetouchType.PATCH_HEALING to "Patch Healing",
-        RetouchType.CLONE_STAMP to "Clone Stamp",
-        RetouchType.OBJECT_REMOVAL to "Object Erase",
-        RetouchType.WRINKLE_REMOVAL to "Wrinkle Fix"
-    )
-
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -322,21 +233,6 @@ fun HealDomainPanel(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )
-                if (strokeCount > 0) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = AccentBlue.copy(alpha = 0.2f),
-                        border = BorderStroke(1.dp, AccentBlue)
-                    ) {
-                        Text(
-                            text = "$strokeCount applied",
-                            color = AccentBlue,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
             }
             if (strokeCount > 0) {
                 TextButton(
@@ -344,39 +240,6 @@ fun HealDomainPanel(
                     contentPadding = PaddingValues(0.dp)
                 ) {
                     Text("Clear All", color = Color(0xFFFF5252), fontSize = 12.sp)
-                }
-            }
-        }
-
-        // Healing Mode Selector
-        Text(
-            text = "Healing Technique:",
-            color = colors.secondaryText,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            healModes.forEach { (mode, label) ->
-                val isSelected = activeType == mode
-                Surface(
-                    onClick = { onSelectType(mode) },
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) AccentBlue.copy(alpha = 0.2f) else colors.elevatedSurface,
-                    border = BorderStroke(1.dp, if (isSelected) AccentBlue else colors.border),
-                    modifier = Modifier.testTag("heal_mode_${mode.name.lowercase()}")
-                ) {
-                    Text(
-                        text = label,
-                        color = if (isSelected) AccentBlue else colors.primaryText,
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
                 }
             }
         }
@@ -464,21 +327,6 @@ fun SkinToneDomainPanel(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
                 )
-                if (strokeCount > 0) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = AccentBlue.copy(alpha = 0.2f),
-                        border = BorderStroke(1.dp, AccentBlue)
-                    ) {
-                        Text(
-                            text = "$strokeCount applied",
-                            color = AccentBlue,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
             }
             if (strokeCount > 0) {
                 TextButton(

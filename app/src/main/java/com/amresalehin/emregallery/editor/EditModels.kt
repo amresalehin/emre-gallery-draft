@@ -35,31 +35,6 @@ enum class EditorTool(val label: String) {
     CURVES("Curves")
 }
 
-enum class ToolSheetSubItem(val label: String) {
-    CROP("Crop"),
-    ROTATE("Rotate"),
-    FLIP("Flip"),
-    STRAIGHTEN("Straighten"),
-    AUTO_LEVEL("Auto-Level"),
-    PERSPECTIVE("Perspective"),
-    CORNER_PIN("Corner Pin"),
-    MESH_WARP("Mesh Warp"),
-    SHAPE_CROP("Shape Crop"),
-    LIQUIFY("Liquify"),
-    SMUDGE("Smudge"),
-    PATCH("Patch"),
-    CLONE("Clone"),
-    DISPERSION("Dispersion"),
-    STRETCH("Stretch"),
-    MOTION("Motion"),
-    LASSO_SELECT("Lasso"),
-    POLYGON_SELECT("Polygon"),
-    ELLIPSE_SELECT("Ellipse"),
-    MAGIC_WAND("Magic Wand"),
-    OBJECT_SELECT("Object Select"),
-    RESIZE("Resize")
-}
-
 enum class AspectRatioPreset(val label: String, val ratio: Float?) {
     FREE("Free", null),
     ORIGINAL("Original", null),

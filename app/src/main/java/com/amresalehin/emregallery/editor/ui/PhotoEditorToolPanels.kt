@@ -24,7 +24,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -34,8 +33,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -52,7 +49,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,497 +95,10 @@ fun SliderHudBanner(
     }
 }
 
-/**
- * Universal Mode Header for consistent Cancel / Apply behavior across editing modes.
- * Displays a clean Cancel (✕), Mode Title, optional Reset, and Apply (✓).
- */
-@Composable
-fun EditorModeHeader(
-    title: String,
-    onCancel: () -> Unit,
-    onApply: () -> Unit,
-    onReset: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        // Cancel button
-        IconButton(
-            onClick = onCancel,
-            modifier = Modifier
-                .size(40.dp)
-                .testTag("mode_cancel_button")
-        ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Cancel",
-                tint = Color(0xFFDDDDDD),
-                modifier = Modifier.size(20.dp)
-            )
-        }
 
-        // Mode Title & optional Reset button
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = title,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp,
-                letterSpacing = 0.4.sp
-            )
-            if (onReset != null) {
-                Surface(
-                    onClick = onReset,
-                    shape = CircleShape,
-                    color = Color(0xFF222222),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-                    modifier = Modifier.testTag("mode_reset_button")
-                ) {
-                    Text(
-                        text = "Reset",
-                        color = Color(0xFFAAAAAA),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
-            }
-        }
 
-        // Apply button
-        Surface(
-            onClick = onApply,
-            shape = CircleShape,
-            color = Color.White,
-            contentColor = Color.Black,
-            modifier = Modifier
-                .size(36.dp)
-                .testTag("mode_apply_button")
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Default.Check,
-                    contentDescription = "Apply",
-                    tint = Color.Black,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    }
-}
 
-/**
- * Target parameter definition when user taps on any slider's numeric value
- * to open precise numeric text input.
- */
-data class NumericInputTarget(
-    val title: String,
-    val currentValue: Float,
-    val valueRange: ClosedFloatingPointRange<Float>,
-    val defaultValue: Float = 0f,
-    val isEv: Boolean = false,
-    val unit: String = "",
-    val onApply: (Float) -> Unit
-)
 
-val LocalNumericInputRequester = staticCompositionLocalOf<(NumericInputTarget) -> Unit> { {} }
-
-/**
- * Material 3 Dialog for typing exact numeric values with quick preset chips,
- * validation, and haptic feedback.
- */
-@Composable
-fun NumericInputDialog(
-    target: NumericInputTarget,
-    onDismiss: () -> Unit
-) {
-    val haptic = LocalHapticFeedback.current
-    val minAllowed = if (target.isEv) target.valueRange.start / 20f else target.valueRange.start
-    val maxAllowed = if (target.isEv) target.valueRange.endInclusive / 20f else target.valueRange.endInclusive
-    val defaultDisp = if (target.isEv) target.defaultValue / 20f else target.defaultValue
-
-    val initialText = if (target.isEv) {
-        String.format(Locale.US, "%.2f", target.currentValue / 20f)
-    } else if (target.valueRange.endInclusive <= 5f) {
-        String.format(Locale.US, "%.2f", target.currentValue)
-    } else {
-        target.currentValue.toInt().toString()
-    }
-
-    var textInput by remember { mutableStateOf(initialText) }
-    val focusRequester = remember { FocusRequester() }
-
-    LaunchedEffect(Unit) {
-        try {
-            focusRequester.requestFocus()
-        } catch (_: Exception) {}
-    }
-
-    val parsedValue = textInput.toFloatOrNull()
-    val isValid = parsedValue != null && parsedValue in minAllowed..maxAllowed
-    val helperOrError = when {
-        textInput.isBlank() -> "Enter a value"
-        parsedValue == null -> "Invalid number"
-        parsedValue !in minAllowed..maxAllowed -> {
-            val minStr = if (target.isEv) String.format(Locale.US, "%.2f", minAllowed) else minAllowed.toInt().toString()
-            val maxStr = if (target.isEv) String.format(Locale.US, "%.2f", maxAllowed) else maxAllowed.toInt().toString()
-            "Allowed: $minStr to $maxStr ${target.unit}".trim()
-        }
-        else -> {
-            val minStr = if (target.isEv) String.format(Locale.US, "%.2f", minAllowed) else minAllowed.toInt().toString()
-            val maxStr = if (target.isEv) String.format(Locale.US, "%.2f", maxAllowed) else maxAllowed.toInt().toString()
-            "Range: $minStr to $maxStr ${target.unit}".trim()
-        }
-    }
-
-    val applyValue: (Float) -> Unit = { raw ->
-        val finalVal = if (target.isEv) raw * 20f else raw
-        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        target.onApply(finalVal.coerceIn(target.valueRange.start, target.valueRange.endInclusive))
-        onDismiss()
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E1E1E),
-        shape = RoundedCornerShape(20.dp),
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = target.title,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
-                )
-                if (target.unit.isNotEmpty()) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = Color(0xFF2C2C2E)
-                    ) {
-                        Text(
-                            text = target.unit,
-                            color = Color(0xFFAAAAAA),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-        },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = textInput,
-                    onValueChange = { textInput = it },
-                    singleLine = true,
-                    isError = textInput.isNotBlank() && !isValid,
-                    supportingText = {
-                        Text(
-                            text = helperOrError,
-                            color = if (textInput.isNotBlank() && !isValid) Color(0xFFFF5252) else Color(0xFF888888),
-                            fontSize = 11.sp
-                        )
-                    },
-                    trailingIcon = {
-                        if (textInput.isNotEmpty()) {
-                            IconButton(onClick = { textInput = "" }) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFFAAAAAA), modifier = Modifier.size(16.dp))
-                            }
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color.White,
-                        unfocusedBorderColor = Color(0xFF444444),
-                        errorBorderColor = Color(0xFFFF5252),
-                        cursorColor = Color.White
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequester)
-                        .testTag("numeric_input_field")
-                )
-
-                Spacer(Modifier.height(10.dp))
-
-                // Quick preset chips
-                val presets: List<Float> = when {
-                    target.isEv -> listOf(-2.0f, -1.0f, -0.5f, 0.0f, 0.5f, 1.0f, 2.0f)
-                    minAllowed < 0f && maxAllowed > 0f -> listOf(-100f, -50f, -25f, 0f, 25f, 50f, 100f)
-                    target.valueRange.endInclusive == 150f -> listOf(0f, 25f, 50f, 75f, 100f, 150f)
-                    target.valueRange.endInclusive <= 3f -> listOf(0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f)
-                    else -> listOf(0f, 25f, 50f, 75f, 100f)
-                }
-
-                Text(
-                    text = "Quick Presets",
-                    color = Color(0xFF888888),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(presets) { p ->
-                        val pStr = if (target.isEv) {
-                            String.format(Locale.US, "%.1f", p)
-                        } else if (target.valueRange.endInclusive <= 3f) {
-                            String.format(Locale.US, "%.1f", p)
-                        } else {
-                            p.toInt().toString()
-                        }
-                        Surface(
-                            onClick = {
-                                textInput = pStr
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            },
-                            shape = CircleShape,
-                            color = Color(0xFF262626),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                        ) {
-                            Text(
-                                text = if (p > 0 && target.isEv) "+$pStr" else pStr,
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { if (isValid) applyValue(parsedValue!!) },
-                enabled = isValid,
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color.Black,
-                    disabledContainerColor = Color(0xFF333333),
-                    disabledContentColor = Color(0xFF666666)
-                ),
-                modifier = Modifier.testTag("numeric_input_apply")
-            ) {
-                Text("Apply", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(
-                    onClick = {
-                        val defVal = if (target.isEv) 0.00f else defaultDisp
-                        val defStr = if (target.isEv) "0.00" else if (target.valueRange.endInclusive <= 3f) String.format(Locale.US, "%.2f", defVal) else defVal.toInt().toString()
-                        textInput = defStr
-                    }
-                ) {
-                    Text("Reset ↺", color = Color(0xFFAAAAAA))
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel", color = Color.White)
-                }
-            }
-        }
-    )
-}
-
-/**
- * Minimal single slider strip shown while dragging any slider.
- * Features centered zero position for bipolar values, center notch, bounds and haptics.
- */
-@Composable
-fun MinimalSingleSliderRow(
-    value: Float,
-    onValueChange: (Float) -> Unit,
-    onValueChangeFinished: () -> Unit,
-    valueRange: ClosedFloatingPointRange<Float>,
-    gradientBrush: Brush? = null,
-    activeColor: Color = Color.White,
-    isEv: Boolean = false,
-    minLabel: String? = null,
-    maxLabel: String? = null,
-    modifier: Modifier = Modifier
-) {
-    val haptic = LocalHapticFeedback.current
-    val isBipolar = valueRange.start < 0f && valueRange.endInclusive > 0f
-    val isNearZero = isBipolar && abs(value) <= (if (isEv) 0.8f else 1.2f)
-    val lastSign = remember { mutableIntStateOf(if (value > 0.05f) 1 else if (value < -0.05f) -1 else 0) }
-
-    val effectiveMinLabel = minLabel ?: if (isBipolar) {
-        if (isEv) "−5.00" else "${valueRange.start.toInt()}"
-    } else {
-        if (valueRange.endInclusive <= 3f) String.format(Locale.US, "%.1f", valueRange.start) else "${valueRange.start.toInt()}"
-    }
-    val effectiveMaxLabel = maxLabel ?: if (isBipolar) {
-        if (isEv) "+5.00" else "+${valueRange.endInclusive.toInt()}"
-    } else {
-        if (valueRange.endInclusive <= 3f) String.format(Locale.US, "%.1f", valueRange.endInclusive) else "+${valueRange.endInclusive.toInt()}"
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Color(0xFF0D0D0D))
-            .padding(horizontal = 24.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(38.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(26.dp)
-            ) {
-                val thumbRadiusPx = 10.dp.toPx()
-                val trackStartX = thumbRadiusPx
-                val trackEndX = size.width - thumbRadiusPx
-                val trackWidth = (trackEndX - trackStartX).coerceAtLeast(1f)
-                val centerY = size.height / 2f
-                val strokeH = 5.dp.toPx()
-
-                val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
-                val currentX = trackStartX + fraction * trackWidth
-
-                val zeroFraction = if (isBipolar) {
-                    ((0f - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
-                } else 0f
-                val zeroX = trackStartX + zeroFraction * trackWidth
-
-                if (gradientBrush != null) {
-                    drawLine(
-                        brush = gradientBrush,
-                        start = Offset(trackStartX, centerY),
-                        end = Offset(trackEndX, centerY),
-                        strokeWidth = strokeH,
-                        cap = StrokeCap.Round
-                    )
-                } else {
-                    drawLine(
-                        color = Color(0xFF2C2C2E),
-                        start = Offset(trackStartX, centerY),
-                        end = Offset(trackEndX, centerY),
-                        strokeWidth = strokeH,
-                        cap = StrokeCap.Round
-                    )
-
-                    if (isBipolar) {
-                        if (currentX > zeroX) {
-                            drawLine(
-                                color = activeColor,
-                                start = Offset(zeroX, centerY),
-                                end = Offset(currentX, centerY),
-                                strokeWidth = strokeH,
-                                cap = StrokeCap.Round
-                            )
-                        } else if (currentX < zeroX) {
-                            drawLine(
-                                color = activeColor,
-                                start = Offset(currentX, centerY),
-                                end = Offset(zeroX, centerY),
-                                strokeWidth = strokeH,
-                                cap = StrokeCap.Round
-                            )
-                        }
-                    } else {
-                        drawLine(
-                            color = activeColor,
-                            start = Offset(trackStartX, centerY),
-                            end = Offset(currentX, centerY),
-                            strokeWidth = strokeH,
-                            cap = StrokeCap.Round
-                        )
-                    }
-                }
-
-                if (isBipolar) {
-                    val tickColor = if (isNearZero) Color.White else Color(0xFF888888)
-                    drawLine(
-                        color = tickColor,
-                        start = Offset(zeroX, centerY - 6.dp.toPx()),
-                        end = Offset(zeroX, centerY + 6.dp.toPx()),
-                        strokeWidth = 2.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                }
-            }
-
-            Slider(
-                value = value,
-                onValueChange = { raw ->
-                    val snapVal = if (isBipolar && abs(raw) < (if (isEv) 0.8f else 1.2f)) 0f else raw
-                    val currentSign = if (snapVal > 0.05f) 1 else if (snapVal < -0.05f) -1 else 0
-                    if (currentSign != lastSign.intValue) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        lastSign.intValue = currentSign
-                    }
-                    onValueChange(snapVal)
-                },
-                onValueChangeFinished = onValueChangeFinished,
-                valueRange = valueRange,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.Transparent,
-                    inactiveTrackColor = Color.Transparent
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        // Bound labels under minimal slider
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = effectiveMinLabel,
-                color = Color(0xFF666666),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            if (isBipolar) {
-                Text(
-                    text = "0",
-                    color = if (isNearZero) Color.White else Color(0xFF666666),
-                    fontSize = 10.sp,
-                    fontWeight = if (isNearZero) FontWeight.Bold else FontWeight.Normal,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            Text(
-                text = effectiveMaxLabel,
-                color = Color(0xFF666666),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace
-            )
-        }
-    }
-}
 
 /**
  * Primary editing tool categories in Lightcraft & Emre Gallery:
@@ -599,217 +108,7 @@ enum class MainBottomTab {
     ADJUST, PRESETS, CROP, DRAW, MASKING, HEALING, OVERLAYS, AI_TOOLS
 }
 
-/**
- * Clean floating navigation dock for the photo editor.
- * Modeled after Emre's FloatingNavigationBar with pure monochrome styling,
- * spring-animated active indicator, and generous 48dp touch targets.
- */
-@Composable
-fun MainBottomTierBar(
-    currentTab: MainBottomTab,
-    onSelectTab: (MainBottomTab) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = Color(0xF2161616),
-            tonalElevation = 6.dp,
-            shadowElevation = 12.dp,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val tabs = listOf(
-                    Triple(MainBottomTab.ADJUST, "Adjust", Icons.Default.Tune),
-                    Triple(MainBottomTab.PRESETS, "Presets", Icons.Default.FilterVintage),
-                    Triple(MainBottomTab.CROP, "Crop", Icons.Default.Crop),
-                    Triple(MainBottomTab.OVERLAYS, "Layers", Icons.Default.Layers),
-                    Triple(MainBottomTab.HEALING, "Healing", Icons.Default.Healing),
-                    Triple(MainBottomTab.AI_TOOLS, "AI Magic", Icons.Default.AutoAwesome)
-                )
 
-                tabs.forEach { (tab, label, icon) ->
-                    val selected = currentTab == tab || (tab == MainBottomTab.OVERLAYS && (currentTab == MainBottomTab.DRAW || currentTab == MainBottomTab.MASKING))
-                    val interactionSource = remember { MutableInteractionSource() }
-                    val isPressed by interactionSource.collectIsPressedAsState()
-
-                    val scale by animateFloatAsState(
-                        targetValue = if (isPressed) 0.92f else 1.0f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessLow
-                        ),
-                        label = "dock_scale"
-                    )
-
-                    val pillWidth by animateDpAsState(
-                        targetValue = if (selected) 48.dp else 38.dp,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        ),
-                        label = "dock_pill_width"
-                    )
-
-                    val pillBg by animateColorAsState(
-                        targetValue = if (selected) Color.White else Color.Transparent,
-                        label = "dock_pill_bg"
-                    )
-
-                    val iconTint by animateColorAsState(
-                        targetValue = if (selected) Color.Black else Color(0xFF8E8E93),
-                        label = "dock_icon_tint"
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                            }
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = null,
-                                onClick = { onSelectTab(tab) }
-                            )
-                            .padding(horizontal = 2.dp, vertical = 2.dp)
-                            .testTag(
-                                when (tab) {
-                                    MainBottomTab.PRESETS -> "bottom_tab_presets"
-                                    MainBottomTab.CROP -> "bottom_tab_crop"
-                                    MainBottomTab.ADJUST -> "bottom_tab_adjust"
-                                    MainBottomTab.DRAW -> "bottom_tab_draw"
-                                    MainBottomTab.MASKING -> "bottom_tab_masking"
-                                    MainBottomTab.HEALING -> "bottom_tab_healing"
-                                    MainBottomTab.OVERLAYS -> "bottom_tab_overlays"
-                                    MainBottomTab.AI_TOOLS -> "bottom_tab_ai_tools"
-                                }
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = pillBg,
-                            modifier = Modifier
-                                .height(36.dp)
-                                .width(pillWidth)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = label,
-                                    tint = iconTint,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Adjustment categories in Lightcraft developer engine:
- * [Auto], [Light], [Color], [Blur], [Effects], [Detail], [Optics], [Profiles]
- */
-enum class AdjustCategory(val label: String) {
-    AUTO("Auto"),
-    LIGHT("Light"),
-    COLOR("Color"),
-    LEVELS("Levels"),
-    COLOR_BAL("Balance"),
-    COLOR_FX("Color FX"),
-    BLUR("Blur"),
-    EFFECTS("Effects"),
-    DETAIL("Detail"),
-    OPTICS("Optics"),
-    PROFILES("Profiles")
-}
-
-/**
- * Secondary floating category strip for Adjust tools.
- * Clean horizontal scrollable pill chips with monochrome aesthetics.
- */
-@Composable
-fun AdjustCategoryStrip(
-    activeCategory: AdjustCategory,
-    onSelectCategory: (AdjustCategory) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        val categories = listOf(
-            AdjustCategory.LIGHT to Icons.Default.WbSunny,
-            AdjustCategory.COLOR to Icons.Default.DeviceThermostat,
-            AdjustCategory.LEVELS to Icons.Default.Equalizer,
-            AdjustCategory.COLOR_BAL to Icons.Default.Balance,
-            AdjustCategory.COLOR_FX to Icons.Default.Gradient,
-            AdjustCategory.BLUR to Icons.Default.WaterDrop,
-            AdjustCategory.EFFECTS to Icons.Default.CropSquare,
-            AdjustCategory.DETAIL to Icons.Default.ChangeHistory,
-            AdjustCategory.OPTICS to Icons.Default.Camera,
-            AdjustCategory.PROFILES to Icons.Default.PhotoLibrary
-        )
-
-        categories.forEach { (cat, icon) ->
-            val isSelected = activeCategory == cat
-            Surface(
-                onClick = { onSelectCategory(cat) },
-                shape = CircleShape,
-                color = if (isSelected) Color.White else Color(0xFF1E1E1E),
-                border = BorderStroke(
-                    1.dp,
-                    if (isSelected) Color.White else Color.White.copy(alpha = 0.08f)
-                ),
-                modifier = Modifier.testTag("category_${cat.label.lowercase()}")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = if (isSelected) Color.Black else Color(0xFF8E8E93),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = cat.label,
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) Color.Black else Color(0xFFCCCCCC)
-                    )
-                }
-            }
-        }
-    }
-}
 
 /**
  * Emre precision slider row.
@@ -1116,7 +415,7 @@ fun LightPanel(
     shadows: Float,
     whites: Float,
     blacks: Float,
-    onOpenCurve: () -> Unit,
+    onOpenCurve: () -> Unit = {},
     onSliderDragStart: (name: String, formattedVal: String) -> Unit,
     onSliderChange: (prop: String, value: Float) -> Unit,
     onSliderChangeFinished: () -> Unit,
@@ -1128,40 +427,6 @@ fun LightPanel(
             .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // Curve button on top right (clean monochrome pill)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Surface(
-                onClick = onOpenCurve,
-                shape = CircleShape,
-                color = Color(0xFF1E1E1E),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                modifier = Modifier.testTag("light_panel_curve_button")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Timeline,
-                        contentDescription = "Curve",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Curve",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(6.dp))
 
         // Exposure: -5.00 .. +5.00 EV
         val expEv = exposure / 20f
@@ -1276,101 +541,7 @@ fun LightPanel(
     }
 }
 
-/**
- * 2. CURVE CONTROLS BAR
- * Minimal floating channel selector and action controls.
- */
-@Composable
-fun CurveControlsBar(
-    activeChannel: CurveChannel,
-    onSelectChannel: (CurveChannel) -> Unit,
-    onResetCurve: () -> Unit,
-    onDone: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        color = LocalEmreEditorColors.current.panelSurface,
-        border = BorderStroke(1.dp, LocalEmreEditorColors.current.border),
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Channel selector dots: RGB (White), Red, Green, Blue
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    val channels = listOf(
-                        Triple(CurveChannel.RGB, Color.White, "RGB"),
-                        Triple(CurveChannel.RED, Color(0xFFFF5252), "Red"),
-                        Triple(CurveChannel.GREEN, Color(0xFF69F0AE), "Green"),
-                        Triple(CurveChannel.BLUE, Color(0xFF448AFF), "Blue")
-                    )
 
-                    channels.forEach { (channel, dotColor, label) ->
-                        val isSel = activeChannel == channel
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(if (isSel) Color.White.copy(alpha = 0.15f) else Color.Transparent)
-                                .border(
-                                    width = if (isSel) 1.5.dp else 0.5.dp,
-                                    color = if (isSel) Color.White else Color(0xFF555555),
-                                    shape = CircleShape
-                                )
-                                .clickable { onSelectChannel(channel) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(14.dp)
-                                    .clip(CircleShape)
-                                    .background(dotColor)
-                            )
-                        }
-                    }
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Reset
-                    IconButton(onClick = onResetCurve, modifier = Modifier.size(36.dp)) {
-                        Icon(
-                            imageVector = Icons.Default.RestartAlt,
-                            contentDescription = "Reset curve",
-                            tint = Color(0xFFAAAAAA),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    // Done
-                    Surface(
-                        onClick = onDone,
-                        shape = CircleShape,
-                        color = Color.White,
-                        contentColor = Color.Black
-                    ) {
-                        Text(
-                            text = "Done",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 /**
  * 3. COLOR PANEL
@@ -1385,8 +556,8 @@ fun ColorPanel(
     vibrance: Float,
     saturation: Float,
     onToggleBw: () -> Unit,
-    onOpenGrading: () -> Unit,
-    onOpenMix: () -> Unit,
+    onOpenGrading: () -> Unit = {},
+    onOpenMix: () -> Unit = {},
     onSelectWbPreset: (String) -> Unit,
     onSliderDragStart: (name: String, formattedVal: String) -> Unit,
     onSliderChange: (prop: String, value: Float) -> Unit,
@@ -1401,93 +572,34 @@ fun ColorPanel(
             .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // Top action pills: [ B & W ], [ Grading ], [ Mix ]
+        // Black & White Toggle
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // B&W Toggle
-            Surface(
-                onClick = onToggleBw,
-                shape = CircleShape,
-                color = if (isBlackAndWhite) Color.White else Color(0xFF1E1E1E),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                modifier = Modifier.weight(1f)
-            ) {
-                Box(
-                    modifier = Modifier.padding(vertical = 7.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "B & W",
-                        color = if (isBlackAndWhite) Color.Black else Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            // Grading
-            Surface(
-                onClick = onOpenGrading,
-                shape = CircleShape,
-                color = Color(0xFF1E1E1E),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                modifier = Modifier.weight(1.1f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ColorLens,
-                        contentDescription = "Grading",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Grading",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
-
-            // Mix (HSL)
-            Surface(
-                onClick = onOpenMix,
-                shape = CircleShape,
-                color = Color(0xFF1E1E1E),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                modifier = Modifier.weight(1f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = "Color Mix",
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Mix",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
+            Text(
+                text = "Black & White",
+                color = Color(0xFFCCCCCC),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Switch(
+                checked = isBlackAndWhite,
+                onCheckedChange = { onToggleBw() },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Color(0xFF2979FF),
+                    uncheckedThumbColor = Color(0xFFAAAAAA),
+                    uncheckedTrackColor = Color(0xFF222222)
+                ),
+                modifier = Modifier.testTag("color_bw_switch")
+            )
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
 
         // White balance selector row
         Row(
@@ -1637,232 +749,9 @@ fun ColorPanel(
     }
 }
 
-/**
- * In-panel HSL Color Mix (8 color bands with hue, saturation, luminance tuning).
- */
-@Composable
-fun ColorMixPanel(
-    selectedBand: ColorBand,
-    onSelectBand: (ColorBand) -> Unit,
-    hslAdjustment: HslBandAdjustment,
-    onHueChange: (Float) -> Unit,
-    onSatChange: (Float) -> Unit,
-    onLumChange: (Float) -> Unit,
-    onResetBand: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(LocalEmreEditorColors.current.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        // 8 color swatches row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ColorBand.entries.forEach { band ->
-                val isSel = selectedBand == band
-                val dotColor = when (band) {
-                    ColorBand.RED -> Color(0xFFFF3B30)
-                    ColorBand.ORANGE -> Color(0xFFFF9500)
-                    ColorBand.YELLOW -> Color(0xFFFFCC00)
-                    ColorBand.GREEN -> Color(0xFF34C759)
-                    ColorBand.CYAN -> Color(0xFF32ADE6)
-                    ColorBand.BLUE -> Color(0xFF007AFF)
-                    ColorBand.PURPLE -> Color(0xFF5856D6)
-                    ColorBand.MAGENTA -> Color(0xFFAF52DE)
-                }
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(if (isSel) Color.White.copy(alpha = 0.2f) else Color.Transparent)
-                        .border(
-                            width = if (isSel) 2.dp else 0.5.dp,
-                            color = if (isSel) Color.White else Color(0xFF444444),
-                            shape = CircleShape
-                        )
-                        .clickable { onSelectBand(band) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(dotColor)
-                    )
-                }
-            }
-        }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "${selectedBand.label} Color",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 13.sp
-            )
-            Surface(
-                onClick = onResetBand,
-                shape = CircleShape,
-                color = Color(0xFF222222)
-            ) {
-                Text(
-                    text = "Reset Band",
-                    color = Color(0xFFAAAAAA),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                )
-            }
-        }
 
-        Spacer(Modifier.height(4.dp))
 
-        val hueStr = if (hslAdjustment.hueShift > 0) "+${hslAdjustment.hueShift.toInt()}" else "${hslAdjustment.hueShift.toInt()}"
-        LrSliderRow(
-            title = "Hue",
-            value = hslAdjustment.hueShift,
-            displayValue = hueStr,
-            valueRange = -100f..100f,
-            onDragStart = {},
-            onValueChange = onHueChange,
-            onValueChangeFinished = {}
-        )
-
-        val satStr = if (hslAdjustment.satShift > 0) "+${hslAdjustment.satShift.toInt()}" else "${hslAdjustment.satShift.toInt()}"
-        LrSliderRow(
-            title = "Saturation",
-            value = hslAdjustment.satShift,
-            displayValue = satStr,
-            valueRange = -100f..100f,
-            onDragStart = {},
-            onValueChange = onSatChange,
-            onValueChangeFinished = {}
-        )
-
-        val lumStr = if (hslAdjustment.lumShift > 0) "+${hslAdjustment.lumShift.toInt()}" else "${hslAdjustment.lumShift.toInt()}"
-        LrSliderRow(
-            title = "Luminance",
-            value = hslAdjustment.lumShift,
-            displayValue = lumStr,
-            valueRange = -100f..100f,
-            onDragStart = {},
-            onValueChange = onLumChange,
-            onValueChangeFinished = {}
-        )
-    }
-}
-
-/**
- * In-panel Color Grading (Split Toning for Shadows & Highlights).
- */
-@Composable
-fun ColorGradingPanel(
-    splitToning: SplitToningParams,
-    onShadowHueChange: (Float) -> Unit,
-    onShadowSatChange: (Float) -> Unit,
-    onHighlightHueChange: (Float) -> Unit,
-    onHighlightSatChange: (Float) -> Unit,
-    onBalanceChange: (Float) -> Unit,
-    onReset: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(LocalEmreEditorColors.current.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Shadows Tone", color = Color(0xFFDDDDDD), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Surface(
-                onClick = onReset,
-                shape = CircleShape,
-                color = Color(0xFF222222)
-            ) {
-                Text(
-                    text = "Reset",
-                    color = Color(0xFFAAAAAA),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                )
-            }
-        }
-
-        LrSliderRow(
-            title = "Hue",
-            value = splitToning.shadowHue,
-            displayValue = "${splitToning.shadowHue.toInt()}°",
-            valueRange = 0f..360f,
-            onDragStart = {},
-            onValueChange = onShadowHueChange,
-            onValueChangeFinished = {}
-        )
-        LrSliderRow(
-            title = "Saturation",
-            value = splitToning.shadowSat,
-            displayValue = "${splitToning.shadowSat.toInt()}",
-            valueRange = 0f..100f,
-            onDragStart = {},
-            onValueChange = onShadowSatChange,
-            onValueChangeFinished = {}
-        )
-
-        Spacer(Modifier.height(6.dp))
-        Text("Highlights Tone", color = Color(0xFFDDDDDD), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        LrSliderRow(
-            title = "Hue",
-            value = splitToning.highlightHue,
-            displayValue = "${splitToning.highlightHue.toInt()}°",
-            valueRange = 0f..360f,
-            onDragStart = {},
-            onValueChange = onHighlightHueChange,
-            onValueChangeFinished = {}
-        )
-        LrSliderRow(
-            title = "Saturation",
-            value = splitToning.highlightSat,
-            displayValue = "${splitToning.highlightSat.toInt()}",
-            valueRange = 0f..100f,
-            onDragStart = {},
-            onValueChange = onHighlightSatChange,
-            onValueChangeFinished = {}
-        )
-
-        Spacer(Modifier.height(6.dp))
-        val balStr = if (splitToning.balance > 0) "+${splitToning.balance.toInt()}" else "${splitToning.balance.toInt()}"
-        LrSliderRow(
-            title = "Balance",
-            value = splitToning.balance,
-            displayValue = balStr,
-            valueRange = -100f..100f,
-            onDragStart = {},
-            onValueChange = onBalanceChange,
-            onValueChangeFinished = {}
-        )
-    }
-}
-
-/**
- * 4. EFFECTS PANEL
- * Minimal tabs: Effects, Vignette, Grain
- */
-enum class EffectsTab { EFFECTS, VIGNETTE, GRAIN }
 
 @Composable
 fun EffectsPanel(
@@ -1883,221 +772,127 @@ fun EffectsPanel(
     onSliderChangeFinished: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var activeTab by remember { mutableStateOf(EffectsTab.EFFECTS) }
-
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // Sub-tabs row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf(
-                EffectsTab.EFFECTS to "Effects",
-                EffectsTab.VIGNETTE to "Vignette",
-                EffectsTab.GRAIN to "Grain"
-            ).forEach { (tab, label) ->
-                val isSel = activeTab == tab
-                Surface(
-                    onClick = { activeTab = tab },
-                    shape = CircleShape,
-                    color = if (isSel) Color.White else Color(0xFF1E1E1E),
-                    border = BorderStroke(1.dp, if (isSel) Color.White else Color.White.copy(alpha = 0.08f))
-                ) {
-                    Text(
-                        text = label,
-                        color = if (isSel) Color.Black else Color(0xFFCCCCCC),
-                        fontSize = 12.sp,
-                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                    )
-                }
-            }
+        val texStr = when {
+            texture > 0f -> "+${texture.toInt()}"
+            texture < 0f -> "−${(-texture).toInt()}"
+            else -> "0"
         }
+        LrSliderRow(
+            title = "Texture",
+            value = texture,
+            displayValue = texStr,
+            valueRange = -100f..100f,
+            minLabel = "−100",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Texture", texStr) },
+            onValueChange = { onSliderChange("Texture", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
 
-        Spacer(Modifier.height(8.dp))
-
-        when (activeTab) {
-            EffectsTab.EFFECTS -> {
-                val texStr = when {
-                    texture > 0f -> "+${texture.toInt()}"
-                    texture < 0f -> "−${(-texture).toInt()}"
-                    else -> "0"
-                }
-                LrSliderRow(
-                    title = "Texture",
-                    value = texture,
-                    displayValue = texStr,
-                    valueRange = -100f..100f,
-                    minLabel = "−100",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Texture", texStr) },
-                    onValueChange = { onSliderChange("Texture", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val clarStr = when {
-                    clarity > 0f -> "+${clarity.toInt()}"
-                    clarity < 0f -> "−${(-clarity).toInt()}"
-                    else -> "0"
-                }
-                LrSliderRow(
-                    title = "Clarity",
-                    value = clarity,
-                    displayValue = clarStr,
-                    valueRange = -100f..100f,
-                    minLabel = "−100",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Clarity", clarStr) },
-                    onValueChange = { onSliderChange("Clarity", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val dehazeStr = when {
-                    dehaze > 0f -> "+${dehaze.toInt()}"
-                    dehaze < 0f -> "−${(-dehaze).toInt()}"
-                    else -> "0"
-                }
-                LrSliderRow(
-                    title = "Dehaze",
-                    value = dehaze,
-                    displayValue = dehazeStr,
-                    valueRange = -100f..100f,
-                    minLabel = "−100",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Dehaze", dehazeStr) },
-                    onValueChange = { onSliderChange("Dehaze", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val dodgeStr = "${dodge.toInt()}"
-                LrSliderRow(
-                    title = "Global Dodge",
-                    value = dodge,
-                    displayValue = dodgeStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Dodge", dodgeStr) },
-                    onValueChange = { onSliderChange("Dodge", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val burnStr = "${burn.toInt()}"
-                LrSliderRow(
-                    title = "Global Burn",
-                    value = burn,
-                    displayValue = burnStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Burn", burnStr) },
-                    onValueChange = { onSliderChange("Burn", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-            }
-            EffectsTab.VIGNETTE -> {
-                val vigStr = when {
-                    vignette > 0f -> "+${vignette.toInt()}"
-                    vignette < 0f -> "−${(-vignette).toInt()}"
-                    else -> "0"
-                }
-                LrSliderRow(
-                    title = "Amount",
-                    value = vignette,
-                    displayValue = vigStr,
-                    valueRange = -100f..100f,
-                    minLabel = "−100",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Amount", vigStr) },
-                    onValueChange = { onSliderChange("Vignette", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val midStr = "${vignetteMidpoint.toInt()}"
-                LrSliderRow(
-                    title = "Midpoint",
-                    value = vignetteMidpoint,
-                    displayValue = midStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "100",
-                    onDragStart = { onSliderDragStart("Midpoint", midStr) },
-                    onValueChange = { onSliderChange("vignetteMidpoint", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val featherStr = "${vignetteFeather.toInt()}"
-                LrSliderRow(
-                    title = "Feather",
-                    value = vignetteFeather,
-                    displayValue = featherStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "100",
-                    onDragStart = { onSliderDragStart("Feather", featherStr) },
-                    onValueChange = { onSliderChange("vignetteFeather", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val roundStr = "${vignetteRoundness.toInt()}"
-                LrSliderRow(
-                    title = "Roundness",
-                    value = vignetteRoundness,
-                    displayValue = roundStr,
-                    valueRange = -100f..100f,
-                    minLabel = "−100",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Roundness", roundStr) },
-                    onValueChange = { onSliderChange("vignetteRoundness", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-            }
-            EffectsTab.GRAIN -> {
-                val grainStr = "${grain.toInt()}"
-                LrSliderRow(
-                    title = "Amount",
-                    value = grain,
-                    displayValue = grainStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Amount", grainStr) },
-                    onValueChange = { onSliderChange("Grain", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val sizeStr = "${grainSize.toInt()}"
-                LrSliderRow(
-                    title = "Size",
-                    value = grainSize,
-                    displayValue = sizeStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Size", sizeStr) },
-                    onValueChange = { onSliderChange("grainSize", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-
-                val roughStr = "${grainRoughness.toInt()}"
-                LrSliderRow(
-                    title = "Roughness",
-                    value = grainRoughness,
-                    displayValue = roughStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Roughness", roughStr) },
-                    onValueChange = { onSliderChange("grainRoughness", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-            }
+        val clarStr = when {
+            clarity > 0f -> "+${clarity.toInt()}"
+            clarity < 0f -> "−${(-clarity).toInt()}"
+            else -> "0"
         }
+        LrSliderRow(
+            title = "Clarity",
+            value = clarity,
+            displayValue = clarStr,
+            valueRange = -100f..100f,
+            minLabel = "−100",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Clarity", clarStr) },
+            onValueChange = { onSliderChange("Clarity", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
+
+        val dehazeStr = when {
+            dehaze > 0f -> "+${dehaze.toInt()}"
+            dehaze < 0f -> "−${(-dehaze).toInt()}"
+            else -> "0"
+        }
+        LrSliderRow(
+            title = "Dehaze",
+            value = dehaze,
+            displayValue = dehazeStr,
+            valueRange = -100f..100f,
+            minLabel = "−100",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Dehaze", dehazeStr) },
+            onValueChange = { onSliderChange("Dehaze", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
+
+        val grainStr = "${grain.toInt()}"
+        LrSliderRow(
+            title = "Grain",
+            value = grain,
+            displayValue = grainStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Grain", grainStr) },
+            onValueChange = { onSliderChange("Grain", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
+
+        val sizeStr = "${grainSize.toInt()}"
+        LrSliderRow(
+            title = "Grain Size",
+            value = grainSize,
+            displayValue = sizeStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Grain Size", sizeStr) },
+            onValueChange = { onSliderChange("grainSize", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
+
+        val roughStr = "${grainRoughness.toInt()}"
+        LrSliderRow(
+            title = "Grain Roughness",
+            value = grainRoughness,
+            displayValue = roughStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Grain Roughness", roughStr) },
+            onValueChange = { onSliderChange("grainRoughness", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
+
+        val dodgeStr = "${dodge.toInt()}"
+        LrSliderRow(
+            title = "Global Dodge",
+            value = dodge,
+            displayValue = dodgeStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Dodge", dodgeStr) },
+            onValueChange = { onSliderChange("Dodge", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
+
+        val burnStr = "${burn.toInt()}"
+        LrSliderRow(
+            title = "Global Burn",
+            value = burn,
+            displayValue = burnStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Burn", burnStr) },
+            onValueChange = { onSliderChange("Burn", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
     }
 }
 
@@ -2105,8 +900,6 @@ fun EffectsPanel(
  * 5. DETAIL PANEL
  * Clean monochrome sharpening, noise and color noise controls.
  */
-enum class DetailTab { SHARPENING, NOISE, COLOR_NOISE }
-
 @Composable
 fun DetailPanel(
     sharpness: Float,
@@ -2119,222 +912,84 @@ fun DetailPanel(
     onSliderChangeFinished: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var activeTab by remember { mutableStateOf(DetailTab.SHARPENING) }
-
     Column(
         modifier = modifier
             .fillMaxWidth()
             .background(LocalEmreEditorColors.current.panelSurface)
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        // Sub-tabs row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf(
-                DetailTab.SHARPENING to "Sharpening",
-                DetailTab.NOISE to "Noise",
-                DetailTab.COLOR_NOISE to "Color noise"
-            ).forEach { (tab, label) ->
-                val isSel = activeTab == tab
-                Surface(
-                    onClick = { activeTab = tab },
-                    shape = CircleShape,
-                    color = if (isSel) Color.White else Color(0xFF1E1E1E),
-                    border = BorderStroke(1.dp, if (isSel) Color.White else Color.White.copy(alpha = 0.08f))
-                ) {
-                    Text(
-                        text = label,
-                        color = if (isSel) Color.Black else Color(0xFFCCCCCC),
-                        fontSize = 12.sp,
-                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                    )
-                }
-            }
-        }
+        val amountStr = if (sharpness > 0) "+${sharpness.toInt()}" else "${sharpness.toInt()}"
+        LrSliderRow(
+            title = "Sharpening",
+            value = sharpness,
+            displayValue = amountStr,
+            valueRange = 0f..150f,
+            minLabel = "0",
+            maxLabel = "+150",
+            activeTrackColor = Color.White,
+            onDragStart = { onSliderDragStart("Sharpening", amountStr) },
+            onValueChange = { onSliderChange("Sharpening", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
 
-        Spacer(Modifier.height(8.dp))
+        val radStr = "%.2f px".format(radius)
+        LrSliderRow(
+            title = "Radius",
+            value = radius,
+            displayValue = radStr,
+            valueRange = 0.5f..3.0f,
+            unit = "px",
+            minLabel = "0.50",
+            maxLabel = "3.00",
+            onDragStart = { onSliderDragStart("Radius", radStr) },
+            onValueChange = { onSliderChange("Radius", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
 
-        when (activeTab) {
-            DetailTab.SHARPENING -> {
-                val amountStr = if (sharpness > 0) "+${sharpness.toInt()}" else "${sharpness.toInt()}"
-                LrSliderRow(
-                    title = "Amount",
-                    value = sharpness,
-                    displayValue = amountStr,
-                    valueRange = 0f..150f,
-                    minLabel = "0",
-                    maxLabel = "+150",
-                    activeTrackColor = Color.White,
-                    onDragStart = { onSliderDragStart("Sharpening", amountStr) },
-                    onValueChange = { onSliderChange("Sharpening", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
+        val detStr = "+${detail.toInt()}"
+        LrSliderRow(
+            title = "Detail",
+            value = detail,
+            displayValue = detStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Detail", detStr) },
+            onValueChange = { onSliderChange("Detail", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
 
-                val radStr = "%.2f px".format(radius)
-                LrSliderRow(
-                    title = "Radius",
-                    value = radius,
-                    displayValue = radStr,
-                    valueRange = 0.5f..3.0f,
-                    unit = "px",
-                    minLabel = "0.50",
-                    maxLabel = "3.00",
-                    onDragStart = { onSliderDragStart("Radius", radStr) },
-                    onValueChange = { onSliderChange("Radius", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
+        val noiseStr = "${noiseReduction.toInt()}"
+        LrSliderRow(
+            title = "Noise Reduction",
+            value = noiseReduction,
+            displayValue = noiseStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Noise Reduction", noiseStr) },
+            onValueChange = { onSliderChange("Noise Reduction", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
 
-                val detStr = "+${detail.toInt()}"
-                LrSliderRow(
-                    title = "Detail",
-                    value = detail,
-                    displayValue = detStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Detail", detStr) },
-                    onValueChange = { onSliderChange("Detail", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-            }
-            DetailTab.NOISE -> {
-                val noiseStr = "${noiseReduction.toInt()}"
-                LrSliderRow(
-                    title = "Noise Reduction",
-                    value = noiseReduction,
-                    displayValue = noiseStr,
-                    valueRange = 0f..100f,
-                    minLabel = "0",
-                    maxLabel = "+100",
-                    onDragStart = { onSliderDragStart("Noise Reduction", noiseStr) },
-                    onValueChange = { onSliderChange("Noise Reduction", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-            }
-            DetailTab.COLOR_NOISE -> {
-                val colorNoiseStr = "${colorNoiseReduction.toInt()}"
-                LrSliderRow(
-                    title = "Color Noise",
-                    value = colorNoiseReduction,
-                    displayValue = colorNoiseStr,
-                    valueRange = 0f..100f,
-                    onDragStart = { onSliderDragStart("Color Noise", colorNoiseStr) },
-                    onValueChange = { onSliderChange("Color noise", it) },
-                    onValueChangeFinished = onSliderChangeFinished
-                )
-            }
-        }
+        val colorNoiseStr = "${colorNoiseReduction.toInt()}"
+        LrSliderRow(
+            title = "Color Noise",
+            value = colorNoiseReduction,
+            displayValue = colorNoiseStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "+100",
+            onDragStart = { onSliderDragStart("Color Noise", colorNoiseStr) },
+            onValueChange = { onSliderChange("Color noise", it) },
+            onValueChangeFinished = onSliderChangeFinished
+        )
     }
 }
 
-/**
- * 6. OPTICS PANEL
- * Monochrome switches and distortion slider.
- */
-@Composable
-fun OpticsPanel(
-    removeChromaticAberration: Boolean,
-    enableLensCorrections: Boolean,
-    distortionCorrection: Float,
-    vignettingCorrection: Float = 100f,
-    onToggleChromaticAberration: (Boolean) -> Unit,
-    onToggleLensCorrections: (Boolean) -> Unit,
-    onSliderDragStart: (name: String, formattedVal: String) -> Unit,
-    onSliderChange: (prop: String, value: Float) -> Unit,
-    onSliderChangeFinished: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(LocalEmreEditorColors.current.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-    ) {
-        // Toggle 1: Remove Chromatic Aberration
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Remove Chromatic Aberration",
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Switch(
-                checked = removeChromaticAberration,
-                onCheckedChange = onToggleChromaticAberration,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.Black,
-                    checkedTrackColor = Color.White,
-                    uncheckedThumbColor = Color(0xFFAAAAAA),
-                    uncheckedTrackColor = Color(0xFF2C2C2E)
-                )
-            )
-        }
 
-        // Toggle 2: Enable Lens Corrections
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Enable Lens Corrections",
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Switch(
-                checked = enableLensCorrections,
-                onCheckedChange = onToggleLensCorrections,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.Black,
-                    checkedTrackColor = Color.White,
-                    uncheckedThumbColor = Color(0xFFAAAAAA),
-                    uncheckedTrackColor = Color(0xFF2C2C2E)
-                )
-            )
-        }
 
-        if (enableLensCorrections) {
-            Spacer(Modifier.height(6.dp))
-            val distStr = "+${distortionCorrection.toInt()}"
-            LrSliderRow(
-                title = "Distortion",
-                value = distortionCorrection,
-                displayValue = distStr,
-                valueRange = 0f..200f,
-                minLabel = "0",
-                maxLabel = "+200",
-                onDragStart = { onSliderDragStart("Distortion", distStr) },
-                onValueChange = { onSliderChange("Distortion Correction", it) },
-                onValueChangeFinished = onSliderChangeFinished
-            )
 
-            val vigCorrStr = "+${vignettingCorrection.toInt()}"
-            LrSliderRow(
-                title = "Vignetting Correction",
-                value = vignettingCorrection,
-                displayValue = vigCorrStr,
-                valueRange = 0f..200f,
-                minLabel = "0",
-                maxLabel = "+200",
-                onDragStart = { onSliderDragStart("Vignetting Correction", vigCorrStr) },
-                onValueChange = { onSliderChange("Vignetting Correction", it) },
-                onValueChangeFinished = onSliderChangeFinished
-            )
-        }
-    }
-}
 
 /**
  * 7. PROFILES & PRESETS
