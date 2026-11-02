@@ -192,8 +192,14 @@ object PhotoProcessor {
         }
 
         // Vignette
-        if (adj.vignette > 2f) {
-            ImageSpatialFilters.applyVignette(result, adj.vignette / 100f)
+        if (kotlin.math.abs(adj.vignette) > 2f) {
+            ImageSpatialFilters.applyVignette(
+                result,
+                adj.vignette / 100f,
+                adj.vignetteMidpoint / 100f,
+                adj.vignetteFeather / 100f,
+                adj.vignetteRoundness / 100f
+            )
         }
 
         // Grain

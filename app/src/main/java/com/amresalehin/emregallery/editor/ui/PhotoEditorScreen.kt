@@ -74,14 +74,24 @@ fun PhotoEditorScreen(
     val thumbnailBitmap by viewModel.thumbnailBitmap.collectAsStateWithLifecycle()
 
     // 05. Bottom Navigation Domain State
-    var selectedDomain by remember { mutableStateOf(EditorDomain.ADJUST) }
+    var selectedDomain by remember { mutableStateOf(EditorDomain.LIGHT) }
 
     // 04. Contextual Subtool States
-    var activeAdjustSubtool by remember { mutableStateOf(AdjustSubtool.LIGHT) }
+    var activeLightSubtool by remember { mutableStateOf(LightSubtool.ALL) }
+    var activeColorSubtool by remember { mutableStateOf(ColorSubtool.BASIC) }
+    var activeCurvesSubtool by remember { mutableStateOf(CurvesSubtool.RGB) }
+    var activeEffectsSubtool by remember { mutableStateOf(EffectsSubtool.ALL) }
+    var activeDetailSubtool by remember { mutableStateOf(DetailSubtool.ALL) }
+    var activeBlurSubtool by remember { mutableStateOf(BlurSubtool.CUSTOM) }
+    var activeVignetteSubtool by remember { mutableStateOf(VignetteSubtool.CUSTOM) }
     var activeCropSubtool by remember { mutableStateOf(CropSubtool.ASPECT) }
     var activeRetouchSubtool by remember { mutableStateOf(RetouchSubtool.BLEMISH) }
     var activeMaskSubtool by remember { mutableStateOf(MaskSubtool.BRUSH) }
-    var activeOverlaysSubtool by remember { mutableStateOf(OverlaysSubtool.TEXT) }
+    var activeTextSubtool by remember { mutableStateOf(TextSubtool.ALL) }
+    var activeShapeSubtool by remember { mutableStateOf(ShapeSubtool.SHAPES) }
+    var activeCalloutSubtool by remember { mutableStateOf(CalloutSubtool.STYLES) }
+    var activeFrameSubtool by remember { mutableStateOf(FrameSubtool.FRAMES) }
+    var activeOverlaysSubtool by remember { mutableStateOf(OverlaysSubtool.STICKERS) }
     var activeAiSubtool by remember { mutableStateOf(AiSubtool.EXPAND) }
 
     // Precision sub-mode channel & band states
@@ -127,8 +137,8 @@ fun PhotoEditorScreen(
             currentMode != EditorMode.NONE -> viewModel.cancelModeChanges()
             showAiSheet -> showAiSheet = false
             showExportSheet -> showExportSheet = false
-            selectedDomain != EditorDomain.ADJUST -> {
-                selectedDomain = EditorDomain.ADJUST
+            selectedDomain != EditorDomain.LIGHT -> {
+                selectedDomain = EditorDomain.LIGHT
                 viewModel.setActiveTool(EditorTool.ADJUST)
             }
             canUndo -> showDiscardDialog = true
@@ -189,52 +199,64 @@ fun PhotoEditorScreen(
             currentMode == EditorMode.CURVES -> viewModel.resetCurves()
             currentMode == EditorMode.COLOR_MIX -> viewModel.resetColorMix()
             currentMode == EditorMode.COLOR_GRADING -> viewModel.setSplitToning(SplitToningParams())
-            selectedDomain == EditorDomain.ADJUST -> {
-                when (activeAdjustSubtool) {
-                    AdjustSubtool.LIGHT -> {
-                        viewModel.updateAdjustmentValue("Exposure", 0f)
-                        viewModel.updateAdjustmentValue("Contrast", 0f)
-                        viewModel.updateAdjustmentValue("Highlights", 0f)
-                        viewModel.updateAdjustmentValue("Shadows", 0f)
-                        viewModel.updateAdjustmentValue("Whites", 0f)
-                        viewModel.updateAdjustmentValue("Blacks", 0f)
-                    }
-                    AdjustSubtool.COLOR -> {
-                        viewModel.updateAdjustmentValue("Temp", 0f)
-                        viewModel.updateAdjustmentValue("Tint", 0f)
-                        viewModel.updateAdjustmentValue("Vibrance", 0f)
-                        viewModel.updateAdjustmentValue("Saturation", 0f)
-                    }
-                    AdjustSubtool.DETAIL -> {
-                        viewModel.updateAdjustmentValue("Sharpening", 0f)
-                        viewModel.updateAdjustmentValue("Noise Reduction", 0f)
-                    }
-                    AdjustSubtool.EFFECTS -> {
-                        viewModel.updateAdjustmentValue("Texture", 0f)
-                        viewModel.updateAdjustmentValue("Clarity", 0f)
-                        viewModel.updateAdjustmentValue("Dehaze", 0f)
-                        viewModel.updateAdjustmentValue("Vignette", 0f)
-                        viewModel.updateAdjustmentValue("Grain", 0f)
-                    }
-                    AdjustSubtool.BLUR -> viewModel.updateAdjustmentValue("Blur", 0f)
-                    AdjustSubtool.LEVELS -> viewModel.setLevels(LevelsParams())
-                    AdjustSubtool.BALANCE -> viewModel.setColorBalance(ColorBalanceParams())
-                    AdjustSubtool.CURVES -> viewModel.resetCurves()
-                    AdjustSubtool.OPTICS -> {
-                        viewModel.setRemoveChromaticAberration(false)
-                        viewModel.setEnableLensCorrections(false)
-                        viewModel.updateAdjustmentValue("Distortion", 0f)
-                        viewModel.updateAdjustmentValue("Vignetting", 0f)
-                    }
-                    AdjustSubtool.PROFILES -> viewModel.setFilter(FilterType.NONE)
-                }
+            selectedDomain == EditorDomain.LIGHT -> {
+                viewModel.updateAdjustmentValue("Exposure", 0f)
+                viewModel.updateAdjustmentValue("Contrast", 0f)
+                viewModel.updateAdjustmentValue("Highlights", 0f)
+                viewModel.updateAdjustmentValue("Shadows", 0f)
+                viewModel.updateAdjustmentValue("Whites", 0f)
+                viewModel.updateAdjustmentValue("Blacks", 0f)
                 viewModel.commitSliderChange()
+            }
+            selectedDomain == EditorDomain.COLOR -> {
+                viewModel.updateAdjustmentValue("Temp", 0f)
+                viewModel.updateAdjustmentValue("Tint", 0f)
+                viewModel.updateAdjustmentValue("Vibrance", 0f)
+                viewModel.updateAdjustmentValue("Saturation", 0f)
+                viewModel.setColorBalance(ColorBalanceParams())
+                viewModel.setSplitToning(SplitToningParams())
+                viewModel.setGradientMap(GradientMapType.NONE)
+                viewModel.setDuotone(DuotoneParams())
+                viewModel.setColorReplace(ColorReplaceParams())
+                viewModel.setColorSplash(ColorSplashParams())
+                viewModel.commitSliderChange()
+            }
+            selectedDomain == EditorDomain.CURVES -> {
+                viewModel.resetCurves()
+            }
+            selectedDomain == EditorDomain.EFFECTS -> {
+                viewModel.updateAdjustmentValue("Texture", 0f)
+                viewModel.updateAdjustmentValue("Clarity", 0f)
+                viewModel.updateAdjustmentValue("Dehaze", 0f)
+                viewModel.updateAdjustmentValue("Grain", 0f)
+                viewModel.updateAdjustmentValue("Dodge", 0f)
+                viewModel.updateAdjustmentValue("Burn", 0f)
+                viewModel.commitSliderChange()
+            }
+            selectedDomain == EditorDomain.DETAIL -> {
+                viewModel.updateAdjustmentValue("Sharpening", 0f)
+                viewModel.updateAdjustmentValue("Noise Reduction", 0f)
+                viewModel.updateAdjustmentValue("Radius", 1.0f)
+                viewModel.updateAdjustmentValue("Detail", 25f)
+                viewModel.updateAdjustmentValue("Color Noise Reduction", 0f)
+                viewModel.commitSliderChange()
+            }
+            selectedDomain == EditorDomain.BLUR -> {
+                viewModel.updateAdjustmentValue("Blur", 0f)
+                viewModel.commitSliderChange()
+            }
+            selectedDomain == EditorDomain.VIGNETTE -> {
+                viewModel.setVignettePreset(0f, 50f, 50f, 0f)
             }
             selectedDomain == EditorDomain.CROP -> viewModel.resetCrop()
             selectedDomain == EditorDomain.PRESETS -> viewModel.setFilter(FilterType.NONE)
             selectedDomain == EditorDomain.RETOUCH -> viewModel.clearRetouchStrokes()
             selectedDomain == EditorDomain.MASK -> viewModel.clearMask()
-            selectedDomain == EditorDomain.OVERLAYS -> viewModel.clearDrawingStrokes(sessionState.activeDrawLayerId)
+            selectedDomain == EditorDomain.TEXT -> viewModel.clearTextOverlays()
+            selectedDomain == EditorDomain.SHAPE -> viewModel.clearShapes()
+            selectedDomain == EditorDomain.CALLOUT -> viewModel.clearCallouts()
+            selectedDomain == EditorDomain.FRAME -> viewModel.clearFrame()
+            selectedDomain == EditorDomain.OVERLAYS -> viewModel.clearStickers()
             selectedDomain == EditorDomain.AI_TOOLS -> viewModel.setAiExpand(0f)
         }
         Toast.makeText(context, "Reset ${selectedDomain.label}", Toast.LENGTH_SHORT).show()
@@ -352,14 +374,34 @@ fun PhotoEditorScreen(
                                     selectedDomain = selectedDomain,
                                     sessionState = sessionState,
                                     viewModel = viewModel,
-                                    activeAdjustSubtool = activeAdjustSubtool,
-                                    onSelectAdjustSubtool = { activeAdjustSubtool = it },
+                                    activeLightSubtool = activeLightSubtool,
+                                    onSelectLightSubtool = { activeLightSubtool = it },
+                                    activeColorSubtool = activeColorSubtool,
+                                    onSelectColorSubtool = { activeColorSubtool = it },
+                                    activeCurvesSubtool = activeCurvesSubtool,
+                                    onSelectCurvesSubtool = { activeCurvesSubtool = it },
+                                    activeEffectsSubtool = activeEffectsSubtool,
+                                    onSelectEffectsSubtool = { activeEffectsSubtool = it },
+                                    activeDetailSubtool = activeDetailSubtool,
+                                    onSelectDetailSubtool = { activeDetailSubtool = it },
+                                    activeBlurSubtool = activeBlurSubtool,
+                                    onSelectBlurSubtool = { activeBlurSubtool = it },
+                                    activeVignetteSubtool = activeVignetteSubtool,
+                                    onSelectVignetteSubtool = { activeVignetteSubtool = it },
                                     activeCropSubtool = activeCropSubtool,
                                     onSelectCropSubtool = { activeCropSubtool = it },
                                     activeRetouchSubtool = activeRetouchSubtool,
                                     onSelectRetouchSubtool = { activeRetouchSubtool = it },
                                     activeMaskSubtool = activeMaskSubtool,
                                     onSelectMaskSubtool = { activeMaskSubtool = it },
+                                    activeTextSubtool = activeTextSubtool,
+                                    onSelectTextSubtool = { activeTextSubtool = it },
+                                    activeShapeSubtool = activeShapeSubtool,
+                                    onSelectShapeSubtool = { activeShapeSubtool = it },
+                                    activeCalloutSubtool = activeCalloutSubtool,
+                                    onSelectCalloutSubtool = { activeCalloutSubtool = it },
+                                    activeFrameSubtool = activeFrameSubtool,
+                                    onSelectFrameSubtool = { activeFrameSubtool = it },
                                     activeOverlaysSubtool = activeOverlaysSubtool,
                                     onSelectOverlaysSubtool = { activeOverlaysSubtool = it },
                                     activeAiSubtool = activeAiSubtool,
@@ -404,24 +446,34 @@ fun PhotoEditorScreen(
                                         .fillMaxWidth()
                                         .weight(1f),
                                     colors = colors
-                                )
+                                 )
 
-                                EditorBottomNavigation(
-                                    selectedDomain = selectedDomain,
-                                    onSelectDomain = { domain ->
-                                        selectedDomain = domain
-                                        when (domain) {
-                                            EditorDomain.ADJUST -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                            EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
-                                            EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
-                                            EditorDomain.RETOUCH -> viewModel.setActiveTool(EditorTool.RETOUCH)
-                                            EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
-                                            EditorDomain.OVERLAYS -> viewModel.setActiveTool(EditorTool.TEXT)
-                                            EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
-                                        }
-                                    },
-                                    colors = colors
-                                )
+                                 EditorBottomNavigation(
+                                     selectedDomain = selectedDomain,
+                                     onSelectDomain = { domain ->
+                                         selectedDomain = domain
+                                         when (domain) {
+                                             EditorDomain.LIGHT -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                             EditorDomain.COLOR -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                             EditorDomain.CURVES -> viewModel.setActiveTool(EditorTool.CURVES)
+                                             EditorDomain.EFFECTS -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                             EditorDomain.DETAIL -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                             EditorDomain.BLUR -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                             EditorDomain.VIGNETTE -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                             EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
+                                             EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
+                                             EditorDomain.RETOUCH -> viewModel.setActiveTool(EditorTool.RETOUCH)
+                                             EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
+                                             EditorDomain.TEXT -> viewModel.setActiveTool(EditorTool.TEXT)
+                                             EditorDomain.SHAPE -> viewModel.setActiveTool(EditorTool.SHAPE)
+                                             EditorDomain.CALLOUT -> viewModel.setActiveTool(EditorTool.CALLOUT)
+                                             EditorDomain.FRAME -> viewModel.setActiveTool(EditorTool.FRAME)
+                                             EditorDomain.OVERLAYS -> viewModel.setActiveTool(EditorTool.STICKER)
+                                             EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
+                                         }
+                                     },
+                                     colors = colors
+                                 )
                             }
                         }
                     }
@@ -511,14 +563,34 @@ fun PhotoEditorScreen(
                             selectedDomain = selectedDomain,
                             sessionState = sessionState,
                             viewModel = viewModel,
-                            activeAdjustSubtool = activeAdjustSubtool,
-                            onSelectAdjustSubtool = { activeAdjustSubtool = it },
+                            activeLightSubtool = activeLightSubtool,
+                            onSelectLightSubtool = { activeLightSubtool = it },
+                            activeColorSubtool = activeColorSubtool,
+                            onSelectColorSubtool = { activeColorSubtool = it },
+                            activeCurvesSubtool = activeCurvesSubtool,
+                            onSelectCurvesSubtool = { activeCurvesSubtool = it },
+                            activeEffectsSubtool = activeEffectsSubtool,
+                            onSelectEffectsSubtool = { activeEffectsSubtool = it },
+                            activeDetailSubtool = activeDetailSubtool,
+                            onSelectDetailSubtool = { activeDetailSubtool = it },
+                            activeBlurSubtool = activeBlurSubtool,
+                            onSelectBlurSubtool = { activeBlurSubtool = it },
+                            activeVignetteSubtool = activeVignetteSubtool,
+                            onSelectVignetteSubtool = { activeVignetteSubtool = it },
                             activeCropSubtool = activeCropSubtool,
                             onSelectCropSubtool = { activeCropSubtool = it },
                             activeRetouchSubtool = activeRetouchSubtool,
                             onSelectRetouchSubtool = { activeRetouchSubtool = it },
                             activeMaskSubtool = activeMaskSubtool,
                             onSelectMaskSubtool = { activeMaskSubtool = it },
+                            activeTextSubtool = activeTextSubtool,
+                            onSelectTextSubtool = { activeTextSubtool = it },
+                            activeShapeSubtool = activeShapeSubtool,
+                            onSelectShapeSubtool = { activeShapeSubtool = it },
+                            activeCalloutSubtool = activeCalloutSubtool,
+                            onSelectCalloutSubtool = { activeCalloutSubtool = it },
+                            activeFrameSubtool = activeFrameSubtool,
+                            onSelectFrameSubtool = { activeFrameSubtool = it },
                             activeOverlaysSubtool = activeOverlaysSubtool,
                             onSelectOverlaysSubtool = { activeOverlaysSubtool = it },
                             activeAiSubtool = activeAiSubtool,
@@ -571,12 +643,22 @@ fun PhotoEditorScreen(
                             onSelectDomain = { domain ->
                                 selectedDomain = domain
                                 when (domain) {
-                                    EditorDomain.ADJUST -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                    EditorDomain.LIGHT -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                    EditorDomain.COLOR -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                    EditorDomain.CURVES -> viewModel.setActiveTool(EditorTool.CURVES)
+                                    EditorDomain.EFFECTS -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                    EditorDomain.DETAIL -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                    EditorDomain.BLUR -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                    EditorDomain.VIGNETTE -> viewModel.setActiveTool(EditorTool.ADJUST)
                                     EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
                                     EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
                                     EditorDomain.RETOUCH -> viewModel.setActiveTool(EditorTool.RETOUCH)
                                     EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
-                                    EditorDomain.OVERLAYS -> viewModel.setActiveTool(EditorTool.TEXT)
+                                    EditorDomain.TEXT -> viewModel.setActiveTool(EditorTool.TEXT)
+                                    EditorDomain.SHAPE -> viewModel.setActiveTool(EditorTool.SHAPE)
+                                    EditorDomain.CALLOUT -> viewModel.setActiveTool(EditorTool.CALLOUT)
+                                    EditorDomain.FRAME -> viewModel.setActiveTool(EditorTool.FRAME)
+                                    EditorDomain.OVERLAYS -> viewModel.setActiveTool(EditorTool.STICKER)
                                     EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
                                 }
                             },

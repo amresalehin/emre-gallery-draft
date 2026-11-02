@@ -95,16 +95,36 @@ object ImageSpatialFilters {
         return out
     }
 
-    fun applyVignette(bitmap: Bitmap, intensity: Float) {
+    fun applyVignette(
+        bitmap: Bitmap,
+        intensity: Float,
+        midpoint: Float = 0.5f,
+        feather: Float = 0.5f,
+        roundness: Float = 0f
+    ) {
         val canvas = Canvas(bitmap)
         val w = bitmap.width.toFloat()
         val h = bitmap.height.toFloat()
-        val radius = max(w, h) * 0.75f
+        val baseRadius = max(w, h) * 0.75f
+
+        val isWhite = intensity > 0f
+        val absInt = kotlin.math.abs(intensity).coerceIn(0f, 1f)
+        if (absInt <= 0.01f) return
+
+        val r = if (isWhite) 255 else 0
+        val g = if (isWhite) 255 else 0
+        val b = if (isWhite) 255 else 0
+        val alphaMax = (absInt * 220).toInt().coerceIn(0, 255)
+
+        val midFrac = midpoint.coerceIn(0.1f, 0.9f)
+        val featherFrac = feather.coerceIn(0.1f, 0.9f)
+        val startStop = (midFrac * (1f - featherFrac * 0.5f)).coerceIn(0f, 0.75f)
+        val endStop = (midFrac + (1f - midFrac) * featherFrac).coerceIn(startStop + 0.05f, 1f)
 
         val shader = RadialGradient(
-            w / 2f, h / 2f, radius,
-            intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, Color.argb((intensity * 210).toInt(), 0, 0, 0)),
-            floatArrayOf(0f, 0.45f, 1f),
+            w / 2f, h / 2f, baseRadius,
+            intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, Color.argb(alphaMax, r, g, b)),
+            floatArrayOf(0f, startStop, endStop),
             Shader.TileMode.CLAMP
         )
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

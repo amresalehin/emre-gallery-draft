@@ -948,6 +948,81 @@ class PhotoEditorTest {
         assertEquals(0, vm.sessionState.value.transform.rotationDegrees)
         assertEquals(0f, vm.sessionState.value.transform.straightenAngle, 0.001f)
     }
+
+    @Test
+    fun testSeparateEditorDomains_definitions() {
+        val domains = com.amresalehin.emregallery.editor.ui.EditorDomain.values().map { it.label }
+        assertTrue(domains.contains("Light"))
+        assertTrue(domains.contains("Color"))
+        assertTrue(domains.contains("Curves"))
+        assertTrue(domains.contains("Effects"))
+        assertTrue(domains.contains("Detail"))
+        assertTrue(domains.contains("Blur"))
+        assertTrue(domains.contains("Vignette"))
+        assertFalse(domains.contains("Adjust"))
+        assertTrue(domains.contains("Text"))
+        assertTrue(domains.contains("Shape"))
+        assertTrue(domains.contains("Callout"))
+        assertTrue(domains.contains("Frame"))
+        assertTrue(domains.contains("Overlays"))
+
+        // Effects subtools
+        val effectsSubtools = com.amresalehin.emregallery.editor.ui.EffectsSubtool.values().map { it.label }
+        assertTrue(effectsSubtools.contains("All Effects"))
+
+        // Blur subtools
+        val blurSubtools = com.amresalehin.emregallery.editor.ui.BlurSubtool.values().map { it.label }
+        assertTrue(blurSubtools.contains("Blur Slider"))
+
+        // Overlay subtools no longer have Text, Shapes, Callout, Frames
+        val overlaySubtools = com.amresalehin.emregallery.editor.ui.OverlaysSubtool.values().map { it.label }
+        assertTrue(overlaySubtools.contains("Stickers"))
+        assertTrue(overlaySubtools.contains("Layers"))
+        assertFalse(overlaySubtools.contains("Text"))
+        assertFalse(overlaySubtools.contains("Shapes"))
+        assertFalse(overlaySubtools.contains("Callout"))
+        assertFalse(overlaySubtools.contains("Frames"))
+
+        // Text subtools
+        val textSubtools = com.amresalehin.emregallery.editor.ui.TextSubtool.values().map { it.label }
+        assertTrue(textSubtools.contains("All Controls"))
+
+        // Shape subtools
+        val shapeSubtools = com.amresalehin.emregallery.editor.ui.ShapeSubtool.values().map { it.label }
+        assertTrue(shapeSubtools.contains("Shapes"))
+
+        // Callout subtools
+        val calloutSubtools = com.amresalehin.emregallery.editor.ui.CalloutSubtool.values().map { it.label }
+        assertTrue(calloutSubtools.contains("Styles"))
+
+        // Frame subtools
+        val frameSubtools = com.amresalehin.emregallery.editor.ui.FrameSubtool.values().map { it.label }
+        assertTrue(frameSubtools.contains("Photo Frames"))
+        assertTrue(frameSubtools.contains("Custom Border"))
+    }
+
+    @Test
+    fun testVignetteAndCurvePresets() {
+        val vm = PhotoEditorViewModel()
+        // Vignette preset
+        vm.setVignettePreset(-40f, 45f, 65f, 10f)
+        assertEquals(-40f, vm.sessionState.value.adjustments.vignette, 0.001f)
+        assertEquals(45f, vm.sessionState.value.adjustments.vignetteMidpoint, 0.001f)
+        assertEquals(65f, vm.sessionState.value.adjustments.vignetteFeather, 0.001f)
+        assertEquals(10f, vm.sessionState.value.adjustments.vignetteRoundness, 0.001f)
+
+        // Curve preset
+        vm.applyCurvePreset("Medium Contrast")
+        assertEquals(4, vm.sessionState.value.adjustments.curves.master.size)
+
+        // Detail preset
+        vm.setDetailPreset(50f, 1.2f, 30f, 20f, 15f)
+        assertEquals(50f, vm.sessionState.value.adjustments.sharpness, 0.001f)
+        assertEquals(1.2f, vm.sessionState.value.adjustments.sharpnessRadius, 0.001f)
+        assertEquals(30f, vm.sessionState.value.adjustments.sharpnessDetail, 0.001f)
+        assertEquals(20f, vm.sessionState.value.adjustments.noiseReduction, 0.001f)
+        assertEquals(15f, vm.sessionState.value.adjustments.colorNoiseReduction, 0.001f)
+    }
 }
 
 

@@ -633,6 +633,9 @@ class PhotoEditorViewModel : ViewModel() {
             "Color Noise Reduction", "Color noise" -> cur.copy(colorNoiseReduction = value)
             "Blur" -> cur.copy(blur = value)
             "Vignette" -> cur.copy(vignette = value)
+            "vignetteMidpoint", "VignetteMidpoint", "Midpoint" -> cur.copy(vignetteMidpoint = value)
+            "vignetteFeather", "VignetteFeather", "Feather" -> cur.copy(vignetteFeather = value)
+            "vignetteRoundness", "VignetteRoundness", "Roundness" -> cur.copy(vignetteRoundness = value)
             "Grain" -> cur.copy(grain = value)
             "Vibrance" -> cur.copy(vibrance = value)
             "Dehaze" -> cur.copy(dehaze = value)
@@ -645,6 +648,70 @@ class PhotoEditorViewModel : ViewModel() {
         }
         _sessionState.value = _sessionState.value.copy(adjustments = updated)
         updateLivePreview()
+    }
+
+    fun setVignettePreset(amount: Float, midpoint: Float = 50f, feather: Float = 50f, roundness: Float = 0f) {
+        commitSliderChange()
+        val cur = _sessionState.value.adjustments
+        _sessionState.value = _sessionState.value.copy(
+            adjustments = cur.copy(
+                vignette = amount,
+                vignetteMidpoint = midpoint,
+                vignetteFeather = feather,
+                vignetteRoundness = roundness
+            )
+        )
+        commitSliderChange()
+        updateLivePreview()
+    }
+
+    fun setDetailPreset(sharpness: Float, radius: Float = 1.0f, detail: Float = 25f, noise: Float = 0f, colorNoise: Float = 0f) {
+        commitSliderChange()
+        val cur = _sessionState.value.adjustments
+        _sessionState.value = _sessionState.value.copy(
+            adjustments = cur.copy(
+                sharpness = sharpness,
+                sharpnessRadius = radius,
+                sharpnessDetail = detail,
+                noiseReduction = noise,
+                colorNoiseReduction = colorNoise
+            )
+        )
+        commitSliderChange()
+        updateLivePreview()
+    }
+
+    fun applyCurvePreset(name: String) {
+        commitSliderChange()
+        val cur = _sessionState.value.adjustments.curves
+        val newMaster = when (name) {
+            "Medium Contrast" -> listOf(
+                CurvePoint(0f, 0f),
+                CurvePoint(0.25f, 0.20f),
+                CurvePoint(0.75f, 0.80f),
+                CurvePoint(1f, 1f)
+            )
+            "High Contrast" -> listOf(
+                CurvePoint(0f, 0f),
+                CurvePoint(0.25f, 0.15f),
+                CurvePoint(0.75f, 0.85f),
+                CurvePoint(1f, 1f)
+            )
+            "Matte Fade" -> listOf(
+                CurvePoint(0f, 0.10f),
+                CurvePoint(0.30f, 0.28f),
+                CurvePoint(0.70f, 0.75f),
+                CurvePoint(1f, 0.95f)
+            )
+            "Cross Process" -> listOf(
+                CurvePoint(0f, 0.05f),
+                CurvePoint(0.35f, 0.30f),
+                CurvePoint(0.65f, 0.72f),
+                CurvePoint(1f, 0.92f)
+            )
+            else -> listOf(CurvePoint(0f, 0f), CurvePoint(1f, 1f))
+        }
+        setCurves(cur.copy(master = newMaster))
     }
 
     fun commitAdjustmentValue(prop: String, value: Float) {
@@ -1153,6 +1220,22 @@ class PhotoEditorViewModel : ViewModel() {
     fun deleteShape(id: String) = removeShape(id)
     fun deleteCallout(id: String) = removeCallout(id)
     fun deleteLensFlare(id: String) = removeLensFlare(id)
+
+    fun clearTextOverlays() {
+        pushState(_sessionState.value.copy(textOverlays = emptyList(), description = "Clear text"))
+    }
+    fun clearShapes() {
+        pushState(_sessionState.value.copy(shapes = emptyList(), description = "Clear shapes"))
+    }
+    fun clearCallouts() {
+        pushState(_sessionState.value.copy(callouts = emptyList(), description = "Clear callouts"))
+    }
+    fun clearStickers() {
+        pushState(_sessionState.value.copy(stickers = emptyList(), description = "Clear stickers"))
+    }
+    fun clearFrame() {
+        pushState(_sessionState.value.copy(frame = FrameStyle.NONE, border = BorderSettings(), description = "Clear frame"))
+    }
 
     // --- Transform & Liquify Helpers ---
     fun clearLiquify() = clearLiquifyPoints()

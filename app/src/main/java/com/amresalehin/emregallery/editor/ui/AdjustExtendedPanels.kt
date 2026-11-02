@@ -14,8 +14,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -610,6 +609,566 @@ fun ColorFxPanel(
                         onValueChange = { onColorSplashChange(splash.copy(tolerance = it)) },
                         onValueChangeFinished = {}
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Dedicated Vignette Panel for the separate Vignette Domain.
+ * Features an interactive visual preview canvas, precision sliders
+ * (Amount, Midpoint, Feather, Roundness), and quick artistic presets.
+ */
+@Composable
+fun VignettePanel(
+    vignette: Float,
+    vignetteMidpoint: Float,
+    vignetteFeather: Float,
+    vignetteRoundness: Float,
+    onVignetteChange: (Float) -> Unit,
+    onMidpointChange: (Float) -> Unit,
+    onFeatherChange: (Float) -> Unit,
+    onRoundnessChange: (Float) -> Unit,
+    onApplyPreset: (amount: Float, midpoint: Float, feather: Float, roundness: Float) -> Unit,
+    onReset: () -> Unit,
+    onSliderDragStart: (name: String, formattedVal: String) -> Unit,
+    onSliderDragFinished: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xFF141414))
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        // Header with reset button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Vignette Framing",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp
+            )
+            IconButton(
+                onClick = onReset,
+                modifier = Modifier.size(36.dp).testTag("vignette_reset_button")
+            ) {
+                Icon(
+                    Icons.Default.RestartAlt,
+                    contentDescription = "Reset Vignette",
+                    tint = Color(0xFFAAAAAA),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Visual Vignette Preview Simulator Box
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF1C1C1C))
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                val cx = w / 2f
+                val cy = h / 2f
+                val maxRadius = kotlin.math.max(w, h) / 2f
+
+                val isWhiteVignette = vignette > 0f
+                val absVig = (kotlin.math.abs(vignette) / 100f).coerceIn(0f, 1f)
+                val vigColor = if (isWhiteVignette) Color.White else Color.Black
+
+                val midFrac = (vignetteMidpoint / 100f).coerceIn(0.1f, 0.9f)
+                val featherFrac = (vignetteFeather / 100f).coerceIn(0.1f, 0.9f)
+                val startStop = (midFrac * (1f - featherFrac * 0.5f)).coerceIn(0f, 0.8f)
+                val endStop = (midFrac + (1f - midFrac) * featherFrac).coerceIn(startStop + 0.05f, 1f)
+
+                drawRect(Color(0xFF262626))
+
+                if (absVig > 0.02f) {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colorStops = arrayOf(
+                                0.0f to Color.Transparent,
+                                startStop to Color.Transparent,
+                                endStop to vigColor.copy(alpha = absVig * 0.85f),
+                                1.0f to vigColor.copy(alpha = absVig)
+                            ),
+                            center = Offset(cx, cy),
+                            radius = maxRadius
+                        )
+                    )
+                }
+            }
+
+            Text(
+                text = if (vignette == 0f) "Vignette Off" else if (vignette > 0) "White Vignette (+${vignette.toInt()})" else "Dark Vignette (${vignette.toInt()})",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Quick Preset Chips
+        Text(
+            text = "Artistic Vignette Styles",
+            color = Color(0xFFAAAAAA),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.height(6.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            val presets = listOf(
+                "None" to (0f to Triple(50f, 50f, 0f)),
+                "Subtle Dark" to (-25f to Triple(50f, 60f, 0f)),
+                "Dramatic" to (-60f to Triple(40f, 70f, 10f)),
+                "Vintage Oval" to (-75f to Triple(30f, 45f, -30f)),
+                "White Dream" to (45f to Triple(45f, 80f, 20f)),
+                "Spotlight" to (-90f to Triple(20f, 25f, 40f))
+            )
+            items(presets) { (title, params) ->
+                val (amt, rest) = params
+                val (mid, fth, rnd) = rest
+                val isSelected = kotlin.math.abs(vignette - amt) < 3f
+
+                Surface(
+                    onClick = { onApplyPreset(amt, mid, fth, rnd) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) Color.White else Color(0xFF222222),
+                    border = BorderStroke(1.dp, if (isSelected) Color.White else Color.White.copy(alpha = 0.1f)),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = title,
+                            color = if (isSelected) Color.Black else Color.White,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // Amount Slider (-100..+100)
+        val vigStr = when {
+            vignette > 0f -> "+${vignette.toInt()}"
+            vignette < 0f -> "−${(-vignette).toInt()}"
+            else -> "0"
+        }
+        LrSliderRow(
+            title = "Amount",
+            value = vignette,
+            displayValue = vigStr,
+            valueRange = -100f..100f,
+            minLabel = "Dark",
+            maxLabel = "White",
+            onDragStart = { onSliderDragStart("Vignette Amount", vigStr) },
+            onValueChange = onVignetteChange,
+            onValueChangeFinished = onSliderDragFinished
+        )
+
+        // Midpoint Slider (0..100)
+        val midStr = "${vignetteMidpoint.toInt()}"
+        LrSliderRow(
+            title = "Midpoint",
+            value = vignetteMidpoint,
+            displayValue = midStr,
+            valueRange = 0f..100f,
+            minLabel = "Small",
+            maxLabel = "Large",
+            onDragStart = { onSliderDragStart("Vignette Midpoint", midStr) },
+            onValueChange = onMidpointChange,
+            onValueChangeFinished = onSliderDragFinished
+        )
+
+        // Feather Slider (0..100)
+        val featherStr = "${vignetteFeather.toInt()}"
+        LrSliderRow(
+            title = "Feather",
+            value = vignetteFeather,
+            displayValue = featherStr,
+            valueRange = 0f..100f,
+            minLabel = "Hard",
+            maxLabel = "Soft",
+            onDragStart = { onSliderDragStart("Vignette Feather", featherStr) },
+            onValueChange = onFeatherChange,
+            onValueChangeFinished = onSliderDragFinished
+        )
+
+        // Roundness Slider (-100..+100)
+        val roundStr = "${vignetteRoundness.toInt()}"
+        LrSliderRow(
+            title = "Roundness",
+            value = vignetteRoundness,
+            displayValue = roundStr,
+            valueRange = -100f..100f,
+            minLabel = "Rect",
+            maxLabel = "Circle",
+            onDragStart = { onSliderDragStart("Vignette Roundness", roundStr) },
+            onValueChange = onRoundnessChange,
+            onValueChangeFinished = onSliderDragFinished
+        )
+    }
+}
+
+/**
+ * Dedicated Curves Domain Panel for interactive RGB and per-channel tone curve adjustments.
+ */
+@Composable
+fun CurvesDomainPanel(
+    curves: RgbCurves,
+    activeChannel: CurveChannel,
+    onSelectChannel: (CurveChannel) -> Unit,
+    onOpenFullscreenCurves: () -> Unit,
+    onApplyPreset: (String) -> Unit,
+    onResetChannel: (CurveChannel) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xFF141414))
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        // Channel Selector Dots & Action Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Channel switcher dots: RGB (White), Red, Green, Blue
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                val channels = listOf(
+                    Triple(CurveChannel.RGB, Color.White, "RGB"),
+                    Triple(CurveChannel.RED, Color(0xFFFF5252), "Red"),
+                    Triple(CurveChannel.GREEN, Color(0xFF69F0AE), "Green"),
+                    Triple(CurveChannel.BLUE, Color(0xFF448AFF), "Blue")
+                )
+
+                channels.forEach { (channel, dotColor, label) ->
+                    val isSel = activeChannel == channel
+                    Surface(
+                        onClick = { onSelectChannel(channel) },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSel) Color(0xFF2C2C2C) else Color(0xFF181818),
+                        border = BorderStroke(1.dp, if (isSel) dotColor else Color.White.copy(alpha = 0.1f)),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = label,
+                                color = if (isSel) Color.White else Color(0xFFAAAAAA),
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Reset Channel Button
+            IconButton(
+                onClick = { onResetChannel(activeChannel) },
+                modifier = Modifier.size(34.dp).testTag("curves_reset_channel_button")
+            ) {
+                Icon(
+                    Icons.Default.RestartAlt,
+                    contentDescription = "Reset Channel",
+                    tint = Color(0xFFAAAAAA),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // Visual Curve Graph Preview Canvas
+        val currentPoints = when (activeChannel) {
+            CurveChannel.RGB -> curves.master
+            CurveChannel.RED -> curves.red
+            CurveChannel.GREEN -> curves.green
+            CurveChannel.BLUE -> curves.blue
+        }
+
+        val channelColor = when (activeChannel) {
+            CurveChannel.RGB -> Color.White
+            CurveChannel.RED -> Color(0xFFFF5252)
+            CurveChannel.GREEN -> Color(0xFF69F0AE)
+            CurveChannel.BLUE -> Color(0xFF448AFF)
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(100.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF0A0A0A))
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)), RoundedCornerShape(10.dp))
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                val w = size.width
+                val h = size.height
+
+                // Draw grid lines
+                val gridColor = Color.White.copy(alpha = 0.08f)
+                for (step in 1..3) {
+                    val frac = step / 4f
+                    drawLine(gridColor, Offset(w * frac, 0f), Offset(w * frac, h), 1f)
+                    drawLine(gridColor, Offset(0f, h * frac), Offset(w, h * frac), 1f)
+                }
+
+                // Reference diagonal
+                drawLine(
+                    Color.White.copy(alpha = 0.15f),
+                    Offset(0f, h),
+                    Offset(w, 0f),
+                    1f
+                )
+
+                // Curve path
+                if (currentPoints.isNotEmpty()) {
+                    val path = Path()
+                    val sorted = currentPoints.sortedBy { it.inVal }
+                    val first = sorted.first()
+                    path.moveTo(first.inVal * w, h - (first.outVal * h))
+
+                    for (i in 1 until sorted.size) {
+                        val pt = sorted[i]
+                        path.lineTo(pt.inVal * w, h - (pt.outVal * h))
+                    }
+
+                    drawPath(
+                        path = path,
+                        color = channelColor,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5.dp.toPx())
+                    )
+
+                    // Control Points Dots
+                    sorted.forEach { pt ->
+                        val px = pt.inVal * w
+                        val py = h - (pt.outVal * h)
+                        drawCircle(Color.Black, radius = 5.dp.toPx(), center = Offset(px, py))
+                        drawCircle(channelColor, radius = 3.5.dp.toPx(), center = Offset(px, py))
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Open Full-screen Interactive Curve Editor Action
+        Surface(
+            onClick = onOpenFullscreenCurves,
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xFF222222),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+            modifier = Modifier.fillMaxWidth().height(38.dp).testTag("curves_open_fullscreen_button")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Timeline,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Open Full-Screen Tone Curve Editor",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        // Quick Curve Presets
+        Text(
+            text = "Curve Tone Presets",
+            color = Color(0xFFAAAAAA),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.height(6.dp))
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            val presets = listOf(
+                "Linear" to "Linear",
+                "Medium Contrast" to "Medium Contrast",
+                "High Contrast" to "High Contrast",
+                "Matte Fade" to "Matte Fade",
+                "Cross Process" to "Cross Process"
+            )
+            items(presets) { (label, key) ->
+                Surface(
+                    onClick = { onApplyPreset(key) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF1E1E1E),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = label,
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Dedicated Blur domain panel: slider + presets + reset.
+ */
+@Composable
+fun BlurPanel(
+    blur: Float,
+    onBlurChange: (Float) -> Unit,
+    onReset: () -> Unit,
+    onSliderDragStart: (name: String, formattedVal: String) -> Unit,
+    onSliderDragFinished: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalEmreEditorColors.current
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(colors.panelSurface)
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.BlurOn,
+                    contentDescription = null,
+                    tint = colors.primaryText,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Blur",
+                    color = colors.primaryText,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+            }
+            if (blur > 0.1f) {
+                IconButton(
+                    onClick = onReset,
+                    modifier = Modifier.size(36.dp).testTag("blur_reset_button")
+                ) {
+                    Icon(
+                        Icons.Default.RestartAlt,
+                        contentDescription = "Reset Blur",
+                        tint = colors.secondaryText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        val blurStr = "${blur.toInt()}"
+        LrSliderRow(
+            title = "Blur Amount",
+            value = blur,
+            displayValue = blurStr,
+            valueRange = 0f..100f,
+            minLabel = "0",
+            maxLabel = "100",
+            onDragStart = { onSliderDragStart("Blur", blurStr) },
+            onValueChange = onBlurChange,
+            onValueChangeFinished = onSliderDragFinished
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        Text(
+            text = "Blur Presets",
+            color = colors.secondaryText,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.height(6.dp))
+
+        val presets = listOf(
+            "Off" to 0f,
+            "Subtle Soft" to 15f,
+            "Portrait Bokeh" to 35f,
+            "Medium Blur" to 55f,
+            "Heavy Dream" to 75f,
+            "Max Obscure" to 100f
+        )
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(presets) { (label, value) ->
+                val isSelected = kotlin.math.abs(blur - value) < 1.0f
+                Surface(
+                    onClick = {
+                        onBlurChange(value)
+                        onSliderDragFinished()
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) colors.primaryText else colors.elevatedSurface,
+                    border = BorderStroke(1.dp, if (isSelected) colors.primaryText else colors.border),
+                    modifier = Modifier.height(30.dp).testTag("blur_preset_${label.lowercase().replace(' ', '_')}")
+                ) {
+                    Box(modifier = Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) colors.baseSurface else colors.primaryText,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
                 }
             }
         }

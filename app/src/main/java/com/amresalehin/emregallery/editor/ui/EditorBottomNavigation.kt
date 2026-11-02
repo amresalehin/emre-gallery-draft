@@ -34,11 +34,21 @@ import androidx.compose.ui.unit.sp
  * Editing Domains for Emre Gallery Photo Editor.
  */
 enum class EditorDomain(val label: String, val icon: ImageVector) {
-    ADJUST("Adjust", Icons.Default.Tune),
+    LIGHT("Light", Icons.Default.WbSunny),
+    COLOR("Color", Icons.Default.Palette),
+    CURVES("Curves", Icons.Default.Timeline),
+    EFFECTS("Effects", Icons.Default.AutoFixHigh),
+    DETAIL("Detail", Icons.Default.Details),
+    BLUR("Blur", Icons.Default.BlurOn),
+    VIGNETTE("Vignette", Icons.Default.Vignette),
     CROP("Crop", Icons.Default.Crop),
     PRESETS("Presets", Icons.Default.FilterVintage),
     RETOUCH("Retouch", Icons.Default.Healing),
     MASK("Mask", Icons.Default.Brush),
+    TEXT("Text", Icons.Default.TextFields),
+    SHAPE("Shape", Icons.Default.Category),
+    CALLOUT("Callout", Icons.Default.ChatBubbleOutline),
+    FRAME("Frame", Icons.Default.CropPortrait),
     OVERLAYS("Overlays", Icons.Default.Layers),
     AI_TOOLS("AI Tools", Icons.Default.AutoAwesome)
 }
