@@ -216,105 +216,46 @@ fun EditorContextualPanel(
             // Top drag handle indicator
             EmreDragHandle(colors = colors)
 
-            // Dynamic Subtools Pill Row based on Active Domain
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                when (selectedDomain) {
-                    EditorDomain.LIGHT -> {
-                        LightSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeLightSubtool,
-                                onClick = { onSelectLightSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_light_${sub.name.lowercase()}"
-                            )
+            val domainsWithoutSubtools = setOf(
+                EditorDomain.LIGHT,
+                EditorDomain.COLOR,
+                EditorDomain.CURVES,
+                EditorDomain.EFFECTS,
+                EditorDomain.DETAIL,
+                EditorDomain.BLUR,
+                EditorDomain.VIGNETTE,
+                EditorDomain.CROP,
+                EditorDomain.BLEMISH,
+                EditorDomain.SMOOTH,
+                EditorDomain.HEAL,
+                EditorDomain.SKIN_TONE
+            )
+            if (selectedDomain !in domainsWithoutSubtools) {
+                // Dynamic Subtools Pill Row based on Active Domain
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    when (selectedDomain) {
+                        EditorDomain.LIGHT,
+                        EditorDomain.COLOR,
+                        EditorDomain.CURVES,
+                        EditorDomain.EFFECTS,
+                        EditorDomain.DETAIL,
+                        EditorDomain.BLUR,
+                        EditorDomain.VIGNETTE,
+                        EditorDomain.CROP,
+                        EditorDomain.BLEMISH,
+                        EditorDomain.SMOOTH,
+                        EditorDomain.HEAL,
+                        EditorDomain.SKIN_TONE -> {
+                            // Dedicated single-panel domains without tier 2 subtool pills
                         }
-                    }
-                    EditorDomain.COLOR -> {
-                        ColorSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeColorSubtool,
-                                onClick = { onSelectColorSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_color_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.CURVES -> {
-                        CurvesSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeCurvesSubtool,
-                                onClick = { onSelectCurvesSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_curves_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.EFFECTS -> {
-                        EffectsSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeEffectsSubtool,
-                                onClick = { onSelectEffectsSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_effects_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.DETAIL -> {
-                        DetailSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeDetailSubtool,
-                                onClick = { onSelectDetailSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_detail_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.BLUR -> {
-                        BlurSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeBlurSubtool,
-                                onClick = { onSelectBlurSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_blur_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.VIGNETTE -> {
-                        VignetteSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeVignetteSubtool,
-                                onClick = { onSelectVignetteSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_vignette_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.CROP -> {
-                        CropSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeCropSubtool,
-                                onClick = { onSelectCropSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_crop_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.PRESETS -> {
+                        EditorDomain.PRESETS -> {
                         listOf("All", "Simple", "Portraits", "Cinematic", "Film", "B&W", "Vintage", "Duotone").forEach { cat ->
                             EmrePillButton(
                                 label = cat,
@@ -322,25 +263,6 @@ fun EditorContextualPanel(
                                 onClick = { onSelectProfileCategory(cat.uppercase()) },
                                 colors = colors,
                                 testTag = "subtool_preset_${cat.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.RETOUCH -> {
-                        RetouchSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeRetouchSubtool,
-                                onClick = {
-                                    onSelectRetouchSubtool(sub)
-                                    when (sub) {
-                                        RetouchSubtool.BLEMISH -> onSelectRetouchType(RetouchType.BLEMISH)
-                                        RetouchSubtool.SMOOTH -> onSelectRetouchType(RetouchType.SKIN_SMOOTH)
-                                        RetouchSubtool.HEAL -> onSelectRetouchType(RetouchType.BLEMISH)
-                                        RetouchSubtool.SKIN_TONE -> onSelectRetouchType(RetouchType.SKIN_TONE)
-                                    }
-                                },
-                                colors = colors,
-                                testTag = "subtool_retouch_${sub.name.lowercase()}"
                             )
                         }
                     }
@@ -399,17 +321,6 @@ fun EditorContextualPanel(
                             )
                         }
                     }
-                    EditorDomain.OVERLAYS -> {
-                        OverlaysSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeOverlaysSubtool,
-                                onClick = { onSelectOverlaysSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_overlays_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
                     EditorDomain.AI_TOOLS -> {
                         AiSubtool.values().forEach { sub ->
                             EmrePillButton(
@@ -423,8 +334,8 @@ fun EditorContextualPanel(
                     }
                 }
             }
-
             Spacer(Modifier.height(4.dp))
+        }
 
             // Contextual Parameters Area (scrollable parameters box)
             Box(
@@ -436,282 +347,67 @@ fun EditorContextualPanel(
                 when (selectedDomain) {
                     EditorDomain.LIGHT -> {
                         val adj = sessionState.adjustments
-                        when (activeLightSubtool) {
-                            LightSubtool.ALL -> {
-                                LightPanel(
-                                    exposure = adj.exposure,
-                                    contrast = adj.contrast,
-                                    highlights = adj.highlights,
-                                    shadows = adj.shadows,
-                                    whites = adj.whites,
-                                    blacks = adj.blacks,
-                                    onOpenCurve = onOpenCurvesMode,
-                                    onSliderDragStart = { name, formatted ->
-                                        val initVal = when (name) {
-                                            "Exposure" -> adj.exposure
-                                            "Contrast" -> adj.contrast
-                                            "Highlights" -> adj.highlights
-                                            "Shadows" -> adj.shadows
-                                            "Whites" -> adj.whites
-                                            else -> adj.blacks
-                                        }
-                                        onSliderDragStart(name, formatted, initVal)
-                                    },
-                                    onSliderChange = { prop, val_ ->
-                                        viewModel.updateAdjustmentValue(prop, val_)
-                                    },
-                                    onSliderChangeFinished = onSliderDragFinished
-                                )
-                            }
-                            LightSubtool.EXPOSURE -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val expEv = adj.exposure / 20f
-                                    val expStr = when {
-                                        expEv > 0.001f -> "+%.2f EV".format(expEv)
-                                        expEv < -0.001f -> "−%.2f EV".format(-expEv)
-                                        else -> "0.00 EV"
-                                    }
-                                    LrSliderRow(
-                                        title = "Exposure",
-                                        value = adj.exposure,
-                                        displayValue = expStr,
-                                        valueRange = -100f..100f,
-                                        isEv = true,
-                                        unit = "EV",
-                                        minLabel = "−5.00",
-                                        maxLabel = "+5.00",
-                                        onDragStart = { onSliderDragStart("Exposure", expStr, adj.exposure) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Exposure", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val contrastStr = when {
-                                        adj.contrast > 0f -> "+${adj.contrast.toInt()}"
-                                        adj.contrast < 0f -> "−${(-adj.contrast).toInt()}"
-                                        else -> "0"
-                                    }
-                                    LrSliderRow(
-                                        title = "Contrast",
-                                        value = adj.contrast,
-                                        displayValue = contrastStr,
-                                        valueRange = -100f..100f,
-                                        minLabel = "−100",
-                                        maxLabel = "+100",
-                                        onDragStart = { onSliderDragStart("Contrast", contrastStr, adj.contrast) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Contrast", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
+                        LightPanel(
+                            exposure = adj.exposure,
+                            contrast = adj.contrast,
+                            highlights = adj.highlights,
+                            shadows = adj.shadows,
+                            whites = adj.whites,
+                            blacks = adj.blacks,
+                            onOpenCurve = onOpenCurvesMode,
+                            onSliderDragStart = { name, formatted ->
+                                val initVal = when (name) {
+                                    "Exposure" -> adj.exposure
+                                    "Contrast" -> adj.contrast
+                                    "Highlights" -> adj.highlights
+                                    "Shadows" -> adj.shadows
+                                    "Whites" -> adj.whites
+                                    else -> adj.blacks
                                 }
-                            }
-                            LightSubtool.TONE -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val highStr = when {
-                                        adj.highlights > 0f -> "+${adj.highlights.toInt()}"
-                                        adj.highlights < 0f -> "−${(-adj.highlights).toInt()}"
-                                        else -> "0"
-                                    }
-                                    LrSliderRow(
-                                        title = "Highlights",
-                                        value = adj.highlights,
-                                        displayValue = highStr,
-                                        valueRange = -100f..100f,
-                                        minLabel = "−100",
-                                        maxLabel = "+100",
-                                        onDragStart = { onSliderDragStart("Highlights", highStr, adj.highlights) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Highlights", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val shadowStr = when {
-                                        adj.shadows > 0f -> "+${adj.shadows.toInt()}"
-                                        adj.shadows < 0f -> "−${(-adj.shadows).toInt()}"
-                                        else -> "0"
-                                    }
-                                    LrSliderRow(
-                                        title = "Shadows",
-                                        value = adj.shadows,
-                                        displayValue = shadowStr,
-                                        valueRange = -100f..100f,
-                                        minLabel = "−100",
-                                        maxLabel = "+100",
-                                        onDragStart = { onSliderDragStart("Shadows", shadowStr, adj.shadows) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Shadows", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                }
-                            }
-                            LightSubtool.POINTS -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val whitesStr = when {
-                                        adj.whites > 0f -> "+${adj.whites.toInt()}"
-                                        adj.whites < 0f -> "−${(-adj.whites).toInt()}"
-                                        else -> "0"
-                                    }
-                                    LrSliderRow(
-                                        title = "Whites",
-                                        value = adj.whites,
-                                        displayValue = whitesStr,
-                                        valueRange = -100f..100f,
-                                        minLabel = "−100",
-                                        maxLabel = "+100",
-                                        onDragStart = { onSliderDragStart("Whites", whitesStr, adj.whites) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Whites", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val blacksStr = when {
-                                        adj.blacks > 0f -> "+${adj.blacks.toInt()}"
-                                        adj.blacks < 0f -> "−${(-adj.blacks).toInt()}"
-                                        else -> "0"
-                                    }
-                                    LrSliderRow(
-                                        title = "Blacks",
-                                        value = adj.blacks,
-                                        displayValue = blacksStr,
-                                        valueRange = -100f..100f,
-                                        minLabel = "−100",
-                                        maxLabel = "+100",
-                                        onDragStart = { onSliderDragStart("Blacks", blacksStr, adj.blacks) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Blacks", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                }
-                            }
-                        }
+                                onSliderDragStart(name, formatted, initVal)
+                            },
+                            onSliderChange = { prop, val_ ->
+                                viewModel.updateAdjustmentValue(prop, val_)
+                            },
+                            onSliderChangeFinished = onSliderDragFinished
+                        )
                     }
                     EditorDomain.COLOR -> {
                         val adj = sessionState.adjustments
-                        when (activeColorSubtool) {
-                            ColorSubtool.BASIC -> {
-                                ColorPanel(
-                                    isBlackAndWhite = adj.isBlackAndWhite,
-                                    whiteBalancePreset = adj.whiteBalancePreset,
-                                    temperature = adj.temperature,
-                                    tint = adj.tint,
-                                    vibrance = adj.vibrance,
-                                    saturation = adj.saturation,
-                                    onToggleBw = { viewModel.toggleBlackAndWhite() },
-                                    onOpenGrading = onOpenColorGradingMode,
-                                    onOpenMix = onOpenColorMixMode,
-                                    onSelectWbPreset = { viewModel.setWhiteBalancePreset(it) },
-                                    onSliderDragStart = { name, formatted ->
-                                        val initVal = when (name) {
-                                            "Temp" -> adj.temperature
-                                            "Tint" -> adj.tint
-                                            "Vibrance" -> adj.vibrance
-                                            else -> adj.saturation
-                                        }
-                                        onSliderDragStart(name, formatted, initVal)
-                                    },
-                                    onSliderChange = { prop, val_ ->
-                                        viewModel.updateAdjustmentValue(prop, val_)
-                                    },
-                                    onSliderChangeFinished = onSliderDragFinished
-                                )
-                            }
-                            ColorSubtool.COLOR_MIX -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        "8-Band Targeted Color Mix (HSL)",
-                                        color = colors.primaryText,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 14.sp
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        "Adjust specific hues, saturations, and luminances independently across 8 spectral color bands.",
-                                        color = colors.secondaryText,
-                                        fontSize = 12.sp
-                                    )
-                                    Spacer(Modifier.height(14.dp))
-                                    EmrePillButton(
-                                        label = "Open Precision Color Mix",
-                                        isSelected = true,
-                                        onClick = onOpenColorMixMode,
-                                        icon = Icons.Default.Palette,
-                                        colors = colors
-                                    )
+                        ColorPanel(
+                            isBlackAndWhite = adj.isBlackAndWhite,
+                            whiteBalancePreset = adj.whiteBalancePreset,
+                            temperature = adj.temperature,
+                            tint = adj.tint,
+                            vibrance = adj.vibrance,
+                            saturation = adj.saturation,
+                            onToggleBw = { viewModel.toggleBlackAndWhite() },
+                            onOpenGrading = onOpenColorGradingMode,
+                            onOpenMix = onOpenColorMixMode,
+                            onSelectWbPreset = { viewModel.setWhiteBalancePreset(it) },
+                            onSliderDragStart = { name, formatted ->
+                                val initVal = when (name) {
+                                    "Temp" -> adj.temperature
+                                    "Tint" -> adj.tint
+                                    "Vibrance" -> adj.vibrance
+                                    else -> adj.saturation
                                 }
-                            }
-                            ColorSubtool.COLOR_GRADING -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        "Split Toning & Color Grading",
-                                        color = colors.primaryText,
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 14.sp
-                                    )
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        "Grade Shadows and Highlights with cinematic chromatic hues and tonal balance.",
-                                        color = colors.secondaryText,
-                                        fontSize = 12.sp
-                                    )
-                                    Spacer(Modifier.height(14.dp))
-                                    EmrePillButton(
-                                        label = "Open Color Grading Wheels",
-                                        isSelected = true,
-                                        onClick = onOpenColorGradingMode,
-                                        icon = Icons.Default.Tune,
-                                        colors = colors
-                                    )
-                                }
-                            }
-                            ColorSubtool.BALANCE -> {
-                                ColorBalancePanel(
-                                    balance = adj.colorBalance,
-                                    onBalanceChange = { viewModel.setColorBalance(it) },
-                                    onReset = { viewModel.setColorBalance(ColorBalanceParams()) }
-                                )
-                            }
-                            ColorSubtool.FX -> {
-                                ColorFxPanel(
-                                    adj = adj,
-                                    onGradientMapChange = { viewModel.setGradientMap(it) },
-                                    onDuotoneChange = { viewModel.setDuotone(it) },
-                                    onColorReplaceChange = { viewModel.setColorReplace(it) },
-                                    onColorSplashChange = { viewModel.setColorSplash(it) }
-                                )
-                            }
-                        }
+                                onSliderDragStart(name, formatted, initVal)
+                            },
+                            onSliderChange = { prop, val_ ->
+                                viewModel.updateAdjustmentValue(prop, val_)
+                            },
+                            onSliderChangeFinished = onSliderDragFinished
+                        )
                     }
                     EditorDomain.CURVES -> {
                         val adj = sessionState.adjustments
-                        val currentChannel = when (activeCurvesSubtool) {
-                            CurvesSubtool.RED -> CurveChannel.RED
-                            CurvesSubtool.GREEN -> CurveChannel.GREEN
-                            CurvesSubtool.BLUE -> CurveChannel.BLUE
-                            else -> CurveChannel.RGB
-                        }
+                        var currentCurveChannel by remember { mutableStateOf(CurveChannel.RGB) }
                         CurvesDomainPanel(
                             curves = adj.curves,
-                            activeChannel = currentChannel,
+                            activeChannel = currentCurveChannel,
                             onSelectChannel = { ch ->
-                                when (ch) {
-                                    CurveChannel.RGB -> onSelectCurvesSubtool(CurvesSubtool.RGB)
-                                    CurveChannel.RED -> onSelectCurvesSubtool(CurvesSubtool.RED)
-                                    CurveChannel.GREEN -> onSelectCurvesSubtool(CurvesSubtool.GREEN)
-                                    CurveChannel.BLUE -> onSelectCurvesSubtool(CurvesSubtool.BLUE)
-                                }
+                                currentCurveChannel = ch
                             },
                             onOpenFullscreenCurves = onOpenCurvesMode,
                             onApplyPreset = { presetKey ->
@@ -724,275 +420,51 @@ fun EditorContextualPanel(
                     }
                     EditorDomain.EFFECTS -> {
                         val adj = sessionState.adjustments
-                        when (activeEffectsSubtool) {
-                            EffectsSubtool.ALL -> {
-                                EffectsPanel(
-                                    texture = adj.texture,
-                                    clarity = adj.clarity,
-                                    dehaze = adj.dehaze,
-                                    vignette = adj.vignette,
-                                    grain = adj.grain,
-                                    dodge = adj.dodge,
-                                    burn = adj.burn,
-                                    vignetteMidpoint = adj.vignetteMidpoint,
-                                    vignetteFeather = adj.vignetteFeather,
-                                    vignetteRoundness = adj.vignetteRoundness,
-                                    grainSize = adj.grainSize,
-                                    grainRoughness = adj.grainRoughness,
-                                    onSliderDragStart = { name, formatted ->
-                                        onSliderDragStart(name, formatted, 0f)
-                                    },
-                                    onSliderChange = { prop, val_ ->
-                                        viewModel.updateAdjustmentValue(prop, val_)
-                                    },
-                                    onSliderChangeFinished = onSliderDragFinished
-                                )
-                            }
-                            EffectsSubtool.TEXTURE_CLARITY -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val texStr = when {
-                                        adj.texture > 0f -> "+${adj.texture.toInt()}"
-                                        adj.texture < 0f -> "−${(-adj.texture).toInt()}"
-                                        else -> "0"
-                                    }
-                                    LrSliderRow(
-                                        title = "Texture",
-                                        value = adj.texture,
-                                        displayValue = texStr,
-                                        valueRange = -100f..100f,
-                                        minLabel = "−100",
-                                        maxLabel = "+100",
-                                        onDragStart = { onSliderDragStart("Texture", texStr, adj.texture) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Texture", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val clarStr = when {
-                                        adj.clarity > 0f -> "+${adj.clarity.toInt()}"
-                                        adj.clarity < 0f -> "−${(-adj.clarity).toInt()}"
-                                        else -> "0"
-                                    }
-                                    LrSliderRow(
-                                        title = "Clarity",
-                                        value = adj.clarity,
-                                        displayValue = clarStr,
-                                        valueRange = -100f..100f,
-                                        minLabel = "−100",
-                                        maxLabel = "+100",
-                                        onDragStart = { onSliderDragStart("Clarity", clarStr, adj.clarity) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Clarity", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                }
-                            }
-                            EffectsSubtool.DEHAZE -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val dehazeStr = when {
-                                        adj.dehaze > 0f -> "+${adj.dehaze.toInt()}"
-                                        adj.dehaze < 0f -> "−${(-adj.dehaze).toInt()}"
-                                        else -> "0"
-                                    }
-                                    LrSliderRow(
-                                        title = "Dehaze",
-                                        value = adj.dehaze,
-                                        displayValue = dehazeStr,
-                                        valueRange = -100f..100f,
-                                        minLabel = "−100",
-                                        maxLabel = "+100",
-                                        onDragStart = { onSliderDragStart("Dehaze", dehazeStr, adj.dehaze) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Dehaze", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                }
-                            }
-                            EffectsSubtool.GRAIN -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val grainStr = "${adj.grain.toInt()}"
-                                    LrSliderRow(
-                                        title = "Grain Amount",
-                                        value = adj.grain,
-                                        displayValue = grainStr,
-                                        valueRange = 0f..100f,
-                                        minLabel = "0",
-                                        maxLabel = "100",
-                                        onDragStart = { onSliderDragStart("Grain", grainStr, adj.grain) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Grain", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val sizeStr = "${adj.grainSize.toInt()}"
-                                    LrSliderRow(
-                                        title = "Grain Size",
-                                        value = adj.grainSize,
-                                        displayValue = sizeStr,
-                                        valueRange = 10f..60f,
-                                        minLabel = "10",
-                                        maxLabel = "60",
-                                        onDragStart = { onSliderDragStart("Grain Size", sizeStr, adj.grainSize) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("grainSize", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val roughStr = "${adj.grainRoughness.toInt()}"
-                                    LrSliderRow(
-                                        title = "Grain Roughness",
-                                        value = adj.grainRoughness,
-                                        displayValue = roughStr,
-                                        valueRange = 0f..100f,
-                                        minLabel = "0",
-                                        maxLabel = "100",
-                                        onDragStart = { onSliderDragStart("Grain Roughness", roughStr, adj.grainRoughness) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("grainRoughness", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                }
-                            }
-                            EffectsSubtool.DODGE_BURN -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val dodgeStr = "${adj.dodge.toInt()}"
-                                    LrSliderRow(
-                                        title = "Global Dodge",
-                                        value = adj.dodge,
-                                        displayValue = dodgeStr,
-                                        valueRange = 0f..100f,
-                                        minLabel = "0",
-                                        maxLabel = "100",
-                                        onDragStart = { onSliderDragStart("Dodge", dodgeStr, adj.dodge) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Dodge", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val burnStr = "${adj.burn.toInt()}"
-                                    LrSliderRow(
-                                        title = "Global Burn",
-                                        value = adj.burn,
-                                        displayValue = burnStr,
-                                        valueRange = 0f..100f,
-                                        minLabel = "0",
-                                        maxLabel = "100",
-                                        onDragStart = { onSliderDragStart("Burn", burnStr, adj.burn) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Burn", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                }
-                            }
-                        }
+                        EffectsPanel(
+                            texture = adj.texture,
+                            clarity = adj.clarity,
+                            dehaze = adj.dehaze,
+                            vignette = adj.vignette,
+                            grain = adj.grain,
+                            dodge = adj.dodge,
+                            burn = adj.burn,
+                            vignetteMidpoint = adj.vignetteMidpoint,
+                            vignetteFeather = adj.vignetteFeather,
+                            vignetteRoundness = adj.vignetteRoundness,
+                            grainSize = adj.grainSize,
+                            grainRoughness = adj.grainRoughness,
+                            onSliderDragStart = { name, formatted ->
+                                onSliderDragStart(name, formatted, 0f)
+                            },
+                            onSliderChange = { prop, val_ ->
+                                viewModel.updateAdjustmentValue(prop, val_)
+                            },
+                            onSliderChangeFinished = onSliderDragFinished
+                        )
                     }
                     EditorDomain.DETAIL -> {
                         val adj = sessionState.adjustments
-                        when (activeDetailSubtool) {
-                            DetailSubtool.ALL -> {
-                                DetailPanel(
-                                    sharpness = adj.sharpness,
-                                    radius = adj.sharpnessRadius,
-                                    detail = adj.sharpnessDetail,
-                                    noiseReduction = adj.noiseReduction,
-                                    colorNoiseReduction = adj.colorNoiseReduction,
-                                    onSliderDragStart = { name, formatted ->
-                                        val initVal = when (name) {
-                                            "Sharpening" -> adj.sharpness
-                                            "Radius" -> adj.sharpnessRadius
-                                            "Detail" -> adj.sharpnessDetail
-                                            "Noise Reduction" -> adj.noiseReduction
-                                            else -> adj.colorNoiseReduction
-                                        }
-                                        onSliderDragStart(name, formatted, initVal)
-                                    },
-                                    onSliderChange = { prop, val_ ->
-                                        viewModel.updateAdjustmentValue(prop, val_)
-                                    },
-                                    onSliderChangeFinished = onSliderDragFinished
-                                )
-                            }
-                            DetailSubtool.SHARPEN -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val sharpStr = "${adj.sharpness.toInt()}"
-                                    LrSliderRow(
-                                        title = "Sharpening",
-                                        value = adj.sharpness,
-                                        displayValue = sharpStr,
-                                        valueRange = 0f..100f,
-                                        minLabel = "0",
-                                        maxLabel = "100",
-                                        onDragStart = { onSliderDragStart("Sharpening", sharpStr, adj.sharpness) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Sharpness", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val radStr = String.format(java.util.Locale.US, "%.1f", adj.sharpnessRadius)
-                                    LrSliderRow(
-                                        title = "Radius",
-                                        value = adj.sharpnessRadius,
-                                        displayValue = radStr,
-                                        valueRange = 0.5f..3.0f,
-                                        minLabel = "0.5",
-                                        maxLabel = "3.0",
-                                        onDragStart = { onSliderDragStart("Radius", radStr, adj.sharpnessRadius) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Radius", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val detStr = "${adj.sharpnessDetail.toInt()}"
-                                    LrSliderRow(
-                                        title = "Detail",
-                                        value = adj.sharpnessDetail,
-                                        displayValue = detStr,
-                                        valueRange = 0f..100f,
-                                        minLabel = "0",
-                                        maxLabel = "100",
-                                        onDragStart = { onSliderDragStart("Detail", detStr, adj.sharpnessDetail) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Detail", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
+                        DetailPanel(
+                            sharpness = adj.sharpness,
+                            radius = adj.sharpnessRadius,
+                            detail = adj.sharpnessDetail,
+                            noiseReduction = adj.noiseReduction,
+                            colorNoiseReduction = adj.colorNoiseReduction,
+                            onSliderDragStart = { name, formatted ->
+                                val initVal = when (name) {
+                                    "Sharpening" -> adj.sharpness
+                                    "Radius" -> adj.sharpnessRadius
+                                    "Detail" -> adj.sharpnessDetail
+                                    "Noise Reduction" -> adj.noiseReduction
+                                    else -> adj.colorNoiseReduction
                                 }
-                            }
-                            DetailSubtool.NOISE -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    val nrStr = "${adj.noiseReduction.toInt()}"
-                                    LrSliderRow(
-                                        title = "Luminance Noise",
-                                        value = adj.noiseReduction,
-                                        displayValue = nrStr,
-                                        valueRange = 0f..100f,
-                                        minLabel = "0",
-                                        maxLabel = "100",
-                                        onDragStart = { onSliderDragStart("Noise Reduction", nrStr, adj.noiseReduction) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Noise Reduction", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                    val cnrStr = "${adj.colorNoiseReduction.toInt()}"
-                                    LrSliderRow(
-                                        title = "Color Noise",
-                                        value = adj.colorNoiseReduction,
-                                        displayValue = cnrStr,
-                                        valueRange = 0f..100f,
-                                        minLabel = "0",
-                                        maxLabel = "100",
-                                        onDragStart = { onSliderDragStart("Color Noise", cnrStr, adj.colorNoiseReduction) },
-                                        onValueChange = { viewModel.updateAdjustmentValue("Color Noise Reduction", it) },
-                                        onValueChangeFinished = onSliderDragFinished
-                                    )
-                                }
-                            }
-                        }
+                                onSliderDragStart(name, formatted, initVal)
+                            },
+                            onSliderChange = { prop, val_ ->
+                                viewModel.updateAdjustmentValue(prop, val_)
+                            },
+                            onSliderChangeFinished = onSliderDragFinished
+                        )
                     }
                     EditorDomain.VIGNETTE -> {
                         val adj = sessionState.adjustments
@@ -1033,166 +505,32 @@ fun EditorContextualPanel(
                         )
                     }
                     EditorDomain.CROP -> {
-                        when (activeCropSubtool) {
-                            CropSubtool.ASPECT -> {
-                                CropExtendedPanel(
-                                    transform = sessionState.transform,
-                                    selectedCropPreset = selectedCropPreset,
-                                    onSelectCropPreset = onSelectCropPreset,
-                                    onRotate90 = { viewModel.rotate90() },
-                                    onFlipH = { viewModel.flipHorizontal() },
-                                    onFlipV = { viewModel.flipVertical() },
-                                    onStraightenChange = { viewModel.setStraighten(it) },
-                                    onStraightenFinished = { viewModel.commitSliderChange() },
-                                    onAutoLevel = {},
-                                    onShapeCropChange = { viewModel.setShapeCrop(it) },
-                                    onPerspectiveChange = { x, y -> viewModel.setPerspective(x, y) },
-                                    onCornerPinReset = { viewModel.resetCrop() },
-                                    onCornerPinEnable = {},
-                                    onLiquifyModeChange = onLiquifyModeChange,
-                                    currentLiquifyMode = currentLiquifyMode,
-                                    liquifyRadius = liquifyRadius,
-                                    onLiquifyRadiusChange = onLiquifyRadiusChange,
-                                    liquifyStrength = liquifyStrength,
-                                    onLiquifyStrengthChange = onLiquifyStrengthChange,
-                                    onClearLiquify = { viewModel.clearLiquify() },
-                                    onDispersionChange = { viewModel.setDispersion(it) },
-                                    onMotionChange = { amt, ang -> viewModel.setMotionBlur(amt, ang) },
-                                    onScaleFactorChange = { viewModel.setScaleFactor(it) },
-                                    onResetCrop = { viewModel.resetCrop() }
-                                )
-                            }
-                            CropSubtool.TRANSFORM -> {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    horizontalArrangement = Arrangement.SpaceEvenly
-                                ) {
-                                    EmrePillButton(
-                                        label = "Rotate 90°",
-                                        isSelected = false,
-                                        onClick = { viewModel.rotate90() },
-                                        icon = Icons.Default.RotateRight,
-                                        colors = colors
-                                    )
-                                    EmrePillButton(
-                                        label = "Flip H",
-                                        isSelected = sessionState.transform.flipHorizontal,
-                                        onClick = { viewModel.flipHorizontal() },
-                                        icon = Icons.Default.Flip,
-                                        colors = colors
-                                    )
-                                    EmrePillButton(
-                                        label = "Flip V",
-                                        isSelected = sessionState.transform.flipVertical,
-                                        onClick = { viewModel.flipVertical() },
-                                        icon = Icons.Default.SwapVert,
-                                        colors = colors
-                                    )
-                                }
-                            }
-                            CropSubtool.STRAIGHTEN -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp)
-                                ) {
-                                    val angle = sessionState.transform.straightenAngle
-                                    val str = String.format("%.1f°", angle)
-                                    LrSliderRow(
-                                        title = "Straighten",
-                                        value = angle,
-                                        displayValue = str,
-                                        valueRange = -45f..45f,
-                                        minLabel = "−45°",
-                                        maxLabel = "+45°",
-                                        onDragStart = { onSliderDragStart("Straighten", str, angle) },
-                                        onValueChange = { viewModel.setStraighten(it) },
-                                        onValueChangeFinished = {
-                                            viewModel.commitSliderChange()
-                                            onSliderDragFinished()
-                                        }
-                                    )
-                                }
-                            }
-                            CropSubtool.PERSPECTIVE -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp)
-                                ) {
-                                    val px = sessionState.transform.perspectiveX
-                                    val py = sessionState.transform.perspectiveY
-                                    val strX = String.format("%.0f", px)
-                                    val strY = String.format("%.0f", py)
-                                    LrSliderRow(
-                                        title = "Horizontal",
-                                        value = px,
-                                        displayValue = strX,
-                                        valueRange = -30f..30f,
-                                        onDragStart = { onSliderDragStart("Perspective X", strX, px) },
-                                        onValueChange = { viewModel.setPerspective(it, py) },
-                                        onValueChangeFinished = {
-                                            viewModel.commitSliderChange()
-                                            onSliderDragFinished()
-                                        }
-                                    )
-                                    LrSliderRow(
-                                        title = "Vertical",
-                                        value = py,
-                                        displayValue = strY,
-                                        valueRange = -30f..30f,
-                                        onDragStart = { onSliderDragStart("Perspective Y", strY, py) },
-                                        onValueChange = { viewModel.setPerspective(px, it) },
-                                        onValueChangeFinished = {
-                                            viewModel.commitSliderChange()
-                                            onSliderDragFinished()
-                                        }
-                                    )
-                                }
-                            }
-                            CropSubtool.LIQUIFY -> {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        LiquifyMode.values().forEach { mode ->
-                                            EmrePillButton(
-                                                label = mode.label,
-                                                isSelected = mode == currentLiquifyMode,
-                                                onClick = { onLiquifyModeChange(mode) },
-                                                colors = colors
-                                            )
-                                        }
-                                    }
-                                    Spacer(Modifier.height(12.dp))
-                                    LrSliderRow(
-                                        title = "Radius",
-                                        value = liquifyRadius,
-                                        displayValue = "${liquifyRadius.toInt()}px",
-                                        valueRange = 10f..100f,
-                                        onDragStart = {},
-                                        onValueChange = onLiquifyRadiusChange,
-                                        onValueChangeFinished = {}
-                                    )
-                                    LrSliderRow(
-                                        title = "Strength",
-                                        value = liquifyStrength,
-                                        displayValue = "${(liquifyStrength * 100).toInt()}%",
-                                        valueRange = 0.1f..1.0f,
-                                        onDragStart = {},
-                                        onValueChange = onLiquifyStrengthChange,
-                                        onValueChangeFinished = {}
-                                    )
-                                }
-                            }
-                        }
+                        CropExtendedPanel(
+                            transform = sessionState.transform,
+                            selectedCropPreset = selectedCropPreset,
+                            onSelectCropPreset = onSelectCropPreset,
+                            onRotate90 = { viewModel.rotate90() },
+                            onFlipH = { viewModel.flipHorizontal() },
+                            onFlipV = { viewModel.flipVertical() },
+                            onStraightenChange = { viewModel.setStraighten(it) },
+                            onStraightenFinished = { viewModel.commitSliderChange() },
+                            onAutoLevel = {},
+                            onShapeCropChange = { viewModel.setShapeCrop(it) },
+                            onPerspectiveChange = { x, y -> viewModel.setPerspective(x, y) },
+                            onCornerPinReset = { viewModel.resetCrop() },
+                            onCornerPinEnable = {},
+                            onLiquifyModeChange = onLiquifyModeChange,
+                            currentLiquifyMode = currentLiquifyMode,
+                            liquifyRadius = liquifyRadius,
+                            onLiquifyRadiusChange = onLiquifyRadiusChange,
+                            liquifyStrength = liquifyStrength,
+                            onLiquifyStrengthChange = onLiquifyStrengthChange,
+                            onClearLiquify = { viewModel.clearLiquify() },
+                            onDispersionChange = { viewModel.setDispersion(it) },
+                            onMotionChange = { amt, ang -> viewModel.setMotionBlur(amt, ang) },
+                            onScaleFactorChange = { viewModel.setScaleFactor(it) },
+                            onResetCrop = { viewModel.resetCrop() }
+                        )
                     }
                     EditorDomain.PRESETS -> {
                         ProfilesPanel(
@@ -1208,18 +546,52 @@ fun EditorContextualPanel(
                             }
                         )
                     }
-                    EditorDomain.RETOUCH -> {
-                        HealingExtendedPanel(
+                    EditorDomain.BLEMISH -> {
+                        BlemishDomainPanel(
+                            brushRadius = brushWidth * 1.5f,
+                            onRadiusChange = { onBrushWidthChange(it / 1.5f) },
+                            intensity = healingIntensity,
+                            onIntensityChange = onHealingIntensityChange,
+                            strokeCount = sessionState.retouchStrokes.count { it.type == RetouchType.BLEMISH },
+                            onClearStrokes = { viewModel.clearRetouchStrokes() },
+                            colors = colors
+                        )
+                    }
+                    EditorDomain.SMOOTH -> {
+                        SmoothDomainPanel(
+                            brushRadius = brushWidth * 1.5f,
+                            onRadiusChange = { onBrushWidthChange(it / 1.5f) },
+                            intensity = healingIntensity,
+                            onIntensityChange = onHealingIntensityChange,
+                            strokeCount = sessionState.retouchStrokes.count { it.type == RetouchType.SKIN_SMOOTH },
+                            onClearStrokes = { viewModel.clearRetouchStrokes() },
+                            colors = colors
+                        )
+                    }
+                    EditorDomain.HEAL -> {
+                        HealDomainPanel(
                             activeType = activeRetouchType,
                             onSelectType = onSelectRetouchType,
                             brushRadius = brushWidth * 1.5f,
                             onRadiusChange = { onBrushWidthChange(it / 1.5f) },
                             intensity = healingIntensity,
                             onIntensityChange = onHealingIntensityChange,
+                            strokeCount = sessionState.retouchStrokes.count { it.type in listOf(RetouchType.PATCH_HEALING, RetouchType.CLONE_STAMP, RetouchType.OBJECT_REMOVAL, RetouchType.WRINKLE_REMOVAL) },
+                            onClearStrokes = { viewModel.clearRetouchStrokes() },
+                            colors = colors
+                        )
+                    }
+                    EditorDomain.SKIN_TONE -> {
+                        SkinToneDomainPanel(
+                            brushRadius = brushWidth * 1.5f,
+                            onRadiusChange = { onBrushWidthChange(it / 1.5f) },
+                            intensity = healingIntensity,
+                            onIntensityChange = onHealingIntensityChange,
                             tintColor = healingTintColor,
                             onTintColorChange = onHealingTintColorChange,
-                            strokeCount = sessionState.retouchStrokes.size,
-                            onClearStrokes = { viewModel.clearRetouchStrokes() }
+                            strokeCount = sessionState.retouchStrokes.count { it.type == RetouchType.SKIN_TONE },
+                            onClearStrokes = { viewModel.clearRetouchStrokes() },
+                            colors = colors
                         )
                     }
                     EditorDomain.MASK -> {
@@ -1306,48 +678,6 @@ fun EditorContextualPanel(
                             onBorderChange = onBorderChange,
                             colors = colors
                         )
-                    }
-                    EditorDomain.OVERLAYS -> {
-                        when (activeOverlaysSubtool) {
-                            OverlaysSubtool.STICKERS -> {
-                                StickersPanel(
-                                    sessionState = sessionState,
-                                    viewModel = viewModel,
-                                    colors = colors
-                                )
-                            }
-                            OverlaysSubtool.LAYERS -> {
-                                OverlaysWorkspacePanel(
-                                    sessionState = sessionState,
-                                    viewModel = viewModel,
-                                    onFrameChange = onFrameChange,
-                                    onBorderChange = onBorderChange,
-                                    onAddText = { text, col, bgCol ->
-                                        viewModel.addTextOverlay(text, col, bgCol)
-                                    },
-                                    onUpdateText = { viewModel.updateTextOverlay(it) },
-                                    onDeleteText = { viewModel.deleteTextOverlay(it) },
-                                    onDuplicateText = { viewModel.duplicateTextOverlay(it) },
-                                    onAddSticker = { viewModel.addSticker(it) },
-                                    onUpdateSticker = { viewModel.updateSticker(it) },
-                                    onDeleteSticker = { viewModel.deleteSticker(it) },
-                                    onDuplicateSticker = { viewModel.duplicateSticker(it) },
-                                    onAddShape = { viewModel.addShape(it) },
-                                    onUpdateShape = { viewModel.updateShape(it) },
-                                    onDeleteShape = { viewModel.deleteShape(it) },
-                                    onDuplicateShape = { viewModel.duplicateShape(it) },
-                                    onAddCallout = { text, style ->
-                                        viewModel.addCalloutWithStyle(text, style)
-                                    },
-                                    onUpdateCallout = { viewModel.updateCallout(it) },
-                                    onDeleteCallout = { viewModel.deleteCallout(it) },
-                                    onAddLensFlare = { viewModel.addLensFlare(it) },
-                                    onUpdateLensFlare = { viewModel.updateLensFlare(it) },
-                                    onDeleteLensFlare = { viewModel.deleteLensFlare(it) },
-                                    onBackgroundChange = { viewModel.setBackgroundSettings(it) }
-                                )
-                            }
-                        }
                     }
                     EditorDomain.AI_TOOLS -> {
                         AiToolsPanel(

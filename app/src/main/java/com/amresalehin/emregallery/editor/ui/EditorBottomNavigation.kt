@@ -43,13 +43,15 @@ enum class EditorDomain(val label: String, val icon: ImageVector) {
     VIGNETTE("Vignette", Icons.Default.Vignette),
     CROP("Crop", Icons.Default.Crop),
     PRESETS("Presets", Icons.Default.FilterVintage),
-    RETOUCH("Retouch", Icons.Default.Healing),
+    BLEMISH("Blemish", Icons.Default.Face),
+    SMOOTH("Smooth", Icons.Default.AutoFixNormal),
+    HEAL("Heal", Icons.Default.Healing),
+    SKIN_TONE("Skin Tone", Icons.Default.ColorLens),
     MASK("Mask", Icons.Default.Brush),
     TEXT("Text", Icons.Default.TextFields),
     SHAPE("Shape", Icons.Default.Category),
     CALLOUT("Callout", Icons.Default.ChatBubbleOutline),
     FRAME("Frame", Icons.Default.CropPortrait),
-    OVERLAYS("Overlays", Icons.Default.Layers),
     AI_TOOLS("AI Tools", Icons.Default.AutoAwesome)
 }
 

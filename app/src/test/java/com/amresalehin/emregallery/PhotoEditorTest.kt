@@ -964,7 +964,12 @@ class PhotoEditorTest {
         assertTrue(domains.contains("Shape"))
         assertTrue(domains.contains("Callout"))
         assertTrue(domains.contains("Frame"))
-        assertTrue(domains.contains("Overlays"))
+        assertFalse(domains.contains("Overlays"))
+        assertFalse(domains.contains("Retouch"))
+        assertTrue(domains.contains("Blemish"))
+        assertTrue(domains.contains("Smooth"))
+        assertTrue(domains.contains("Heal"))
+        assertTrue(domains.contains("Skin Tone"))
 
         // Effects subtools
         val effectsSubtools = com.amresalehin.emregallery.editor.ui.EffectsSubtool.values().map { it.label }

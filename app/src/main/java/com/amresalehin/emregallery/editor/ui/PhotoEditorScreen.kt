@@ -250,13 +250,17 @@ fun PhotoEditorScreen(
             }
             selectedDomain == EditorDomain.CROP -> viewModel.resetCrop()
             selectedDomain == EditorDomain.PRESETS -> viewModel.setFilter(FilterType.NONE)
-            selectedDomain == EditorDomain.RETOUCH -> viewModel.clearRetouchStrokes()
+            selectedDomain in listOf(
+                EditorDomain.BLEMISH,
+                EditorDomain.SMOOTH,
+                EditorDomain.HEAL,
+                EditorDomain.SKIN_TONE
+            ) -> viewModel.clearRetouchStrokes()
             selectedDomain == EditorDomain.MASK -> viewModel.clearMask()
             selectedDomain == EditorDomain.TEXT -> viewModel.clearTextOverlays()
             selectedDomain == EditorDomain.SHAPE -> viewModel.clearShapes()
             selectedDomain == EditorDomain.CALLOUT -> viewModel.clearCallouts()
             selectedDomain == EditorDomain.FRAME -> viewModel.clearFrame()
-            selectedDomain == EditorDomain.OVERLAYS -> viewModel.clearStickers()
             selectedDomain == EditorDomain.AI_TOOLS -> viewModel.setAiExpand(0f)
         }
         Toast.makeText(context, "Reset ${selectedDomain.label}", Toast.LENGTH_SHORT).show()
@@ -462,13 +466,27 @@ fun PhotoEditorScreen(
                                              EditorDomain.VIGNETTE -> viewModel.setActiveTool(EditorTool.ADJUST)
                                              EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
                                              EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
-                                             EditorDomain.RETOUCH -> viewModel.setActiveTool(EditorTool.RETOUCH)
+                                             EditorDomain.BLEMISH -> {
+                                                 viewModel.setActiveTool(EditorTool.RETOUCH)
+                                                 activeRetouchType = RetouchType.BLEMISH
+                                             }
+                                             EditorDomain.SMOOTH -> {
+                                                 viewModel.setActiveTool(EditorTool.RETOUCH)
+                                                 activeRetouchType = RetouchType.SKIN_SMOOTH
+                                             }
+                                             EditorDomain.HEAL -> {
+                                                 viewModel.setActiveTool(EditorTool.RETOUCH)
+                                                 activeRetouchType = RetouchType.PATCH_HEALING
+                                             }
+                                             EditorDomain.SKIN_TONE -> {
+                                                 viewModel.setActiveTool(EditorTool.RETOUCH)
+                                                 activeRetouchType = RetouchType.SKIN_TONE
+                                             }
                                              EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
                                              EditorDomain.TEXT -> viewModel.setActiveTool(EditorTool.TEXT)
                                              EditorDomain.SHAPE -> viewModel.setActiveTool(EditorTool.SHAPE)
                                              EditorDomain.CALLOUT -> viewModel.setActiveTool(EditorTool.CALLOUT)
                                              EditorDomain.FRAME -> viewModel.setActiveTool(EditorTool.FRAME)
-                                             EditorDomain.OVERLAYS -> viewModel.setActiveTool(EditorTool.STICKER)
                                              EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
                                          }
                                      },
@@ -652,13 +670,27 @@ fun PhotoEditorScreen(
                                     EditorDomain.VIGNETTE -> viewModel.setActiveTool(EditorTool.ADJUST)
                                     EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
                                     EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
-                                    EditorDomain.RETOUCH -> viewModel.setActiveTool(EditorTool.RETOUCH)
+                                    EditorDomain.BLEMISH -> {
+                                        viewModel.setActiveTool(EditorTool.RETOUCH)
+                                        activeRetouchType = RetouchType.BLEMISH
+                                    }
+                                    EditorDomain.SMOOTH -> {
+                                        viewModel.setActiveTool(EditorTool.RETOUCH)
+                                        activeRetouchType = RetouchType.SKIN_SMOOTH
+                                    }
+                                    EditorDomain.HEAL -> {
+                                        viewModel.setActiveTool(EditorTool.RETOUCH)
+                                        activeRetouchType = RetouchType.PATCH_HEALING
+                                    }
+                                    EditorDomain.SKIN_TONE -> {
+                                        viewModel.setActiveTool(EditorTool.RETOUCH)
+                                        activeRetouchType = RetouchType.SKIN_TONE
+                                    }
                                     EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
                                     EditorDomain.TEXT -> viewModel.setActiveTool(EditorTool.TEXT)
                                     EditorDomain.SHAPE -> viewModel.setActiveTool(EditorTool.SHAPE)
                                     EditorDomain.CALLOUT -> viewModel.setActiveTool(EditorTool.CALLOUT)
                                     EditorDomain.FRAME -> viewModel.setActiveTool(EditorTool.FRAME)
-                                    EditorDomain.OVERLAYS -> viewModel.setActiveTool(EditorTool.STICKER)
                                     EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
                                 }
                             },
