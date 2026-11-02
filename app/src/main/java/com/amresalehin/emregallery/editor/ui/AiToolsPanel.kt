@@ -39,12 +39,9 @@ enum class AiSubTool(val label: String) {
 @Composable
 fun AiToolsPanel(
     aiSettings: AiEditSettings,
-    onToggleAutoEnhance: (Boolean) -> Unit = {},
-    onAutoEnhanceIntensityChange: (Float) -> Unit = {},
     onExpandRatioChange: (Float) -> Unit,
     onSelectStyleTransfer: (AiStyleTransfer?) -> Unit,
     onSelectTryOn: (AiTryOnStyle?) -> Unit,
-    onAutoTone: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var activeSubTool by remember { mutableStateOf(AiSubTool.EXPAND) }

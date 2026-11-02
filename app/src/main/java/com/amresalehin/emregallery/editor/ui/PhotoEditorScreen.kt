@@ -75,33 +75,21 @@ fun PhotoEditorScreen(
     // 05. Bottom Navigation Domain State
     var selectedDomain by remember { mutableStateOf(EditorDomain.LIGHT) }
 
-    // 04. Contextual Subtool States
-    var activeLightSubtool by remember { mutableStateOf(LightSubtool.ALL) }
-    var activeColorSubtool by remember { mutableStateOf(ColorSubtool.BASIC) }
-    var activeCurvesSubtool by remember { mutableStateOf(CurvesSubtool.RGB) }
-    var activeEffectsSubtool by remember { mutableStateOf(EffectsSubtool.ALL) }
-    var activeDetailSubtool by remember { mutableStateOf(DetailSubtool.ALL) }
-    var activeBlurSubtool by remember { mutableStateOf(BlurSubtool.CUSTOM) }
-    var activeVignetteSubtool by remember { mutableStateOf(VignetteSubtool.CUSTOM) }
-    var activeCropSubtool by remember { mutableStateOf(CropSubtool.ASPECT) }
-    var activeRetouchSubtool by remember { mutableStateOf(RetouchSubtool.BLEMISH) }
+    // 04. Contextual Subtool States (for domains with sub-options)
     var activeMaskSubtool by remember { mutableStateOf(MaskSubtool.BRUSH) }
     var activeTextSubtool by remember { mutableStateOf(TextSubtool.ALL) }
     var activeShapeSubtool by remember { mutableStateOf(ShapeSubtool.SHAPES) }
     var activeCalloutSubtool by remember { mutableStateOf(CalloutSubtool.STYLES) }
     var activeFrameSubtool by remember { mutableStateOf(FrameSubtool.FRAMES) }
-    var activeOverlaysSubtool by remember { mutableStateOf(OverlaysSubtool.STICKERS) }
     var activeAiSubtool by remember { mutableStateOf(AiSubtool.EXPAND) }
 
-    // Precision sub-mode channel & band states
+    // Precision sub-mode channel state
     var activeCurveChannel by remember { mutableStateOf(CurveChannel.RGB) }
     var selectedProfileCategory by remember { mutableStateOf("ALL") }
-    var selectedColorMixBand by remember { mutableStateOf(ColorBand.RED) }
 
     // Floating HUD slider state for interactive drag feedback
     var activeDraggingSliderName by remember { mutableStateOf<String?>(null) }
     var activeDraggingSliderValue by remember { mutableStateOf("") }
-    var activeDraggingSliderCurrentValue by remember { mutableFloatStateOf(0f) }
 
     // Secondary editing tools state
     var selectedCropPreset by remember { mutableStateOf(AspectRatioPreset.FREE) }
@@ -216,7 +204,6 @@ fun PhotoEditorScreen(
     fun startSliderDrag(name: String, formattedVal: String, initialVal: Float) {
         activeDraggingSliderName = name
         activeDraggingSliderValue = formattedVal
-        activeDraggingSliderCurrentValue = initialVal
     }
 
     fun finishSliderDrag() {
@@ -328,460 +315,242 @@ fun PhotoEditorScreen(
         ) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val editorMaxHeight = maxHeight
-                if (isLandscape) {
-                    // ==========================================
-                    // LANDSCAPE-SPECIFIC TWO-COLUMN COMPOSITION
-                    // ==========================================
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        // 01. Top Toolbar (Persistent)
-                        EditorTopToolbar(
-                            onBack = handleCancel,
-                            onOpenVersions = { showHistoryDialog = true },
-                            onQuickSave = { doSave(false, 95) },
-                            onSaveCopy = { doSave(false, 95) },
-                            onExportOptions = { showExportSheet = true },
-                            onShare = sharePhoto,
-                            onRevert = {
-                                viewModel.revertToOriginal()
-                                Toast.makeText(context, "Reverted to original", Toast.LENGTH_SHORT).show()
-                            },
-                            onCopySettings = {
-                                viewModel.copySettings()
-                                Toast.makeText(context, "Settings copied to clipboard", Toast.LENGTH_SHORT).show()
-                            },
-                            onPasteSettings = {
-                                if (viewModel.pasteSettings()) {
-                                    Toast.makeText(context, "Settings applied", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            canPasteSettings = viewModel.hasCopiedSettings(),
-                            versionCount = viewModel.getHistoryList().size,
-                            colors = colors
-                        )
+                // Reusable composable components for Zone 01 - 05
+                val renderTopToolbar = @Composable {
+                    EditorTopToolbar(
+                        onBack = handleCancel,
+                        onOpenVersions = { showHistoryDialog = true },
+                        onQuickSave = { doSave(false, 95) },
+                        onSaveCopy = { doSave(false, 95) },
+                        onExportOptions = { showExportSheet = true },
+                        onShare = sharePhoto,
+                        onRevert = {
+                            viewModel.revertToOriginal()
+                            Toast.makeText(context, "Reverted to original", Toast.LENGTH_SHORT).show()
+                        },
+                        onCopySettings = {
+                            viewModel.copySettings()
+                            Toast.makeText(context, "Settings copied to clipboard", Toast.LENGTH_SHORT).show()
+                        },
+                        onPasteSettings = {
+                            if (viewModel.pasteSettings()) {
+                                Toast.makeText(context, "Settings applied", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        canPasteSettings = viewModel.hasCopiedSettings(),
+                        versionCount = viewModel.getHistoryList().size,
+                        colors = colors
+                    )
+                }
 
+                val renderWorkspace = @Composable { workspaceModifier: Modifier ->
+                    EditorWorkspace(
+                        previewBitmap = previewBitmap,
+                        originalBitmap = originalBitmap,
+                        activeTool = activeTool,
+                        selectedBrushType = selectedBrushType,
+                        selectedBrushColor = selectedBrushColor,
+                        brushWidth = if (selectedDomain in listOf(EditorDomain.BLEMISH, EditorDomain.SMOOTH, EditorDomain.HEAL, EditorDomain.SKIN_TONE)) (currentRetouchRadius / 1.5f) else brushWidth,
+                        brushOpacity = brushOpacity,
+                        brushHardness = brushHardness,
+                        activeRetouchType = currentRetouchType,
+                        healingIntensity = currentRetouchIntensity,
+                        healingTintColor = currentRetouchTintColor,
+                        cropAspectRatio = if (selectedDomain == EditorDomain.CROP) selectedCropPreset.ratio else null,
+                        isCurveMode = currentMode == EditorMode.CURVES || selectedDomain == EditorDomain.CURVES,
+                        activeCurveChannel = activeCurveChannel,
+                        sessionState = sessionState,
+                        viewModel = viewModel,
+                        activeDraggingSliderName = activeDraggingSliderName,
+                        activeDraggingSliderValue = activeDraggingSliderValue,
+                        isReplaying = isReplaying,
+                        replayProgress = replayProgress,
+                        isEyedropperActive = isEyedropperActive,
+                        onColorPicked = {
+                            selectedBrushColor = it
+                            isEyedropperActive = false
+                        },
+                        modifier = workspaceModifier,
+                        colors = colors
+                    )
+                }
+
+                val renderOperationToolbar = @Composable {
+                    EditorOperationToolbar(
+                        canUndo = canUndo && !isReplaying,
+                        canRedo = canRedo && !isReplaying,
+                        onCancel = handleCancel,
+                        onUndo = { viewModel.undo() },
+                        onRedo = { viewModel.redo() },
+                        onReset = handleReset,
+                        onApply = handleApply,
+                        colors = colors
+                    )
+                }
+
+                val renderContextualPanel = @Composable { panelModifier: Modifier ->
+                    EditorContextualPanel(
+                        selectedDomain = selectedDomain,
+                        sessionState = sessionState,
+                        viewModel = viewModel,
+                        activeMaskSubtool = activeMaskSubtool,
+                        onSelectMaskSubtool = { activeMaskSubtool = it },
+                        activeTextSubtool = activeTextSubtool,
+                        onSelectTextSubtool = { activeTextSubtool = it },
+                        activeShapeSubtool = activeShapeSubtool,
+                        onSelectShapeSubtool = { activeShapeSubtool = it },
+                        activeCalloutSubtool = activeCalloutSubtool,
+                        onSelectCalloutSubtool = { activeCalloutSubtool = it },
+                        activeFrameSubtool = activeFrameSubtool,
+                        onSelectFrameSubtool = { activeFrameSubtool = it },
+                        activeAiSubtool = activeAiSubtool,
+                        onSelectAiSubtool = { activeAiSubtool = it },
+                        onSliderDragStart = ::startSliderDrag,
+                        onSliderDragFinished = ::finishSliderDrag,
+                        onOpenCurvesMode = { viewModel.enterMode(EditorMode.CURVES) },
+                        onOpenColorMixMode = { viewModel.enterMode(EditorMode.COLOR_MIX) },
+                        onOpenColorGradingMode = { viewModel.enterMode(EditorMode.COLOR_GRADING) },
+                        selectedProfileCategory = selectedProfileCategory,
+                        onSelectProfileCategory = { selectedProfileCategory = it },
+                        selectedCropPreset = selectedCropPreset,
+                        onSelectCropPreset = { selectedCropPreset = it },
+                        currentLiquifyMode = currentLiquifyMode,
+                        onLiquifyModeChange = { currentLiquifyMode = it },
+                        liquifyRadius = liquifyRadius,
+                        onLiquifyRadiusChange = { liquifyRadius = it },
+                        liquifyStrength = liquifyStrength,
+                        onLiquifyStrengthChange = { liquifyStrength = it },
+                        activeRetouchType = currentRetouchType,
+                        onSelectRetouchType = { activeRetouchType = it },
+                        healingIntensity = currentRetouchIntensity,
+                        onHealingIntensityChange = { healingIntensity = it },
+                        healingTintColor = currentRetouchTintColor,
+                        onHealingTintColorChange = { healingTintColor = it },
+                        brushWidth = brushWidth,
+                        onBrushWidthChange = { brushWidth = it },
+                        blemishRadius = blemishRadius,
+                        onBlemishRadiusChange = { blemishRadius = it },
+                        blemishIntensity = blemishIntensity,
+                        onBlemishIntensityChange = { blemishIntensity = it },
+                        smoothRadius = smoothRadius,
+                        onSmoothRadiusChange = { smoothRadius = it },
+                        smoothIntensity = smoothIntensity,
+                        onSmoothIntensityChange = { smoothIntensity = it },
+                        healRadius = healRadius,
+                        onHealRadiusChange = { healRadius = it },
+                        healIntensity = healIntensity,
+                        onHealIntensityChange = { healIntensity = it },
+                        healRetouchType = healRetouchType,
+                        onSelectHealRetouchType = { healRetouchType = it },
+                        skinToneRadius = skinToneRadius,
+                        onSkinToneRadiusChange = { skinToneRadius = it },
+                        skinToneIntensity = skinToneIntensity,
+                        onSkinToneIntensityChange = { skinToneIntensity = it },
+                        skinToneColor = skinToneColor,
+                        onSkinToneColorChange = { skinToneColor = it },
+                        maskingSelectionType = maskingSelectionType,
+                        onSelectMaskingType = { maskingSelectionType = it },
+                        brushOpacity = brushOpacity,
+                        onBrushOpacityChange = { brushOpacity = it },
+                        brushFlow = brushFlow,
+                        onBrushFlowChange = { brushFlow = it },
+                        selectedBrushType = selectedBrushType,
+                        onSelectBrushType = { selectedBrushType = it },
+                        selectedBrushColor = selectedBrushColor,
+                        onSelectBrushColor = { selectedBrushColor = it },
+                        onOpenMaskCreationSheet = {},
+                        onFrameChange = { viewModel.setFrame(it) },
+                        onBorderChange = { viewModel.setBorder(it) },
+                        modifier = panelModifier,
+                        colors = colors
+                    )
+                }
+
+                val renderBottomNavigation = @Composable {
+                    EditorBottomNavigation(
+                        selectedDomain = selectedDomain,
+                        onSelectDomain = { domain ->
+                            selectedDomain = domain
+                            when (domain) {
+                                EditorDomain.LIGHT,
+                                EditorDomain.COLOR,
+                                EditorDomain.EFFECTS,
+                                EditorDomain.DETAIL,
+                                EditorDomain.BLUR,
+                                EditorDomain.VIGNETTE -> viewModel.setActiveTool(EditorTool.ADJUST)
+                                EditorDomain.CURVES -> viewModel.setActiveTool(EditorTool.CURVES)
+                                EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
+                                EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
+                                EditorDomain.BLEMISH -> {
+                                    viewModel.setActiveTool(EditorTool.RETOUCH)
+                                    activeRetouchType = RetouchType.BLEMISH
+                                }
+                                EditorDomain.SMOOTH -> {
+                                    viewModel.setActiveTool(EditorTool.RETOUCH)
+                                    activeRetouchType = RetouchType.SKIN_SMOOTH
+                                }
+                                EditorDomain.HEAL -> {
+                                    viewModel.setActiveTool(EditorTool.RETOUCH)
+                                    activeRetouchType = RetouchType.PATCH_HEALING
+                                }
+                                EditorDomain.SKIN_TONE -> {
+                                    viewModel.setActiveTool(EditorTool.RETOUCH)
+                                    activeRetouchType = RetouchType.SKIN_TONE
+                                }
+                                EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
+                                EditorDomain.TEXT -> viewModel.setActiveTool(EditorTool.TEXT)
+                                EditorDomain.SHAPE -> viewModel.setActiveTool(EditorTool.SHAPE)
+                                EditorDomain.CALLOUT -> viewModel.setActiveTool(EditorTool.CALLOUT)
+                                EditorDomain.FRAME -> viewModel.setActiveTool(EditorTool.FRAME)
+                                EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
+                            }
+                        },
+                        colors = colors
+                    )
+                }
+
+                if (isLandscape) {
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        renderTopToolbar()
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
                         ) {
-                            // Left Column: 02. Main Workspace + 03. Operation Toolbar
                             Column(
                                 modifier = Modifier
                                     .weight(1.2f)
                                     .fillMaxHeight()
                             ) {
-                                EditorWorkspace(
-                                    previewBitmap = previewBitmap,
-                                    originalBitmap = originalBitmap,
-                                    activeTool = activeTool,
-                                    selectedBrushType = selectedBrushType,
-                                    selectedBrushColor = selectedBrushColor,
-                                    brushWidth = if (selectedDomain in listOf(EditorDomain.BLEMISH, EditorDomain.SMOOTH, EditorDomain.HEAL, EditorDomain.SKIN_TONE)) (currentRetouchRadius / 1.5f) else brushWidth,
-                                    brushOpacity = brushOpacity,
-                                    brushHardness = brushHardness,
-                                    activeRetouchType = currentRetouchType,
-                                    healingIntensity = currentRetouchIntensity,
-                                    healingTintColor = currentRetouchTintColor,
-                                    cropAspectRatio = if (selectedDomain == EditorDomain.CROP) selectedCropPreset.ratio else null,
-                                    isCurveMode = currentMode == EditorMode.CURVES || selectedDomain == EditorDomain.CURVES,
-                                    activeCurveChannel = activeCurveChannel,
-                                    sessionState = sessionState,
-                                    viewModel = viewModel,
-                                    activeDraggingSliderName = activeDraggingSliderName,
-                                    activeDraggingSliderValue = activeDraggingSliderValue,
-                                    isReplaying = isReplaying,
-                                    replayProgress = replayProgress,
-                                    isEyedropperActive = isEyedropperActive,
-                                    onColorPicked = {
-                                        selectedBrushColor = it
-                                        isEyedropperActive = false
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f),
-                                    colors = colors
-                                )
-
-                                EditorOperationToolbar(
-                                    canUndo = canUndo && !isReplaying,
-                                    canRedo = canRedo && !isReplaying,
-                                    onCancel = handleCancel,
-                                    onUndo = { viewModel.undo() },
-                                    onRedo = { viewModel.redo() },
-                                    onReset = handleReset,
-                                    onApply = handleApply,
-                                    colors = colors
-                                )
+                                renderWorkspace(Modifier.fillMaxWidth().weight(1f))
+                                renderOperationToolbar()
                             }
-
-                            // Right Column: 04. Contextual Editing Panel + 05. Bottom Navigation
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
                             ) {
-                                EditorContextualPanel(
-                                    selectedDomain = selectedDomain,
-                                    sessionState = sessionState,
-                                    viewModel = viewModel,
-                                    activeLightSubtool = activeLightSubtool,
-                                    onSelectLightSubtool = { activeLightSubtool = it },
-                                    activeColorSubtool = activeColorSubtool,
-                                    onSelectColorSubtool = { activeColorSubtool = it },
-                                    activeCurvesSubtool = activeCurvesSubtool,
-                                    onSelectCurvesSubtool = { activeCurvesSubtool = it },
-                                    activeEffectsSubtool = activeEffectsSubtool,
-                                    onSelectEffectsSubtool = { activeEffectsSubtool = it },
-                                    activeDetailSubtool = activeDetailSubtool,
-                                    onSelectDetailSubtool = { activeDetailSubtool = it },
-                                    activeBlurSubtool = activeBlurSubtool,
-                                    onSelectBlurSubtool = { activeBlurSubtool = it },
-                                    activeVignetteSubtool = activeVignetteSubtool,
-                                    onSelectVignetteSubtool = { activeVignetteSubtool = it },
-                                    activeCropSubtool = activeCropSubtool,
-                                    onSelectCropSubtool = { activeCropSubtool = it },
-                                    activeRetouchSubtool = activeRetouchSubtool,
-                                    onSelectRetouchSubtool = { activeRetouchSubtool = it },
-                                    activeMaskSubtool = activeMaskSubtool,
-                                    onSelectMaskSubtool = { activeMaskSubtool = it },
-                                    activeTextSubtool = activeTextSubtool,
-                                    onSelectTextSubtool = { activeTextSubtool = it },
-                                    activeShapeSubtool = activeShapeSubtool,
-                                    onSelectShapeSubtool = { activeShapeSubtool = it },
-                                    activeCalloutSubtool = activeCalloutSubtool,
-                                    onSelectCalloutSubtool = { activeCalloutSubtool = it },
-                                    activeFrameSubtool = activeFrameSubtool,
-                                    onSelectFrameSubtool = { activeFrameSubtool = it },
-                                    activeOverlaysSubtool = activeOverlaysSubtool,
-                                    onSelectOverlaysSubtool = { activeOverlaysSubtool = it },
-                                    activeAiSubtool = activeAiSubtool,
-                                    onSelectAiSubtool = { activeAiSubtool = it },
-                                    onSliderDragStart = ::startSliderDrag,
-                                    onSliderDragFinished = ::finishSliderDrag,
-                                    onOpenCurvesMode = { viewModel.enterMode(EditorMode.CURVES) },
-                                    onOpenColorMixMode = { viewModel.enterMode(EditorMode.COLOR_MIX) },
-                                    onOpenColorGradingMode = { viewModel.enterMode(EditorMode.COLOR_GRADING) },
-                                    selectedProfileCategory = selectedProfileCategory,
-                                    onSelectProfileCategory = { selectedProfileCategory = it },
-                                    selectedCropPreset = selectedCropPreset,
-                                    onSelectCropPreset = { selectedCropPreset = it },
-                                    currentLiquifyMode = currentLiquifyMode,
-                                    onLiquifyModeChange = { currentLiquifyMode = it },
-                                    liquifyRadius = liquifyRadius,
-                                    onLiquifyRadiusChange = { liquifyRadius = it },
-                                    liquifyStrength = liquifyStrength,
-                                    onLiquifyStrengthChange = { liquifyStrength = it },
-                                    activeRetouchType = currentRetouchType,
-                                    onSelectRetouchType = { activeRetouchType = it },
-                                    healingIntensity = currentRetouchIntensity,
-                                    onHealingIntensityChange = { healingIntensity = it },
-                                    healingTintColor = currentRetouchTintColor,
-                                    onHealingTintColorChange = { healingTintColor = it },
-                                    brushWidth = brushWidth,
-                                    onBrushWidthChange = { brushWidth = it },
-                                    blemishRadius = blemishRadius,
-                                    onBlemishRadiusChange = { blemishRadius = it },
-                                    blemishIntensity = blemishIntensity,
-                                    onBlemishIntensityChange = { blemishIntensity = it },
-                                    smoothRadius = smoothRadius,
-                                    onSmoothRadiusChange = { smoothRadius = it },
-                                    smoothIntensity = smoothIntensity,
-                                    onSmoothIntensityChange = { smoothIntensity = it },
-                                    healRadius = healRadius,
-                                    onHealRadiusChange = { healRadius = it },
-                                    healIntensity = healIntensity,
-                                    onHealIntensityChange = { healIntensity = it },
-                                    healRetouchType = healRetouchType,
-                                    onSelectHealRetouchType = { healRetouchType = it },
-                                    skinToneRadius = skinToneRadius,
-                                    onSkinToneRadiusChange = { skinToneRadius = it },
-                                    skinToneIntensity = skinToneIntensity,
-                                    onSkinToneIntensityChange = { skinToneIntensity = it },
-                                    skinToneColor = skinToneColor,
-                                    onSkinToneColorChange = { skinToneColor = it },
-                                    maskingSelectionType = maskingSelectionType,
-                                    onSelectMaskingType = { maskingSelectionType = it },
-                                    brushOpacity = brushOpacity,
-                                    onBrushOpacityChange = { brushOpacity = it },
-                                    brushFlow = brushFlow,
-                                    onBrushFlowChange = { brushFlow = it },
-                                    selectedBrushType = selectedBrushType,
-                                    onSelectBrushType = { selectedBrushType = it },
-                                    selectedBrushColor = selectedBrushColor,
-                                    onSelectBrushColor = { selectedBrushColor = it },
-                                    onOpenMaskCreationSheet = {},
-                                    onFrameChange = { viewModel.setFrame(it) },
-                                    onBorderChange = { viewModel.setBorder(it) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f),
-                                    colors = colors
-                                 )
-
-                                 EditorBottomNavigation(
-                                     selectedDomain = selectedDomain,
-                                     onSelectDomain = { domain ->
-                                         selectedDomain = domain
-                                         when (domain) {
-                                             EditorDomain.LIGHT -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                             EditorDomain.COLOR -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                             EditorDomain.CURVES -> viewModel.setActiveTool(EditorTool.CURVES)
-                                             EditorDomain.EFFECTS -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                             EditorDomain.DETAIL -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                             EditorDomain.BLUR -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                             EditorDomain.VIGNETTE -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                             EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
-                                             EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
-                                             EditorDomain.BLEMISH -> {
-                                                 viewModel.setActiveTool(EditorTool.RETOUCH)
-                                                 activeRetouchType = RetouchType.BLEMISH
-                                             }
-                                             EditorDomain.SMOOTH -> {
-                                                 viewModel.setActiveTool(EditorTool.RETOUCH)
-                                                 activeRetouchType = RetouchType.SKIN_SMOOTH
-                                             }
-                                             EditorDomain.HEAL -> {
-                                                 viewModel.setActiveTool(EditorTool.RETOUCH)
-                                                 activeRetouchType = RetouchType.PATCH_HEALING
-                                             }
-                                             EditorDomain.SKIN_TONE -> {
-                                                 viewModel.setActiveTool(EditorTool.RETOUCH)
-                                                 activeRetouchType = RetouchType.SKIN_TONE
-                                             }
-                                             EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
-                                             EditorDomain.TEXT -> viewModel.setActiveTool(EditorTool.TEXT)
-                                             EditorDomain.SHAPE -> viewModel.setActiveTool(EditorTool.SHAPE)
-                                             EditorDomain.CALLOUT -> viewModel.setActiveTool(EditorTool.CALLOUT)
-                                             EditorDomain.FRAME -> viewModel.setActiveTool(EditorTool.FRAME)
-                                             EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
-                                         }
-                                     },
-                                     colors = colors
-                                 )
+                                renderContextualPanel(Modifier.fillMaxWidth().weight(1f))
+                                renderBottomNavigation()
                             }
                         }
                     }
                 } else {
-                    // ==========================================
-                    // PORTRAIT COMPOSITION (5 PRINCIPAL ZONES)
-                    // ==========================================
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(colors.baseSurface)
                     ) {
-                        // 01. Top Toolbar (Persistent)
-                        EditorTopToolbar(
-                            onBack = handleCancel,
-                            onOpenVersions = { showHistoryDialog = true },
-                            onQuickSave = { doSave(false, 95) },
-                            onSaveCopy = { doSave(false, 95) },
-                            onExportOptions = { showExportSheet = true },
-                            onShare = sharePhoto,
-                            onRevert = {
-                                viewModel.revertToOriginal()
-                                Toast.makeText(context, "Reverted to original", Toast.LENGTH_SHORT).show()
-                            },
-                            onCopySettings = {
-                                viewModel.copySettings()
-                                Toast.makeText(context, "Settings copied to clipboard", Toast.LENGTH_SHORT).show()
-                            },
-                            onPasteSettings = {
-                                if (viewModel.pasteSettings()) {
-                                    Toast.makeText(context, "Settings applied", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            canPasteSettings = viewModel.hasCopiedSettings(),
-                            versionCount = viewModel.getHistoryList().size,
-                            colors = colors
-                        )
-
-                        // 02. Main Workspace (Image / Video Canvas)
-                        EditorWorkspace(
-                            previewBitmap = previewBitmap,
-                            originalBitmap = originalBitmap,
-                            activeTool = activeTool,
-                            selectedBrushType = selectedBrushType,
-                            selectedBrushColor = selectedBrushColor,
-                            brushWidth = if (selectedDomain in listOf(EditorDomain.BLEMISH, EditorDomain.SMOOTH, EditorDomain.HEAL, EditorDomain.SKIN_TONE)) (currentRetouchRadius / 1.5f) else brushWidth,
-                            brushOpacity = brushOpacity,
-                            brushHardness = brushHardness,
-                            activeRetouchType = currentRetouchType,
-                            healingIntensity = currentRetouchIntensity,
-                            healingTintColor = currentRetouchTintColor,
-                            cropAspectRatio = if (selectedDomain == EditorDomain.CROP) selectedCropPreset.ratio else null,
-                            isCurveMode = currentMode == EditorMode.CURVES || selectedDomain == EditorDomain.CURVES,
-                            activeCurveChannel = activeCurveChannel,
-                            sessionState = sessionState,
-                            viewModel = viewModel,
-                            activeDraggingSliderName = activeDraggingSliderName,
-                            activeDraggingSliderValue = activeDraggingSliderValue,
-                            isReplaying = isReplaying,
-                            replayProgress = replayProgress,
-                            isEyedropperActive = isEyedropperActive,
-                            onColorPicked = {
-                                selectedBrushColor = it
-                                isEyedropperActive = false
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            colors = colors
-                        )
-
-                        // 03. Operation Toolbar (Cancel · Undo · Redo · Reset · Apply)
-                        EditorOperationToolbar(
-                            canUndo = canUndo && !isReplaying,
-                            canRedo = canRedo && !isReplaying,
-                            onCancel = handleCancel,
-                            onUndo = { viewModel.undo() },
-                            onRedo = { viewModel.redo() },
-                            onReset = handleReset,
-                            onApply = handleApply,
-                            colors = colors
-                        )
-
-                        // 04. Contextual Editing Panel (capped strictly at 40% maximum height)
+                        renderTopToolbar()
+                        renderWorkspace(Modifier.fillMaxWidth().weight(1f))
+                        renderOperationToolbar()
                         val contextualPanelMaxHeight = editorMaxHeight * 0.40f
-                        EditorContextualPanel(
-                            selectedDomain = selectedDomain,
-                            sessionState = sessionState,
-                            viewModel = viewModel,
-                            activeLightSubtool = activeLightSubtool,
-                            onSelectLightSubtool = { activeLightSubtool = it },
-                            activeColorSubtool = activeColorSubtool,
-                            onSelectColorSubtool = { activeColorSubtool = it },
-                            activeCurvesSubtool = activeCurvesSubtool,
-                            onSelectCurvesSubtool = { activeCurvesSubtool = it },
-                            activeEffectsSubtool = activeEffectsSubtool,
-                            onSelectEffectsSubtool = { activeEffectsSubtool = it },
-                            activeDetailSubtool = activeDetailSubtool,
-                            onSelectDetailSubtool = { activeDetailSubtool = it },
-                            activeBlurSubtool = activeBlurSubtool,
-                            onSelectBlurSubtool = { activeBlurSubtool = it },
-                            activeVignetteSubtool = activeVignetteSubtool,
-                            onSelectVignetteSubtool = { activeVignetteSubtool = it },
-                            activeCropSubtool = activeCropSubtool,
-                            onSelectCropSubtool = { activeCropSubtool = it },
-                            activeRetouchSubtool = activeRetouchSubtool,
-                            onSelectRetouchSubtool = { activeRetouchSubtool = it },
-                            activeMaskSubtool = activeMaskSubtool,
-                            onSelectMaskSubtool = { activeMaskSubtool = it },
-                            activeTextSubtool = activeTextSubtool,
-                            onSelectTextSubtool = { activeTextSubtool = it },
-                            activeShapeSubtool = activeShapeSubtool,
-                            onSelectShapeSubtool = { activeShapeSubtool = it },
-                            activeCalloutSubtool = activeCalloutSubtool,
-                            onSelectCalloutSubtool = { activeCalloutSubtool = it },
-                            activeFrameSubtool = activeFrameSubtool,
-                            onSelectFrameSubtool = { activeFrameSubtool = it },
-                            activeOverlaysSubtool = activeOverlaysSubtool,
-                            onSelectOverlaysSubtool = { activeOverlaysSubtool = it },
-                            activeAiSubtool = activeAiSubtool,
-                            onSelectAiSubtool = { activeAiSubtool = it },
-                            onSliderDragStart = ::startSliderDrag,
-                            onSliderDragFinished = ::finishSliderDrag,
-                            onOpenCurvesMode = { viewModel.enterMode(EditorMode.CURVES) },
-                            onOpenColorMixMode = { viewModel.enterMode(EditorMode.COLOR_MIX) },
-                            onOpenColorGradingMode = { viewModel.enterMode(EditorMode.COLOR_GRADING) },
-                            selectedProfileCategory = selectedProfileCategory,
-                            onSelectProfileCategory = { selectedProfileCategory = it },
-                            selectedCropPreset = selectedCropPreset,
-                            onSelectCropPreset = { selectedCropPreset = it },
-                            currentLiquifyMode = currentLiquifyMode,
-                            onLiquifyModeChange = { currentLiquifyMode = it },
-                            liquifyRadius = liquifyRadius,
-                            onLiquifyRadiusChange = { liquifyRadius = it },
-                            liquifyStrength = liquifyStrength,
-                            onLiquifyStrengthChange = { liquifyStrength = it },
-                            activeRetouchType = currentRetouchType,
-                            onSelectRetouchType = { activeRetouchType = it },
-                            healingIntensity = currentRetouchIntensity,
-                            onHealingIntensityChange = { healingIntensity = it },
-                            healingTintColor = currentRetouchTintColor,
-                            onHealingTintColorChange = { healingTintColor = it },
-                            brushWidth = brushWidth,
-                            onBrushWidthChange = { brushWidth = it },
-                            blemishRadius = blemishRadius,
-                            onBlemishRadiusChange = { blemishRadius = it },
-                            blemishIntensity = blemishIntensity,
-                            onBlemishIntensityChange = { blemishIntensity = it },
-                            smoothRadius = smoothRadius,
-                            onSmoothRadiusChange = { smoothRadius = it },
-                            smoothIntensity = smoothIntensity,
-                            onSmoothIntensityChange = { smoothIntensity = it },
-                            healRadius = healRadius,
-                            onHealRadiusChange = { healRadius = it },
-                            healIntensity = healIntensity,
-                            onHealIntensityChange = { healIntensity = it },
-                            healRetouchType = healRetouchType,
-                            onSelectHealRetouchType = { healRetouchType = it },
-                            skinToneRadius = skinToneRadius,
-                            onSkinToneRadiusChange = { skinToneRadius = it },
-                            skinToneIntensity = skinToneIntensity,
-                            onSkinToneIntensityChange = { skinToneIntensity = it },
-                            skinToneColor = skinToneColor,
-                            onSkinToneColorChange = { skinToneColor = it },
-                            maskingSelectionType = maskingSelectionType,
-                            onSelectMaskingType = { maskingSelectionType = it },
-                            brushOpacity = brushOpacity,
-                            onBrushOpacityChange = { brushOpacity = it },
-                            brushFlow = brushFlow,
-                            onBrushFlowChange = { brushFlow = it },
-                            selectedBrushType = selectedBrushType,
-                            onSelectBrushType = { selectedBrushType = it },
-                            selectedBrushColor = selectedBrushColor,
-                            onSelectBrushColor = { selectedBrushColor = it },
-                            onOpenMaskCreationSheet = {},
-                            onFrameChange = { viewModel.setFrame(it) },
-                            onBorderChange = { viewModel.setBorder(it) },
-                            modifier = Modifier
+                        renderContextualPanel(
+                            Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = contextualPanelMaxHeight),
-                            colors = colors
+                                .heightIn(max = contextualPanelMaxHeight)
                         )
-
-                        // 05. Bottom Navigation (Docked primary access layer)
-                        EditorBottomNavigation(
-                            selectedDomain = selectedDomain,
-                            onSelectDomain = { domain ->
-                                selectedDomain = domain
-                                when (domain) {
-                                    EditorDomain.LIGHT -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                    EditorDomain.COLOR -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                    EditorDomain.CURVES -> viewModel.setActiveTool(EditorTool.CURVES)
-                                    EditorDomain.EFFECTS -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                    EditorDomain.DETAIL -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                    EditorDomain.BLUR -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                    EditorDomain.VIGNETTE -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                    EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
-                                    EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
-                                    EditorDomain.BLEMISH -> {
-                                        viewModel.setActiveTool(EditorTool.RETOUCH)
-                                        activeRetouchType = RetouchType.BLEMISH
-                                    }
-                                    EditorDomain.SMOOTH -> {
-                                        viewModel.setActiveTool(EditorTool.RETOUCH)
-                                        activeRetouchType = RetouchType.SKIN_SMOOTH
-                                    }
-                                    EditorDomain.HEAL -> {
-                                        viewModel.setActiveTool(EditorTool.RETOUCH)
-                                        activeRetouchType = RetouchType.PATCH_HEALING
-                                    }
-                                    EditorDomain.SKIN_TONE -> {
-                                        viewModel.setActiveTool(EditorTool.RETOUCH)
-                                        activeRetouchType = RetouchType.SKIN_TONE
-                                    }
-                                    EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
-                                    EditorDomain.TEXT -> viewModel.setActiveTool(EditorTool.TEXT)
-                                    EditorDomain.SHAPE -> viewModel.setActiveTool(EditorTool.SHAPE)
-                                    EditorDomain.CALLOUT -> viewModel.setActiveTool(EditorTool.CALLOUT)
-                                    EditorDomain.FRAME -> viewModel.setActiveTool(EditorTool.FRAME)
-                                    EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
-                                }
-                            },
-                            colors = colors
-                        )
+                        renderBottomNavigation()
                     }
                 }
 
