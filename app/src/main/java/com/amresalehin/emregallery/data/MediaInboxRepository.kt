@@ -1,0 +1,176 @@
+package com.amresalehin.emregallery.data
+
+import android.content.Context
+import android.content.SharedPreferences
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+data class MediaInboxItem(
+    val id: String,
+    val title: String,
+    val localUri: String,
+    val sourceUrl: String,
+    val isVideo: Boolean,
+    val sizeBytes: Long = 0L,
+    val dateAddedMillis: Long = System.currentTimeMillis()
+)
+
+data class MediaInboxStack(
+    val id: String,
+    val title: String,
+    val sourceDomain: String,
+    val sourceUrl: String,
+    val items: List<MediaInboxItem>,
+    val timestampMillis: Long = System.currentTimeMillis()
+)
+
+class MediaInboxRepository(private val context: Context) {
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("media_inbox_prefs", Context.MODE_PRIVATE)
+
+    private val _stacks = MutableStateFlow<List<MediaInboxStack>>(emptyList())
+    val stacks: StateFlow<List<MediaInboxStack>> = _stacks.asStateFlow()
+
+    init {
+        loadStacks()
+    }
+
+    private fun loadStacks() {
+        val rawJson = prefs.getString(KEY_STACKS_JSON, null)
+        if (rawJson.isNullOrBlank()) {
+            _stacks.value = emptyList()
+            return
+        }
+
+        try {
+            val jsonArray = JSONArray(rawJson)
+            val list = mutableListOf<MediaInboxStack>()
+            for (i in 0 until jsonArray.length()) {
+                val stackObj = jsonArray.getJSONObject(i)
+                val id = stackObj.getString("id")
+                val title = stackObj.optString("title", "Untitled Stack")
+                val sourceDomain = stackObj.optString("sourceDomain", "")
+                val sourceUrl = stackObj.optString("sourceUrl", "")
+                val timestamp = stackObj.optLong("timestampMillis", System.currentTimeMillis())
+
+                val itemsArray = stackObj.optJSONArray("items") ?: JSONArray()
+                val itemsList = mutableListOf<MediaInboxItem>()
+                for (j in 0 until itemsArray.length()) {
+                    val itmObj = itemsArray.getJSONObject(j)
+                    itemsList.add(
+                        MediaInboxItem(
+                            id = itmObj.getString("id"),
+                            title = itmObj.optString("title", "Media"),
+                            localUri = itmObj.getString("localUri"),
+                            sourceUrl = itmObj.optString("sourceUrl", ""),
+                            isVideo = itmObj.optBoolean("isVideo", false),
+                            sizeBytes = itmObj.optLong("sizeBytes", 0L),
+                            dateAddedMillis = itmObj.optLong("dateAddedMillis", timestamp)
+                        )
+                    )
+                }
+
+                list.add(
+                    MediaInboxStack(
+                        id = id,
+                        title = title,
+                        sourceDomain = sourceDomain,
+                        sourceUrl = sourceUrl,
+                        items = itemsList,
+                        timestampMillis = timestamp
+                    )
+                )
+            }
+            _stacks.value = list
+        } catch (e: Exception) {
+            _stacks.value = emptyList()
+        }
+    }
+
+    private fun persist() {
+        try {
+            val jsonArray = JSONArray()
+            _stacks.value.forEach { stack ->
+                val stackObj = JSONObject().apply {
+                    put("id", stack.id)
+                    put("title", stack.title)
+                    put("sourceDomain", stack.sourceDomain)
+                    put("sourceUrl", stack.sourceUrl)
+                    put("timestampMillis", stack.timestampMillis)
+
+                    val itemsArr = JSONArray()
+                    stack.items.forEach { itm ->
+                        val itmObj = JSONObject().apply {
+                            put("id", itm.id)
+                            put("title", itm.title)
+                            put("localUri", itm.localUri)
+                            put("sourceUrl", itm.sourceUrl)
+                            put("isVideo", itm.isVideo)
+                            put("sizeBytes", itm.sizeBytes)
+                            put("dateAddedMillis", itm.dateAddedMillis)
+                        }
+                        itemsArr.put(itmObj)
+                    }
+                    put("items", itemsArr)
+                }
+                jsonArray.put(stackObj)
+            }
+            prefs.edit().putString(KEY_STACKS_JSON, jsonArray.toString()).apply()
+        } catch (e: Exception) {
+            // Log or ignore
+        }
+    }
+
+    fun addStack(stack: MediaInboxStack) {
+        val updated = listOf(stack) + _stacks.value.filter { it.id != stack.id }
+        _stacks.value = updated
+        persist()
+    }
+
+    fun deleteStack(stackId: String) {
+        // Also cleanup local files
+        val stack = _stacks.value.firstOrNull { it.id == stackId }
+        stack?.items?.forEach { item ->
+            try {
+                if (item.localUri.startsWith("file://") || item.localUri.startsWith("/")) {
+                    val path = item.localUri.removePrefix("file://")
+                    val file = File(path)
+                    if (file.exists()) file.delete()
+                }
+            } catch (_: Exception) {}
+        }
+        _stacks.value = _stacks.value.filter { it.id != stackId }
+        persist()
+    }
+
+    fun clearAll() {
+        _stacks.value.forEach { stack ->
+            stack.items.forEach { item ->
+                try {
+                    val path = item.localUri.removePrefix("file://")
+                    val file = File(path)
+                    if (file.exists()) file.delete()
+                } catch (_: Exception) {}
+            }
+        }
+        _stacks.value = emptyList()
+        prefs.edit().remove(KEY_STACKS_JSON).apply()
+    }
+
+    companion object {
+        private const val KEY_STACKS_JSON = "inbox_stacks_json"
+
+        @Volatile
+        private var INSTANCE: MediaInboxRepository? = null
+
+        fun getInstance(context: Context): MediaInboxRepository {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: MediaInboxRepository(context.applicationContext).also { INSTANCE = it }
+            }
+        }
+    }
+}

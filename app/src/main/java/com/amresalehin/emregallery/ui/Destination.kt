@@ -19,7 +19,8 @@ enum class Destination {
     OCR_SETTINGS,
     ABOUT,
     SEARCH,
-    VIEWER
+    VIEWER,
+    MEDIA_INBOX
 }
 
 enum class SearchStage {

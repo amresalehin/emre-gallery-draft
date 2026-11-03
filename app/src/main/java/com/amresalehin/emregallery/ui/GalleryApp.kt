@@ -607,7 +607,8 @@ fun GalleryApp() {
                 Destination.LIBRARY_OVERVIEW,
                 Destination.INDEXING_STATUS,
                 Destination.OCR_SETTINGS,
-                Destination.ABOUT
+                Destination.ABOUT,
+                Destination.MEDIA_INBOX
             ) -> {
                 destination = Destination.SETTINGS
                 viewerStoryTitle = null
@@ -1117,6 +1118,7 @@ fun GalleryApp() {
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
                                 "About" -> navigateTo(Destination.ABOUT)
+                                "Media Downloader" -> navigateTo(Destination.MEDIA_INBOX)
                             }
                         },
                         onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
@@ -1206,6 +1208,15 @@ fun GalleryApp() {
                     )
                     Destination.ABOUT -> AboutScreen(
                         onBack = { performBackNavigation() }
+                    )
+                    Destination.MEDIA_INBOX -> MediaInboxScreen(
+                        onBack = { performBackNavigation() },
+                        onOpenMediaItem = { uri ->
+                            val match = media.firstOrNull { it.uri == uri }
+                            if (match != null) {
+                                openMediaInViewer(match, media)
+                            }
+                        }
                     )
                     Destination.SEARCH -> {
                         val searchScopeMedia = remember(media, hidden, inBin, archive) {
