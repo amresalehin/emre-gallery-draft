@@ -33,6 +33,7 @@ class DualMediaExtractor(private val context: Context) {
 
     enum class ExtractionPhase {
         IDLE,
+        GALLERY_DL,
         STATIC_SCRAPING,
         BROWSER_INTERCEPTING,
         AUTO_SCROLLING,
@@ -66,8 +67,8 @@ class DualMediaExtractor(private val context: Context) {
 
         _state.value = ExtractionState(
             isRunning = true,
-            statusMessage = "Starting dual-engine extraction...",
-            phase = ExtractionPhase.STATIC_SCRAPING,
+            statusMessage = "Starting extraction engine...",
+            phase = ExtractionPhase.GALLERY_DL,
             domain = domain,
             items = emptyList()
         )
@@ -91,6 +92,30 @@ class DualMediaExtractor(private val context: Context) {
                         statusMessage = msg ?: _state.value.statusMessage,
                         phase = phase ?: _state.value.phase
                     )
+                }
+            }
+
+            // Phase 0: High-performance Python Extractor (gallery-dl & yt-dlp)
+            if (GalleryDlEngine.isAvailable()) {
+                _state.value = _state.value.copy(
+                    statusMessage = "Extracting media...",
+                    phase = ExtractionPhase.GALLERY_DL
+                )
+
+                val gdlResult = GalleryDlEngine.extractMedia(normalizedUrl)
+                if (gdlResult.success && gdlResult.items.isNotEmpty()) {
+                    updateItems(
+                        newList = gdlResult.items,
+                        title = gdlResult.pageTitle.ifBlank { domain },
+                        msg = "Discovered ${gdlResult.items.size} media items",
+                        phase = ExtractionPhase.COMPLETED
+                    )
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        phase = ExtractionPhase.COMPLETED,
+                        statusMessage = "Discovered ${gdlResult.items.size} media items"
+                    )
+                    return@launch
                 }
             }
 

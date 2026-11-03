@@ -21,6 +21,7 @@ enum class MediaCategory(val label: String) {
  * Extraction source indicator for transparency.
  */
 enum class ExtractionSource(val label: String) {
+    GALLERY_DL("gallery-dl"),
     STATIC_HTML("HTML"),
     DOM_SCRAPE("DOM"),
     CSS_BACKGROUND("CSS"),

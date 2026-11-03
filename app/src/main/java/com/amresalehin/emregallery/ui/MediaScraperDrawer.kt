@@ -624,46 +624,29 @@ fun MediaScraperDrawer(
                             onClick = {
                                 if (!isDownloadEnabled) return@Surface
                                 isDownloading = true
-                                downloadProgress = 0f
-                                downloadStatusText = "Preparing download..."
+                                downloadProgress = 0.2f
+                                downloadStatusText = "Queueing persistent download..."
                                 scope.launch {
                                     val itemsToDownload = filteredScrapedItems.filter { it.id in selectedItemIds }
-                                    val downloadedInboxItems = mutableListOf<MediaInboxItem>()
+                                    val stackId = "stack_${System.currentTimeMillis()}"
+                                    val stackTitle = extractorState.pageTitle.ifBlank { extractorState.domain.ifBlank { "Discovered Media" } }
 
-                                    itemsToDownload.forEachIndexed { index, scrapedItem ->
-                                        downloadStatusText = "Downloading (${index + 1}/${itemsToDownload.size}): ${scrapedItem.title}"
-                                        downloadProgress = (index + 0.3f) / itemsToDownload.size.toFloat()
-                                        val file = scraper.downloadMediaFile(context, scrapedItem.url, scrapedItem.title)
-                                        if (file != null) {
-                                            downloadedInboxItems.add(
-                                                MediaInboxItem(
-                                                    id = "item_${System.currentTimeMillis()}_$index",
-                                                    title = scrapedItem.title,
-                                                    localUri = file.absolutePath,
-                                                    sourceUrl = scrapedItem.url,
-                                                    isVideo = scrapedItem.isVideo,
-                                                    isAudio = scrapedItem.isAudio,
-                                                    isStream = scrapedItem.isStream,
-                                                    format = scrapedItem.format,
-                                                    sizeBytes = file.length()
-                                                )
-                                            )
-                                        }
-                                        downloadProgress = (index + 1f) / itemsToDownload.size.toFloat()
-                                    }
+                                    // Persistently download using WorkManager
+                                    DownloadQueueManager.enqueueBatch(
+                                        context = context,
+                                        items = itemsToDownload,
+                                        referer = urlInput,
+                                        stackId = stackId,
+                                        stackTitle = stackTitle,
+                                        sourceDomain = extractorState.domain,
+                                        sourceUrl = urlInput
+                                    )
 
+                                    downloadProgress = 1.0f
+                                    downloadStatusText = "Queued ${itemsToDownload.size} items for background download"
+                                    kotlinx.coroutines.delay(400)
                                     isDownloading = false
-                                    if (downloadedInboxItems.isNotEmpty()) {
-                                        val newStack = MediaInboxStack(
-                                            id = "stack_${System.currentTimeMillis()}",
-                                            title = extractorState.pageTitle.ifBlank { extractorState.domain.ifBlank { "Discovered Media" } },
-                                            sourceDomain = extractorState.domain,
-                                            sourceUrl = urlInput,
-                                            items = downloadedInboxItems
-                                        )
-                                        inboxRepo.addStack(newStack)
-                                        onDownloadComplete()
-                                    }
+                                    onDownloadComplete()
                                 }
                             },
                             enabled = isDownloadEnabled,

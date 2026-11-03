@@ -140,6 +140,34 @@ class MediaInboxRepository(private val context: Context) {
         persist()
     }
 
+    @Synchronized
+    fun addItemToStack(
+        stackId: String,
+        item: MediaInboxItem,
+        stackTitle: String,
+        sourceDomain: String,
+        sourceUrl: String
+    ) {
+        val current = _stacks.value.toMutableList()
+        val existingIndex = current.indexOfFirst { it.id == stackId }
+        if (existingIndex >= 0) {
+            val existing = current[existingIndex]
+            val updatedItems = existing.items.filter { it.id != item.id } + item
+            current[existingIndex] = existing.copy(items = updatedItems)
+        } else {
+            val newStack = MediaInboxStack(
+                id = stackId,
+                title = stackTitle.ifBlank { sourceDomain.ifBlank { "Discovered Media" } },
+                sourceDomain = sourceDomain,
+                sourceUrl = sourceUrl,
+                items = listOf(item)
+            )
+            current.add(0, newStack)
+        }
+        _stacks.value = current
+        persist()
+    }
+
     fun deleteStack(stackId: String) {
         // Also cleanup local files
         val stack = _stacks.value.firstOrNull { it.id == stackId }

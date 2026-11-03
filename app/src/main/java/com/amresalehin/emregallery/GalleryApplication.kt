@@ -60,6 +60,9 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
+
+        // Initialize Chaquopy Python SDK and gallery-dl media engine
+        com.amresalehin.emregallery.data.GalleryDlEngine.init(this)
     }
 
     /**

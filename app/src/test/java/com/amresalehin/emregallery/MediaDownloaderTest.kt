@@ -261,5 +261,143 @@ class MediaDownloaderTest {
             assertEquals("Expected invalid: $invalid", false, com.amresalehin.emregallery.data.MediaClassifier.isValidWebUrl(invalid))
         }
     }
+
+    @Test
+    fun testGalleryDlEngineStatusAndSupportedSites() {
+        val status = com.amresalehin.emregallery.data.GalleryDlEngine.getStatus()
+        assertTrue(status.popularSites.isNotEmpty())
+        assertTrue(status.popularSites.any { it.name == "Reddit" })
+        assertTrue(status.popularSites.any { it.name == "Imgur" })
+        assertTrue(status.popularSites.any { it.name == "Twitter / X" })
+        assertTrue(status.popularSites.any { it.name == "Pinterest" })
+        assertTrue(status.popularSites.any { it.name == "ArtStation" })
+    }
+
+    @Test
+    fun testGalleryDlSupportInfoDetection() {
+        val redditCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://www.reddit.com/r/earthporn/comments/123/mountains")
+        assertTrue(redditCheck.isSupported)
+
+        val imgurCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://imgur.com/a/abcde")
+        assertTrue(imgurCheck.isSupported)
+
+        val artstationCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://artstation.com/artwork/xyz123")
+        assertTrue(artstationCheck.isSupported)
+
+        val genericCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://nonexistent-random-domain-12345.com")
+        assertEquals(false, genericCheck.isSupported)
+    }
+
+    @Test
+    fun testExtractionSourceGalleryDlEnum() {
+        assertEquals("gallery-dl", com.amresalehin.emregallery.data.ExtractionSource.GALLERY_DL.label)
+        assertEquals(
+            com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.GALLERY_DL.name,
+            "GALLERY_DL"
+        )
+    }
+
+    @Test
+    fun testJsoupHtmlParserExtractsMedia() {
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Sample Gallery Page</title>
+                <meta property="og:image" content="https://example.com/og_hero.jpg" />
+                <meta property="og:video" content="https://example.com/promo.mp4" />
+            </head>
+            <body>
+                <img src="/images/pic1.jpg" data-src="/images/pic1_large.jpg" />
+                <video poster="/images/poster.jpg">
+                    <source src="/videos/clip.webm" type="video/webm" />
+                </video>
+                <div style="background-image: url('/images/bg.png');"></div>
+                <a href="/downloads/wallpaper_4k.jpg">Download 4K</a>
+            </body>
+            </html>
+        """.trimIndent()
+
+        val doc = org.jsoup.Jsoup.parse(html, "https://example.com")
+        assertEquals("Sample Gallery Page", doc.title())
+
+        val ogImage = doc.selectFirst("meta[property=og:image]")?.attr("content")
+        assertEquals("https://example.com/og_hero.jpg", ogImage)
+
+        val images = doc.select("img")
+        assertEquals(1, images.size)
+        assertEquals("https://example.com/images/pic1.jpg", images[0].absUrl("src"))
+
+        val videoSources = doc.select("video source")
+        assertEquals(1, videoSources.size)
+        assertEquals("https://example.com/videos/clip.webm", videoSources[0].absUrl("src"))
+
+        val directLinks = doc.select("a[href]")
+        assertEquals(1, directLinks.size)
+        assertEquals("https://example.com/downloads/wallpaper_4k.jpg", directLinks[0].absUrl("href"))
+    }
+
+    @Test
+    fun testOkHttpSharedSessionCookieJar() {
+        val cookieJar = com.amresalehin.emregallery.data.OkHttpDownloader.SharedSessionCookieJar()
+        val testUrl = "https://example.com/gallery"
+        
+        cookieJar.setManualCookie(testUrl, "session_token", "abc123xyz")
+        cookieJar.setManualCookie(testUrl, "cf_clearance", "token987")
+
+        val cookieString = cookieJar.getCookieString(testUrl)
+        assertTrue(cookieString.contains("session_token=abc123xyz"))
+        assertTrue(cookieString.contains("cf_clearance=token987"))
+
+        val httpUrl = okhttp3.HttpUrl.Builder()
+            .scheme("https")
+            .host("example.com")
+            .encodedPath("/gallery")
+            .build()
+        val loadedCookies = cookieJar.loadForRequest(httpUrl)
+        assertEquals(2, loadedCookies.size)
+        assertTrue(loadedCookies.any { it.name == "session_token" && it.value == "abc123xyz" })
+        assertTrue(loadedCookies.any { it.name == "cf_clearance" && it.value == "token987" })
+
+        // Clear session
+        cookieJar.clearSession()
+        val afterClear = cookieJar.loadForRequest(httpUrl)
+        assertEquals(0, afterClear.size)
+    }
+
+    @Test
+    fun testOkHttpClientConfiguration() {
+        val client = com.amresalehin.emregallery.data.OkHttpDownloader.client
+        assertTrue(client.followRedirects)
+        assertTrue(client.followSslRedirects)
+        assertEquals(15000, client.connectTimeoutMillis)
+        assertEquals(30000, client.readTimeoutMillis)
+        assertEquals(30000, client.writeTimeoutMillis)
+        assertEquals(com.amresalehin.emregallery.data.OkHttpDownloader.sharedCookieJar, client.cookieJar)
+        assertTrue(client.interceptors.isNotEmpty())
+    }
+
+    @Test
+    fun testWorkManagerDownloadWorkerConstants() {
+        assertEquals("media_download", com.amresalehin.emregallery.data.MediaDownloadWorker.WORK_TAG_DOWNLOAD)
+        assertEquals("media_url", com.amresalehin.emregallery.data.MediaDownloadWorker.KEY_MEDIA_URL)
+        assertEquals("file_name", com.amresalehin.emregallery.data.MediaDownloadWorker.KEY_FILE_NAME)
+        assertEquals("stack_id", com.amresalehin.emregallery.data.MediaDownloadWorker.KEY_STACK_ID)
+        assertEquals("progress", com.amresalehin.emregallery.data.MediaDownloadWorker.KEY_PROGRESS)
+    }
+
+    @Test
+    fun testMedia3StreamingMimeTypesDetection() {
+        val hlsUrl = "https://example.com/live/stream.m3u8"
+        val isHls = hlsUrl.contains(".m3u8", ignoreCase = true) || hlsUrl.contains("mpegurl", ignoreCase = true)
+        assertTrue(isHls)
+
+        val dashUrl = "https://example.com/vod/manifest.mpd"
+        val isDash = dashUrl.contains(".mpd", ignoreCase = true) || dashUrl.contains("dash", ignoreCase = true)
+        assertTrue(isDash)
+
+        assertEquals("application/x-mpegURL", androidx.media3.common.MimeTypes.APPLICATION_M3U8)
+        assertEquals("application/dash+xml", androidx.media3.common.MimeTypes.APPLICATION_MPD)
+    }
 }
 

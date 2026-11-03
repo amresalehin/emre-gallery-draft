@@ -1,16 +1,15 @@
 package com.amresalehin.emregallery.data
 
-import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.InputStream
-import java.net.HttpURLConnection
+import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import java.net.URL
-import java.util.regex.Pattern
 
 /**
- * High-speed static HTML / DOM extractor.
- * Scans metadata, tags, CSS backgrounds, srcset, and iframes before live browser execution.
+ * High-speed static HTML / DOM extractor powered by OkHttp and Jsoup.
+ * Reliably parses document metadata, OpenGraph tags, HTML5 video/audio/picture tags,
+ * srcset, lazy-loaded attributes, CSS backgrounds, direct links, and iframes with shared session handling.
  */
 class StaticMediaScraper {
 
@@ -20,7 +19,7 @@ class StaticMediaScraper {
             return@withContext StaticScrapeResult("", "", "", emptyList(), "URL cannot be empty")
         }
 
-        val normalizedUrl = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+        val normalizedUrl = if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
             "https://$trimmed"
         } else {
             trimmed
@@ -28,7 +27,7 @@ class StaticMediaScraper {
 
         val domain = runCatching { URL(normalizedUrl).host }.getOrDefault("")
 
-        // Check if the input is a direct media file (e.g. video, stream, audio, image)
+        // Check if the input is a direct media file
         val classification = MediaClassifier.classify(normalizedUrl)
         val isDirectMedia = classification.isVideo || classification.isAudio || classification.isStream ||
                 normalizedUrl.endsWith(".jpg", true) || normalizedUrl.endsWith(".jpeg", true) ||
@@ -58,34 +57,18 @@ class StaticMediaScraper {
         }
 
         try {
-            val url = URL(normalizedUrl)
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 10000
-                readTimeout = 15000
-                instanceFollowRedirects = true
-                setRequestProperty(
-                    "User-Agent",
-                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-                )
-                setRequestProperty(
-                    "Accept",
-                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/*;q=0.8,video/*;q=0.8,audio/*;q=0.8,*/*;q=0.7"
-                )
-            }
-
-            conn.connect()
-            val code = conn.responseCode
-            if (code !in 200..299) {
+            val response = OkHttpDownloader.getHtml(normalizedUrl)
+            if (!response.isSuccessful) {
                 return@withContext StaticScrapeResult(
                     sourceUrl = normalizedUrl,
                     pageTitle = domain,
                     domain = domain,
                     items = emptyList(),
-                    errorMessage = "Server returned HTTP status $code"
+                    errorMessage = response.errorMessage ?: "Server returned HTTP status ${response.statusCode}"
                 )
             }
 
-            val contentType = conn.contentType?.lowercase() ?: ""
+            val contentType = response.contentType
             if (contentType.startsWith("image/") || contentType.startsWith("video/") ||
                 contentType.startsWith("audio/") || contentType.contains("mpegurl") || contentType.contains("dash")
             ) {
@@ -111,20 +94,11 @@ class StaticMediaScraper {
                 )
             }
 
-            // Read HTML response (limit to 1MB)
-            val inputStream: InputStream = conn.inputStream
-            val bytes = ByteArray(1024 * 1024)
-            var totalRead = 0
-            while (totalRead < bytes.size) {
-                val read = inputStream.read(bytes, totalRead, bytes.size - totalRead)
-                if (read == -1) break
-                totalRead += read
-            }
-            val html = String(bytes, 0, totalRead, Charsets.UTF_8)
-            conn.disconnect()
-
-            val pageTitle = extractTitle(html).ifBlank { domain }
-            val extractedItems = parseHtmlMedia(html, normalizedUrl)
+            val html = response.bodyString ?: ""
+            val targetBaseUrl = response.finalUrl.ifBlank { normalizedUrl }
+            val doc = Jsoup.parse(html, targetBaseUrl)
+            val pageTitle = doc.title().trim().ifBlank { domain }
+            val extractedItems = parseDocumentMedia(doc, targetBaseUrl)
 
             StaticScrapeResult(
                 sourceUrl = normalizedUrl,
@@ -138,21 +112,12 @@ class StaticMediaScraper {
                 pageTitle = domain,
                 domain = domain,
                 items = emptyList(),
-                errorMessage = e.localizedMessage ?: "Failed to connect to page"
+                errorMessage = e.message ?: "Failed to scrape page"
             )
         }
     }
 
-    private fun extractTitle(html: String): String {
-        val matcher = Pattern.compile("<title>(.*?)</title>", Pattern.CASE_INSENSITIVE or Pattern.DOTALL).matcher(html)
-        return if (matcher.find()) {
-            matcher.group(1)?.replace(Regex("\\s+"), " ")?.trim() ?: ""
-        } else {
-            ""
-        }
-    }
-
-    private fun parseHtmlMedia(html: String, baseUrl: String): List<ScrapedMediaItem> {
+    private fun parseDocumentMedia(doc: Document, baseUrl: String): List<ScrapedMediaItem> {
         val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
 
         fun addCandidate(rawUrl: String, source: ExtractionSource, resolution: String? = null, posterUrl: String? = null) {
@@ -182,76 +147,109 @@ class StaticMediaScraper {
             itemsMap[key] = item
         }
 
-        // 1. OpenGraph & Twitter tags
-        val metaPatterns = listOf(
-            Pattern.compile("<meta[^>]+property=[\"']og:video[\"'][^>]+content=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:video[\"']", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("<meta[^>]+property=[\"']og:image[\"'][^>]+content=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:image[\"']", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("<meta[^>]+name=[\"']twitter:image[\"'][^>]+content=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE),
-            Pattern.compile("<meta[^>]+name=[\"']twitter:player:stream[\"'][^>]+content=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
+        // 1. OpenGraph, Twitter & schema.org meta tags
+        val metaSelectors = listOf(
+            "meta[property=og:video]", "meta[content][property=og:video]",
+            "meta[property=og:image]", "meta[content][property=og:image]",
+            "meta[name=twitter:image]", "meta[name=twitter:player:stream]",
+            "meta[itemprop=image]", "meta[itemprop=video]"
         )
-        for (p in metaPatterns) {
-            val m = p.matcher(html)
-            while (m.find()) {
-                m.group(1)?.let { addCandidate(it, ExtractionSource.STATIC_HTML, "OpenGraph") }
+        for (sel in metaSelectors) {
+            for (meta in doc.select(sel)) {
+                val content = meta.attr("content").ifBlank { meta.attr("value") }
+                if (content.isNotBlank()) {
+                    addCandidate(content, ExtractionSource.STATIC_HTML, "OpenGraph")
+                }
             }
         }
 
-        // 2. Video & Audio tags with poster & source
-        val videoPattern = Pattern.compile("<video([^>]*)>", Pattern.CASE_INSENSITIVE)
-        val vm = videoPattern.matcher(html)
-        while (vm.find()) {
-            val attrs = vm.group(1) ?: ""
-            val srcMatch = Pattern.compile("src=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE).matcher(attrs)
-            val posterMatch = Pattern.compile("poster=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE).matcher(attrs)
-            val poster = if (posterMatch.find()) posterMatch.group(1)?.let { MediaClassifier.resolveUrl(it, baseUrl) } else null
-
-            if (srcMatch.find()) {
-                srcMatch.group(1)?.let { addCandidate(it, ExtractionSource.DOM_SCRAPE, posterUrl = poster) }
+        // 2. Video elements & posters & source children
+        for (video in doc.select("video")) {
+            val src = video.attr("src").ifBlank { video.attr("data-src") }
+            val poster = video.attr("poster").ifBlank { null }
+            if (src.isNotBlank()) {
+                addCandidate(src, ExtractionSource.DOM_SCRAPE, posterUrl = poster)
             }
-            if (poster != null) {
+            if (!poster.isNullOrBlank()) {
                 addCandidate(poster, ExtractionSource.DOM_SCRAPE, resolution = "Poster")
             }
         }
 
-        // Audio & Source tags
-        val audioOrSourcePattern = Pattern.compile("<(?:source|audio)[^>]+src=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
-        val asm = audioOrSourcePattern.matcher(html)
-        while (asm.find()) {
-            asm.group(1)?.let { addCandidate(it, ExtractionSource.DOM_SCRAPE) }
-        }
-
-        // 3. Img tags (src, data-src, data-original)
-        val imgPattern = Pattern.compile("<img[^>]+(?:src|data-src|data-original)=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
-        val im = imgPattern.matcher(html)
-        while (im.find()) {
-            im.group(1)?.let { addCandidate(it, ExtractionSource.DOM_SCRAPE) }
-        }
-
-        // 4. Srcset parsing (<picture><source srcset="..."> and <img srcset="...">)
-        val srcsetPattern = Pattern.compile("(?:srcset|data-srcset)=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
-        val ssm = srcsetPattern.matcher(html)
-        while (ssm.find()) {
-            val rawSrcset = ssm.group(1) ?: continue
-            val entries = MediaClassifier.parseSrcset(rawSrcset, baseUrl)
-            for ((url, res) in entries) {
-                addCandidate(url, ExtractionSource.SRCSET, resolution = res.ifBlank { "srcset" })
+        // 3. Audio elements & source elements
+        for (source in doc.select("source, audio")) {
+            val src = source.attr("src").ifBlank { source.attr("data-src") }
+            if (src.isNotBlank()) {
+                addCandidate(src, ExtractionSource.DOM_SCRAPE)
             }
         }
 
-        // 5. CSS background-image extraction (inline style and embedded style tags)
-        val cssBgPattern = Pattern.compile("background(?:-image)?\\s*:\\s*url\\([\"']?([^\"')]+)[\"']?\\)", Pattern.CASE_INSENSITIVE)
-        val cm = cssBgPattern.matcher(html)
-        while (cm.find()) {
-            cm.group(1)?.let { addCandidate(it, ExtractionSource.CSS_BACKGROUND) }
+        // 4. Img elements with lazy-load support
+        for (img in doc.select("img")) {
+            val src = img.attr("src").ifBlank {
+                img.attr("data-src").ifBlank {
+                    img.attr("data-original").ifBlank {
+                        img.attr("data-lazy-src").ifBlank {
+                            img.attr("data-full-url")
+                        }
+                    }
+                }
+            }
+            if (src.isNotBlank()) {
+                addCandidate(src, ExtractionSource.DOM_SCRAPE)
+            }
         }
 
-        // 6. iFrame inspection (look for video embed frames)
-        val iframePattern = Pattern.compile("<iframe[^>]+src=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
-        val ifm = iframePattern.matcher(html)
-        while (ifm.find()) {
-            ifm.group(1)?.let { addCandidate(it, ExtractionSource.IFRAME, resolution = "iFrame Embed") }
+        // 5. Srcset parsing (img and picture source elements)
+        for (elem in doc.select("[srcset], [data-srcset]")) {
+            val rawSrcset = elem.attr("srcset").ifBlank { elem.attr("data-srcset") }
+            if (rawSrcset.isNotBlank()) {
+                val entries = MediaClassifier.parseSrcset(rawSrcset, baseUrl)
+                for ((url, res) in entries) {
+                    addCandidate(url, ExtractionSource.SRCSET, resolution = res.ifBlank { "srcset" })
+                }
+            }
+        }
+
+        // 6. Inline CSS background-image extraction
+        for (styled in doc.select("[style*='url('], [style*='url(\"'], [style*='url(&quot;']")) {
+            val style = styled.attr("style")
+            val urlIndex = style.indexOf("url(", ignoreCase = true)
+            if (urlIndex != -1) {
+                val sub = style.substring(urlIndex + 4)
+                val closeIndex = sub.indexOf(")")
+                if (closeIndex != -1) {
+                    val rawUrl = sub.substring(0, closeIndex)
+                        .replace("\"", "")
+                        .replace("'", "")
+                        .replace("&quot;", "")
+                        .trim()
+                    if (rawUrl.isNotBlank()) {
+                        addCandidate(rawUrl, ExtractionSource.CSS_BACKGROUND)
+                    }
+                }
+            }
+        }
+
+        // 7. iFrame inspection (video embed frames)
+        for (iframe in doc.select("iframe[src]")) {
+            val src = iframe.attr("src")
+            if (src.isNotBlank()) {
+                addCandidate(src, ExtractionSource.IFRAME, resolution = "iFrame Embed")
+            }
+        }
+
+        // 8. Direct anchor links to media files
+        for (link in doc.select("a[href]")) {
+            val href = link.attr("href")
+            if (href.isNotBlank() && MediaClassifier.isValidMedia(href)) {
+                val lower = href.lowercase()
+                if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") ||
+                    lower.endsWith(".webp") || lower.endsWith(".gif") || lower.endsWith(".mp4") ||
+                    lower.endsWith(".webm") || lower.endsWith(".mkv") || lower.endsWith(".mp3")
+                ) {
+                    addCandidate(href, ExtractionSource.DOM_SCRAPE, resolution = "Full Link")
+                }
+            }
         }
 
         return itemsMap.values.toList()

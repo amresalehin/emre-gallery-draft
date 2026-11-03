@@ -1066,44 +1066,29 @@ fun FullScreenBrowserView(
                         onClick = {
                             if (selectedItemIds.isEmpty() || isDownloading) return@Button
                             isDownloading = true
-                            downloadProgress = 0f
+                            downloadProgress = 0.2f
                             scope.launch {
                                 val toDownload = filteredItems.filter { it.id in selectedItemIds }
-                                val downloadedInboxItems = mutableListOf<MediaInboxItem>()
-                                toDownload.forEachIndexed { idx, itm ->
-                                    downloadProgress = (idx + 0.3f) / toDownload.size.toFloat()
-                                    val file = scraper.downloadMediaFile(context, itm.url, itm.title)
-                                    if (file != null) {
-                                        downloadedInboxItems.add(
-                                            MediaInboxItem(
-                                                id = "item_${System.currentTimeMillis()}_$idx",
-                                                title = itm.title,
-                                                localUri = file.absolutePath,
-                                                sourceUrl = itm.url,
-                                                isVideo = itm.isVideo,
-                                                isAudio = itm.isAudio,
-                                                isStream = itm.isStream,
-                                                format = itm.format,
-                                                sizeBytes = file.length()
-                                            )
-                                        )
-                                    }
-                                    downloadProgress = (idx + 1f) / toDownload.size.toFloat()
-                                }
+                                val domain = runCatching { URL(currentUrl).host }.getOrDefault("Web")
+                                val stackId = "stack_${System.currentTimeMillis()}"
+                                val stackTitle = pageTitle.ifBlank { domain.ifBlank { "Browser Download" } }
+
+                                // Persistently download using WorkManager
+                                com.amresalehin.emregallery.data.DownloadQueueManager.enqueueBatch(
+                                    context = context,
+                                    items = toDownload,
+                                    referer = currentUrl,
+                                    stackId = stackId,
+                                    stackTitle = stackTitle,
+                                    sourceDomain = domain,
+                                    sourceUrl = currentUrl
+                                )
+
+                                downloadProgress = 1.0f
+                                kotlinx.coroutines.delay(300)
                                 isDownloading = false
-                                if (downloadedInboxItems.isNotEmpty()) {
-                                    val domain = runCatching { URL(currentUrl).host }.getOrDefault("Web")
-                                    val newStack = MediaInboxStack(
-                                        id = "stack_${System.currentTimeMillis()}",
-                                        title = pageTitle.ifBlank { domain.ifBlank { "Browser Download" } },
-                                        sourceDomain = domain,
-                                        sourceUrl = currentUrl,
-                                        items = downloadedInboxItems
-                                    )
-                                    inboxRepo.addStack(newStack)
-                                    showDiscoveredMediaSheet = false
-                                    onDownloadComplete(downloadedInboxItems.size)
-                                }
+                                showDiscoveredMediaSheet = false
+                                onDownloadComplete(toDownload.size)
                             }
                         },
                         enabled = selectedItemIds.isNotEmpty() && !isDownloading,

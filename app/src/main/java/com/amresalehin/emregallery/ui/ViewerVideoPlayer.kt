@@ -32,10 +32,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem as ExoMediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import com.amresalehin.emregallery.data.OkHttpDownloader
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -111,11 +116,33 @@ fun rememberViewerVideoState(
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
 
+            val httpDataSourceFactory = OkHttpDataSource.Factory(OkHttpDownloader.client)
+                .setUserAgent(OkHttpDownloader.DEFAULT_USER_AGENT)
+            val upstreamDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+            val mediaSourceFactory = DefaultMediaSourceFactory(context)
+                .setDataSourceFactory(upstreamDataSourceFactory)
+
+            val parsedUri = Uri.parse(uri)
+            val isHls = uri.contains(".m3u8", ignoreCase = true) || uri.contains("mpegurl", ignoreCase = true)
+            val isDash = uri.contains(".mpd", ignoreCase = true) || uri.contains("dash", ignoreCase = true)
+
+            val mediaItem = ExoMediaItem.Builder()
+                .setUri(parsedUri)
+                .apply {
+                    if (isHls) {
+                        setMimeType(MimeTypes.APPLICATION_M3U8)
+                    } else if (isDash) {
+                        setMimeType(MimeTypes.APPLICATION_MPD)
+                    }
+                }
+                .build()
+
             ExoPlayer.Builder(context)
+                .setMediaSourceFactory(mediaSourceFactory)
                 .setLoadControl(loadControl)
                 .build().apply {
-                    setMediaItem(ExoMediaItem.fromUri(Uri.parse(uri)))
-                    repeatMode = Player.REPEAT_MODE_ONE
+                    setMediaItem(mediaItem)
+                    repeatMode = if (isHls || isDash) Player.REPEAT_MODE_OFF else Player.REPEAT_MODE_ONE
                     videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
                     prepare()
                     // Respect user's playback intent for this session:
