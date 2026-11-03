@@ -233,74 +233,6 @@ object PhotoProcessor {
     fun applyBackgroundCutout(src: Bitmap, settings: BackgroundSettings): Bitmap =
         PhotoCutoutEngine.applyBackgroundCutout(src, settings)
 
-    fun applyAiFeatures(src: Bitmap, aiSettings: AiEditSettings): Bitmap {
-        var bmp = src
-
-        // AI Auto-Enhance
-        if (aiSettings.autoEnhanceEnabled) {
-            val adj = AdjustmentParams(
-                brightness = 8f * aiSettings.autoEnhanceIntensity,
-                contrast = 15f * aiSettings.autoEnhanceIntensity,
-                saturation = 14f * aiSettings.autoEnhanceIntensity,
-                highlights = -10f * aiSettings.autoEnhanceIntensity,
-                shadows = 18f * aiSettings.autoEnhanceIntensity,
-                sharpness = 22f * aiSettings.autoEnhanceIntensity
-            )
-            bmp = applyAdjustmentsAndFilter(bmp, adj, FilterType.NONE, 0f)
-        }
-
-        // AI Style Transfer
-        aiSettings.activeStyleTransfer?.let { style ->
-            val filter = when (style) {
-                AiStyleTransfer.CYBERPUNK -> FilterType.CYBER
-                AiStyleTransfer.ANIME_VIBRANT -> FilterType.VIVID
-                AiStyleTransfer.CHARCOAL_SKETCH -> FilterType.NOIR
-                AiStyleTransfer.OIL_PAINTING -> FilterType.WARM_SUNSET
-                AiStyleTransfer.VINTAGE_SEPIA -> FilterType.SEPIA
-            }
-            bmp = applyAdjustmentsAndFilter(bmp, AdjustmentParams(contrast = 10f), filter, 0.85f)
-        }
-
-        // AI Try-On Style
-        aiSettings.activeTryOn?.let { tryOn ->
-            val canvas = Canvas(bmp)
-            val w = bmp.width.toFloat()
-            val h = bmp.height.toFloat()
-
-            val torsoRect = RectF(w * 0.22f, h * 0.48f, w * 0.78f, h * 0.88f)
-            val colorInt = when (tryOn) {
-                AiTryOnStyle.LEATHER_JACKET, AiTryOnStyle.BIKER_LEATHER -> Color.argb(105, 30, 30, 30)
-                AiTryOnStyle.FORMAL_SUIT -> Color.argb(105, 17, 23, 38)
-                AiTryOnStyle.NEON_HOODIE -> Color.argb(105, 80, 80, 80)
-                AiTryOnStyle.DENIM_VINTAGE -> Color.argb(105, 56, 94, 140)
-                AiTryOnStyle.HAWAIIAN_SUMMER -> Color.argb(105, 255, 159, 28)
-            }
-            val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                this.color = colorInt
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
-            }
-            canvas.drawRoundRect(torsoRect, 32f, 32f, overlayPaint)
-        }
-
-        // AI Expand Outpaint
-        if (aiSettings.expandOutpaintRatio > 0.05f) {
-            val expand = aiSettings.expandOutpaintRatio
-            val extraW = (bmp.width * expand).toInt()
-            val extraH = (bmp.height * expand).toInt()
-            val newW = bmp.width + extraW * 2
-            val newH = bmp.height + extraH * 2
-            val expanded = Bitmap.createBitmap(newW, newH, Bitmap.Config.ARGB_8888)
-            val canvas = Canvas(expanded)
-
-            val bgBlur = applyGaussianBlur(bmp, 25)
-            canvas.drawBitmap(bgBlur, null, RectF(0f, 0f, newW.toFloat(), newH.toFloat()), null)
-            canvas.drawBitmap(bmp, extraW.toFloat(), extraH.toFloat(), null)
-            bmp = expanded
-        }
-
-        return bmp
-    }
-
     fun renderOverlays(canvas: Canvas, width: Float, height: Float, state: EditSessionState, density: Float) {
         PhotoOverlayRenderer.renderAll(canvas, width, height, state, density)
     }
@@ -326,13 +258,7 @@ object PhotoProcessor {
             result = applyBackgroundCutout(result, state.background)
         }
 
-        // 5. AI Suite
-        if (state.aiSettings.autoEnhanceEnabled || state.aiSettings.activeStyleTransfer != null ||
-            state.aiSettings.activeTryOn != null || state.aiSettings.expandOutpaintRatio > 0.05f) {
-            result = applyAiFeatures(result, state.aiSettings)
-        }
-
-        // 5b. LightCraft Masking Layers
+        // 5. LightCraft Masking Layers
         if (state.maskLayers.isNotEmpty()) {
             result = PhotoMaskEngine.applyMaskLayers(result, state.maskLayers)
         }

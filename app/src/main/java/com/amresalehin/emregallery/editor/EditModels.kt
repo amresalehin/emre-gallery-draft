@@ -30,7 +30,6 @@ enum class EditorTool(val label: String) {
     FRAME("Frames"),
     CALLOUT("Callout"),
     LENS_FLARE("Lens Flare"),
-    AI_TOOLS("AI Magic"),
     REPLAY("Replay"),
     CURVES("Curves")
 }
@@ -695,35 +694,6 @@ data class CalloutItem(
     val textColor: Color = Color.Black
 )
 
-enum class AiStyleTransfer(val label: String) {
-    CYBERPUNK("Cyberpunk Neon"),
-    ANIME_VIBRANT("Anime Pop"),
-    CHARCOAL_SKETCH("Charcoal Sketch"),
-    OIL_PAINTING("Impressionist"),
-    VINTAGE_SEPIA("Sepia Antique")
-}
-
-enum class AiTryOnStyle(val label: String, val description: String) {
-    LEATHER_JACKET("Biker Leather", "Sharp matte leather styling"),
-    BIKER_LEATHER("Biker Leather", "Sharp matte leather styling"),
-    FORMAL_SUIT("Classic Tuxedo", "Tailored midnight black blazer"),
-    NEON_HOODIE("Cyber Streetwear", "Neon accents streetwear hoodie"),
-    DENIM_VINTAGE("Vintage Denim", "Distressed washed denim jacket"),
-    HAWAIIAN_SUMMER("Tropical Silk", "Vibrant floral summer shirt")
-}
-
-data class AiEditSettings(
-    val autoEnhanceEnabled: Boolean = false,
-    val autoEnhanceIntensity: Float = 1.0f,
-    val activeStyleTransfer: AiStyleTransfer? = null,
-    val activeTryOn: AiTryOnStyle? = null,
-    val expandOutpaintRatio: Float = 0f // 0f to 0.5f expansion
-) {
-    val autoEnhance: Boolean get() = autoEnhanceEnabled
-    val generativeExpandRatio: Float get() = expandOutpaintRatio
-    val styleTransfer: AiStyleTransfer? get() = activeStyleTransfer
-    val tryOnStyle: AiTryOnStyle? get() = activeTryOn
-}
 
 enum class OverlayLayerType(val label: String) {
     IMAGE("Image layer"),
@@ -822,7 +792,6 @@ data class EditSessionState(
     val border: BorderSettings = BorderSettings(),
     val lensFlares: List<LensFlareItem> = emptyList(),
     val callouts: List<CalloutItem> = emptyList(),
-    val aiSettings: AiEditSettings = AiEditSettings(),
     val activeSelectionPath: List<Offset> = emptyList(),
     val isSelectionActive: Boolean = false,
     val maskLayers: List<LightcraftMaskLayer> = emptyList(),

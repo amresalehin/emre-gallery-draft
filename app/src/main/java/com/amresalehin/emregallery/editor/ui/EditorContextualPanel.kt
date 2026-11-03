@@ -99,11 +99,6 @@ enum class OverlaysSubtool(val label: String) {
     LAYERS("Layers")
 }
 
-enum class AiSubtool(val label: String) {
-    EXPAND("Generative Expand"),
-    ENHANCE("Neural Enhance"),
-    STYLES("Style Transfer")
-}
 
 /**
  * Zone 04: Contextual Editing Panel
@@ -131,8 +126,6 @@ fun EditorContextualPanel(
     onSelectCalloutSubtool: (CalloutSubtool) -> Unit = {},
     activeFrameSubtool: FrameSubtool = FrameSubtool.FRAMES,
     onSelectFrameSubtool: (FrameSubtool) -> Unit = {},
-    activeAiSubtool: AiSubtool,
-    onSelectAiSubtool: (AiSubtool) -> Unit,
     // Adjust domain actions
     onSliderDragStart: (String, String, Float) -> Unit,
     onSliderDragFinished: () -> Unit,
@@ -206,12 +199,12 @@ fun EditorContextualPanel(
         tonalElevation = 4.dp,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 2.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp),
+                .padding(bottom = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Top drag handle indicator
@@ -319,17 +312,6 @@ fun EditorContextualPanel(
                                 onClick = { onSelectFrameSubtool(sub) },
                                 colors = colors,
                                 testTag = "subtool_frame_${sub.name.lowercase()}"
-                            )
-                        }
-                    }
-                    EditorDomain.AI_TOOLS -> {
-                        AiSubtool.values().forEach { sub ->
-                            EmrePillButton(
-                                label = sub.label,
-                                isSelected = sub == activeAiSubtool,
-                                onClick = { onSelectAiSubtool(sub) },
-                                colors = colors,
-                                testTag = "subtool_ai_${sub.name.lowercase()}"
                             )
                         }
                     }
@@ -678,14 +660,6 @@ fun EditorContextualPanel(
                             onFrameChange = onFrameChange,
                             onBorderChange = onBorderChange,
                             colors = colors
-                        )
-                    }
-                    EditorDomain.AI_TOOLS -> {
-                        AiToolsPanel(
-                            aiSettings = sessionState.aiSettings,
-                            onExpandRatioChange = { viewModel.setAiExpand(it) },
-                            onSelectStyleTransfer = { viewModel.setAiStyleTransfer(it) },
-                            onSelectTryOn = { viewModel.setAiTryOnStyle(it) }
                         )
                     }
                 }

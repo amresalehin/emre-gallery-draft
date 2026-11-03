@@ -35,7 +35,7 @@ fun EditorOperationToolbar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 6.dp),
+            .padding(horizontal = 20.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -44,8 +44,8 @@ fun EditorOperationToolbar(
             icon = Icons.Default.Close,
             contentDescription = "Cancel",
             onClick = onCancel,
-            size = 44.dp,
-            iconSize = 20.dp,
+            size = 38.dp,
+            iconSize = 18.dp,
             colors = colors,
             testTag = "operation_cancel_button"
         )
@@ -56,8 +56,8 @@ fun EditorOperationToolbar(
             contentDescription = "Undo",
             onClick = onUndo,
             enabled = canUndo,
-            size = 44.dp,
-            iconSize = 20.dp,
+            size = 38.dp,
+            iconSize = 18.dp,
             colors = colors,
             testTag = "operation_undo_button"
         )
@@ -68,8 +68,8 @@ fun EditorOperationToolbar(
             contentDescription = "Redo",
             onClick = onRedo,
             enabled = canRedo,
-            size = 44.dp,
-            iconSize = 20.dp,
+            size = 38.dp,
+            iconSize = 18.dp,
             colors = colors,
             testTag = "operation_redo_button"
         )
@@ -79,8 +79,8 @@ fun EditorOperationToolbar(
             icon = Icons.Default.RestartAlt,
             contentDescription = "Reset",
             onClick = onReset,
-            size = 44.dp,
-            iconSize = 20.dp,
+            size = 38.dp,
+            iconSize = 18.dp,
             colors = colors,
             testTag = "operation_reset_button"
         )
@@ -90,8 +90,8 @@ fun EditorOperationToolbar(
             icon = Icons.Default.Check,
             contentDescription = "Apply",
             onClick = onApply,
-            size = 44.dp,
-            iconSize = 20.dp,
+            size = 38.dp,
+            iconSize = 18.dp,
             colors = colors,
             testTag = "operation_apply_button"
         )

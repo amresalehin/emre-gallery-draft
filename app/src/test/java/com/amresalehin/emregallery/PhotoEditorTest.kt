@@ -337,7 +337,7 @@ class PhotoEditorTest {
     @Test
     fun testMainBottomTabs_autoRemoved() {
         val tabs = com.amresalehin.emregallery.editor.ui.MainBottomTab.entries
-        assertEquals(8, tabs.size)
+        assertEquals(7, tabs.size)
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.ADJUST))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.PRESETS))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.CROP))
@@ -345,7 +345,6 @@ class PhotoEditorTest {
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.MASKING))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.HEALING))
         assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.OVERLAYS))
-        assertTrue(tabs.contains(com.amresalehin.emregallery.editor.ui.MainBottomTab.AI_TOOLS))
     }
 
     @Test
@@ -398,26 +397,6 @@ class PhotoEditorTest {
         assertEquals(1, vm.sessionState.value.stickers.size)
     }
 
-    @Test
-    fun testAiToolsSettings() {
-        val vm = PhotoEditorViewModel()
-        assertFalse(vm.sessionState.value.aiSettings.autoEnhance)
-
-        vm.toggleAiAutoEnhance(true)
-        assertTrue(vm.sessionState.value.aiSettings.autoEnhance)
-
-        vm.setAiAutoEnhanceIntensity(1.5f)
-        assertEquals(1.5f, vm.sessionState.value.aiSettings.autoEnhanceIntensity, 0.001f)
-
-        vm.setAiExpand(0.35f)
-        assertEquals(0.35f, vm.sessionState.value.aiSettings.generativeExpandRatio, 0.001f)
-
-        vm.setAiStyleTransfer(AiStyleTransfer.CYBERPUNK)
-        assertEquals(AiStyleTransfer.CYBERPUNK, vm.sessionState.value.aiSettings.styleTransfer)
-
-        vm.setAiTryOnStyle(AiTryOnStyle.BIKER_LEATHER)
-        assertEquals(AiTryOnStyle.BIKER_LEATHER, vm.sessionState.value.aiSettings.tryOnStyle)
-    }
 
     @Test
     fun testThumbnailBitmap_stateFlow() {
@@ -1028,6 +1007,45 @@ class PhotoEditorTest {
         assertEquals(20f, vm.sessionState.value.adjustments.noiseReduction, 0.001f)
         assertEquals(15f, vm.sessionState.value.adjustments.colorNoiseReduction, 0.001f)
     }
+
+    @Test
+    fun testEditorDomain_associatedToolAndRetouchType() {
+        assertEquals(EditorTool.ADJUST, com.amresalehin.emregallery.editor.ui.EditorDomain.LIGHT.associatedTool)
+        assertEquals(EditorTool.ADJUST, com.amresalehin.emregallery.editor.ui.EditorDomain.COLOR.associatedTool)
+        assertEquals(EditorTool.CURVES, com.amresalehin.emregallery.editor.ui.EditorDomain.CURVES.associatedTool)
+        assertEquals(EditorTool.CROP, com.amresalehin.emregallery.editor.ui.EditorDomain.CROP.associatedTool)
+        assertEquals(EditorTool.RETOUCH, com.amresalehin.emregallery.editor.ui.EditorDomain.BLEMISH.associatedTool)
+        assertEquals(RetouchType.BLEMISH, com.amresalehin.emregallery.editor.ui.EditorDomain.BLEMISH.defaultRetouchType)
+        assertEquals(RetouchType.SKIN_SMOOTH, com.amresalehin.emregallery.editor.ui.EditorDomain.SMOOTH.defaultRetouchType)
+        assertEquals(RetouchType.PATCH_HEALING, com.amresalehin.emregallery.editor.ui.EditorDomain.HEAL.defaultRetouchType)
+        assertEquals(RetouchType.SKIN_TONE, com.amresalehin.emregallery.editor.ui.EditorDomain.SKIN_TONE.defaultRetouchType)
+        assertNull(com.amresalehin.emregallery.editor.ui.EditorDomain.LIGHT.defaultRetouchType)
+    }
+
+    @Test
+    fun testPhotoEditorViewModel_resetDomain() {
+        val vm = PhotoEditorViewModel()
+        vm.updateAdjustmentValue("Exposure", 30f)
+        vm.updateAdjustmentValue("Contrast", 20f)
+        assertEquals(30f, vm.sessionState.value.adjustments.exposure, 0.001f)
+        assertEquals(20f, vm.sessionState.value.adjustments.contrast, 0.001f)
+
+        vm.resetDomain(com.amresalehin.emregallery.editor.ui.EditorDomain.LIGHT)
+        assertEquals(0f, vm.sessionState.value.adjustments.exposure, 0.001f)
+        assertEquals(0f, vm.sessionState.value.adjustments.contrast, 0.001f)
+    }
+
+    @Test
+    fun testFormattingHelpers() {
+        assertEquals("+50", com.amresalehin.emregallery.editor.ui.formatBipolar(50f))
+        assertEquals("−30", com.amresalehin.emregallery.editor.ui.formatBipolar(-30f))
+        assertEquals("0", com.amresalehin.emregallery.editor.ui.formatBipolar(0f))
+        assertEquals("+15°", com.amresalehin.emregallery.editor.ui.formatBipolar(15f, "°"))
+        assertEquals("+1.50 EV", com.amresalehin.emregallery.editor.ui.formatEv(1.5f))
+        assertEquals("−0.75 EV", com.amresalehin.emregallery.editor.ui.formatEv(-0.75f))
+        assertEquals("0.00 EV", com.amresalehin.emregallery.editor.ui.formatEv(0f))
+    }
 }
+
 
 

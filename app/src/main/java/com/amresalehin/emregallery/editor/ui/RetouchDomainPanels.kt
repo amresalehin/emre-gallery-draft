@@ -28,6 +28,96 @@ import com.amresalehin.emregallery.editor.RetouchType
 private val AccentBlue = Color(0xFF2979FF)
 
 /**
+ * Shared Retouch Domain Header Row with Title, Icon, and Clear All action.
+ */
+@Composable
+fun RetouchDomainHeader(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    strokeCount: Int,
+    onClearStrokes: () -> Unit,
+    colors: EmreEditorColors = LocalEmreEditorColors.current
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = AccentBlue,
+                modifier = Modifier.size(20.dp)
+            )
+            Text(
+                text = title,
+                color = colors.primaryText,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+        }
+        if (strokeCount > 0) {
+            TextButton(
+                onClick = onClearStrokes,
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text("Clear All", color = Color(0xFFFF5252), fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+/**
+ * Shared Retouch Brush Radius Slider
+ */
+@Composable
+fun RetouchRadiusSlider(
+    radius: Float,
+    onRadiusChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float> = 4f..150f
+) {
+    LrSliderRow(
+        title = "Brush Radius",
+        value = radius,
+        displayValue = "${radius.toInt()} px",
+        valueRange = valueRange,
+        unit = "px",
+        minLabel = "${valueRange.start.toInt()} px",
+        maxLabel = "${valueRange.endInclusive.toInt()} px",
+        onDragStart = {},
+        onValueChange = onRadiusChange,
+        onValueChangeFinished = {}
+    )
+}
+
+/**
+ * Shared Retouch Strength / Intensity Slider
+ */
+@Composable
+fun RetouchStrengthSlider(
+    title: String,
+    intensity: Float,
+    onIntensityChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float> = 10f..100f
+) {
+    LrPercentageSliderRow(
+        title = title,
+        value = intensity * 100f,
+        valueRange = valueRange,
+        unit = "%",
+        minLabel = "${valueRange.start.toInt()}%",
+        maxLabel = "${valueRange.endInclusive.toInt()}%",
+        onSliderDragStart = { _, _ -> },
+        onSliderChange = { _, v -> onIntensityChange(v / 100f) },
+        onSliderChangeFinished = {}
+    )
+}
+
+/**
  * Dedicated Domain Panel for Blemish Removal
  */
 @Composable
@@ -47,64 +137,15 @@ fun BlemishDomainPanel(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Top Header Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Face,
-                    contentDescription = null,
-                    tint = AccentBlue,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = "Blemish Eraser",
-                    color = colors.primaryText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-            if (strokeCount > 0) {
-                TextButton(
-                    onClick = onClearStrokes,
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("Clear All", color = Color(0xFFFF5252), fontSize = 12.sp)
-                }
-            }
-        }
-
-        // Brush Radius Slider
-        LrSliderRow(
-            title = "Brush Radius",
-            value = brushRadius,
-            displayValue = "${brushRadius.toInt()} px",
-            valueRange = 4f..120f,
-            minLabel = "4 px",
-            maxLabel = "120 px",
-            onDragStart = {},
-            onValueChange = onRadiusChange,
-            onValueChangeFinished = {}
+        RetouchDomainHeader(
+            title = "Blemish Eraser",
+            icon = Icons.Default.Face,
+            strokeCount = strokeCount,
+            onClearStrokes = onClearStrokes,
+            colors = colors
         )
-
-        // Removal Strength Slider
-        LrSliderRow(
-            title = "Removal Strength",
-            value = intensity * 100f,
-            displayValue = "${(intensity * 100).toInt()}%",
-            valueRange = 10f..100f,
-            minLabel = "10%",
-            maxLabel = "100%",
-            onDragStart = {},
-            onValueChange = { onIntensityChange(it / 100f) },
-            onValueChangeFinished = {}
-        )
+        RetouchRadiusSlider(radius = brushRadius, onRadiusChange = onRadiusChange, valueRange = 4f..120f)
+        RetouchStrengthSlider(title = "Removal Strength", intensity = intensity, onIntensityChange = onIntensityChange)
     }
 }
 
@@ -128,64 +169,15 @@ fun SmoothDomainPanel(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Top Header Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoFixNormal,
-                    contentDescription = null,
-                    tint = AccentBlue,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = "Skin Smoothing",
-                    color = colors.primaryText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-            if (strokeCount > 0) {
-                TextButton(
-                    onClick = onClearStrokes,
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("Clear All", color = Color(0xFFFF5252), fontSize = 12.sp)
-                }
-            }
-        }
-
-        // Brush Radius Slider
-        LrSliderRow(
-            title = "Brush Radius",
-            value = brushRadius,
-            displayValue = "${brushRadius.toInt()} px",
-            valueRange = 8f..150f,
-            minLabel = "8 px",
-            maxLabel = "150 px",
-            onDragStart = {},
-            onValueChange = onRadiusChange,
-            onValueChangeFinished = {}
+        RetouchDomainHeader(
+            title = "Skin Smoothing",
+            icon = Icons.Default.AutoFixNormal,
+            strokeCount = strokeCount,
+            onClearStrokes = onClearStrokes,
+            colors = colors
         )
-
-        // Smoothing Intensity Slider
-        LrSliderRow(
-            title = "Smoothing Strength",
-            value = intensity * 100f,
-            displayValue = "${(intensity * 100).toInt()}%",
-            valueRange = 10f..100f,
-            minLabel = "10%",
-            maxLabel = "100%",
-            onDragStart = {},
-            onValueChange = { onIntensityChange(it / 100f) },
-            onValueChangeFinished = {}
-        )
+        RetouchRadiusSlider(radius = brushRadius, onRadiusChange = onRadiusChange, valueRange = 8f..150f)
+        RetouchStrengthSlider(title = "Smoothing Strength", intensity = intensity, onIntensityChange = onIntensityChange)
     }
 }
 
@@ -211,64 +203,45 @@ fun HealDomainPanel(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Top Header Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        RetouchDomainHeader(
+            title = "Healing & Patch",
+            icon = Icons.Default.Healing,
+            strokeCount = strokeCount,
+            onClearStrokes = onClearStrokes,
+            colors = colors
+        )
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Healing,
-                    contentDescription = null,
-                    tint = AccentBlue,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = "Healing & Patch",
-                    color = colors.primaryText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-            if (strokeCount > 0) {
-                TextButton(
-                    onClick = onClearStrokes,
-                    contentPadding = PaddingValues(0.dp)
+            val healTypes = listOf(
+                RetouchType.PATCH_HEALING to "Patch",
+                RetouchType.CLONE_STAMP to "Clone",
+                RetouchType.OBJECT_REMOVAL to "Remove",
+                RetouchType.WRINKLE_REMOVAL to "Wrinkle"
+            )
+            items(healTypes) { (type, label) ->
+                val isSelected = activeType == type
+                Surface(
+                    onClick = { onSelectType(type) },
+                    shape = CircleShape,
+                    color = if (isSelected) AccentBlue else Color(0xFF1E1E1E),
+                    border = BorderStroke(1.dp, if (isSelected) AccentBlue else colors.border)
                 ) {
-                    Text("Clear All", color = Color(0xFFFF5252), fontSize = 12.sp)
+                    Text(
+                        text = label,
+                        color = if (isSelected) Color.White else colors.secondaryText,
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
                 }
             }
         }
 
-        // Brush Radius Slider
-        LrSliderRow(
-            title = "Brush Radius",
-            value = brushRadius,
-            displayValue = "${brushRadius.toInt()} px",
-            valueRange = 6f..140f,
-            minLabel = "6 px",
-            maxLabel = "140 px",
-            onDragStart = {},
-            onValueChange = onRadiusChange,
-            onValueChangeFinished = {}
-        )
-
-        // Blend Strength Slider
-        LrSliderRow(
-            title = "Blend Strength",
-            value = intensity * 100f,
-            displayValue = "${(intensity * 100).toInt()}%",
-            valueRange = 10f..100f,
-            minLabel = "10%",
-            maxLabel = "100%",
-            onDragStart = {},
-            onValueChange = { onIntensityChange(it / 100f) },
-            onValueChangeFinished = {}
-        )
+        RetouchRadiusSlider(radius = brushRadius, onRadiusChange = onRadiusChange, valueRange = 6f..140f)
+        RetouchStrengthSlider(title = "Blend Strength", intensity = intensity, onIntensityChange = onIntensityChange)
     }
 }
 
@@ -305,40 +278,14 @@ fun SkinToneDomainPanel(
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Top Header Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ColorLens,
-                    contentDescription = null,
-                    tint = AccentBlue,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = "Skin Tone Correction",
-                    color = colors.primaryText,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
-                )
-            }
-            if (strokeCount > 0) {
-                TextButton(
-                    onClick = onClearStrokes,
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text("Clear All", color = Color(0xFFFF5252), fontSize = 12.sp)
-                }
-            }
-        }
+        RetouchDomainHeader(
+            title = "Skin Tone Correction",
+            icon = Icons.Default.ColorLens,
+            strokeCount = strokeCount,
+            onClearStrokes = onClearStrokes,
+            colors = colors
+        )
 
-        // Palette Swatches Row
         Text(
             text = "Tone Palette:",
             color = colors.secondaryText,
@@ -389,30 +336,7 @@ fun SkinToneDomainPanel(
             }
         }
 
-        // Brush Radius Slider
-        LrSliderRow(
-            title = "Brush Radius",
-            value = brushRadius,
-            displayValue = "${brushRadius.toInt()} px",
-            valueRange = 8f..150f,
-            minLabel = "8 px",
-            maxLabel = "150 px",
-            onDragStart = {},
-            onValueChange = onRadiusChange,
-            onValueChangeFinished = {}
-        )
-
-        // Tint Warmth / Opacity Slider
-        LrSliderRow(
-            title = "Tone Warmth / Opacity",
-            value = intensity * 100f,
-            displayValue = "${(intensity * 100).toInt()}%",
-            valueRange = 10f..100f,
-            minLabel = "10%",
-            maxLabel = "100%",
-            onDragStart = {},
-            onValueChange = { onIntensityChange(it / 100f) },
-            onValueChangeFinished = {}
-        )
+        RetouchRadiusSlider(radius = brushRadius, onRadiusChange = onRadiusChange, valueRange = 8f..150f)
+        RetouchStrengthSlider(title = "Tone Warmth / Opacity", intensity = intensity, onIntensityChange = onIntensityChange)
     }
 }

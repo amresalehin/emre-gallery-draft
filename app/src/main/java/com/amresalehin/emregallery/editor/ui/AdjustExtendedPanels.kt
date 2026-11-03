@@ -53,7 +53,7 @@ fun VignettePanel(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF141414))
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
         // Header with reset button
         Row(
@@ -83,63 +83,53 @@ fun VignettePanel(
         Spacer(Modifier.height(10.dp))
 
         // Amount Slider (-100..+100)
-        val vigStr = when {
-            vignette > 0f -> "+${vignette.toInt()}"
-            vignette < 0f -> "−${(-vignette).toInt()}"
-            else -> "0"
-        }
-        LrSliderRow(
+        LrBipolarSliderRow(
             title = "Amount",
             value = vignette,
-            displayValue = vigStr,
-            valueRange = -100f..100f,
+            onSliderDragStart = onSliderDragStart,
+            onSliderChange = { _, v -> onVignetteChange(v) },
+            onSliderChangeFinished = onSliderDragFinished,
             minLabel = "Dark",
             maxLabel = "White",
-            onDragStart = { onSliderDragStart("Vignette Amount", vigStr) },
-            onValueChange = onVignetteChange,
-            onValueChangeFinished = onSliderDragFinished
+            dragLabel = "Vignette Amount"
         )
 
         // Midpoint Slider (0..100)
-        val midStr = "${vignetteMidpoint.toInt()}"
-        LrSliderRow(
+        LrPercentageSliderRow(
             title = "Midpoint",
+            propName = "Midpoint",
             value = vignetteMidpoint,
-            displayValue = midStr,
-            valueRange = 0f..100f,
+            onSliderDragStart = onSliderDragStart,
+            onSliderChange = { _, v -> onMidpointChange(v) },
+            onSliderChangeFinished = onSliderDragFinished,
             minLabel = "Small",
             maxLabel = "Large",
-            onDragStart = { onSliderDragStart("Vignette Midpoint", midStr) },
-            onValueChange = onMidpointChange,
-            onValueChangeFinished = onSliderDragFinished
+            dragLabel = "Vignette Midpoint"
         )
 
         // Feather Slider (0..100)
-        val featherStr = "${vignetteFeather.toInt()}"
-        LrSliderRow(
+        LrPercentageSliderRow(
             title = "Feather",
+            propName = "Feather",
             value = vignetteFeather,
-            displayValue = featherStr,
-            valueRange = 0f..100f,
+            onSliderDragStart = onSliderDragStart,
+            onSliderChange = { _, v -> onFeatherChange(v) },
+            onSliderChangeFinished = onSliderDragFinished,
             minLabel = "Hard",
             maxLabel = "Soft",
-            onDragStart = { onSliderDragStart("Vignette Feather", featherStr) },
-            onValueChange = onFeatherChange,
-            onValueChangeFinished = onSliderDragFinished
+            dragLabel = "Vignette Feather"
         )
 
         // Roundness Slider (-100..+100)
-        val roundStr = "${vignetteRoundness.toInt()}"
-        LrSliderRow(
+        LrBipolarSliderRow(
             title = "Roundness",
             value = vignetteRoundness,
-            displayValue = roundStr,
-            valueRange = -100f..100f,
+            onSliderDragStart = onSliderDragStart,
+            onSliderChange = { _, v -> onRoundnessChange(v) },
+            onSliderChangeFinished = onSliderDragFinished,
             minLabel = "Rect",
             maxLabel = "Circle",
-            onDragStart = { onSliderDragStart("Vignette Roundness", roundStr) },
-            onValueChange = onRoundnessChange,
-            onValueChangeFinished = onSliderDragFinished
+            dragLabel = "Vignette Roundness"
         )
     }
 }
@@ -161,7 +151,7 @@ fun CurvesDomainPanel(
         modifier = modifier
             .fillMaxWidth()
             .background(Color(0xFF141414))
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
         // Channel Selector Dots & Action Row
         Row(
@@ -283,7 +273,7 @@ fun BlurPanel(
         modifier = modifier
             .fillMaxWidth()
             .background(colors.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -322,17 +312,14 @@ fun BlurPanel(
 
         Spacer(Modifier.height(10.dp))
 
-        val blurStr = "${blur.toInt()}"
-        LrSliderRow(
+        LrPercentageSliderRow(
             title = "Blur Amount",
+            propName = "Blur",
             value = blur,
-            displayValue = blurStr,
-            valueRange = 0f..100f,
-            minLabel = "0",
-            maxLabel = "100",
-            onDragStart = { onSliderDragStart("Blur", blurStr) },
-            onValueChange = onBlurChange,
-            onValueChangeFinished = onSliderDragFinished
+            onSliderDragStart = onSliderDragStart,
+            onSliderChange = { _, v -> onBlurChange(v) },
+            onSliderChangeFinished = onSliderDragFinished,
+            dragLabel = "Blur"
         )
     }
 }

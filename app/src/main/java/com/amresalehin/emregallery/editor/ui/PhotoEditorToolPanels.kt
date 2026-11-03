@@ -105,7 +105,7 @@ fun SliderHudBanner(
  * [Adjust], [Presets], [Crop], [Masking], [Healing]
  */
 enum class MainBottomTab {
-    ADJUST, PRESETS, CROP, DRAW, MASKING, HEALING, OVERLAYS, AI_TOOLS
+    ADJUST, PRESETS, CROP, DRAW, MASKING, HEALING, OVERLAYS
 }
 
 
@@ -121,6 +121,7 @@ enum class MainBottomTab {
  * - Haptic feedback on zero snap/cross and reset
  * - Drag-specific visual transitions with spring animation
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LrSliderRow(
     title: String,
@@ -179,14 +180,14 @@ fun LrSliderRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 3.dp, horizontal = 4.dp),
+            .padding(vertical = 1.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 1. Parameter label with double-tap to reset + Reset ↺ button when modified
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .width(96.dp)
+                .width(88.dp)
                 .pointerInput(Unit) {
                     detectTapGestures(onDoubleTap = { resetToDefault() })
                 }
@@ -194,7 +195,7 @@ fun LrSliderRow(
             Text(
                 text = title,
                 color = if (isModified) colors.primaryText else colors.secondaryText,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 fontWeight = if (isModified) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 modifier = Modifier.weight(1f, fill = false)
@@ -204,14 +205,14 @@ fun LrSliderRow(
                 IconButton(
                     onClick = { resetToDefault() },
                     modifier = Modifier
-                        .size(20.dp)
+                        .size(18.dp)
                         .testTag("reset_slider_$title")
                 ) {
                     Icon(
                         imageVector = Icons.Default.RestartAlt,
                         contentDescription = "Reset $title",
                         tint = colors.secondaryText,
-                        modifier = Modifier.size(13.dp)
+                        modifier = Modifier.size(12.dp)
                     )
                 }
             }
@@ -219,157 +220,128 @@ fun LrSliderRow(
 
         Spacer(Modifier.width(4.dp))
 
-        // 2. Middle Slider Track: Zero-centered with custom Canvas and bounds
-        Column(
-            modifier = Modifier.weight(1f),
-            horizontalAlignment = Alignment.CenterHorizontally
+        // 2. Middle Slider Track: Zero-centered with custom Canvas and compact thumb
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(26.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Box(
+            // Custom Canvas Track
+            Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(34.dp),
-                contentAlignment = Alignment.Center
+                    .height(18.dp)
             ) {
-                // Custom Canvas Track
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(26.dp)
-                ) {
-                    val thumbRadiusPx = 10.dp.toPx()
-                    val trackStartX = thumbRadiusPx
-                    val trackEndX = size.width - thumbRadiusPx
-                    val trackWidth = (trackEndX - trackStartX).coerceAtLeast(1f)
-                    val centerY = size.height / 2f
-                    val strokeH = trackHeight.toPx()
+                val thumbRadiusPx = 6.dp.toPx()
+                val trackStartX = thumbRadiusPx
+                val trackEndX = size.width - thumbRadiusPx
+                val trackWidth = (trackEndX - trackStartX).coerceAtLeast(1f)
+                val centerY = size.height / 2f
+                val strokeH = trackHeight.toPx()
 
-                    val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
-                    val currentX = trackStartX + fraction * trackWidth
+                val fraction = ((value - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+                val currentX = trackStartX + fraction * trackWidth
 
-                    val zeroFraction = if (isBipolar) {
-                        ((0f - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
-                    } else 0f
-                    val zeroX = trackStartX + zeroFraction * trackWidth
+                val zeroFraction = if (isBipolar) {
+                    ((0f - valueRange.start) / (valueRange.endInclusive - valueRange.start)).coerceIn(0f, 1f)
+                } else 0f
+                val zeroX = trackStartX + zeroFraction * trackWidth
 
-                    // Draw Inactive background track
-                    if (gradientBrush != null) {
-                        drawLine(
-                            brush = gradientBrush,
-                            start = Offset(trackStartX, centerY),
-                            end = Offset(trackEndX, centerY),
-                            strokeWidth = strokeH,
-                            cap = StrokeCap.Round
-                        )
-                    } else {
-                        val inactiveColor = if (colors.isDark) Color(0xFF2C2C2E) else Color(0xFFE2E2E2)
-                        drawLine(
-                            color = inactiveColor,
-                            start = Offset(trackStartX, centerY),
-                            end = Offset(trackEndX, centerY),
-                            strokeWidth = strokeH,
-                            cap = StrokeCap.Round
-                        )
+                // Draw Inactive background track
+                if (gradientBrush != null) {
+                    drawLine(
+                        brush = gradientBrush,
+                        start = Offset(trackStartX, centerY),
+                        end = Offset(trackEndX, centerY),
+                        strokeWidth = strokeH,
+                        cap = StrokeCap.Round
+                    )
+                } else {
+                    val inactiveColor = if (colors.isDark) Color(0xFF2C2C2E) else Color(0xFFE2E2E2)
+                    drawLine(
+                        color = inactiveColor,
+                        start = Offset(trackStartX, centerY),
+                        end = Offset(trackEndX, centerY),
+                        strokeWidth = strokeH,
+                        cap = StrokeCap.Round
+                    )
 
-                        // Draw Active Fill
-                        if (isBipolar) {
-                            if (currentX > zeroX) {
-                                drawLine(
-                                    color = resolvedActiveTrackColor,
-                                    start = Offset(zeroX, centerY),
-                                    end = Offset(currentX, centerY),
-                                    strokeWidth = strokeH,
-                                    cap = StrokeCap.Round
-                                )
-                            } else if (currentX < zeroX) {
-                                drawLine(
-                                    color = resolvedActiveTrackColor,
-                                    start = Offset(currentX, centerY),
-                                    end = Offset(zeroX, centerY),
-                                    strokeWidth = strokeH,
-                                    cap = StrokeCap.Round
-                                )
-                            }
-                        } else {
+                    // Draw Active Fill
+                    if (isBipolar) {
+                        if (currentX > zeroX) {
                             drawLine(
                                 color = resolvedActiveTrackColor,
-                                start = Offset(trackStartX, centerY),
+                                start = Offset(zeroX, centerY),
                                 end = Offset(currentX, centerY),
                                 strokeWidth = strokeH,
                                 cap = StrokeCap.Round
                             )
+                        } else if (currentX < zeroX) {
+                            drawLine(
+                                color = resolvedActiveTrackColor,
+                                start = Offset(currentX, centerY),
+                                end = Offset(zeroX, centerY),
+                                strokeWidth = strokeH,
+                                cap = StrokeCap.Round
+                            )
                         }
-                    }
-
-                    // Draw Center Tick Notch for bipolar sliders
-                    if (isBipolar) {
-                        val tickColor = if (isNearZero) colors.primaryText else colors.secondaryText
+                    } else {
                         drawLine(
-                            color = tickColor,
-                            start = Offset(zeroX, centerY - 5.dp.toPx()),
-                            end = Offset(zeroX, centerY + 5.dp.toPx()),
-                            strokeWidth = 2.dp.toPx(),
+                            color = resolvedActiveTrackColor,
+                            start = Offset(trackStartX, centerY),
+                            end = Offset(currentX, centerY),
+                            strokeWidth = strokeH,
                             cap = StrokeCap.Round
                         )
                     }
                 }
 
-                // Interactive Slider
-                Slider(
-                    value = value,
-                    onValueChange = { raw ->
-                        onDragStart()
-                        val snapVal = if (isBipolar && abs(raw) < (if (isEv) 0.8f else 1.2f)) 0f else raw
-                        val currentSign = if (snapVal > 0.05f) 1 else if (snapVal < -0.05f) -1 else 0
-                        if (currentSign != lastSign.intValue) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            lastSign.intValue = currentSign
-                        }
-                        onValueChange(snapVal)
-                    },
-                    onValueChangeFinished = onValueChangeFinished,
-                    valueRange = valueRange,
-                    interactionSource = interactionSource,
-                    colors = SliderDefaults.colors(
-                        thumbColor = colors.activeControlBg,
-                        activeTrackColor = Color.Transparent,
-                        inactiveTrackColor = Color.Transparent
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // Subtle bounds tick labels underneath track: min, 0, max
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = effectiveMinLabel,
-                    color = colors.secondaryText,
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = (-0.2).sp
-                )
+                // Draw Center Tick Notch for bipolar sliders
                 if (isBipolar) {
-                    Text(
-                        text = "0",
-                        color = if (isNearZero) colors.primaryText else colors.secondaryText,
-                        fontSize = 9.sp,
-                        fontWeight = if (isNearZero) FontWeight.Bold else FontWeight.Normal,
-                        fontFamily = FontFamily.Monospace
+                    val tickColor = if (isNearZero) colors.primaryText else colors.secondaryText
+                    drawLine(
+                        color = tickColor,
+                        start = Offset(zeroX, centerY - 4.dp.toPx()),
+                        end = Offset(zeroX, centerY + 4.dp.toPx()),
+                        strokeWidth = 2.dp.toPx(),
+                        cap = StrokeCap.Round
                     )
                 }
-                Text(
-                    text = effectiveMaxLabel,
-                    color = colors.secondaryText,
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    letterSpacing = (-0.2).sp
-                )
             }
+
+            // Interactive Slider with compact vertical thumb
+            Slider(
+                value = value,
+                onValueChange = { raw ->
+                    onDragStart()
+                    val snapVal = if (isBipolar && abs(raw) < (if (isEv) 0.8f else 1.2f)) 0f else raw
+                    val currentSign = if (snapVal > 0.05f) 1 else if (snapVal < -0.05f) -1 else 0
+                    if (currentSign != lastSign.intValue) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        lastSign.intValue = currentSign
+                    }
+                    onValueChange(snapVal)
+                },
+                onValueChangeFinished = onValueChangeFinished,
+                valueRange = valueRange,
+                interactionSource = interactionSource,
+                colors = SliderDefaults.colors(
+                    thumbColor = colors.activeControlBg,
+                    activeTrackColor = Color.Transparent,
+                    inactiveTrackColor = Color.Transparent
+                ),
+                thumb = {
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .height(16.dp)
+                            .clip(RoundedCornerShape(1.5.dp))
+                            .background(colors.activeControlBg)
+                    )
+                },
+                modifier = Modifier.fillMaxWidth()
+            )
         }
 
         Spacer(Modifier.width(6.dp))
@@ -377,16 +349,16 @@ fun LrSliderRow(
         // 3. Right numeric value indicator: Tap or click to reset to default
         Surface(
             onClick = resetToDefault,
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(6.dp),
             color = if (isModified) colors.elevatedSurface else colors.panelSurface,
             border = BorderStroke(1.dp, colors.border),
             modifier = Modifier
-                .width(68.dp)
+                .width(52.dp)
                 .testTag("slider_value_$title")
         ) {
             Box(
                 modifier = Modifier
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                    .padding(horizontal = 2.dp, vertical = 3.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -401,6 +373,85 @@ fun LrSliderRow(
             }
         }
     }
+}
+
+/**
+ * Common formatting helpers for editor slider displays
+ */
+fun formatBipolar(value: Float, unit: String = ""): String = when {
+    value > 0.001f -> "+${value.toInt()}$unit"
+    value < -0.001f -> "−${(-value).toInt()}$unit"
+    else -> "0$unit"
+}
+
+fun formatEv(exposureEv: Float): String = when {
+    exposureEv > 0.001f -> "+%.2f EV".format(exposureEv)
+    exposureEv < -0.001f -> "−%.2f EV".format(-exposureEv)
+    else -> "0.00 EV"
+}
+
+@Composable
+fun LrBipolarSliderRow(
+    title: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float> = -100f..100f,
+    onSliderDragStart: (name: String, formattedVal: String) -> Unit,
+    onSliderChange: (prop: String, value: Float) -> Unit,
+    onSliderChangeFinished: () -> Unit,
+    propName: String = title,
+    dragLabel: String = title,
+    minLabel: String = "−100",
+    maxLabel: String = "+100",
+    unit: String = "",
+    gradientBrush: Brush? = null,
+    modifier: Modifier = Modifier
+) {
+    val displayStr = formatBipolar(value, unit)
+    LrSliderRow(
+        title = title,
+        value = value,
+        displayValue = displayStr,
+        valueRange = valueRange,
+        gradientBrush = gradientBrush,
+        minLabel = minLabel,
+        maxLabel = maxLabel,
+        onDragStart = { onSliderDragStart(dragLabel, displayStr) },
+        onValueChange = { onSliderChange(propName, it) },
+        onValueChangeFinished = onSliderChangeFinished,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun LrPercentageSliderRow(
+    title: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float> = 0f..100f,
+    onSliderDragStart: (name: String, formattedVal: String) -> Unit,
+    onSliderChange: (prop: String, value: Float) -> Unit,
+    onSliderChangeFinished: () -> Unit,
+    propName: String = title,
+    dragLabel: String = title,
+    minLabel: String = "0",
+    maxLabel: String = "+100",
+    unit: String = "",
+    activeTrackColor: Color = Color.Unspecified,
+    modifier: Modifier = Modifier
+) {
+    val displayStr = if (unit.isNotEmpty()) "${value.toInt()}$unit" else "${value.toInt()}"
+    LrSliderRow(
+        title = title,
+        value = value,
+        displayValue = displayStr,
+        valueRange = valueRange,
+        minLabel = minLabel,
+        maxLabel = maxLabel,
+        activeTrackColor = activeTrackColor,
+        onDragStart = { onSliderDragStart(dragLabel, displayStr) },
+        onValueChange = { onSliderChange(propName, it) },
+        onValueChangeFinished = onSliderChangeFinished,
+        modifier = modifier
+    )
 }
 
 /**
@@ -425,16 +476,11 @@ fun LightPanel(
         modifier = modifier
             .fillMaxWidth()
             .background(LocalEmreEditorColors.current.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
-
         // Exposure: -5.00 .. +5.00 EV
         val expEv = exposure / 20f
-        val expStr = when {
-            expEv > 0.001f -> "+%.2f EV".format(expEv)
-            expEv < -0.001f -> "−%.2f EV".format(-expEv)
-            else -> "0.00 EV"
-        }
+        val expStr = formatEv(expEv)
         LrSliderRow(
             title = "Exposure",
             value = exposure,
@@ -449,99 +495,23 @@ fun LightPanel(
             onValueChangeFinished = onSliderChangeFinished
         )
 
-        // Contrast
-        val contrastStr = when {
-            contrast > 0f -> "+${contrast.toInt()}"
-            contrast < 0f -> "−${(-contrast).toInt()}"
-            else -> "0"
+        listOf(
+            "Contrast" to contrast,
+            "Highlights" to highlights,
+            "Shadows" to shadows,
+            "Whites" to whites,
+            "Blacks" to blacks
+        ).forEach { (prop, val_) ->
+            LrBipolarSliderRow(
+                title = prop,
+                value = val_,
+                onSliderDragStart = onSliderDragStart,
+                onSliderChange = onSliderChange,
+                onSliderChangeFinished = onSliderChangeFinished
+            )
         }
-        LrSliderRow(
-            title = "Contrast",
-            value = contrast,
-            displayValue = contrastStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Contrast", contrastStr) },
-            onValueChange = { onSliderChange("Contrast", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        // Highlights
-        val highStr = when {
-            highlights > 0f -> "+${highlights.toInt()}"
-            highlights < 0f -> "−${(-highlights).toInt()}"
-            else -> "0"
-        }
-        LrSliderRow(
-            title = "Highlights",
-            value = highlights,
-            displayValue = highStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Highlights", highStr) },
-            onValueChange = { onSliderChange("Highlights", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        // Shadows
-        val shadowStr = when {
-            shadows > 0f -> "+${shadows.toInt()}"
-            shadows < 0f -> "−${(-shadows).toInt()}"
-            else -> "0"
-        }
-        LrSliderRow(
-            title = "Shadows",
-            value = shadows,
-            displayValue = shadowStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Shadows", shadowStr) },
-            onValueChange = { onSliderChange("Shadows", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        // Whites
-        val whitesStr = when {
-            whites > 0f -> "+${whites.toInt()}"
-            whites < 0f -> "−${(-whites).toInt()}"
-            else -> "0"
-        }
-        LrSliderRow(
-            title = "Whites",
-            value = whites,
-            displayValue = whitesStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Whites", whitesStr) },
-            onValueChange = { onSliderChange("Whites", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        // Blacks
-        val blacksStr = when {
-            blacks > 0f -> "+${blacks.toInt()}"
-            blacks < 0f -> "−${(-blacks).toInt()}"
-            else -> "0"
-        }
-        LrSliderRow(
-            title = "Blacks",
-            value = blacks,
-            displayValue = blacksStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Blacks", blacksStr) },
-            onValueChange = { onSliderChange("Blacks", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
     }
 }
-
-
 
 /**
  * 3. COLOR PANEL
@@ -570,7 +540,7 @@ fun ColorPanel(
         modifier = modifier
             .fillMaxWidth()
             .background(LocalEmreEditorColors.current.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
         // Black & White Toggle
         Row(
@@ -672,8 +642,8 @@ fun ColorPanel(
         )
         val kelvin = (5500 + (temperature * 38)).toInt()
         val tempStr = when {
-            temperature > 0f -> "+${temperature.toInt()} (${kelvin}K)"
-            temperature < 0f -> "−${(-temperature).toInt()} (${kelvin}K)"
+            temperature > 0.001f -> "+${temperature.toInt()} (${kelvin}K)"
+            temperature < -0.001f -> "−${(-temperature).toInt()} (${kelvin}K)"
             else -> "0 (${kelvin}K)"
         }
         LrSliderRow(
@@ -693,11 +663,7 @@ fun ColorPanel(
         val tintBrush = Brush.horizontalGradient(
             colors = listOf(Color(0xFF00E676), Color(0xFFA5D6A7), Color(0xFFF48FB1), Color(0xFFE040FB))
         )
-        val tintStr = when {
-            tint > 0f -> "+${tint.toInt()}"
-            tint < 0f -> "−${(-tint).toInt()}"
-            else -> "0"
-        }
+        val tintStr = formatBipolar(tint)
         LrSliderRow(
             title = "Tint",
             value = tint,
@@ -711,47 +677,21 @@ fun ColorPanel(
             onValueChangeFinished = onSliderChangeFinished
         )
 
-        // Vibrance
-        val vibStr = when {
-            vibrance > 0f -> "+${vibrance.toInt()}"
-            vibrance < 0f -> "−${(-vibrance).toInt()}"
-            else -> "0"
+        // Vibrance & Saturation
+        listOf(
+            "Vibrance" to vibrance,
+            "Saturation" to saturation
+        ).forEach { (prop, val_) ->
+            LrBipolarSliderRow(
+                title = prop,
+                value = val_,
+                onSliderDragStart = onSliderDragStart,
+                onSliderChange = onSliderChange,
+                onSliderChangeFinished = onSliderChangeFinished
+            )
         }
-        LrSliderRow(
-            title = "Vibrance",
-            value = vibrance,
-            displayValue = vibStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Vibrance", vibStr) },
-            onValueChange = { onSliderChange("Vibrance", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        // Saturation
-        val satStr = when {
-            saturation > 0f -> "+${saturation.toInt()}"
-            saturation < 0f -> "−${(-saturation).toInt()}"
-            else -> "0"
-        }
-        LrSliderRow(
-            title = "Saturation",
-            value = saturation,
-            displayValue = satStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Saturation", satStr) },
-            onValueChange = { onSliderChange("Saturation", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
     }
 }
-
-
-
-
 
 @Composable
 fun EffectsPanel(
@@ -776,123 +716,38 @@ fun EffectsPanel(
         modifier = modifier
             .fillMaxWidth()
             .background(LocalEmreEditorColors.current.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
-        val texStr = when {
-            texture > 0f -> "+${texture.toInt()}"
-            texture < 0f -> "−${(-texture).toInt()}"
-            else -> "0"
+        listOf(
+            "Texture" to texture,
+            "Clarity" to clarity,
+            "Dehaze" to dehaze
+        ).forEach { (prop, val_) ->
+            LrBipolarSliderRow(
+                title = prop,
+                value = val_,
+                onSliderDragStart = onSliderDragStart,
+                onSliderChange = onSliderChange,
+                onSliderChangeFinished = onSliderChangeFinished
+            )
         }
-        LrSliderRow(
-            title = "Texture",
-            value = texture,
-            displayValue = texStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Texture", texStr) },
-            onValueChange = { onSliderChange("Texture", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
 
-        val clarStr = when {
-            clarity > 0f -> "+${clarity.toInt()}"
-            clarity < 0f -> "−${(-clarity).toInt()}"
-            else -> "0"
+        listOf(
+            Triple("Grain", "Grain", grain),
+            Triple("Grain Size", "grainSize", grainSize),
+            Triple("Grain Roughness", "grainRoughness", grainRoughness),
+            Triple("Global Dodge", "Dodge", dodge),
+            Triple("Global Burn", "Burn", burn)
+        ).forEach { (title, prop, val_) ->
+            LrPercentageSliderRow(
+                title = title,
+                propName = prop,
+                value = val_,
+                onSliderDragStart = onSliderDragStart,
+                onSliderChange = onSliderChange,
+                onSliderChangeFinished = onSliderChangeFinished
+            )
         }
-        LrSliderRow(
-            title = "Clarity",
-            value = clarity,
-            displayValue = clarStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Clarity", clarStr) },
-            onValueChange = { onSliderChange("Clarity", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        val dehazeStr = when {
-            dehaze > 0f -> "+${dehaze.toInt()}"
-            dehaze < 0f -> "−${(-dehaze).toInt()}"
-            else -> "0"
-        }
-        LrSliderRow(
-            title = "Dehaze",
-            value = dehaze,
-            displayValue = dehazeStr,
-            valueRange = -100f..100f,
-            minLabel = "−100",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Dehaze", dehazeStr) },
-            onValueChange = { onSliderChange("Dehaze", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        val grainStr = "${grain.toInt()}"
-        LrSliderRow(
-            title = "Grain",
-            value = grain,
-            displayValue = grainStr,
-            valueRange = 0f..100f,
-            minLabel = "0",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Grain", grainStr) },
-            onValueChange = { onSliderChange("Grain", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        val sizeStr = "${grainSize.toInt()}"
-        LrSliderRow(
-            title = "Grain Size",
-            value = grainSize,
-            displayValue = sizeStr,
-            valueRange = 0f..100f,
-            minLabel = "0",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Grain Size", sizeStr) },
-            onValueChange = { onSliderChange("grainSize", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        val roughStr = "${grainRoughness.toInt()}"
-        LrSliderRow(
-            title = "Grain Roughness",
-            value = grainRoughness,
-            displayValue = roughStr,
-            valueRange = 0f..100f,
-            minLabel = "0",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Grain Roughness", roughStr) },
-            onValueChange = { onSliderChange("grainRoughness", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        val dodgeStr = "${dodge.toInt()}"
-        LrSliderRow(
-            title = "Global Dodge",
-            value = dodge,
-            displayValue = dodgeStr,
-            valueRange = 0f..100f,
-            minLabel = "0",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Dodge", dodgeStr) },
-            onValueChange = { onSliderChange("Dodge", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
-
-        val burnStr = "${burn.toInt()}"
-        LrSliderRow(
-            title = "Global Burn",
-            value = burn,
-            displayValue = burnStr,
-            valueRange = 0f..100f,
-            minLabel = "0",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Burn", burnStr) },
-            onValueChange = { onSliderChange("Burn", it) },
-            onValueChangeFinished = onSliderChangeFinished
-        )
     }
 }
 
@@ -916,7 +771,7 @@ fun DetailPanel(
         modifier = modifier
             .fillMaxWidth()
             .background(LocalEmreEditorColors.current.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 12.dp, vertical = 3.dp)
     ) {
         val amountStr = if (sharpness > 0) "+${sharpness.toInt()}" else "${sharpness.toInt()}"
         LrSliderRow(
@@ -959,30 +814,22 @@ fun DetailPanel(
             onValueChangeFinished = onSliderChangeFinished
         )
 
-        val noiseStr = "${noiseReduction.toInt()}"
-        LrSliderRow(
+        LrPercentageSliderRow(
             title = "Noise Reduction",
+            propName = "Noise Reduction",
             value = noiseReduction,
-            displayValue = noiseStr,
-            valueRange = 0f..100f,
-            minLabel = "0",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Noise Reduction", noiseStr) },
-            onValueChange = { onSliderChange("Noise Reduction", it) },
-            onValueChangeFinished = onSliderChangeFinished
+            onSliderDragStart = onSliderDragStart,
+            onSliderChange = onSliderChange,
+            onSliderChangeFinished = onSliderChangeFinished
         )
 
-        val colorNoiseStr = "${colorNoiseReduction.toInt()}"
-        LrSliderRow(
+        LrPercentageSliderRow(
             title = "Color Noise",
+            propName = "Color noise",
             value = colorNoiseReduction,
-            displayValue = colorNoiseStr,
-            valueRange = 0f..100f,
-            minLabel = "0",
-            maxLabel = "+100",
-            onDragStart = { onSliderDragStart("Color Noise", colorNoiseStr) },
-            onValueChange = { onSliderChange("Color noise", it) },
-            onValueChangeFinished = onSliderChangeFinished
+            onSliderDragStart = onSliderDragStart,
+            onSliderChange = onSliderChange,
+            onSliderChangeFinished = onSliderChangeFinished
         )
     }
 }
@@ -1541,141 +1388,4 @@ private fun PresetSliderRow(
     }
 }
 
-/**
- * 8. CROP & GEOMETRY PANEL
- * Rotate, Flip, Straighten, and Aspect Ratio presets.
- */
-@Composable
-fun CropControlsPanel(
-    selectedPreset: AspectRatioPreset,
-    straightenAngle: Float,
-    onSelectPreset: (AspectRatioPreset) -> Unit,
-    onRotate90: () -> Unit,
-    onFlipH: () -> Unit,
-    onFlipV: () -> Unit,
-    onStraightenChange: (Float) -> Unit,
-    onStraightenFinished: (() -> Unit)? = null,
-    onApply: () -> Unit = {},
-    onAutoLevel: (() -> Unit)? = null,
-    onResetCrop: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(LocalEmreEditorColors.current.panelSurface)
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-    ) {
-        // Quick Actions row: Rotate, Flip H, Flip V, Auto-Level
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            item {
-                Surface(
-                    onClick = onRotate90,
-                    shape = CircleShape,
-                    color = Color(0xFF1E1E1E),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.RotateRight, null, Modifier.size(16.dp), tint = Color.White)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Rotate 90°", color = Color.White, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            item {
-                Surface(
-                    onClick = onFlipH,
-                    shape = CircleShape,
-                    color = Color(0xFF1E1E1E),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Flip, null, Modifier.size(16.dp), tint = Color.White)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Flip H", color = Color.White, fontSize = 12.sp)
-                    }
-                }
-            }
-
-            item {
-                Surface(
-                    onClick = onFlipV,
-                    shape = CircleShape,
-                    color = Color(0xFF1E1E1E),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Flip, null, Modifier.size(16.dp), tint = Color.White)
-                        Spacer(Modifier.width(6.dp))
-                        Text("Flip V", color = Color.White, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(4.dp))
-
-        // Straighten Slider
-        val angleStr = when {
-            straightenAngle > 0f -> "+${straightenAngle.toInt()}°"
-            straightenAngle < 0f -> "−${(-straightenAngle).toInt()}°"
-            else -> "0°"
-        }
-        LrSliderRow(
-            title = "Straighten",
-            value = straightenAngle,
-            displayValue = angleStr,
-            valueRange = -45f..45f,
-            unit = "°",
-            minLabel = "−45°",
-            maxLabel = "+45°",
-            onDragStart = {},
-            onValueChange = onStraightenChange,
-            onValueChangeFinished = { onStraightenFinished?.invoke() }
-        )
-
-        Spacer(Modifier.height(4.dp))
-
-        // Aspect ratio presets row
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            items(AspectRatioPreset.entries) { preset ->
-                val isSelected = selectedPreset == preset
-                Surface(
-                    onClick = { onSelectPreset(preset) },
-                    shape = CircleShape,
-                    color = if (isSelected) Color.White else Color(0xFF1E1E1E),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isSelected) Color.White else Color.White.copy(alpha = 0.08f)
-                    )
-                ) {
-                    Text(
-                        text = preset.label,
-                        color = if (isSelected) Color.Black else Color(0xFFCCCCCC),
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                    )
-                }
-            }
-        }
-    }
-}
 

@@ -144,8 +144,8 @@ fun EmreDragHandle(
 ) {
     Box(
         modifier = modifier
-            .padding(vertical = 8.dp)
-            .size(width = 36.dp, height = 4.dp)
+            .padding(vertical = 4.dp)
+            .size(width = 32.dp, height = 3.dp)
             .clip(CircleShape)
             .background(colors.border)
     )

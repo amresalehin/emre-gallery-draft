@@ -29,6 +29,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.amresalehin.emregallery.editor.EditorTool
+import com.amresalehin.emregallery.editor.RetouchType
 
 /**
  * Editing Domains for Emre Gallery Photo Editor.
@@ -51,8 +53,30 @@ enum class EditorDomain(val label: String, val icon: ImageVector) {
     TEXT("Text", Icons.Default.TextFields),
     SHAPE("Shape", Icons.Default.Category),
     CALLOUT("Callout", Icons.Default.ChatBubbleOutline),
-    FRAME("Frame", Icons.Default.CropPortrait),
-    AI_TOOLS("AI Tools", Icons.Default.AutoAwesome)
+    FRAME("Frame", Icons.Default.CropPortrait);
+
+    val associatedTool: EditorTool
+        get() = when (this) {
+            LIGHT, COLOR, EFFECTS, DETAIL, BLUR, VIGNETTE -> EditorTool.ADJUST
+            CURVES -> EditorTool.CURVES
+            CROP -> EditorTool.CROP
+            PRESETS -> EditorTool.EFFECTS
+            BLEMISH, SMOOTH, HEAL, SKIN_TONE -> EditorTool.RETOUCH
+            MASK -> EditorTool.BRUSHES
+            TEXT -> EditorTool.TEXT
+            SHAPE -> EditorTool.SHAPE
+            CALLOUT -> EditorTool.CALLOUT
+            FRAME -> EditorTool.FRAME
+        }
+
+    val defaultRetouchType: RetouchType?
+        get() = when (this) {
+            BLEMISH -> RetouchType.BLEMISH
+            SMOOTH -> RetouchType.SKIN_SMOOTH
+            HEAL -> RetouchType.PATCH_HEALING
+            SKIN_TONE -> RetouchType.SKIN_TONE
+            else -> null
+        }
 }
 
 /**

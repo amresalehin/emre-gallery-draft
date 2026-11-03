@@ -81,7 +81,6 @@ fun PhotoEditorScreen(
     var activeShapeSubtool by remember { mutableStateOf(ShapeSubtool.SHAPES) }
     var activeCalloutSubtool by remember { mutableStateOf(CalloutSubtool.STYLES) }
     var activeFrameSubtool by remember { mutableStateOf(FrameSubtool.FRAMES) }
-    var activeAiSubtool by remember { mutableStateOf(AiSubtool.EXPAND) }
 
     // Precision sub-mode channel state
     var activeCurveChannel by remember { mutableStateOf(CurveChannel.RGB) }
@@ -155,7 +154,6 @@ fun PhotoEditorScreen(
     var liquifyStrength by remember { mutableFloatStateOf(0.5f) }
 
     // Dialogs & Sheets
-    var showAiSheet by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
     var showDiscardDialog by remember { mutableStateOf(false) }
     var showHistoryDialog by remember { mutableStateOf(false) }
@@ -165,7 +163,6 @@ fun PhotoEditorScreen(
         when {
             showHistoryDialog -> showHistoryDialog = false
             currentMode != EditorMode.NONE -> viewModel.cancelModeChanges()
-            showAiSheet -> showAiSheet = false
             showExportSheet -> showExportSheet = false
             selectedDomain != EditorDomain.LIGHT -> {
                 selectedDomain = EditorDomain.LIGHT
@@ -228,72 +225,7 @@ fun PhotoEditorScreen(
             currentMode == EditorMode.CURVES -> viewModel.resetCurves()
             currentMode == EditorMode.COLOR_MIX -> viewModel.resetColorMix()
             currentMode == EditorMode.COLOR_GRADING -> viewModel.setSplitToning(SplitToningParams())
-            selectedDomain == EditorDomain.LIGHT -> {
-                viewModel.updateAdjustmentValue("Exposure", 0f)
-                viewModel.updateAdjustmentValue("Contrast", 0f)
-                viewModel.updateAdjustmentValue("Highlights", 0f)
-                viewModel.updateAdjustmentValue("Shadows", 0f)
-                viewModel.updateAdjustmentValue("Whites", 0f)
-                viewModel.updateAdjustmentValue("Blacks", 0f)
-                viewModel.commitSliderChange()
-            }
-            selectedDomain == EditorDomain.COLOR -> {
-                viewModel.updateAdjustmentValue("Temp", 0f)
-                viewModel.updateAdjustmentValue("Tint", 0f)
-                viewModel.updateAdjustmentValue("Vibrance", 0f)
-                viewModel.updateAdjustmentValue("Saturation", 0f)
-                viewModel.setColorBalance(ColorBalanceParams())
-                viewModel.setSplitToning(SplitToningParams())
-                viewModel.setGradientMap(GradientMapType.NONE)
-                viewModel.setDuotone(DuotoneParams())
-                viewModel.setColorReplace(ColorReplaceParams())
-                viewModel.setColorSplash(ColorSplashParams())
-                viewModel.commitSliderChange()
-            }
-            selectedDomain == EditorDomain.CURVES -> {
-                viewModel.resetCurves()
-            }
-            selectedDomain == EditorDomain.EFFECTS -> {
-                viewModel.updateAdjustmentValue("Texture", 0f)
-                viewModel.updateAdjustmentValue("Clarity", 0f)
-                viewModel.updateAdjustmentValue("Dehaze", 0f)
-                viewModel.updateAdjustmentValue("Grain", 0f)
-                viewModel.updateAdjustmentValue("Dodge", 0f)
-                viewModel.updateAdjustmentValue("Burn", 0f)
-                viewModel.commitSliderChange()
-            }
-            selectedDomain == EditorDomain.DETAIL -> {
-                viewModel.updateAdjustmentValue("Sharpening", 0f)
-                viewModel.updateAdjustmentValue("Noise Reduction", 0f)
-                viewModel.updateAdjustmentValue("Radius", 1.0f)
-                viewModel.updateAdjustmentValue("Detail", 25f)
-                viewModel.updateAdjustmentValue("Color Noise Reduction", 0f)
-                viewModel.commitSliderChange()
-            }
-            selectedDomain == EditorDomain.BLUR -> {
-                viewModel.updateAdjustmentValue("Blur", 0f)
-                viewModel.commitSliderChange()
-            }
-            selectedDomain == EditorDomain.VIGNETTE -> {
-                viewModel.setVignettePreset(0f, 50f, 50f, 0f)
-            }
-            selectedDomain == EditorDomain.CROP -> viewModel.resetCrop()
-            selectedDomain == EditorDomain.PRESETS -> viewModel.setFilter(FilterType.NONE)
-            selectedDomain == EditorDomain.BLEMISH -> viewModel.clearRetouchStrokes(RetouchType.BLEMISH)
-            selectedDomain == EditorDomain.SMOOTH -> viewModel.clearRetouchStrokes(RetouchType.SKIN_SMOOTH)
-            selectedDomain == EditorDomain.HEAL -> viewModel.clearRetouchStrokes(
-                RetouchType.PATCH_HEALING,
-                RetouchType.CLONE_STAMP,
-                RetouchType.OBJECT_REMOVAL,
-                RetouchType.WRINKLE_REMOVAL
-            )
-            selectedDomain == EditorDomain.SKIN_TONE -> viewModel.clearRetouchStrokes(RetouchType.SKIN_TONE)
-            selectedDomain == EditorDomain.MASK -> viewModel.clearMask()
-            selectedDomain == EditorDomain.TEXT -> viewModel.clearTextOverlays()
-            selectedDomain == EditorDomain.SHAPE -> viewModel.clearShapes()
-            selectedDomain == EditorDomain.CALLOUT -> viewModel.clearCallouts()
-            selectedDomain == EditorDomain.FRAME -> viewModel.clearFrame()
-            selectedDomain == EditorDomain.AI_TOOLS -> viewModel.setAiExpand(0f)
+            else -> viewModel.resetDomain(selectedDomain)
         }
         Toast.makeText(context, "Reset ${selectedDomain.label}", Toast.LENGTH_SHORT).show()
     }
@@ -403,8 +335,6 @@ fun PhotoEditorScreen(
                         onSelectCalloutSubtool = { activeCalloutSubtool = it },
                         activeFrameSubtool = activeFrameSubtool,
                         onSelectFrameSubtool = { activeFrameSubtool = it },
-                        activeAiSubtool = activeAiSubtool,
-                        onSelectAiSubtool = { activeAiSubtool = it },
                         onSliderDragStart = ::startSliderDrag,
                         onSliderDragFinished = ::finishSliderDrag,
                         onOpenCurvesMode = { viewModel.enterMode(EditorMode.CURVES) },
@@ -471,39 +401,8 @@ fun PhotoEditorScreen(
                         selectedDomain = selectedDomain,
                         onSelectDomain = { domain ->
                             selectedDomain = domain
-                            when (domain) {
-                                EditorDomain.LIGHT,
-                                EditorDomain.COLOR,
-                                EditorDomain.EFFECTS,
-                                EditorDomain.DETAIL,
-                                EditorDomain.BLUR,
-                                EditorDomain.VIGNETTE -> viewModel.setActiveTool(EditorTool.ADJUST)
-                                EditorDomain.CURVES -> viewModel.setActiveTool(EditorTool.CURVES)
-                                EditorDomain.CROP -> viewModel.setActiveTool(EditorTool.CROP)
-                                EditorDomain.PRESETS -> viewModel.setActiveTool(EditorTool.EFFECTS)
-                                EditorDomain.BLEMISH -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.BLEMISH
-                                }
-                                EditorDomain.SMOOTH -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.SKIN_SMOOTH
-                                }
-                                EditorDomain.HEAL -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.PATCH_HEALING
-                                }
-                                EditorDomain.SKIN_TONE -> {
-                                    viewModel.setActiveTool(EditorTool.RETOUCH)
-                                    activeRetouchType = RetouchType.SKIN_TONE
-                                }
-                                EditorDomain.MASK -> viewModel.setActiveTool(EditorTool.BRUSHES)
-                                EditorDomain.TEXT -> viewModel.setActiveTool(EditorTool.TEXT)
-                                EditorDomain.SHAPE -> viewModel.setActiveTool(EditorTool.SHAPE)
-                                EditorDomain.CALLOUT -> viewModel.setActiveTool(EditorTool.CALLOUT)
-                                EditorDomain.FRAME -> viewModel.setActiveTool(EditorTool.FRAME)
-                                EditorDomain.AI_TOOLS -> viewModel.setActiveTool(EditorTool.AI_TOOLS)
-                            }
+                            viewModel.setActiveTool(domain.associatedTool)
+                            domain.defaultRetouchType?.let { activeRetouchType = it }
                         },
                         colors = colors
                     )
@@ -543,13 +442,20 @@ fun PhotoEditorScreen(
                     ) {
                         renderTopToolbar()
                         renderWorkspace(Modifier.fillMaxWidth().weight(1f))
-                        renderOperationToolbar()
-                        val contextualPanelMaxHeight = editorMaxHeight * 0.40f
-                        renderContextualPanel(
-                            Modifier
+                        
+                        val panelWithOperationsMaxHeight = editorMaxHeight * 0.40f
+                        Column(
+                            modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = contextualPanelMaxHeight)
-                        )
+                                .heightIn(max = panelWithOperationsMaxHeight)
+                        ) {
+                            renderOperationToolbar()
+                            renderContextualPanel(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false)
+                            )
+                        }
                         renderBottomNavigation()
                     }
                 }
@@ -694,48 +600,6 @@ fun PhotoEditorScreen(
             }
         }
 
-        // AI Magic Sheet
-        if (showAiSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showAiSheet = false },
-                containerColor = colors.elevatedSurface,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp)
-                ) {
-                    Text(
-                        "AI Magic Tools",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = colors.primaryText,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(20.dp))
-
-                    OutlinedButton(
-                        onClick = {
-                            viewModel.setAiExpand(0.25f)
-                            showAiSheet = false
-                            Toast.makeText(context, "Generative Expand Preview enabled", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        shape = CircleShape,
-                        border = BorderStroke(1.dp, colors.border)
-                    ) {
-                        Text(
-                            "Generative Outpainting / Expand",
-                            color = colors.primaryText,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-        }
 
         // Versions / Edit History Dialog
         if (showHistoryDialog) {

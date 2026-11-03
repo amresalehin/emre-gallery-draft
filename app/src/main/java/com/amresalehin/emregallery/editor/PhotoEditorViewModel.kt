@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.MediaRepository
 import com.amresalehin.emregallery.editor.state.EditorHistoryManager
+import com.amresalehin.emregallery.editor.ui.EditorDomain
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -226,6 +227,96 @@ class PhotoEditorViewModel : ViewModel() {
             adjustments = AdjustmentParams()
         )
         updateLivePreview()
+    }
+
+    fun resetDomain(domain: EditorDomain) {
+        when (domain) {
+            EditorDomain.LIGHT -> {
+                val cur = _sessionState.value.adjustments
+                _sessionState.value = _sessionState.value.copy(
+                    adjustments = cur.copy(
+                        exposure = 0f,
+                        contrast = 0f,
+                        highlights = 0f,
+                        shadows = 0f,
+                        whites = 0f,
+                        blacks = 0f
+                    )
+                )
+                commitSliderChange()
+                updateLivePreview()
+            }
+            EditorDomain.COLOR -> {
+                val cur = _sessionState.value.adjustments
+                _sessionState.value = _sessionState.value.copy(
+                    adjustments = cur.copy(
+                        temperature = 0f,
+                        tint = 0f,
+                        vibrance = 0f,
+                        saturation = 0f,
+                        colorBalance = ColorBalanceParams(),
+                        splitToning = SplitToningParams(),
+                        gradientMap = GradientMapType.NONE,
+                        duotone = DuotoneParams(),
+                        colorReplace = ColorReplaceParams(),
+                        colorSplash = ColorSplashParams()
+                    )
+                )
+                commitSliderChange()
+                updateLivePreview()
+            }
+            EditorDomain.CURVES -> resetCurves()
+            EditorDomain.EFFECTS -> {
+                val cur = _sessionState.value.adjustments
+                _sessionState.value = _sessionState.value.copy(
+                    adjustments = cur.copy(
+                        texture = 0f,
+                        clarity = 0f,
+                        dehaze = 0f,
+                        grain = 0f,
+                        dodge = 0f,
+                        burn = 0f
+                    )
+                )
+                commitSliderChange()
+                updateLivePreview()
+            }
+            EditorDomain.DETAIL -> {
+                val cur = _sessionState.value.adjustments
+                _sessionState.value = _sessionState.value.copy(
+                    adjustments = cur.copy(
+                        sharpness = 0f,
+                        sharpnessRadius = 1.0f,
+                        sharpnessDetail = 25f,
+                        noiseReduction = 0f,
+                        colorNoiseReduction = 0f
+                    )
+                )
+                commitSliderChange()
+                updateLivePreview()
+            }
+            EditorDomain.BLUR -> {
+                updateAdjustmentValue("Blur", 0f)
+                commitSliderChange()
+            }
+            EditorDomain.VIGNETTE -> setVignettePreset(0f, 50f, 50f, 0f)
+            EditorDomain.CROP -> resetCrop()
+            EditorDomain.PRESETS -> setFilter(FilterType.NONE)
+            EditorDomain.BLEMISH -> clearRetouchStrokes(RetouchType.BLEMISH)
+            EditorDomain.SMOOTH -> clearRetouchStrokes(RetouchType.SKIN_SMOOTH)
+            EditorDomain.HEAL -> clearRetouchStrokes(
+                RetouchType.PATCH_HEALING,
+                RetouchType.CLONE_STAMP,
+                RetouchType.OBJECT_REMOVAL,
+                RetouchType.WRINKLE_REMOVAL
+            )
+            EditorDomain.SKIN_TONE -> clearRetouchStrokes(RetouchType.SKIN_TONE)
+            EditorDomain.MASK -> clearMask()
+            EditorDomain.TEXT -> clearTextOverlays()
+            EditorDomain.SHAPE -> clearShapes()
+            EditorDomain.CALLOUT -> clearCallouts()
+            EditorDomain.FRAME -> clearFrame()
+        }
     }
 
     fun clearDrawingStrokes() {
@@ -1768,42 +1859,6 @@ class PhotoEditorViewModel : ViewModel() {
             transform = _sessionState.value.transform.copy(scaleFactor = scale),
             description = "Scale ${(scale * 100).toInt()}%"
         ))
-    }
-
-    // --- AI Tools ---
-    fun toggleAiAutoEnhance(enabled: Boolean) {
-        val updated = _sessionState.value.aiSettings.copy(autoEnhanceEnabled = enabled)
-        pushState(_sessionState.value.copy(aiSettings = updated, description = if (enabled) "AI Auto Enhance" else "AI Auto Enhance Off"))
-    }
-
-    fun setAiAutoEnhanceIntensity(intensity: Float) {
-        val updated = _sessionState.value.aiSettings.copy(autoEnhanceIntensity = intensity)
-        _sessionState.value = _sessionState.value.copy(aiSettings = updated)
-        updateLivePreview()
-    }
-
-    fun setAiStyleTransfer(style: AiStyleTransfer?) {
-        val updated = _sessionState.value.aiSettings.copy(activeStyleTransfer = style)
-        pushState(_sessionState.value.copy(aiSettings = updated, description = style?.label ?: "Remove style"))
-    }
-
-    fun setAiTryOnStyle(style: AiTryOnStyle?) = setAiTryOn(style)
-
-    fun setAiTryOn(style: AiTryOnStyle?) {
-        val updated = _sessionState.value.aiSettings.copy(activeTryOn = style)
-        pushState(_sessionState.value.copy(aiSettings = updated, description = style?.label ?: "Remove attire"))
-    }
-
-    fun setAiExpand(ratio: Float) {
-        val updated = _sessionState.value.aiSettings.copy(expandOutpaintRatio = ratio)
-        pushState(_sessionState.value.copy(aiSettings = updated, description = "AI Expand ${(ratio * 100).toInt()}%"))
-    }
-
-    fun updateAiExpand(ratio: Float) {
-        recordSliderBaseline()
-        val updated = _sessionState.value.aiSettings.copy(expandOutpaintRatio = ratio)
-        _sessionState.value = _sessionState.value.copy(aiSettings = updated)
-        updateLivePreview()
     }
 
     private fun updateLivePreview() {
