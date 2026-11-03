@@ -15,6 +15,9 @@ data class MediaInboxItem(
     val localUri: String,
     val sourceUrl: String,
     val isVideo: Boolean,
+    val isAudio: Boolean = false,
+    val isStream: Boolean = false,
+    val format: String = "",
     val sizeBytes: Long = 0L,
     val dateAddedMillis: Long = System.currentTimeMillis()
 )
@@ -68,6 +71,9 @@ class MediaInboxRepository(private val context: Context) {
                             localUri = itmObj.getString("localUri"),
                             sourceUrl = itmObj.optString("sourceUrl", ""),
                             isVideo = itmObj.optBoolean("isVideo", false),
+                            isAudio = itmObj.optBoolean("isAudio", false),
+                            isStream = itmObj.optBoolean("isStream", false),
+                            format = itmObj.optString("format", ""),
                             sizeBytes = itmObj.optLong("sizeBytes", 0L),
                             dateAddedMillis = itmObj.optLong("dateAddedMillis", timestamp)
                         )
@@ -110,6 +116,9 @@ class MediaInboxRepository(private val context: Context) {
                             put("localUri", itm.localUri)
                             put("sourceUrl", itm.sourceUrl)
                             put("isVideo", itm.isVideo)
+                            put("isAudio", itm.isAudio)
+                            put("isStream", itm.isStream)
+                            put("format", itm.format)
                             put("sizeBytes", itm.sizeBytes)
                             put("dateAddedMillis", itm.dateAddedMillis)
                         }

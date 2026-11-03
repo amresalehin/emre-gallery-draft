@@ -328,6 +328,7 @@ fun SideNavigationDrawer(
                             Triple(Destination.BIN, "Bin", Icons.Default.Delete)
                         ),
                         listOf(
+                            Triple(Destination.MEDIA_INBOX, "Media Downloader", Icons.Default.CloudDownload),
                             Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings),
                             Triple(Destination.INDEXING_STATUS, "Indexing Status", Icons.Default.Storage)
                         )

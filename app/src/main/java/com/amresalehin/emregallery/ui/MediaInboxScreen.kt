@@ -517,49 +517,19 @@ fun MediaInboxScreen(
                     .testTag("scraper_scrim")
             )
 
-            // Sheet taking strictly 80% of screen height anchored to the bottom (Alignment.BottomCenter)
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.80f)
-                    .animateEnterExit(
-                        enter = slideInVertically(
-                            initialOffsetY = { it },
-                            animationSpec = spring(
-                                dampingRatio = 0.85f,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
-                        ),
-                        exit = slideOutVertically(
-                            targetOffsetY = { it },
-                            animationSpec = tween(200, easing = FastOutSlowInEasing)
-                        )
-                    )
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        // Prevent click propagation to the scrim
+            // Scraper Drawer with top floating bar and bottom 80% sheet
+            MediaScraperDrawer(
+                onClose = {
+                    showScraperDrawer = false
+                },
+                onDownloadComplete = {
+                    showScraperDrawer = false
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Media stack added to Inbox!")
                     }
-                    .testTag("media_scraper_bottom_drawer"),
-                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                shadowElevation = 24.dp
-            ) {
-                MediaScraperDrawer(
-                    onClose = {
-                        showScraperDrawer = false
-                    },
-                    onDownloadComplete = {
-                        showScraperDrawer = false
-                        scope.launch {
-                            snackbarHostState.showSnackbar("Media stack added to Inbox!")
-                        }
-                    }
-                )
-            }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
     }

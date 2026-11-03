@@ -116,4 +116,65 @@ class MediaDownloaderTest {
         assertEquals("Alpha", sortedByTitle[0].title)
         assertEquals("Beta", sortedByTitle[1].title)
     }
+
+    @Test
+    fun mediaClassifierDetectsStreamsAndFormats() {
+        val hls = com.amresalehin.emregallery.data.MediaClassifier.classify("https://example.com/live/playlist.m3u8")
+        assertEquals(com.amresalehin.emregallery.data.MediaCategory.STREAMS, hls.category)
+        assertTrue(hls.isStream)
+        assertTrue(hls.isVideo)
+        assertEquals("HLS (m3u8)", hls.format)
+
+        val dash = com.amresalehin.emregallery.data.MediaClassifier.classify("https://example.com/video/manifest.mpd")
+        assertEquals(com.amresalehin.emregallery.data.MediaCategory.STREAMS, dash.category)
+        assertTrue(dash.isStream)
+        assertEquals("DASH (mpd)", dash.format)
+
+        val mp4 = com.amresalehin.emregallery.data.MediaClassifier.classify("https://example.com/clip.mp4")
+        assertEquals(com.amresalehin.emregallery.data.MediaCategory.VIDEOS, mp4.category)
+        assertEquals("MP4", mp4.format)
+
+        val mp3 = com.amresalehin.emregallery.data.MediaClassifier.classify("https://example.com/audio.mp3")
+        assertEquals(com.amresalehin.emregallery.data.MediaCategory.AUDIO, mp3.category)
+        assertTrue(mp3.isAudio)
+
+        val webp = com.amresalehin.emregallery.data.MediaClassifier.classify("https://example.com/photo.webp")
+        assertEquals(com.amresalehin.emregallery.data.MediaCategory.IMAGES, webp.category)
+        assertEquals("WEBP", webp.format)
+    }
+
+    @Test
+    fun mediaClassifierCanonicalDeduplicationStripsTrackingParams() {
+        val urlWithTracking = "https://example.com/image.jpg?utm_source=twitter&utm_medium=social&id=42&fbclid=xyz"
+        val canonical = com.amresalehin.emregallery.data.MediaClassifier.canonicalKey(urlWithTracking)
+        assertTrue(canonical.contains("id=42"))
+        assertEquals(false, canonical.contains("utm_source"))
+        assertEquals(false, canonical.contains("fbclid"))
+
+        // Duplicate URL with different tracking params resolves to same canonical key
+        val urlDifferentTracking = "https://example.com/image.jpg?fbclid=different&id=42&utm_campaign=winter"
+        val canonical2 = com.amresalehin.emregallery.data.MediaClassifier.canonicalKey(urlDifferentTracking)
+        assertEquals(canonical, canonical2)
+    }
+
+    @Test
+    fun mediaClassifierUrlResolution() {
+        val base = "https://example.com/articles/index.html"
+        val relative = com.amresalehin.emregallery.data.MediaClassifier.resolveUrl("/images/hero.png", base)
+        assertEquals("https://example.com/images/hero.png", relative)
+
+        val protocolRelative = com.amresalehin.emregallery.data.MediaClassifier.resolveUrl("//cdn.example.com/video.mp4", base)
+        assertEquals("https://cdn.example.com/video.mp4", protocolRelative)
+    }
+
+    @Test
+    fun mediaClassifierSrcsetParsing() {
+        val srcset = "thumb.jpg 320w, medium.jpg 640w, large.jpg 1280w"
+        val parsed = com.amresalehin.emregallery.data.MediaClassifier.parseSrcset(srcset, "https://example.com/")
+        assertEquals(3, parsed.size)
+        assertEquals("https://example.com/thumb.jpg", parsed[0].first)
+        assertEquals("320w", parsed[0].second)
+        assertEquals("https://example.com/large.jpg", parsed[2].first)
+        assertEquals("1280w", parsed[2].second)
+    }
 }
