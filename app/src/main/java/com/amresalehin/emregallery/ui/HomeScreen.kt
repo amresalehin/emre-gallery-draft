@@ -21,6 +21,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +54,8 @@ fun HomeScreen(
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
     media: List<MediaItem>,
     loading: Boolean,
+    isRefreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     albumTitle: String? = null,
     sortOrder: String = "date_desc",
     groupBy: String = "day",
@@ -237,9 +244,30 @@ fun HomeScreen(
         }
     }
 
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxSize().nestedScroll(predictivePrefetchConnection)
+    val hapticFeedback = LocalHapticFeedback.current
+    val pullRefreshState = rememberPullToRefreshState()
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            onRefresh?.invoke()
+        },
+        modifier = Modifier.fillMaxSize(),
+        state = pullRefreshState,
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullRefreshState,
+                isRefreshing = isRefreshing,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = topContentPadding)
+            )
+        }
     ) {
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize().nestedScroll(predictivePrefetchConnection)
+        ) {
         val containerWidth = maxWidth - 24.dp
         LazyColumn(
             state = listState,
@@ -432,6 +460,7 @@ fun HomeScreen(
             bottomContentPadding = bottomContentPadding,
             thumbColor = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
     }
 }
 

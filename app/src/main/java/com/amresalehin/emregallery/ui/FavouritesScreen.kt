@@ -13,6 +13,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -33,9 +38,12 @@ import coil.size.Precision
 import coil.size.Size
 import com.amresalehin.emregallery.data.MediaItem
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FavouritesScreen(
     items: List<MediaItem>,
+    isRefreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     onBack: () -> Unit,
     onOpen: (MediaItem) -> Unit,
     onRemoveFavourite: (MediaItem) -> Unit
@@ -62,7 +70,26 @@ fun FavouritesScreen(
             Icon(Icons.Default.Favorite, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-        if (items.isEmpty()) {
+        val hapticFeedback = LocalHapticFeedback.current
+        val pullRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                onRefresh?.invoke()
+            },
+            modifier = Modifier.fillMaxSize().weight(1f),
+            state = pullRefreshState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullRefreshState,
+                    isRefreshing = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                )
+            }
+        ) {
+            if (items.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
@@ -160,5 +187,6 @@ fun FavouritesScreen(
                 }
             }
         }
+    }
     }
 }

@@ -17,6 +17,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +58,7 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsScreen(
     media: List<MediaItem>,
@@ -63,6 +69,8 @@ fun AlbumsScreen(
     customAlbums: List<CustomAlbum>,
     topContentPadding: Dp,
     bottomContentPadding: Dp,
+    isRefreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     onFilter: (String) -> Unit,
     onOpen: (MediaItem) -> Unit,
     onCreateAlbumClick: (parentPreset: String) -> Unit,
@@ -137,8 +145,29 @@ fun AlbumsScreen(
         )
     }
 
-    LazyColumn(
+    val hapticFeedback = LocalHapticFeedback.current
+    val pullRefreshState = rememberPullToRefreshState()
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            onRefresh?.invoke()
+        },
         modifier = Modifier.fillMaxSize(),
+        state = pullRefreshState,
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullRefreshState,
+                isRefreshing = isRefreshing,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = topContentPadding)
+            )
+        }
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(20.dp),
         contentPadding = PaddingValues(
             start = 16.dp,
@@ -734,6 +763,7 @@ fun AlbumsScreen(
                 )
             }
         }
+    }
     }
 }
 

@@ -18,6 +18,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +47,8 @@ import com.amresalehin.emregallery.data.MediaItem
 @Composable
 fun BinScreen(
     items: List<MediaItem>,
+    isRefreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     onBack: () -> Unit,
     onOpen: (MediaItem) -> Unit,
     onRestore: (MediaItem) -> Unit,
@@ -170,9 +177,26 @@ fun BinScreen(
                     }
                 }
             }
-        }
+        val hapticFeedback = LocalHapticFeedback.current
+        val pullRefreshState = rememberPullToRefreshState()
 
-        if (items.isEmpty()) {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                onRefresh?.invoke()
+            },
+            modifier = Modifier.fillMaxSize().weight(1f),
+            state = pullRefreshState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullRefreshState,
+                    isRefreshing = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                )
+            }
+        ) {
+            if (items.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -242,6 +266,8 @@ fun BinScreen(
                 }
             }
         }
+    }
+    }
     }
 
     // Confirmation dialog: Empty entire bin

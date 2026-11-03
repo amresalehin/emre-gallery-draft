@@ -8,6 +8,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -17,10 +22,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.amresalehin.emregallery.data.MediaItem
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryOverviewScreen(
     media: List<MediaItem>,
     loading: Boolean,
+    isRefreshing: Boolean = false,
     onBack: () -> Unit,
     onRefresh: () -> Unit
 ) {
@@ -38,12 +45,31 @@ fun LibraryOverviewScreen(
             IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Back to settings") }
             Column(Modifier.weight(1f)) {
                 Text("Library overview", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(if (loading) "Updating media index…" else "Local device library", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (loading || isRefreshing) "Updating media index…" else "Local device library", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, contentDescription = "Refresh library") }
         }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+        val hapticFeedback = LocalHapticFeedback.current
+        val pullRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                onRefresh()
+            },
+            modifier = Modifier.fillMaxSize().weight(1f),
+            state = pullRefreshState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullRefreshState,
+                    isRefreshing = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                )
+            }
+        ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -80,6 +106,7 @@ fun LibraryOverviewScreen(
                 }
             }
         }
+    }
     }
 }
 

@@ -132,16 +132,22 @@ fun GalleryApp() {
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
 
-    fun refreshMedia() {
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    fun refreshMedia(userInitiated: Boolean = false) {
         scope.launch {
+            if (userInitiated) {
+                isRefreshing = true
+            } else {
+                loading = true
+            }
+            val startTime = System.currentTimeMillis()
             lockedVaultItems = withContext(Dispatchers.IO) { runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList()) }
             if (hasMediaPermission(context)) {
-                loading = true
                 val loadedMedia = withContext(Dispatchers.IO) {
                     runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())
                 }
                 media = loadedMedia
-                loading = false
 
                 // Start disk-backed preparation after permissions and the MediaStore list are ready.
                 // This worker is independent of composition and never holds the whole library in RAM.
@@ -149,6 +155,15 @@ fun GalleryApp() {
                     // URI fingerprinting may traverse tens of thousands of rows; keep it off Main.
                     ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
                 }
+            }
+            if (userInitiated) {
+                val elapsed = System.currentTimeMillis() - startTime
+                if (elapsed < 400L) {
+                    delay(400L - elapsed)
+                }
+                isRefreshing = false
+            } else {
+                loading = false
             }
         }
     }
@@ -827,6 +842,8 @@ fun GalleryApp() {
                         listState = homeListState,
                         media = visibleMedia,
                         loading = loading,
+                        isRefreshing = isRefreshing,
+                        onRefresh = { refreshMedia(userInitiated = true) },
                         onPermissionGranted = { refreshMedia() },
                         albumTitle = activeAlbumTitle,
                         sortOrder = sortOrderPref,
@@ -867,6 +884,8 @@ fun GalleryApp() {
                         customAlbums = customAlbums,
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
+                        isRefreshing = isRefreshing,
+                        onRefresh = { refreshMedia(userInitiated = true) },
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
                         }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
@@ -888,6 +907,8 @@ fun GalleryApp() {
                         }
                         FavouritesScreen(
                             items = favouriteItems,
+                            isRefreshing = isRefreshing,
+                            onRefresh = { refreshMedia(userInitiated = true) },
                             onBack = { performBackNavigation() },
                             onOpen = { openMediaInViewer(it, favouriteItems) },
                             onRemoveFavourite = { item -> scope.launch { prefs.toggleFavourite(item.uri) } }
@@ -899,6 +920,8 @@ fun GalleryApp() {
                         }
                         BinScreen(
                             items = binItems,
+                            isRefreshing = isRefreshing,
+                            onRefresh = { refreshMedia(userInitiated = true) },
                             onBack = { performBackNavigation() },
                             onOpen = { openMediaInViewer(it, binItems) },
                             onRestore = { item -> restoreFromDeviceTrash(listOf(item)) },
@@ -915,6 +938,8 @@ fun GalleryApp() {
                         HomeScreen(
                             media = videoItems,
                             loading = loading,
+                            isRefreshing = isRefreshing,
+                            onRefresh = { refreshMedia(userInitiated = true) },
                             onPermissionGranted = { refreshMedia() },
                             albumTitle = "Videos",
                             sortOrder = sortOrderPref,
@@ -942,6 +967,8 @@ fun GalleryApp() {
                         HomeScreen(
                             media = recentItems,
                             loading = loading,
+                            isRefreshing = isRefreshing,
+                            onRefresh = { refreshMedia(userInitiated = true) },
                             onPermissionGranted = { refreshMedia() },
                             albumTitle = "Recently added",
                             sortOrder = sortOrderPref,
@@ -1020,6 +1047,8 @@ fun GalleryApp() {
                         }
                         ArchiveScreen(
                             items = archiveItems,
+                            isRefreshing = isRefreshing,
+                            onRefresh = { refreshMedia(userInitiated = true) },
                             onBack = { performBackNavigation() },
                             onOpen = { openMediaInViewer(it, archiveItems) },
                             onUnarchive = { item -> scope.launch { prefs.setArchived(item.uri, false) } }
@@ -1055,12 +1084,16 @@ fun GalleryApp() {
                     }
                     Destination.DEVICE_FOLDERS -> DeviceFoldersScreen(
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
+                        isRefreshing = isRefreshing,
+                        onRefresh = { refreshMedia(userInitiated = true) },
                         onBack = { performBackNavigation() },
                         onOpenFolder = { folderPath -> albumFilterReturnDestination = Destination.DEVICE_FOLDERS; albumFilter = folderPath; navigateTo(Destination.HOME) }
                     )
                     Destination.ALBUM_CATALOG -> AlbumCatalogScreen(
                         albums = customAlbums,
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
+                        isRefreshing = isRefreshing,
+                        onRefresh = { refreshMedia(userInitiated = true) },
                         onBack = { performBackNavigation() },
                         onCreateAlbum = { parentPath ->
                             createAlbumPresetParent = parentPath
@@ -1091,8 +1124,9 @@ fun GalleryApp() {
                     Destination.LIBRARY_OVERVIEW -> LibraryOverviewScreen(
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
                         loading = loading,
+                        isRefreshing = isRefreshing,
                         onBack = { performBackNavigation() },
-                        onRefresh = { refreshMedia() }
+                        onRefresh = { refreshMedia(userInitiated = true) }
                     )
                     Destination.INDEXING_STATUS -> IndexingStatusScreen(
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },

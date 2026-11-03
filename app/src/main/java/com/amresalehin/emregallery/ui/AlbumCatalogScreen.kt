@@ -11,6 +11,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -29,10 +34,13 @@ import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumCatalogScreen(
     albums: List<CustomAlbum>,
     media: List<MediaItem>,
+    isRefreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     onBack: () -> Unit,
     onCreateAlbum: (String) -> Unit,
     onOpenAlbum: (CustomAlbum) -> Unit
@@ -61,7 +69,26 @@ fun AlbumCatalogScreen(
                 Text("New album")
             }
         }
-        if (sortedAlbums.isEmpty()) {
+        val hapticFeedback = LocalHapticFeedback.current
+        val pullRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                onRefresh?.invoke()
+            },
+            modifier = Modifier.fillMaxSize().weight(1f),
+            state = pullRefreshState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullRefreshState,
+                    isRefreshing = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter)
+                )
+            }
+        ) {
+            if (sortedAlbums.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(
                     modifier = Modifier.padding(28.dp),
@@ -141,5 +168,6 @@ fun AlbumCatalogScreen(
                 }
             }
         }
+    }
     }
 }
