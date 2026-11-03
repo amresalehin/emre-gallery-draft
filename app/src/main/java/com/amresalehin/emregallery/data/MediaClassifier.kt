@@ -3,6 +3,7 @@ package com.amresalehin.emregallery.data
 import android.net.Uri
 import java.net.URI
 import java.net.URL
+import java.net.URLEncoder
 import java.util.Locale
 
 /**
@@ -76,6 +77,41 @@ object MediaClassifier {
             } catch (_: Exception) {
                 null
             }
+        }
+    }
+
+    /**
+     * Strictly validates whether an input string is a valid web URL (e.g. https://example.com, example.com/page).
+     * Rejects arbitrary text, invalid hosts, spaces, local file/javascript URIs, or non-domain inputs.
+     */
+    fun isValidWebUrl(raw: String): Boolean {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank() || trimmed.contains(" ") || trimmed.length < 4) {
+            return false
+        }
+        val lower = trimmed.lowercase(Locale.ROOT)
+        if (lower.startsWith("javascript:") || lower.startsWith("data:") ||
+            lower.startsWith("mailto:") || lower.startsWith("file:") || lower.startsWith("content:")) {
+            return false
+        }
+        val candidate = if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            "https://$trimmed"
+        } else {
+            trimmed
+        }
+        return try {
+            val uri = URI(candidate)
+            val host = uri.host ?: return false
+            if (host.equals("localhost", ignoreCase = true)) return true
+            if (!host.contains(".") || host.startsWith(".") || host.endsWith(".")) return false
+            val parts = host.split(".")
+            if (parts.any { it.isBlank() }) return false
+            val tld = parts.last()
+            val isAlphabeticTld = tld.length >= 2 && tld.all { it.isLetter() }
+            val isIp = parts.size == 4 && parts.all { it.toIntOrNull()?.let { n -> n in 0..255 } == true }
+            isAlphabeticTld || isIp
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -341,6 +377,25 @@ object MediaClassifier {
         }
         return results
     }
+
+    fun formatQueryOrUrl(input: String, searchEngine: BrowserSearchEngine = BrowserSearchEngine.DUCKDUCKGO): String {
+        val trimmed = input.trim()
+        if (trimmed.isBlank()) return ""
+        return if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+            trimmed
+        } else if (trimmed.contains(".") && !trimmed.contains(" ") && trimmed.length > 3) {
+            "https://$trimmed"
+        } else {
+            "${searchEngine.searchUrl}${URLEncoder.encode(trimmed, "UTF-8")}"
+        }
+    }
+}
+
+enum class BrowserSearchEngine(val label: String, val shortLabel: String, val searchUrl: String) {
+    DUCKDUCKGO("DuckDuckGo", "DDG", "https://duckduckgo.com/?q="),
+    GOOGLE("Google", "Google", "https://www.google.com/search?q="),
+    BING("Bing", "Bing", "https://www.bing.com/search?q="),
+    WIKIPEDIA("Wikipedia", "Wiki", "https://en.wikipedia.org/wiki/Special:Search?search=")
 }
 
 data class ClassificationResult(

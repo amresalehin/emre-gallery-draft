@@ -47,14 +47,16 @@ class DualMediaExtractor(private val context: Context) {
         cancel()
 
         val trimmed = targetUrl.trim()
-        if (trimmed.isBlank()) {
+        if (!MediaClassifier.isValidWebUrl(trimmed)) {
             _state.value = ExtractionState(
-                errorMessage = "Please enter a valid URL"
+                errorMessage = "Please enter a valid URL (e.g. https://example.com)",
+                isRunning = false,
+                items = emptyList()
             )
             return
         }
 
-        val normalizedUrl = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+        val normalizedUrl = if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
             "https://$trimmed"
         } else {
             trimmed

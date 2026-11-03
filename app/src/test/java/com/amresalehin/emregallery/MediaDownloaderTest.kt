@@ -177,4 +177,89 @@ class MediaDownloaderTest {
         assertEquals("https://example.com/large.jpg", parsed[2].first)
         assertEquals("1280w", parsed[2].second)
     }
+
+    @Test
+    fun browserUrlFormattingAndNormalization() {
+        fun formatUrl(input: String): String {
+            val trimmed = input.trim()
+            if (trimmed.isBlank()) return ""
+            return if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+                if (trimmed.contains(".") && !trimmed.contains(" ")) {
+                    "https://$trimmed"
+                } else {
+                    "https://duckduckgo.com/?q=${java.net.URLEncoder.encode(trimmed, "UTF-8")}"
+                }
+            } else {
+                trimmed
+            }
+        }
+
+        assertEquals("https://example.com/videos", formatUrl("example.com/videos"))
+        assertEquals("https://duckduckgo.com/?q=funny+cats", formatUrl("funny cats"))
+        assertEquals("https://test.org", formatUrl("https://test.org"))
+    }
+
+    @Test
+    fun testBrowserSearchEnginesAndFormatQueryOrUrl() {
+        val query = "vintage photography"
+        val ddgUrl = com.amresalehin.emregallery.data.MediaClassifier.formatQueryOrUrl(
+            query,
+            com.amresalehin.emregallery.data.BrowserSearchEngine.DUCKDUCKGO
+        )
+        assertTrue(ddgUrl.contains("duckduckgo.com/?q=vintage+photography"))
+
+        val googleUrl = com.amresalehin.emregallery.data.MediaClassifier.formatQueryOrUrl(
+            query,
+            com.amresalehin.emregallery.data.BrowserSearchEngine.GOOGLE
+        )
+        assertTrue(googleUrl.contains("google.com/search?q=vintage+photography"))
+
+        val bingUrl = com.amresalehin.emregallery.data.MediaClassifier.formatQueryOrUrl(
+            query,
+            com.amresalehin.emregallery.data.BrowserSearchEngine.BING
+        )
+        assertTrue(bingUrl.contains("bing.com/search?q=vintage+photography"))
+
+        val wikiUrl = com.amresalehin.emregallery.data.MediaClassifier.formatQueryOrUrl(
+            query,
+            com.amresalehin.emregallery.data.BrowserSearchEngine.WIKIPEDIA
+        )
+        assertTrue(wikiUrl.contains("wikipedia.org/wiki/Special:Search?search=vintage+photography"))
+
+        // Standard URLs without http/https should add https://
+        val siteUrl = com.amresalehin.emregallery.data.MediaClassifier.formatQueryOrUrl("commons.wikimedia.org")
+        assertEquals("https://commons.wikimedia.org", siteUrl)
+
+        // Empty string remains empty
+        val emptyUrl = com.amresalehin.emregallery.data.MediaClassifier.formatQueryOrUrl("   ")
+        assertEquals("", emptyUrl)
+    }
+
+    @Test
+    fun testValidWebUrlValidation() {
+        val validCases = listOf(
+            "https://example.com/gallery",
+            "http://sub.domain.org/path/to/image.jpg",
+            "commons.wikimedia.org",
+            "m.youtube.com/watch?v=123",
+            "https://site.co.uk/media.mp4?id=50"
+        )
+        for (url in validCases) {
+            assertTrue("Expected valid: $url", com.amresalehin.emregallery.data.MediaClassifier.isValidWebUrl(url))
+        }
+
+        val invalidCases = listOf(
+            "not a valid url",
+            "random pasted text from notes",
+            "justwords",
+            "   ",
+            "javascript:void(0)",
+            "file:///data/local/tmp",
+            "invalid.123"
+        )
+        for (invalid in invalidCases) {
+            assertEquals("Expected invalid: $invalid", false, com.amresalehin.emregallery.data.MediaClassifier.isValidWebUrl(invalid))
+        }
+    }
 }
+
