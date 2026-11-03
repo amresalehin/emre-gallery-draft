@@ -43,7 +43,7 @@ fun CreateAlbumDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(if (parentPath.isBlank()) "Create new album" else "Create nested sub-album")
+            Text(if (parentPath.isBlank()) "Create new folder or album" else "Create nested sub-folder")
         },
         text = {
             Column(
@@ -53,7 +53,7 @@ fun CreateAlbumDialog(
                 OutlinedTextField(
                     value = albumName,
                     onValueChange = { albumName = it },
-                    label = { Text("Album name") },
+                    label = { Text("Folder / Album name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -130,7 +130,8 @@ fun AddToAlbumBottomSheet(
     customAlbums: List<CustomAlbum>,
     onDismiss: () -> Unit,
     onToggleAlbum: (CustomAlbum) -> Unit,
-    onCreateNewAlbum: () -> Unit
+    onCreateNewAlbum: () -> Unit,
+    title: String = "Move to folder / album"
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss
@@ -146,20 +147,34 @@ fun AddToAlbumBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Add to Album",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DriveFileMove,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 TextButton(
                     onClick = {
                         onDismiss()
                         onCreateNewAlbum()
                     }
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("New Album")
+                    Text("New Folder")
                 }
             }
 
@@ -169,53 +184,96 @@ fun AddToAlbumBottomSheet(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 24.dp),
+                        .padding(vertical = 28.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "No custom albums yet. Create one to organize your photos!",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "No custom folders yet. Tap 'New Folder' to create one and organize your photos!",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(customAlbums, key = { it.id }) { album ->
                         val contains = album.mediaUris.contains(item.uri)
                         Surface(
                             onClick = { onToggleAlbum(album) },
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             color = if (contains) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            border = BorderStroke(
+                                1.dp,
+                                if (contains) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = album.name,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    if (album.parentPath.isNotBlank()) {
-                                        Text(
-                                            text = album.parentPath,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(
+                                                if (contains) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                                else MaterialTheme.colorScheme.surface
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (contains) Icons.Default.FolderOpen else Icons.Default.Folder,
+                                            contentDescription = null,
+                                            tint = if (contains) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(22.dp)
                                         )
                                     }
-                                    Text(
-                                        text = "${album.mediaUris.size} items",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = album.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (album.parentPath.isNotBlank()) {
+                                            Text(
+                                                text = album.parentPath,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Text(
+                                            text = "${album.mediaUris.size} items",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                                 Checkbox(
                                     checked = contains,
@@ -225,6 +283,18 @@ fun AddToAlbumBottomSheet(
                         }
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Done")
             }
         }
     }

@@ -1,0 +1,6 @@
+{
+  "summary":  "Revised ImageToolbox integration plan removing standalone utilities from the Photo Editor page. Utilities (PDF tools, format conversion, EXIF editor, collage, QR scanner, color palette, compression lab) are housed strictly outside the editor in a dedicated Image & Document Utilities hub accessible from Settings, keeping the editor interface focused purely on the 7 core photo-editing categories.",
+  "updatedAt":  "2026-11-01T04:32:57.668246064Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

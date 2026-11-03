@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -509,19 +510,24 @@ fun EndOfStoryOverlay(
 }
 
 /**
- * Bottom action bar with Delete/Restore buttons.
+ * Bottom action bar with Lock, Archive, Move (for move to folder), Delete/Restore buttons.
  */
 @Composable
 fun ViewerBottomActionBar(
     isBin: Boolean,
+    isHidden: Boolean = false,
+    isArchived: Boolean = false,
     onToggleBin: () -> Unit,
+    onToggleHide: () -> Unit = {},
+    onToggleArchive: () -> Unit = {},
+    onMove: () -> Unit = {},
     onDeletePermanently: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -529,28 +535,56 @@ fun ViewerBottomActionBar(
             ViewerAction(
                 icon = Icons.Default.Restore,
                 label = "Restore",
-                onClick = onToggleBin
+                onClick = onToggleBin,
+                modifier = Modifier.testTag("viewer_restore_button")
             )
             if (onDeletePermanently != null) {
                 ViewerAction(
                     icon = Icons.Default.DeleteForever,
                     label = "Delete permanently",
                     tint = MaterialTheme.colorScheme.onSurface,
-                    onClick = onDeletePermanently
+                    onClick = onDeletePermanently,
+                    modifier = Modifier.testTag("viewer_delete_permanently_button")
                 )
             }
         } else {
+            // Lock button
+            ViewerAction(
+                icon = if (isHidden) Icons.Default.LockOpen else Icons.Default.Lock,
+                label = if (isHidden) "Unlock" else "Lock",
+                onClick = onToggleHide,
+                modifier = Modifier.testTag("viewer_lock_button")
+            )
+
+            // Archive button
+            ViewerAction(
+                icon = if (isArchived) Icons.Default.Unarchive else Icons.Default.Archive,
+                label = if (isArchived) "Unarchive" else "Archive",
+                onClick = onToggleArchive,
+                modifier = Modifier.testTag("viewer_archive_button")
+            )
+
+            // Move button (for move to folder)
+            ViewerAction(
+                icon = Icons.Default.DriveFileMove,
+                label = "Move",
+                onClick = onMove,
+                modifier = Modifier.testTag("viewer_move_button")
+            )
+
+            // Delete button
             ViewerAction(
                 icon = Icons.Default.Delete,
                 label = "Delete",
-                onClick = onToggleBin
+                onClick = onToggleBin,
+                modifier = Modifier.testTag("viewer_delete_button")
             )
         }
     }
 }
 
 /**
- * Bottom sheet for extra media actions (Archive, Lock, Bin, Info).
+ * Bottom sheet for extra media actions (Archive, Lock, Bin, Move to folder, Info).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -561,6 +595,7 @@ fun ViewerMoreBottomSheet(
     onToggleBin: () -> Unit,
     onToggleHide: () -> Unit,
     onToggleArchive: () -> Unit,
+    onMove: (() -> Unit)? = null,
     onDeletePermanently: (() -> Unit)? = null,
     onShowDetails: () -> Unit,
     onDismiss: () -> Unit
@@ -580,6 +615,13 @@ fun ViewerMoreBottomSheet(
                 )
             }
         } else {
+            if (onMove != null) {
+                ListItem(
+                    headlineContent = { Text("Move to folder / album") },
+                    leadingContent = { Icon(Icons.Default.DriveFileMove, null) },
+                    modifier = Modifier.clickable { onDismiss(); onMove() }
+                )
+            }
             ListItem(
                 headlineContent = { Text(if (isHidden) "Unhide (return to gallery)" else "Move to Locked folder") },
                 leadingContent = { Icon(if (isHidden) Icons.Default.Visibility else Icons.Default.Lock, null) },

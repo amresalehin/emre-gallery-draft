@@ -1,13 +1,18 @@
 package com.amresalehin.emregallery.ui
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 
+data class FaceFolderInfo(
+    val path: String,
+    val name: String,
+    val photoCount: Int,
+    val coverUri: String? = null
+)
 
 @Composable
 fun FaceScanOptionsDialog(
@@ -18,7 +23,9 @@ fun FaceScanOptionsDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Rescan faces") },
-        text = { Text("Choose whether to scan only photos that have not been indexed, or clear the existing face index and scan every photo again.") },
+        text = {
+            Text("Choose whether to scan only photos that have not been indexed, or clear the existing face index and scan every photo again.")
+        },
         confirmButton = {
             TextButton(onClick = onRescanAll) { Text("Rescan all") }
         },

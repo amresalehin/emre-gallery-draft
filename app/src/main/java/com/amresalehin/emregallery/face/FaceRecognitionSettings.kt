@@ -95,6 +95,51 @@ object FaceRecognitionSettings {
     const val THROTTLE_BALANCED = "balanced"
     const val THROTTLE_ECO = "eco"
 
+    const val KEY_INDEX_ALL_FOLDERS = "face_index_all_folders"
+    const val KEY_SELECTED_FOLDERS = "face_index_selected_folders"
+
+    fun isIndexAllFolders(context: Context): Boolean {
+        return preferences(context).getBoolean(KEY_INDEX_ALL_FOLDERS, true)
+    }
+
+    fun setIndexAllFolders(context: Context, all: Boolean) {
+        preferences(context).edit().putBoolean(KEY_INDEX_ALL_FOLDERS, all).apply()
+    }
+
+    fun getSelectedFolders(context: Context): Set<String> {
+        val set = preferences(context).getStringSet(KEY_SELECTED_FOLDERS, null)
+        return if (set != null) HashSet(set) else emptySet()
+    }
+
+    fun setSelectedFolders(context: Context, folders: Set<String>) {
+        preferences(context).edit().putStringSet(KEY_SELECTED_FOLDERS, HashSet(folders)).apply()
+    }
+
+    fun normalizeFolderPath(relativePath: String): String {
+        return relativePath.trim().trim('/').ifBlank { "Internal storage" }
+    }
+
+    fun isMediaInFaceIndexingFolders(context: Context, relativePath: String): Boolean {
+        if (isIndexAllFolders(context)) return true
+        val selected = getSelectedFolders(context)
+        if (selected.isEmpty()) return true
+        return selected.contains(normalizeFolderPath(relativePath))
+    }
+
+    fun <T> filterMediaForFaceIndexing(
+        context: Context,
+        media: List<T>,
+        pathSelector: (T) -> String
+    ): List<T> {
+        if (isIndexAllFolders(context)) return media
+        val selected = getSelectedFolders(context)
+        if (selected.isEmpty()) return media
+        return media.filter { item ->
+            val folder = normalizeFolderPath(pathSelector(item))
+            selected.contains(folder)
+        }
+    }
+
     fun cpuThrottleMode(context: Context): String {
         return preferences(context).getString(KEY_CPU_THROTTLE_MODE, THROTTLE_UNCONSTRAINED) ?: THROTTLE_UNCONSTRAINED
     }

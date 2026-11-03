@@ -100,15 +100,18 @@ fun ViewerAction(
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
-    tint: Color? = null
+    tint: Color? = null,
+    modifier: Modifier = Modifier
 ) {
     val scheme = MaterialTheme.colorScheme
     val actionColor = tint ?: scheme.onSurface
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp)
+            .padding(horizontal = 4.dp, vertical = 2.dp)
+            .defaultMinSize(minWidth = 54.dp, minHeight = 48.dp)
     ) {
         Surface(
             shape = CircleShape,
@@ -121,7 +124,14 @@ fun ViewerAction(
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(label, color = actionColor, style = MaterialTheme.typography.labelSmall)
+        Text(
+            text = label,
+            color = actionColor,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

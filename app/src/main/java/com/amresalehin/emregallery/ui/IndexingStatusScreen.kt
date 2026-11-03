@@ -67,6 +67,20 @@ fun IndexingStatusScreen(
     var showComparisonDialog by remember { mutableStateOf(false) }
     var comparisonResult by remember { mutableStateOf<EngineComparisonResult?>(null) }
 
+    val availableFolders = remember(media) {
+        media.filterNot { it.isVideo }
+            .groupBy { FaceRecognitionSettings.normalizeFolderPath(it.relativePath) }
+            .map { (path, items) ->
+                FaceFolderInfo(
+                    path = path,
+                    name = path.substringAfterLast('/').ifBlank { "Internal storage" },
+                    photoCount = items.size,
+                    coverUri = items.firstOrNull()?.uri
+                )
+            }
+            .sortedByDescending { it.photoCount }
+    }
+
     // Request notification permission on Android 13+ (POST_NOTIFICATIONS)
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -185,6 +199,28 @@ fun IndexingStatusScreen(
                 onClusterFaces = { threshold, eng -> viewModel.runFaceClustering(threshold, eng) },
                 onResetClusters = { eng -> viewModel.resetFaceClusters(eng) },
                 onRetryFailedFaces = { eng -> viewModel.retryFailedFaces(eng) },
+                availableFolders = availableFolders,
+                onToggleFolder = { folderPath ->
+                    val isAll = uiState.faceFinding.isAllFolders
+                    val currentSelected = uiState.faceFinding.selectedFolders
+                    if (isAll) {
+                        viewModel.setFaceIndexingFolders(allFolders = false, folders = setOf(folderPath))
+                    } else {
+                        val newSelected = if (folderPath in currentSelected) {
+                            currentSelected - folderPath
+                        } else {
+                            currentSelected + folderPath
+                        }
+                        if (newSelected.isEmpty() || newSelected.size >= availableFolders.size) {
+                            viewModel.setFaceIndexingFolders(allFolders = true, folders = emptySet())
+                        } else {
+                            viewModel.setFaceIndexingFolders(allFolders = false, folders = newSelected)
+                        }
+                    }
+                },
+                onSelectAllFolders = {
+                    viewModel.setFaceIndexingFolders(allFolders = true, folders = emptySet())
+                },
                 onComparePipelines = {
                     scope.launch(Dispatchers.IO) {
                         val commonUri = faceStore.findCommonIndexedMediaUri(BuffaloLFaceEngine.ENGINE_ID, com.amresalehin.emregallery.face.EnteFaceConstants.ENGINE_ID)

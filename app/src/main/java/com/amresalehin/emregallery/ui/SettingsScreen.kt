@@ -33,6 +33,7 @@ fun SettingsScreen(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var query by remember { mutableStateOf("") }
+
     val entries = listOf(
         "Theme" to Icons.Default.Palette,
         "Indexing Status" to Icons.Default.Storage,

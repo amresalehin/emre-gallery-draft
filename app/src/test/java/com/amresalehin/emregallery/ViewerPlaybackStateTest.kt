@@ -174,4 +174,29 @@ class ViewerPlaybackStateTest {
         assertEquals(destTransX, currentTransXThumb, 0.001f)
         assertEquals(destTransY, currentTransYThumb, 0.001f)
     }
+
+    @Test
+    fun testViewerBottomBarActionTracking() {
+        var lockInvoked = false
+        var archiveInvoked = false
+        var moveInvoked = false
+        var binInvoked = false
+
+        val onLock = { lockInvoked = true }
+        val onArchive = { archiveInvoked = true }
+        val onMove = { moveInvoked = true }
+        val onBin = { binInvoked = true }
+
+        onLock()
+        assertTrue("Lock callback must be triggered", lockInvoked)
+
+        onArchive()
+        assertTrue("Archive callback must be triggered", archiveInvoked)
+
+        onMove()
+        assertTrue("Move callback must be triggered", moveInvoked)
+
+        onBin()
+        assertTrue("Bin callback must be triggered", binInvoked)
+    }
 }

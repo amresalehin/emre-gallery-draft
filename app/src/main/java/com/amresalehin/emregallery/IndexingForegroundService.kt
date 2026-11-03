@@ -117,7 +117,8 @@ class IndexingForegroundService : Service() {
                     ACTION_START_FACE -> runFace(
                         rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
                         engineId = intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID,
-                        retryFailedOnly = intent?.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false) == true
+                        retryFailedOnly = intent?.getBooleanExtra(EXTRA_RETRY_FAILED_ONLY, false) == true,
+                        folderFilter = intent?.getStringArrayListExtra(EXTRA_FOLDERS)?.toSet()
                     )
                     ACTION_START_LOCATION -> runLocation(
                         intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
@@ -200,10 +201,16 @@ class IndexingForegroundService : Service() {
     private suspend fun runFace(
         rescanAll: Boolean,
         engineId: String = BuffaloLFaceEngine.ENGINE_ID,
-        retryFailedOnly: Boolean = false
+        retryFailedOnly: Boolean = false,
+        folderFilter: Set<String>? = null
     ) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
-        val photos = loadPhotos()
+        val allPhotos = loadPhotos()
+        val photos = if (folderFilter != null && folderFilter.isNotEmpty()) {
+            allPhotos.filter { FaceRecognitionSettings.normalizeFolderPath(it.relativePath) in folderFilter }
+        } else {
+            FaceRecognitionSettings.filterMediaForFaceIndexing(applicationContext, allPhotos) { it.relativePath }
+        }
         val store = FaceClusterStore(applicationContext)
         val factory = FaceEngineRegistry.getFactory(engineId) ?: BuffaloLFaceEngineFactory
         val serviceHandle = FaceProcessingCoordinator.beginOperation(
@@ -215,29 +222,37 @@ class IndexingForegroundService : Service() {
         try {
             if (rescanAll) {
                 withContext(Dispatchers.IO) {
-                    // Reset indexed status for selected engine to reprocess photos without wiping identities
-                    store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId))
+                    if (FaceRecognitionSettings.isIndexAllFolders(applicationContext) && (folderFilter == null || folderFilter.isEmpty())) {
+                        // Reset indexed status for selected engine to reprocess photos without wiping identities
+                        store.writableDatabase.delete("indexed_media", "engine_id=?", arrayOf(engineId))
+                    } else {
+                        // Reset indexed status only for the scoped photos
+                        for (p in photos) {
+                            store.writableDatabase.delete("indexed_media", "media_uri=? AND engine_id=?", arrayOf(p.uri, engineId))
+                        }
+                    }
                 }
             }
 
-        val targetUris = if (retryFailedOnly) {
-            store.getFailedMedia(engineId).map { it.first }.toSet()
-        } else null
+            val targetUris = if (retryFailedOnly) {
+                val failedUris = store.getFailedMedia(engineId).map { it.first }.toSet()
+                photos.map { it.uri }.filter { it in failedUris }.toSet()
+            } else null
 
-        val relevantPhotos = if (targetUris != null) photos.filter { it.uri in targetUris } else photos
-        val alreadyDone = if (retryFailedOnly) 0 else store.indexedMediaCount(relevantPhotos.map { it.uri }, engineId = engineId)
-        val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
-        pauseSignal.value = initialPaused
+            val relevantPhotos = if (targetUris != null) photos.filter { it.uri in targetUris } else photos
+            val alreadyDone = if (retryFailedOnly) 0 else store.indexedMediaCount(relevantPhotos.map { it.uri }, engineId = engineId)
+            val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
+            pauseSignal.value = initialPaused
 
-        updateState(
-            task = TASK_FACE,
-            running = true,
-            paused = initialPaused,
-            processed = alreadyDone,
-            total = relevantPhotos.size,
-            faces = store.indexedFaceCount(engineId),
-            failed = store.failedMediaCount(engineId),
-            photosWithFaces = store.mediaWithFacesCount(relevantPhotos.map { it.uri }, engineId),
+            updateState(
+                task = TASK_FACE,
+                running = true,
+                paused = initialPaused,
+                processed = alreadyDone,
+                total = relevantPhotos.size,
+                faces = store.indexedFaceCount(engineId),
+                failed = store.failedMediaCount(relevantPhotos.map { it.uri }, engineId),
+                photosWithFaces = store.mediaWithFacesCount(relevantPhotos.map { it.uri }, engineId),
             engineId = engineId,
             currentItemName = "Initializing ${factory.displayName}…",
             currentItemStatus = "",
@@ -569,6 +584,7 @@ class IndexingForegroundService : Service() {
         private const val EXTRA_FORCE = "force"
         const val EXTRA_ENGINE_ID = "engine_id"
         const val EXTRA_RETRY_FAILED_ONLY = "retry_failed_only"
+        const val EXTRA_FOLDERS = "face_indexing_folders"
 
         private fun command(context: Context, action: String, configure: Intent.() -> Unit = {}) {
             val intent = Intent(context, IndexingForegroundService::class.java).setAction(action).apply(configure)
@@ -598,11 +614,15 @@ class IndexingForegroundService : Service() {
         fun startFace(
             context: Context,
             rescanAll: Boolean = false,
-            engineId: String = BuffaloLFaceEngine.ENGINE_ID
+            engineId: String = BuffaloLFaceEngine.ENGINE_ID,
+            folders: List<String>? = null
         ) =
             command(context, ACTION_START_FACE) {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
                 putExtra(EXTRA_ENGINE_ID, engineId)
+                if (folders != null) {
+                    putStringArrayListExtra(EXTRA_FOLDERS, ArrayList(folders))
+                }
             }
 
         fun retryFailedFaces(

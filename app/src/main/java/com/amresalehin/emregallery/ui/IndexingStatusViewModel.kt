@@ -147,7 +147,10 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             _uiState.update { it.copy(countsReady = false) }
             val photos = currentPhotos
-            val photoUris = currentPhotoUris
+            val isAll = FaceRecognitionSettings.isIndexAllFolders(context)
+            val selectedFolders = FaceRecognitionSettings.getSelectedFolders(context)
+            val facePhotos = FaceRecognitionSettings.filterMediaForFaceIndexing(context, photos) { it.relativePath }
+            val facePhotoUris = facePhotos.map { it.uri }
 
             val result = withContext(Dispatchers.IO) {
                 val oCount = photos.count { item ->
@@ -155,21 +158,21 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                 }
                 val oFiles = TesseractOcr.cachedResultCount(context)
 
-                // Buffalo_L counts
-                val bCount = faceStore.indexedMediaCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
-                val bWithFaces = faceStore.mediaWithFacesCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
+                // Buffalo_L counts (scoped to chosen folders)
+                val bCount = faceStore.indexedMediaCount(facePhotoUris, BuffaloLFaceEngine.ENGINE_ID)
+                val bWithFaces = faceStore.mediaWithFacesCount(facePhotoUris, BuffaloLFaceEngine.ENGINE_ID)
                 val bFaces = faceStore.indexedFaceCount(BuffaloLFaceEngine.ENGINE_ID)
-                val bFailures = faceStore.failedMediaCount(photoUris, BuffaloLFaceEngine.ENGINE_ID)
+                val bFailures = faceStore.failedMediaCount(facePhotoUris, BuffaloLFaceEngine.ENGINE_ID)
                 val bSummaries = faceStore.summaries(BuffaloLFaceEngine.ENGINE_ID)
-                val bFailedList = faceStore.getFailedMedia(photoUris, BuffaloLFaceEngine.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
+                val bFailedList = faceStore.getFailedMedia(facePhotoUris, BuffaloLFaceEngine.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
 
-                // Ente-Style counts
-                val eCount = faceStore.indexedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
-                val eWithFaces = faceStore.mediaWithFacesCount(photoUris, EnteFaceConstants.ENGINE_ID)
+                // Ente-Style counts (scoped to chosen folders)
+                val eCount = faceStore.indexedMediaCount(facePhotoUris, EnteFaceConstants.ENGINE_ID)
+                val eWithFaces = faceStore.mediaWithFacesCount(facePhotoUris, EnteFaceConstants.ENGINE_ID)
                 val eFaces = faceStore.indexedFaceCount(EnteFaceConstants.ENGINE_ID)
-                val eFailures = faceStore.failedMediaCount(photoUris, EnteFaceConstants.ENGINE_ID)
+                val eFailures = faceStore.failedMediaCount(facePhotoUris, EnteFaceConstants.ENGINE_ID)
                 val eSummaries = faceStore.summaries(EnteFaceConstants.ENGINE_ID)
-                val eFailedList = faceStore.getFailedMedia(photoUris, EnteFaceConstants.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
+                val eFailedList = faceStore.getFailedMedia(facePhotoUris, EnteFaceConstants.ENGINE_ID).map { it.first to (it.second ?: "Detection failed") }
 
                 val locCache = com.amresalehin.emregallery.data.PhotoMapLocationCache(context.applicationContext)
                 val locMap = locCache.loadAll()
@@ -186,6 +189,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
 
             _uiState.update { state ->
                 val totalPhotos = photos.size
+                val scopedFaceTotal = facePhotos.size
                 state.copy(
                     countsReady = true,
                     totalPhotos = totalPhotos,
@@ -194,21 +198,27 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
                         cachedCount = result.ocrCached
                     ),
                     faceFinding = state.faceFinding.copy(
-                        processed = (result.buffaloProcessed + result.buffaloFailures).coerceIn(0, totalPhotos),
-                        successfulCount = result.buffaloWithFaces.coerceIn(0, totalPhotos),
+                        processed = (result.buffaloProcessed + result.buffaloFailures).coerceIn(0, scopedFaceTotal),
+                        successfulCount = result.buffaloWithFaces.coerceIn(0, scopedFaceTotal),
                         totalDetected = result.buffaloDetected,
                         failedCount = result.buffaloFailures,
-                        failedItems = result.buffaloFailedItems
+                        failedItems = result.buffaloFailedItems,
+                        isAllFolders = isAll,
+                        selectedFolders = selectedFolders,
+                        scopedTotalPhotos = scopedFaceTotal
                     ),
                     clustering = state.clustering.copy(
                         summaries = result.buffaloSummaries
                     ),
                     enteFaceFinding = state.enteFaceFinding.copy(
-                        processed = (result.enteProcessed + result.enteFailures).coerceIn(0, totalPhotos),
-                        successfulCount = result.enteWithFaces.coerceIn(0, totalPhotos),
+                        processed = (result.enteProcessed + result.enteFailures).coerceIn(0, scopedFaceTotal),
+                        successfulCount = result.enteWithFaces.coerceIn(0, scopedFaceTotal),
                         totalDetected = result.enteDetected,
                         failedCount = result.enteFailures,
-                        failedItems = result.enteFailedItems
+                        failedItems = result.enteFailedItems,
+                        isAllFolders = isAll,
+                        selectedFolders = selectedFolders,
+                        scopedTotalPhotos = scopedFaceTotal
                     ),
                     enteClustering = state.enteClustering.copy(
                         summaries = result.enteSummaries
@@ -476,7 +486,10 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             state.faceFinding.isRunning || state.enteFaceFinding.isRunning
         ) return
 
-        if (targetState.processed >= currentPhotos.size) {
+        val scopedFacePhotos = FaceRecognitionSettings.filterMediaForFaceIndexing(context, currentPhotos) { it.relativePath }
+        val effectiveFaceTotal = scopedFacePhotos.size
+
+        if (targetState.processed >= effectiveFaceTotal && effectiveFaceTotal > 0) {
             val modelVersion = if (engineId == EnteFaceConstants.ENGINE_ID) EnteFaceConstants.MODEL_VERSION else BuffaloLFaceEngine.MODEL_VERSION
             val strategyVersion = if (engineId == EnteFaceConstants.ENGINE_ID) EnteFaceClusteringStrategy.strategyVersion else MANUAL_CLUSTERING_STRATEGY_VERSION
             if (faceStore.isGroupingRequired(engineId, modelVersion, strategyVersion)) {
@@ -504,6 +517,12 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
             _uiState.update { it.copy(faceFinding = it.faceFinding.copy(isRunning = true, isPaused = false)) }
         }
         IndexingForegroundService.startFace(context, rescanAll = false, engineId = engineId)
+    }
+
+    fun setFaceIndexingFolders(allFolders: Boolean, folders: Set<String>) {
+        FaceRecognitionSettings.setIndexAllFolders(context, allFolders)
+        FaceRecognitionSettings.setSelectedFolders(context, folders)
+        refreshCounts()
     }
 
     fun stopFaceFinding(engineId: String = BuffaloLFaceEngine.ENGINE_ID) {

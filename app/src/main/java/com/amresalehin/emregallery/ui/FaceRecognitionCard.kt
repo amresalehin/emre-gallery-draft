@@ -4,7 +4,9 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -13,6 +15,7 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
@@ -57,6 +61,9 @@ fun FaceRecognitionCard(
     onResetClusters: (String) -> Unit,
     onComparePipelines: (() -> Unit)? = null,
     onRetryFailedFaces: ((String) -> Unit)? = null,
+    availableFolders: List<FaceFolderInfo> = emptyList(),
+    onToggleFolder: (String) -> Unit = {},
+    onSelectAllFolders: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -105,11 +112,15 @@ fun FaceRecognitionCard(
         ((currentDownloadState.bytesReceived.toFloat() / estimatedTotal) * 100f).roundToInt().coerceIn(0, 99)
     } else 0
 
-    val scanProgress = if (totalPhotos > 0) (currentFindingState.processed.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
+    val effectiveTotalPhotos = if (currentFindingState.scopedTotalPhotos > 0 || !currentFindingState.isAllFolders) {
+        currentFindingState.scopedTotalPhotos
+    } else totalPhotos
+
+    val scanProgress = if (effectiveTotalPhotos > 0) (currentFindingState.processed.toFloat() / effectiveTotalPhotos).coerceIn(0f, 1f) else 0f
     val scanPercent = (scanProgress * 100f).roundToInt()
     val animatedScanProgress by animateFloatAsState(targetValue = scanProgress, label = "face_scan_progress")
 
-    val isCompleted = isModelInstalled && !currentFindingState.isRunning && !isClusteringActive && totalPhotos > 0 && currentFindingState.processed >= totalPhotos
+    val isCompleted = isModelInstalled && !currentFindingState.isRunning && !isClusteringActive && effectiveTotalPhotos > 0 && currentFindingState.processed >= effectiveTotalPhotos
 
     var showActionMenu by remember { mutableStateOf(false) }
 
@@ -515,8 +526,128 @@ fun FaceRecognitionCard(
                     }
                 }
 
+                if (selectedOption != "disable") {
+                    Spacer(Modifier.height(16.dp))
+
+                    // Folders Header Row: Icon + "Folders" on left, "All folders" pill on right
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Folder,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Folders",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                        }
+
+                        // "All folders" toggle pill
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (currentFindingState.isAllFolders) Color(0xFF161A20) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            border = BorderStroke(
+                                1.dp,
+                                if (currentFindingState.isAllFolders) Color(0xFF161A20) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                            ),
+                            modifier = Modifier
+                                .height(36.dp)
+                                .clickable(onClick = onSelectAllFolders)
+                                .testTag("face_folders_all_pill")
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 14.dp)
+                            ) {
+                                Text(
+                                    text = "All folders",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontSize = 13.sp,
+                                        fontWeight = if (currentFindingState.isAllFolders) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (currentFindingState.isAllFolders) Color.White else MaterialTheme.colorScheme.onSurface
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Horizontally scrollable row of real device folders
+                    if (availableFolders.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .testTag("face_folders_horizontal_row"),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            availableFolders.forEach { folder ->
+                                val isSelected = !currentFindingState.isAllFolders && folder.path in currentFindingState.selectedFolders
+                                FolderChip(
+                                    label = folder.name,
+                                    isSelected = isSelected,
+                                    onClick = { onToggleFolder(folder.path) },
+                                    testTag = "face_folder_chip_${folder.name}"
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(6.dp))
             }
+        }
+    }
+}
+
+@Composable
+private fun FolderChip(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = if (isSelected) Color(0xFF161A20) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) Color(0xFF161A20) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        ),
+        modifier = Modifier
+            .height(38.dp)
+            .defaultMinSize(minWidth = 72.dp)
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 14.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

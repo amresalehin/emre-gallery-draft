@@ -637,6 +637,8 @@ fun ViewerScreen(
                     if (!videoState.isFullscreen && !isStoryMode) {
                         ViewerBottomActionBar(
                             isBin = isBin,
+                            isHidden = isHidden,
+                            isArchived = isArchived,
                             onToggleBin = {
                                 if (isBin) {
                                     onToggleBin()
@@ -644,6 +646,9 @@ fun ViewerScreen(
                                     confirmMoveToBin = true
                                 }
                             },
+                            onToggleHide = onToggleHide,
+                            onToggleArchive = onToggleArchive,
+                            onMove = onAddTo,
                             onDeletePermanently = if (isBin && onDeletePermanently != null) { { confirmPermanentDelete = true } } else null
                         )
                     }
@@ -715,6 +720,7 @@ fun ViewerScreen(
             },
             onToggleHide = onToggleHide,
             onToggleArchive = onToggleArchive,
+            onMove = onAddTo,
             onDeletePermanently = if (isBin && onDeletePermanently != null) { { confirmPermanentDelete = true } } else null,
             onShowDetails = { if (!showDetails) onToggleDetails() },
             onDismiss = { showMore = false }

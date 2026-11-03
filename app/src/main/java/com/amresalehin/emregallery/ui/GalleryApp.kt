@@ -1590,8 +1590,10 @@ fun GalleryApp() {
                 scope.launch {
                     if (mediaForAddToAlbum!!.uri in album.mediaUris) {
                         prefs.removeMediaFromCustomAlbum(album.id, mediaForAddToAlbum!!.uri)
+                        snackbarHostState.showSnackbar("Removed from ${album.name}", duration = SnackbarDuration.Short)
                     } else {
                         prefs.addMediaToCustomAlbum(album.id, mediaForAddToAlbum!!.uri)
+                        snackbarHostState.showSnackbar("Moved to ${album.name}", duration = SnackbarDuration.Short)
                     }
                 }
             },
