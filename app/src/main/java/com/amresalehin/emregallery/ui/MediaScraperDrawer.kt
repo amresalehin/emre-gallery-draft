@@ -359,17 +359,24 @@ fun MediaScraperDrawer(
                     // Category filter chips (scrollable)
                     LazyRow(
                         modifier = Modifier.weight(1f),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         items(filterOptions) { filter ->
                             val isSelected = selectedFilter == filter
-                            val countLabel = when (filter) {
-                                "Images" -> if (imageCount > 0) " ($imageCount)" else ""
-                                "Videos" -> if (videoCount > 0) " ($videoCount)" else ""
-                                "Audio" -> if (audioCount > 0) " ($audioCount)" else ""
-                                "Streams" -> if (streamCount > 0) " ($streamCount)" else ""
-                                else -> ""
+                            val count = when (filter) {
+                                "Images" -> imageCount
+                                "Videos" -> videoCount
+                                "Audio" -> audioCount
+                                "Streams" -> streamCount
+                                else -> 0
+                            }
+                            val icon = when (filter) {
+                                "Images" -> Icons.Default.Image
+                                "Videos" -> Icons.Default.Videocam
+                                "Audio" -> Icons.Default.Audiotrack
+                                "Streams" -> Icons.Default.LiveTv
+                                else -> Icons.Default.PermMedia
                             }
 
                             Surface(
@@ -378,14 +385,27 @@ fun MediaScraperDrawer(
                                 },
                                 shape = CircleShape,
                                 color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                modifier = Modifier.height(34.dp)
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                ),
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .testTag("scraper_filter_chip_$filter")
                             ) {
-                                Box(
-                                    modifier = Modifier.padding(horizontal = 12.dp),
-                                    contentAlignment = Alignment.Center
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = "$filter ($count)",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                     Text(
-                                        text = "$filter$countLabel",
+                                        text = "$count",
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                         color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,

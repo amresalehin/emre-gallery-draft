@@ -10,11 +10,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -24,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -34,8 +38,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.amresalehin.emregallery.data.BrowserHistoryManager
+import com.amresalehin.emregallery.data.BrowserSite
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.ScrapedMediaItem
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import java.net.URL
 
@@ -73,6 +80,10 @@ fun DirectBrowserView(
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val historyManager = remember { BrowserHistoryManager(context) }
+
     // Intercept back button when browser can navigate back
     BackHandler(enabled = canGoBack) {
         webViewInstance?.goBack()
@@ -85,6 +96,9 @@ fun DirectBrowserView(
         addressInput = formatted
         currentUrl = formatted
         onUrlChange?.invoke(formatted)
+        coroutineScope.launch {
+            historyManager.recordVisit(formatted)
+        }
         webViewInstance?.loadUrl(formatted)
         focusManager.clearFocus()
     }
@@ -406,193 +420,147 @@ fun DirectBrowserView(
                 )
             }
 
-            // 2. Interactive WebView
-            AndroidView(
-                factory = { ctx ->
-                    WebView(ctx).apply {
-                        webViewInstance = this
-                        layoutParams = android.view.ViewGroup.LayoutParams(
-                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            builtInZoomControls = true
-                            displayZoomControls = false
-                            useWideViewPort = true
-                            loadWithOverviewMode = true
-                            mediaPlaybackRequiresUserGesture = false
-                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-                        }
-
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                loadingProgress = newProgress / 100f
-                                isLoading = newProgress < 100
-                            }
-
-                            override fun onReceivedTitle(view: WebView?, title: String?) {
-                                pageTitle = title.orEmpty()
-                                onPageTitleChanged?.invoke(pageTitle)
-                            }
-                        }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                isLoading = true
-                                url?.let {
-                                    if (it == "about:blank" || it.isBlank()) {
-                                        currentUrl = ""
-                                        addressInput = ""
-                                        pageTitle = ""
-                                        onUrlChange?.invoke("")
-                                    } else {
-                                        currentUrl = it
-                                        addressInput = it
-                                        onUrlChange?.invoke(it)
-                                    }
-                                }
-                                canGoBack = view?.canGoBack() == true
-                                canGoForward = view?.canGoForward() == true
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                isLoading = false
-                                url?.let {
-                                    if (it == "about:blank" || it.isBlank()) {
-                                        currentUrl = ""
-                                        addressInput = ""
-                                        pageTitle = ""
-                                        onUrlChange?.invoke("")
-                                    } else {
-                                        currentUrl = it
-                                        addressInput = it
-                                        onUrlChange?.invoke(it)
-                                        // Automatically scan page DOM for media once loaded
-                                        scanCurrentPageDOM(view)
-                                    }
-                                }
-                                canGoBack = view?.canGoBack() == true
-                                canGoForward = view?.canGoForward() == true
-                            }
-
-                            override fun shouldInterceptRequest(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): WebResourceResponse? {
-                                if (currentUrl.isBlank()) return null
-                                val reqUrl = request?.url?.toString() ?: return null
-                                if (reqUrl.startsWith("about:")) return null
-                                val classified = MediaClassifier.classify(reqUrl)
-
-                                // Intercept video streams (HLS/DASH), standalone videos, audio files, or quality media
-                                if (classified.isStream || classified.isVideo || classified.isAudio ||
-                                    (classified.category == com.amresalehin.emregallery.data.MediaCategory.IMAGES &&
-                                            (reqUrl.contains("jpg") || reqUrl.contains("png") || reqUrl.contains("webp")) &&
-                                            !reqUrl.contains("analytics") && !reqUrl.contains("tracker") && !reqUrl.contains("pixel"))
-                                ) {
-                                    val fileName = MediaClassifier.deriveFileName(reqUrl, classified.format, 0)
-                                    val item = ScrapedMediaItem(
-                                        id = "intercept_${System.currentTimeMillis()}_${reqUrl.hashCode()}",
-                                        url = reqUrl,
-                                        title = fileName,
-                                        isVideo = classified.isVideo,
-                                        isAudio = classified.isAudio,
-                                        isStream = classified.isStream,
-                                        category = classified.category,
-                                        format = classified.format,
-                                        mimeType = classified.mimeType,
-                                        source = "Browser Interceptor"
-                                    )
-                                    onMediaExtracted(item)
-                                }
-
-                                return null
-                            }
-                        }
-
-                        if (startUrl.isNotBlank()) {
-                            loadUrl(startUrl)
-                        } else {
-                            loadUrl("about:blank")
-                        }
-                    }
-                },
-                update = { wv ->
-                    webViewInstance = wv
-                },
+            // 2. Interactive WebView and Home Page Container
+            Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("browser_webview_canvas")
-            )
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            webViewInstance = this
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                            )
 
-            if (currentUrl.isBlank()) {
-                BrowserEmptyHomePage(
-                    onNavigate = { target ->
-                        navigateToUrl(target)
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                builtInZoomControls = true
+                                displayZoomControls = false
+                                useWideViewPort = true
+                                loadWithOverviewMode = true
+                                mediaPlaybackRequiresUserGesture = false
+                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                            }
+
+                            webChromeClient = object : WebChromeClient() {
+                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                    loadingProgress = newProgress / 100f
+                                    isLoading = newProgress < 100
+                                }
+
+                                override fun onReceivedTitle(view: WebView?, title: String?) {
+                                    pageTitle = title.orEmpty()
+                                    onPageTitleChanged?.invoke(pageTitle)
+                                }
+                            }
+
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    isLoading = true
+                                    url?.let {
+                                        if (it == "about:blank" || it.isBlank()) {
+                                            currentUrl = ""
+                                            addressInput = ""
+                                            pageTitle = ""
+                                            onUrlChange?.invoke("")
+                                        } else {
+                                            currentUrl = it
+                                            addressInput = it
+                                            onUrlChange?.invoke(it)
+                                        }
+                                    }
+                                    canGoBack = view?.canGoBack() == true
+                                    canGoForward = view?.canGoForward() == true
+                                }
+
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    isLoading = false
+                                    url?.let {
+                                        if (it == "about:blank" || it.isBlank()) {
+                                            currentUrl = ""
+                                            addressInput = ""
+                                            pageTitle = ""
+                                            onUrlChange?.invoke("")
+                                        } else {
+                                            currentUrl = it
+                                            addressInput = it
+                                            onUrlChange?.invoke(it)
+                                            coroutineScope.launch {
+                                                historyManager.recordVisit(it, view?.title)
+                                            }
+                                            // Automatically scan page DOM for media once loaded
+                                            scanCurrentPageDOM(view)
+                                        }
+                                    }
+                                    canGoBack = view?.canGoBack() == true
+                                    canGoForward = view?.canGoForward() == true
+                                }
+
+                                override fun shouldInterceptRequest(
+                                    view: WebView?,
+                                    request: WebResourceRequest?
+                                ): WebResourceResponse? {
+                                    if (currentUrl.isBlank()) return null
+                                    val reqUrl = request?.url?.toString() ?: return null
+                                    if (reqUrl.startsWith("about:")) return null
+                                    val classified = MediaClassifier.classify(reqUrl)
+
+                                    // Intercept video streams (HLS/DASH), standalone videos, audio files, or quality media
+                                    if (classified.isStream || classified.isVideo || classified.isAudio ||
+                                        (classified.category == com.amresalehin.emregallery.data.MediaCategory.IMAGES &&
+                                                (reqUrl.contains("jpg") || reqUrl.contains("png") || reqUrl.contains("webp")) &&
+                                                !reqUrl.contains("analytics") && !reqUrl.contains("tracker") && !reqUrl.contains("pixel"))
+                                    ) {
+                                        val fileName = MediaClassifier.deriveFileName(reqUrl, classified.format, 0)
+                                        val item = ScrapedMediaItem(
+                                            id = "intercept_${System.currentTimeMillis()}_${reqUrl.hashCode()}",
+                                            url = reqUrl,
+                                            title = fileName,
+                                            isVideo = classified.isVideo,
+                                            isAudio = classified.isAudio,
+                                            isStream = classified.isStream,
+                                            category = classified.category,
+                                            format = classified.format,
+                                            mimeType = classified.mimeType,
+                                            source = "Browser Interceptor"
+                                        )
+                                        onMediaExtracted(item)
+                                    }
+
+                                    return null
+                                }
+                            }
+
+                            if (startUrl.isNotBlank()) {
+                                loadUrl(startUrl)
+                            } else {
+                                loadUrl("about:blank")
+                            }
+                        }
+                    },
+                    update = { wv ->
+                        webViewInstance = wv
                     },
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .testTag("browser_empty_home_page")
+                        .testTag("browser_webview_canvas")
                 )
-            }
-        }
 
-        // 3. Floating Quick Badge: "Discovered N media items • View in Media tab"
-        AnimatedVisibility(
-            visible = discoveredCount > 0,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
-        ) {
-            Surface(
-                onClick = onSwitchToMediaTab,
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                modifier = Modifier.testTag("browser_view_media_pill")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Collections,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(20.dp)
+                if (currentUrl.isBlank()) {
+                    BrowserEmptyHomePage(
+                        onNavigate = { target ->
+                            navigateToUrl(target)
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .testTag("browser_empty_home_page")
                     )
-                    Text(
-                        text = "Discovered $discoveredCount media items",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.height(26.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "View Media",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -608,6 +576,26 @@ fun BrowserEmptyHomePage(
     onNavigate: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val historyManager = remember { BrowserHistoryManager(context) }
+    val allHistorySites by historyManager.allSites.collectAsState(initial = emptyList())
+
+    val topVisitedSites = remember(allHistorySites) {
+        if (allHistorySites.isNotEmpty()) {
+            allHistorySites.sortedByDescending { it.visitCount }.take(5)
+        } else {
+            historyManager.defaultTopSites
+        }
+    }
+
+    val recentSites = remember(allHistorySites) {
+        if (allHistorySites.isNotEmpty()) {
+            allHistorySites.sortedByDescending { it.lastVisitedMillis }.take(5)
+        } else {
+            historyManager.defaultTopSites.take(5)
+        }
+    }
+
     var homeSearchInput by remember { mutableStateOf("") }
 
     Box(
@@ -622,49 +610,14 @@ fun BrowserEmptyHomePage(
             modifier = Modifier
                 .fillMaxWidth()
                 .widthIn(max = 440.dp)
+                .verticalScroll(rememberScrollState())
         ) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(68.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.TravelExplore,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(34.dp)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            Text(
-                text = "Media Downloader Browser",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(Modifier.height(6.dp))
-
-            Text(
-                text = "Search the web or enter any URL to discover and download videos, audios, streams & photos.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                fontSize = 13.sp
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            // Prominent Search / URL Input Card in Center of Home Page
+            // 1. Prominent Search / URL Input Bar
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 tonalElevation = 4.dp,
-                shadowElevation = 4.dp,
+                shadowElevation = 3.dp,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -692,9 +645,9 @@ fun BrowserEmptyHomePage(
                     ) {
                         if (homeSearchInput.isEmpty()) {
                             Text(
-                                text = "Search web or enter address (URL)...",
+                                text = "Search or type URL",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                 fontSize = 14.sp
                             )
                         }
@@ -763,89 +716,87 @@ fun BrowserEmptyHomePage(
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(32.dp))
 
-            // Quick Shortcut Chips
-            Text(
-                text = "Popular Media Platforms",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(Modifier.height(12.dp))
-
-            val shortcuts = listOf(
-                "Wikimedia" to "https://commons.wikimedia.org",
-                "Unsplash" to "https://unsplash.com",
-                "Pexels" to "https://pexels.com",
-                "Internet Archive" to "https://archive.org",
-                "Pixabay" to "https://pixabay.com",
-                "DuckDuckGo" to "https://duckduckgo.com"
-            )
-
+            // 2. Top 5 Visited Sites
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                shortcuts.take(3).forEach { (name, url) ->
-                    Surface(
-                        onClick = { onNavigate(url) },
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.height(36.dp)
+                topVisitedSites.take(5).forEachIndexed { idx, site ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .width(62.dp)
+                            .clickable { onNavigate(site.url) }
+                            .testTag("top_site_$idx")
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            shadowElevation = 2.dp,
+                            modifier = Modifier.size(48.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Language,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Text(
-                                text = name,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                val initial = site.title.ifBlank { site.domain }.firstOrNull()?.uppercaseChar()?.toString() ?: "W"
+                                Text(
+                                    text = initial,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = site.title.ifBlank { site.domain },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(20.dp))
 
+            // 3. Recent 5 Sites in Recommendation
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                shortcuts.drop(3).forEach { (name, url) ->
+                recentSites.take(5).forEachIndexed { idx, site ->
                     Surface(
-                        onClick = { onNavigate(url) },
+                        onClick = { onNavigate(site.url) },
                         shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.height(36.dp)
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .height(32.dp)
+                            .testTag("recent_site_$idx")
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Language,
+                                imageVector = Icons.Default.History,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(13.dp)
                             )
                             Text(
-                                text = name,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = site.title.ifBlank { site.domain },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }

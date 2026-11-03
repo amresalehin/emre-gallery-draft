@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -852,71 +853,129 @@ fun FullScreenBrowserView(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
+                    val isAllSelected = filteredItems.isNotEmpty() &&
+                            selectedItemIds.containsAll(filteredItems.map { it.id }.toSet())
+
+                    // Pinned Filter & Action Row: Category Chips with Icons + Pinned Select All
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                            .testTag("discovered_media_filters_row"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "Discovered Media (${discoveredItems.size})",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            if (currentUrl.isNotBlank()) {
-                                Text(
-                                    text = currentUrl,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                        // Category filter chips using icons instead of texts to save space
+                        LazyRow(
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            items(filterOptions) { filter ->
+                                val isSelected = selectedFilter == filter
+                                val count = when (filter) {
+                                    "Images" -> discoveredItems.count { it.category == MediaCategory.IMAGES }
+                                    "Videos" -> discoveredItems.count { it.category == MediaCategory.VIDEOS }
+                                    "Audio" -> discoveredItems.count { it.category == MediaCategory.AUDIO }
+                                    "Streams" -> discoveredItems.count { it.category == MediaCategory.STREAMS }
+                                    else -> 0
+                                }
+                                val icon = when (filter) {
+                                    "Images" -> Icons.Default.Image
+                                    "Videos" -> Icons.Default.Videocam
+                                    "Audio" -> Icons.Default.Audiotrack
+                                    "Streams" -> Icons.Default.LiveTv
+                                    else -> Icons.Default.PermMedia
+                                }
+
+                                Surface(
+                                    onClick = {
+                                        selectedFilter = if (selectedFilter == filter) null else filter
+                                    },
+                                    shape = CircleShape,
+                                    color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                    ),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .testTag("discovered_filter_chip_$filter")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = "$filter ($count)",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "$count",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
                             }
                         }
 
-                        TextButton(
+                        Spacer(Modifier.width(8.dp))
+
+                        // Pinned Select All / Deselect Pill matching scraper drawer
+                        Surface(
                             onClick = {
                                 val currentFilteredIds = filteredItems.map { it.id }.toSet()
-                                val isAllSelected = filteredItems.isNotEmpty() && selectedItemIds.containsAll(currentFilteredIds)
                                 selectedItemIds = if (isAllSelected) {
                                     selectedItemIds - currentFilteredIds
                                 } else {
                                     selectedItemIds + currentFilteredIds
                                 }
-                            }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .height(34.dp)
+                                .testTag("discovered_select_all_button")
                         ) {
-                            val isAllSelected = filteredItems.isNotEmpty() && selectedItemIds.containsAll(filteredItems.map { it.id }.toSet())
-                            Text(if (isAllSelected) "Deselect All" else "Select All")
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // Filter Chips
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        filterOptions.forEach { filter ->
-                            val isSelected = selectedFilter == filter
-                            val count = when (filter) {
-                                "Images" -> discoveredItems.count { it.category == MediaCategory.IMAGES }
-                                "Videos" -> discoveredItems.count { it.category == MediaCategory.VIDEOS }
-                                "Audio" -> discoveredItems.count { it.category == MediaCategory.AUDIO }
-                                "Streams" -> discoveredItems.count { it.category == MediaCategory.STREAMS }
-                                else -> 0
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(3.dp),
+                                    color = if (isAllSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    border = BorderStroke(
+                                        1.2.dp,
+                                        if (isAllSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    modifier = Modifier.size(14.dp)
+                                ) {
+                                    if (isAllSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = if (isAllSelected) "Deselect" else "Select All",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 12.sp
+                                )
                             }
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = {
-                                    selectedFilter = if (selectedFilter == filter) null else filter
-                                },
-                                label = { Text("$filter ($count)") }
-                            )
                         }
                     }
-
-                    Spacer(Modifier.height(12.dp))
 
                     // Media items list
                     LazyColumn(
