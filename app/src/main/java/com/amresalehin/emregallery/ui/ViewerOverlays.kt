@@ -509,12 +509,11 @@ fun EndOfStoryOverlay(
 }
 
 /**
- * Bottom action bar with Edit and Delete/Restore buttons.
+ * Bottom action bar with Delete/Restore buttons.
  */
 @Composable
 fun ViewerBottomActionBar(
     isBin: Boolean,
-    onEdit: () -> Unit,
     onToggleBin: () -> Unit,
     onDeletePermanently: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -541,7 +540,6 @@ fun ViewerBottomActionBar(
                 )
             }
         } else {
-            ViewerAction(Icons.Default.Tune, "Edit", onEdit)
             ViewerAction(
                 icon = Icons.Default.Delete,
                 label = "Delete",

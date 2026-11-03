@@ -111,7 +111,6 @@ fun ViewerScreen(
     onToggleArchive: () -> Unit,
     onDeletePermanently: (() -> Unit)? = null,
     onAddTo: () -> Unit,
-    onEdit: () -> Unit = {},
     onOpenNeighbor: (MediaItem) -> Unit,
     onOpenMap: () -> Unit,
     onOpenPerson: ((personId: String, engineId: String) -> Unit)? = null,
@@ -355,10 +354,6 @@ fun ViewerScreen(
 
     val shareMedia: () -> Unit = {
         shareMediaItem(context, item)
-    }
-
-    val launchEdit: () -> Unit = {
-        onEdit()
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -642,7 +637,6 @@ fun ViewerScreen(
                     if (!videoState.isFullscreen && !isStoryMode) {
                         ViewerBottomActionBar(
                             isBin = isBin,
-                            onEdit = launchEdit,
                             onToggleBin = {
                                 if (isBin) {
                                     onToggleBin()

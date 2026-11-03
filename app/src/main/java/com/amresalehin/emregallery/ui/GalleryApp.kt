@@ -1216,22 +1216,6 @@ fun GalleryApp() {
                     Destination.VIEWER -> {
                         Box(Modifier.fillMaxSize())
                     }
-                    Destination.EDITOR -> {
-                        if (selectedMedia != null) {
-                            com.amresalehin.emregallery.editor.ui.PhotoEditorScreen(
-                                item = selectedMedia!!,
-                                mediaRepository = mediaRepository,
-                                onBack = { performBackNavigation() },
-                                onSaved = { savedItem ->
-                                    refreshMedia()
-                                    selectedMedia = savedItem
-                                    performBackNavigation()
-                                }
-                            )
-                        } else {
-                            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
-                        }
-                    }
                 }
             }
         }
@@ -1331,13 +1315,6 @@ fun GalleryApp() {
                     performBackNavigation()
                 },
                 onAddTo = { mediaForAddToAlbum = currentItem; showAddToAlbumSheet = true },
-                onEdit = {
-                    navigateTo(
-                        dest = Destination.EDITOR,
-                        rememberPrevious = true,
-                        newSelectedMedia = currentItem
-                    )
-                },
                 onOpenNeighbor = { selectedMedia = it; showDetails = false },
                 onOpenMap = {
                     showDetails = false
@@ -1357,7 +1334,7 @@ fun GalleryApp() {
         }
 
         // Wider top and bottom edge blur across app screens, smoothly fading with return progress
-        val showEdgeBlurs = (destination != Destination.VIEWER && destination != Destination.EDITOR) || viewerTransitionProgress.value < 0.99f
+        val showEdgeBlurs = (destination != Destination.VIEWER) || viewerTransitionProgress.value < 0.99f
         if (showEdgeBlurs) {
             Box(
                 modifier = Modifier
@@ -1403,7 +1380,7 @@ fun GalleryApp() {
         }
 
         // Floating search bar across Home and Albums - coordinated entrance downward from above screen edge
-        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && destination != Destination.EDITOR
+        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER
         if (showSearchBar) {
             Box(
                 modifier = Modifier
@@ -1441,7 +1418,7 @@ fun GalleryApp() {
         }
 
         // Floating Bottom Navigation Bar across Home, Albums, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && destination != Destination.EDITOR
+        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier
