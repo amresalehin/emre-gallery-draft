@@ -7,11 +7,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.URL
 
 data class MediaRequestContext(
@@ -195,6 +198,7 @@ class BrowserProvider(private val context: Context) : ExtractionProvider {
                         onCancellation = { browserExtractor.cleanup() }
                     )
                 }
+                browserExtractor.cleanup()
             }
         )
     }
@@ -264,15 +268,16 @@ class DualMediaExtractor(private val context: Context) {
             items = emptyList()
         )
 
-        extractionJob = scope.launch(Dispatchers.Main) {
+        extractionJob = scope.launch {
             val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
+            val itemsMutex = Mutex()
 
-            fun updateItems(
+            suspend fun updateItems(
                 newList: List<ScrapedMediaItem>,
                 title: String? = null,
                 msg: String? = null,
                 phase: ExtractionPhase? = null
-            ) {
+            ) = itemsMutex.withLock {
                 var modified = false
 
                 fun getVideoThumbKeys(): Set<String> {
@@ -403,19 +408,25 @@ class DualMediaExtractor(private val context: Context) {
                 }
             }
 
+            suspend fun updateStatus(status: String, phase: ExtractionPhase? = null) = itemsMutex.withLock {
+                _state.value = _state.value.copy(
+                    statusMessage = status,
+                    phase = phase ?: _state.value.phase
+                )
+            }
+
             try {
-                // Provider 1: Direct Media Provider
+                // Provider 1: Direct Media Provider (Fast-path initial discovery)
                 val directProvider = DirectMediaProvider()
                 if (directProvider.isApplicable(requestContext)) {
-                    _state.value = _state.value.copy(
-                        phase = ExtractionPhase.DIRECT_MEDIA,
-                        statusMessage = "Identified direct media link..."
-                    )
-                    val directRes = directProvider.extract(
-                        context = requestContext,
-                        onItemDiscovered = { item -> updateItems(listOf(item)) },
-                        onStatusUpdate = {}
-                    )
+                    updateStatus("Identified direct media link...", ExtractionPhase.DIRECT_MEDIA)
+                    val directRes = coroutineScope {
+                        directProvider.extract(
+                            context = requestContext,
+                            onItemDiscovered = { item -> launch { updateItems(listOf(item)) } },
+                            onStatusUpdate = {}
+                        )
+                    }
                     if (directRes.items.isNotEmpty()) {
                         updateItems(
                             newList = directRes.items,
@@ -423,143 +434,137 @@ class DualMediaExtractor(private val context: Context) {
                             msg = "Discovered direct media file"
                         )
                         if (directOnly) {
-                            _state.value = _state.value.copy(
-                                isRunning = false,
-                                phase = ExtractionPhase.COMPLETED,
-                                statusMessage = "Discovered direct media file"
-                            )
+                            itemsMutex.withLock {
+                                _state.value = _state.value.copy(
+                                    isRunning = false,
+                                    phase = ExtractionPhase.COMPLETED,
+                                    statusMessage = "Discovered direct media file"
+                                )
+                            }
                             return@launch
                         }
                     }
                 }
 
                 // Stage 2: Independent Concurrent Extractor Execution (gallery-dl, yt-dlp, static HTML)
-                _state.value = _state.value.copy(
-                    phase = ExtractionPhase.GALLERY_DL,
-                    statusMessage = "Querying extraction providers..."
-                )
+                updateStatus("Querying extraction providers...", ExtractionPhase.GALLERY_DL)
 
                 val galleryDlProvider = GalleryDlProvider()
                 val ytDlpProvider = YtDlpProvider()
                 val staticHtmlProvider = StaticHtmlProvider()
 
-                // Launch providers independently without letting one's failure abort others
-                val gdlDeferred = async(Dispatchers.IO) {
-                    try {
-                        if (galleryDlProvider.isApplicable(requestContext)) {
-                            galleryDlProvider.extract(
+                // Launch providers independently using structured concurrency under coroutineScope
+                coroutineScope {
+                    val gdlDeferred = async(Dispatchers.IO) {
+                        try {
+                            if (galleryDlProvider.isApplicable(requestContext)) {
+                                galleryDlProvider.extract(
+                                    context = requestContext,
+                                    onItemDiscovered = { item ->
+                                        launch { updateItems(listOf(item)) }
+                                    },
+                                    onStatusUpdate = { status ->
+                                        launch { updateStatus(status) }
+                                    }
+                                )
+                            } else null
+                        } catch (e: Exception) {
+                            Log.w("DualMediaExtractor", "gallery-dl extraction error", e)
+                            null
+                        }
+                    }
+
+                    val ytdlpDeferred = async(Dispatchers.IO) {
+                        try {
+                            if (ytDlpProvider.isApplicable(requestContext)) {
+                                ytDlpProvider.extract(
+                                    context = requestContext,
+                                    onItemDiscovered = { item ->
+                                        launch { updateItems(listOf(item)) }
+                                    },
+                                    onStatusUpdate = { status ->
+                                        launch { updateStatus(status) }
+                                    }
+                                )
+                            } else null
+                        } catch (e: Exception) {
+                            Log.w("DualMediaExtractor", "yt-dlp extraction error", e)
+                            null
+                        }
+                    }
+
+                    val staticDeferred = async(Dispatchers.IO) {
+                        try {
+                            staticHtmlProvider.extract(
                                 context = requestContext,
                                 onItemDiscovered = { item ->
-                                    launch(Dispatchers.Main) { updateItems(listOf(item)) }
+                                    launch { updateItems(listOf(item)) }
                                 },
                                 onStatusUpdate = { status ->
-                                    launch(Dispatchers.Main) {
-                                        _state.value = _state.value.copy(statusMessage = status)
-                                    }
+                                    launch { updateStatus(status) }
                                 }
                             )
-                        } else null
-                    } catch (e: Exception) {
-                        Log.w("DualMediaExtractor", "gallery-dl extraction error", e)
-                        null
+                        } catch (e: Exception) {
+                            Log.w("DualMediaExtractor", "StaticHtmlProvider error", e)
+                            null
+                        }
                     }
-                }
 
-                val ytdlpDeferred = async(Dispatchers.IO) {
-                    try {
-                        if (ytDlpProvider.isApplicable(requestContext)) {
-                            ytDlpProvider.extract(
-                                context = requestContext,
-                                onItemDiscovered = { item ->
-                                    launch(Dispatchers.Main) { updateItems(listOf(item)) }
-                                },
-                                onStatusUpdate = { status ->
-                                    launch(Dispatchers.Main) {
-                                        _state.value = _state.value.copy(statusMessage = status)
-                                    }
-                                }
-                            )
-                        } else null
-                    } catch (e: Exception) {
-                        Log.w("DualMediaExtractor", "yt-dlp extraction error", e)
-                        null
+                    val gdlResult = gdlDeferred.await()
+                    val ytdlpResult = ytdlpDeferred.await()
+                    val staticResult = staticDeferred.await()
+
+                    if (gdlResult != null && gdlResult.items.isNotEmpty()) {
+                        updateItems(gdlResult.items, title = gdlResult.pageTitle)
                     }
-                }
-
-                val staticDeferred = async(Dispatchers.IO) {
-                    try {
-                        staticHtmlProvider.extract(
-                            context = requestContext,
-                            onItemDiscovered = { item ->
-                                launch(Dispatchers.Main) { updateItems(listOf(item)) }
-                            },
-                            onStatusUpdate = { status ->
-                                launch(Dispatchers.Main) {
-                                    _state.value = _state.value.copy(statusMessage = status)
-                                }
-                            }
-                        )
-                    } catch (e: Exception) {
-                        Log.w("DualMediaExtractor", "StaticHtmlProvider error", e)
-                        null
+                    if (ytdlpResult != null && ytdlpResult.items.isNotEmpty()) {
+                        updateItems(ytdlpResult.items, title = ytdlpResult.pageTitle)
                     }
-                }
-
-                val gdlResult = gdlDeferred.await()
-                val ytdlpResult = ytdlpDeferred.await()
-                val staticResult = staticDeferred.await()
-
-                if (gdlResult != null && gdlResult.items.isNotEmpty()) {
-                    updateItems(gdlResult.items, title = gdlResult.pageTitle)
-                }
-                if (ytdlpResult != null && ytdlpResult.items.isNotEmpty()) {
-                    updateItems(ytdlpResult.items, title = ytdlpResult.pageTitle)
-                }
-                if (staticResult != null && staticResult.items.isNotEmpty()) {
-                    updateItems(staticResult.items, title = staticResult.pageTitle)
+                    if (staticResult != null && staticResult.items.isNotEmpty()) {
+                        updateItems(staticResult.items, title = staticResult.pageTitle)
+                    }
                 }
 
                 // Stage 3: Live Chromium Browser Extraction (Network Interception, MutationObserver, Adaptive Scroll)
                 val browserProvider = BrowserProvider(context)
                 activeBrowserProvider = browserProvider
 
-                _state.value = _state.value.copy(
-                    phase = ExtractionPhase.BROWSER_INTERCEPTING,
-                    statusMessage = "Live browser: intercepting streaming requests & dynamic DOM..."
-                )
+                updateStatus("Live browser: intercepting streaming requests & dynamic DOM...", ExtractionPhase.BROWSER_INTERCEPTING)
 
                 try {
-                    browserProvider.extract(
-                        context = requestContext,
-                        onItemDiscovered = { item ->
-                            updateItems(listOf(item))
-                        },
-                        onStatusUpdate = { status ->
-                            val phase = if (status.contains("scrolling", ignoreCase = true)) {
-                                ExtractionPhase.AUTO_SCROLLING
-                            } else {
-                                ExtractionPhase.BROWSER_INTERCEPTING
+                    coroutineScope {
+                        browserProvider.extract(
+                            context = requestContext,
+                            onItemDiscovered = { item ->
+                                launch { updateItems(listOf(item)) }
+                            },
+                            onStatusUpdate = { status ->
+                                val phase = if (status.contains("scrolling", ignoreCase = true)) {
+                                    ExtractionPhase.AUTO_SCROLLING
+                                } else {
+                                    ExtractionPhase.BROWSER_INTERCEPTING
+                                }
+                                launch { updateStatus(status, phase) }
                             }
-                            _state.value = _state.value.copy(
-                                statusMessage = status,
-                                phase = phase
-                            )
-                        }
-                    )
+                        )
+                    }
                 } catch (ce: CancellationException) {
                     throw ce
                 } catch (e: Exception) {
                     Log.w("DualMediaExtractor", "Browser extraction error", e)
                 } finally {
+                    browserProvider.cleanup()
                     activeBrowserProvider = null
                 }
 
-                val finalCount = itemsMap.size
-                _state.value = _state.value.copy(
-                    isRunning = false,
-                    phase = ExtractionPhase.COMPLETED,
-                    statusMessage = if (finalCount > 0) "Extraction completed. Discovered $finalCount media items." else "No media discovered on this page."
-                )
+                itemsMutex.withLock {
+                    val finalCount = itemsMap.size
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        phase = ExtractionPhase.COMPLETED,
+                        statusMessage = if (finalCount > 0) "Extraction completed. Discovered $finalCount media items." else "No media discovered on this page."
+                    )
+                }
             } catch (ce: CancellationException) {
                 _state.value = _state.value.copy(
                     isRunning = false,
@@ -578,6 +583,7 @@ class DualMediaExtractor(private val context: Context) {
         }
     }
 
+    @Synchronized
     fun addDiscoveredItems(newList: List<ScrapedMediaItem>, title: String? = null, domain: String? = null) {
         val existingMap = LinkedHashMap<String, ScrapedMediaItem>()
         for (item in _state.value.items) {

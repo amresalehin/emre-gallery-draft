@@ -54,7 +54,7 @@ class BrowserMediaExtractor(private val context: Context) {
             onStatusUpdate("Initializing Chromium browser engine...")
 
             try {
-                val wv = WebView(context.applicationContext)
+                val wv = WebView(context)
                 webView = wv
 
                 wv.settings.apply {
