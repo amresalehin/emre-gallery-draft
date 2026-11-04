@@ -9,6 +9,7 @@ import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxStack
+import com.amresalehin.emregallery.data.MediaDownloadWorker
 import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
@@ -34,6 +35,42 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class MediaDownloaderTest {
+
+    @Test
+    fun successfulDirectDownloadMustNotRunGalleryDlFallback() {
+        assertFalse(
+            MediaDownloadWorker.shouldUseGalleryDlFallback(
+                directDownloadSucceeded = true,
+                hasUsableFile = true,
+                galleryEngineAvailable = true,
+                errorMessage = null
+            )
+        )
+    }
+
+    @Test
+    fun failedDirectDownloadMayUseGalleryDlFallback() {
+        assertTrue(
+            MediaDownloadWorker.shouldUseGalleryDlFallback(
+                directDownloadSucceeded = false,
+                hasUsableFile = false,
+                galleryEngineAvailable = true,
+                errorMessage = "Connection reset"
+            )
+        )
+    }
+
+    @Test
+    fun invalidHtmlResponseMustNotUseGalleryDlFallback() {
+        assertFalse(
+            MediaDownloadWorker.shouldUseGalleryDlFallback(
+                directDownloadSucceeded = false,
+                hasUsableFile = false,
+                galleryEngineAvailable = true,
+                errorMessage = "Server returned HTML webpage instead of media"
+            )
+        )
+    }
 
     @Test
     fun destinationEnumContainsMediaInbox() {
