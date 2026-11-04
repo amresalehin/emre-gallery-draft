@@ -4,8 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -88,8 +91,14 @@ fun MediaInboxScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    var selectedStackIds by remember { mutableStateOf(setOf<String>()) }
+    val isSelectionMode = selectedStackIds.isNotEmpty()
+    var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
+
     BackHandler(enabled = !showFullScreenBrowser) {
-        if (showScraperDrawer) {
+        if (isSelectionMode) {
+            selectedStackIds = emptySet()
+        } else if (showScraperDrawer) {
             showScraperDrawer = false
         } else if (selectedStackForDetail != null) {
             selectedStackForDetail = null
@@ -128,45 +137,47 @@ fun MediaInboxScreen(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             containerColor = MaterialTheme.colorScheme.background,
         floatingActionButton = {
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.padding(bottom = 16.dp, end = 8.dp)
-            ) {
-                // Browser Button above the plus button
-                FloatingActionButton(
-                    onClick = { showFullScreenBrowser = true },
-                    shape = RoundedCornerShape(16.dp),
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("media_inbox_fab_browser")
+            if (!isSelectionMode) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(bottom = 16.dp, end = 8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Language,
-                        contentDescription = "Open In-App Browser",
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                    // Browser Button above the plus button
+                    FloatingActionButton(
+                        onClick = { showFullScreenBrowser = true },
+                        shape = RoundedCornerShape(16.dp),
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("media_inbox_fab_browser")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = "Open In-App Browser",
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
 
-                // Floating Action Button (+) matching Screenshot 1
-                FloatingActionButton(
-                    onClick = { showScraperDrawer = true },
-                    shape = RoundedCornerShape(18.dp),
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-                    modifier = Modifier
-                        .size(56.dp)
-                        .testTag("media_inbox_fab_add")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Open Media Downloader",
-                        modifier = Modifier.size(28.dp)
-                    )
+                    // Floating Action Button (+) matching Screenshot 1
+                    FloatingActionButton(
+                        onClick = { showScraperDrawer = true },
+                        shape = RoundedCornerShape(18.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+                        modifier = Modifier
+                            .size(56.dp)
+                            .testTag("media_inbox_fab_add")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Open Media Downloader",
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
             }
         }
@@ -187,9 +198,33 @@ fun MediaInboxScreen(
                     verticalItemSpacing = 14.dp
                 ) {
                     items(filteredStacks, key = { it.id }) { stack ->
+                        val isSelected = stack.id in selectedStackIds
                         ImageStackCard(
                             stack = stack,
-                            onClick = { selectedStackForDetail = stack },
+                            isSelected = isSelected,
+                            isSelectionMode = isSelectionMode,
+                            onClick = {
+                                if (isSelectionMode) {
+                                    selectedStackIds = if (isSelected) {
+                                        selectedStackIds - stack.id
+                                    } else {
+                                        selectedStackIds + stack.id
+                                    }
+                                } else {
+                                    selectedStackForDetail = stack
+                                }
+                            },
+                            onLongClick = {
+                                if (!isSelectionMode) {
+                                    selectedStackIds = setOf(stack.id)
+                                } else {
+                                    selectedStackIds = if (isSelected) {
+                                        selectedStackIds - stack.id
+                                    } else {
+                                        selectedStackIds + stack.id
+                                    }
+                                }
+                            },
                             onDelete = {
                                 inboxRepo.deleteStack(stack.id)
                                 scope.launch {
@@ -213,106 +248,239 @@ fun MediaInboxScreen(
                 }
             }
 
-            // Top Search Bar matching Screenshot 1 ("Find in Inbox")
+            // Top Bar: Selection Toolbar when selecting, otherwise Find in Inbox Search Bar
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    tonalElevation = 4.dp,
-                    shadowElevation = 8.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .testTag("inbox_search_pill")
-                ) {
-                    Row(
+                if (isSelectionMode) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        tonalElevation = 6.dp,
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
                         modifier = Modifier
-                            .fillMaxSize()
-                            .padding(start = 6.dp, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("inbox_selection_toolbar")
                     ) {
-                        // Back navigation button
-                        IconButton(
-                            onClick = onBack,
-                            modifier = Modifier.size(42.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 6.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        // Search icon
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            modifier = Modifier.size(22.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(Modifier.width(10.dp))
-
-                        // Text input field with "Find in Inbox" placeholder
-                        Box(
-                            modifier = Modifier.weight(1f),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            if (searchQuery.isEmpty()) {
-                                Text(
-                                    text = "Find in Inbox",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1
-                                )
-                            }
-                            BasicTextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("find_in_inbox_input")
-                            )
-                        }
-
-                        if (searchQuery.isNotEmpty()) {
+                            // Close/Cancel button
                             IconButton(
-                                onClick = { searchQuery = "" },
-                                modifier = Modifier.size(36.dp)
+                                onClick = { selectedStackIds = emptySet() },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .testTag("selection_close_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear search",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
+                                    contentDescription = "Exit selection",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            Spacer(Modifier.width(4.dp))
+
+                            // Selected count text
+                            Text(
+                                text = "${selectedStackIds.size} selected",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("selection_count_text")
+                            )
+
+                            // Select all toggle
+                            val allSelected = filteredStacks.isNotEmpty() && filteredStacks.all { it.id in selectedStackIds }
+                            IconButton(
+                                onClick = {
+                                    selectedStackIds = if (allSelected) {
+                                        emptySet()
+                                    } else {
+                                        filteredStacks.map { it.id }.toSet()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .testTag("selection_select_all_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (allSelected) Icons.Default.Deselect else Icons.Default.SelectAll,
+                                    contentDescription = if (allSelected) "Deselect all" else "Select all",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            // Delete button (in select tool bar keep delete button)
+                            IconButton(
+                                onClick = { showDeleteConfirmationDialog = true },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .testTag("selection_delete_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Delete selected stacks",
+                                    tint = MaterialTheme.colorScheme.error
                                 )
                             }
                         }
-
-                        // Tune / Filter icon on the right (as seen in Screenshot 1)
-                        IconButton(
-                            onClick = { showFilterSheet = true },
-                            modifier = Modifier.size(42.dp).testTag("inbox_tune_button")
+                    }
+                } else {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 8.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .testTag("inbox_search_pill")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 6.dp, end = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Back navigation button
+                            IconButton(
+                                onClick = onBack,
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            // Search icon
                             Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = "Sort and filter inbox",
-                                tint = MaterialTheme.colorScheme.onSurface
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search",
+                                modifier = Modifier.size(22.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+
+                            Spacer(Modifier.width(10.dp))
+
+                            // Text input field with "Find in Inbox" placeholder
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Find in Inbox",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                                BasicTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("find_in_inbox_input")
+                                )
+                            }
+
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { searchQuery = "" },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
+                            // Tune / Filter icon on the right (as seen in Screenshot 1)
+                            IconButton(
+                                onClick = { showFilterSheet = true },
+                                modifier = Modifier.size(42.dp).testTag("inbox_tune_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Sort and filter inbox",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    // Delete Confirmation Dialog for selected stacks
+    if (showDeleteConfirmationDialog) {
+        val count = selectedStackIds.size
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmationDialog = false },
+            title = {
+                Text(
+                    text = if (count == 1) "Delete media stack?" else "Delete $count media stacks?",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to remove ${if (count == 1) "this stack" else "these $count stacks"} from your Inbox?",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val idsToDelete = selectedStackIds.toList()
+                        showDeleteConfirmationDialog = false
+                        selectedStackIds = emptySet()
+                        idsToDelete.forEach { id ->
+                            inboxRepo.deleteStack(id)
+                        }
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (idsToDelete.size == 1) "1 stack deleted" else "${idsToDelete.size} stacks deleted"
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.testTag("confirm_delete_button")
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteConfirmationDialog = false },
+                    modifier = Modifier.testTag("cancel_delete_button")
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Modal Sheet for Sorting / Filtering Inbox
@@ -388,7 +556,6 @@ fun MediaInboxScreen(
                 stack = stack,
                 onClose = { selectedStackForDetail = null },
                 onOpenMedia = { uri ->
-                    selectedStackForDetail = null
                     val allUris = stack.items.map { it.localUri.ifBlank { it.sourceUrl } }
                     if (onOpenMediaWithList != null) {
                         onOpenMediaWithList(uri, allUris)
@@ -661,10 +828,14 @@ fun TrueMediaMosaicThumbnail(
 /**
  * Image Stack Card displaying real downloaded media in True Mosaic format
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ImageStackCard(
     stack: MediaInboxStack,
+    isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -686,7 +857,6 @@ fun ImageStackCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onClick() }
             .testTag("inbox_image_stack_${stack.id}")
     ) {
         // Stack visual effect: Subtle layered card underneath to look like an image stack
@@ -700,12 +870,29 @@ fun ImageStackCard(
         ) {}
 
         ElevatedCard(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .then(
+                    if (isSelected) {
+                        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp))
+                    } else Modifier
+                )
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                ),
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.elevatedCardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                containerColor = if (isSelected) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                }
             ),
-            elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp)
+            elevation = CardDefaults.elevatedCardElevation(
+                defaultElevation = if (isSelected) 6.dp else 3.dp
+            )
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 // Media thumbnail container with True Mosaic
@@ -765,6 +952,34 @@ fun ImageStackCard(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
+                        }
+                    }
+
+                    // Selection Indicator in top left corner
+                    if (isSelectionMode) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.45f),
+                            border = BorderStroke(
+                                2.dp,
+                                if (isSelected) MaterialTheme.colorScheme.primary else Color.White
+                            ),
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(8.dp)
+                                .size(28.dp)
+                                .testTag("stack_selection_check_${stack.id}")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -1119,40 +1334,40 @@ fun MediaStackDetailTab(
                                                     }
                                                 }
 
-                                                if (!hasMoved) {
-                                                    // Tap without dragging: open media viewer!
+                                                val offsetX = dragOffsetX.value
+                                                val offsetY = dragOffsetY.value
+                                                val totalDrag = kotlin.math.sqrt(offsetX * offsetX + offsetY * offsetY)
+
+                                                if (!hasMoved || totalDrag < 45f) {
+                                                    // Direct tap without swipe threshold: directly land in viewer!
                                                     val targetUri = item.localUri.ifBlank { item.sourceUrl }
                                                     onOpenMedia(targetUri)
+                                                } else if ((offsetX < -140f || offsetY < -150f) && currentIndex < items.size - 1) {
+                                                    // Swiped left or up: top card exits and card below comes forward to the top!
+                                                    scope.launch {
+                                                        val exitX = if (abs(offsetX) > 20f) (if (offsetX < 0) -1300f else 1300f) else 0f
+                                                        val exitY = if (abs(offsetY) > 20f) (if (offsetY < 0) -1300f else 1300f) else 0f
+                                                        launch { dragOffsetX.animateTo(exitX, tween(160)) }
+                                                        launch { dragOffsetY.animateTo(exitY, tween(160)) }
+                                                        delay(160)
+                                                        currentIndex = (currentIndex + 1).coerceAtMost(items.size - 1)
+                                                        dragOffsetX.snapTo(0f)
+                                                        dragOffsetY.snapTo(0f)
+                                                    }
+                                                } else if (offsetX > 140f && currentIndex > 0) {
+                                                    // Swiped right: bring previous card back
+                                                    scope.launch {
+                                                        launch { dragOffsetX.animateTo(1300f, tween(160)) }
+                                                        delay(160)
+                                                        currentIndex = (currentIndex - 1).coerceAtLeast(0)
+                                                        dragOffsetX.snapTo(0f)
+                                                        dragOffsetY.snapTo(0f)
+                                                    }
                                                 } else {
-                                                    val offsetX = dragOffsetX.value
-                                                    val offsetY = dragOffsetY.value
-                                                    if ((offsetX < -140f || offsetY < -150f) && currentIndex < items.size - 1) {
-                                                        // Swiped left or up: top card exits and card below comes forward to the top!
-                                                        scope.launch {
-                                                            val exitX = if (abs(offsetX) > 20f) (if (offsetX < 0) -1300f else 1300f) else 0f
-                                                            val exitY = if (abs(offsetY) > 20f) (if (offsetY < 0) -1300f else 1300f) else 0f
-                                                            launch { dragOffsetX.animateTo(exitX, tween(160)) }
-                                                            launch { dragOffsetY.animateTo(exitY, tween(160)) }
-                                                            delay(160)
-                                                            currentIndex = (currentIndex + 1).coerceAtMost(items.size - 1)
-                                                            dragOffsetX.snapTo(0f)
-                                                            dragOffsetY.snapTo(0f)
-                                                        }
-                                                    } else if (offsetX > 140f && currentIndex > 0) {
-                                                        // Swiped right: bring previous card back
-                                                        scope.launch {
-                                                            launch { dragOffsetX.animateTo(1300f, tween(160)) }
-                                                            delay(160)
-                                                            currentIndex = (currentIndex - 1).coerceAtLeast(0)
-                                                            dragOffsetX.snapTo(0f)
-                                                            dragOffsetY.snapTo(0f)
-                                                        }
-                                                    } else {
-                                                        // Snap back to resting position with bouncy spring
-                                                        scope.launch {
-                                                            launch { dragOffsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)) }
-                                                            launch { dragOffsetY.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)) }
-                                                        }
+                                                    // Snap back to resting position with bouncy spring
+                                                    scope.launch {
+                                                        launch { dragOffsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)) }
+                                                        launch { dragOffsetY.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)) }
                                                     }
                                                 }
                                             }

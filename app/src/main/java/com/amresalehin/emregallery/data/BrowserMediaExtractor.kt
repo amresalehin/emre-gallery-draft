@@ -94,8 +94,32 @@ class BrowserMediaExtractor(private val context: Context) {
                     }
 
                     val classification = MediaClassifier.classify(cleanedUrl, mimeHint)
+                    val isVidAudStream = classification.isVideo || classification.isAudio || classification.isStream
                     val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, seenKeys.size)
+
+                    if (ContentAwareMediaFilter.isUiChromeUrl(
+                            url = cleanedUrl,
+                            title = title,
+                            isVideoOrAudioOrStream = isVidAudStream
+                        )
+                    ) {
+                        return
+                    }
+
                     val thumb = resolvedInfo.thumbnailUrl ?: poster ?: if (classification.category == MediaCategory.IMAGES) resolved else poster
+
+                    val headers = mutableMapOf<String, String>()
+                    headers["Referer"] = normalizedUrl
+                    headers["User-Agent"] = OkHttpDownloader.DEFAULT_USER_AGENT
+                    val cookieStr = OkHttpDownloader.sharedCookieJar.getCookieString(normalizedUrl)
+                    if (cookieStr.isNotBlank()) {
+                        headers["Cookie"] = cookieStr
+                    }
+
+                    val metadataMap = mutableMapOf<String, String>()
+                    resolution?.let { metadataMap["resolution"] = it }
+                    mimeHint?.let { metadataMap["mime_hint"] = it }
+                    metadataMap["source_url"] = normalizedUrl
 
                     val item = ScrapedMediaItem(
                         id = "browser_${seenKeys.size}_${System.currentTimeMillis()}",
@@ -109,7 +133,14 @@ class BrowserMediaExtractor(private val context: Context) {
                         thumbnailUrl = thumb,
                         source = source.label,
                         mimeType = classification.mimeType,
-                        resolutionHint = resolution
+                        resolutionHint = resolution,
+                        provenance = MediaProvenance(
+                            extractorEngine = "Browser Chromium (${source.label})",
+                            pageUrl = normalizedUrl,
+                            domSelector = if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null
+                        ),
+                        metadata = metadataMap,
+                        downloadHeaders = headers
                     )
                     onMediaDiscovered(item)
                 }
@@ -394,10 +425,35 @@ class BrowserMediaExtractor(private val context: Context) {
                     }
                 }
 
-                // 1. Images, picture sources, lazy-load attributes, and srcset
+                function isChromeElement(el) {
+                    if (!el) return false;
+                    var chromeParent = el.closest('header, nav, footer, aside, menu, form, [role="banner"], [role="navigation"], [role="contentinfo"], .header, .site-header, .nav, .navbar, .site-nav, .menu, #header, #nav, #navbar, #footer, #mw-navigation, #p-logo, .footer, .site-footer, .breadcrumb, .breadcrumbs, .pagination, .toolbar, .ad, .ads, .advertisement, .cookie, .cookie-banner, .consent');
+                    if (chromeParent) {
+                        var contentParent = el.closest('article, main, [role="main"], #content, #main-content, .mw-parser-output, figure, .gallery, .entry-content, .post-content');
+                        if (!contentParent || chromeParent.contains(contentParent) === false) {
+                            return true;
+                        }
+                    }
+                    var idAndClass = ((el.id || '') + ' ' + (el.className || '') + ' ' + (el.getAttribute('alt') || '')).toLowerCase();
+                    if (/logo|favicon|avatar_default|badge|donate|donation|fundraising|paypal|magnifying-glass|nav-icon|menu-icon|close-icon|arrow-|chevron|bullet|spinner|1x1/.test(idAndClass)) {
+                        return true;
+                    }
+                    var nw = el.naturalWidth || parseInt(el.getAttribute('width')) || el.clientWidth || 0;
+                    var nh = el.naturalHeight || parseInt(el.getAttribute('height')) || el.clientHeight || 0;
+                    if (nw > 0 && nh > 0) {
+                        if (nw <= 48 && nh <= 48) return true;
+                        if (nw <= 32 || nh <= 32) return true;
+                        if ((nw / nh > 12) || (nh / nw > 12)) return true;
+                    }
+                    return false;
+                }
+
+                // 1. Images, picture sources, lazy-load attributes, and srcset (content-aware)
                 var imgs = document.querySelectorAll('img, picture source');
                 for (var i = 0; i < imgs.length; i++) {
                     var el = imgs[i];
+                    if (isChromeElement(el)) continue;
+
                     var nw = el.naturalWidth || parseInt(el.getAttribute('width')) || el.clientWidth || 0;
                     var nh = el.naturalHeight || parseInt(el.getAttribute('height')) || el.clientHeight || 0;
                     var res = (nw > 0 && nh > 0) ? (nw + 'x' + nh) : ((nw > 0) ? (nw + 'w') : null);
@@ -517,17 +573,20 @@ class BrowserMediaExtractor(private val context: Context) {
                     } catch(e) {}
                 }
 
-                // 5. CSS background-image
-                var bgElements = document.querySelectorAll('div, section, header, figure, a, span');
-                var count = Math.min(bgElements.length, 120);
+                // 5. CSS background-image (content containers only, size > 120x120)
+                var bgElements = document.querySelectorAll('main, article, figure, [role="main"], #content, .gallery, .photo, .hero');
+                var count = Math.min(bgElements.length, 60);
                 for (var b = 0; b < count; b++) {
-                    var style = window.getComputedStyle(bgElements[b]);
-                    var bg = style.backgroundImage;
-                    if (bg && bg.indexOf('url(') !== -1) {
-                        var match = bg.match(/url\(['"]?(.*?)['"]?\)/);
-                        if (match && match[1] && !match[1].startsWith('data:')) {
-                            var bgu = resolveAbs(match[1]);
-                            if (bgu) list.push({u: bgu, s: 'CSS', r: 'background'});
+                    var bEl = bgElements[b];
+                    if (bEl.clientWidth >= 120 && bEl.clientHeight >= 120 && !isChromeElement(bEl)) {
+                        var style = window.getComputedStyle(bEl);
+                        var bg = style.backgroundImage;
+                        if (bg && bg.indexOf('url(') !== -1) {
+                            var match = bg.match(/url\(['"]?(.*?)['"]?\)/);
+                            if (match && match[1] && !match[1].startsWith('data:')) {
+                                var bgu = resolveAbs(match[1]);
+                                if (bgu) list.push({u: bgu, s: 'CSS', r: 'background'});
+                            }
                         }
                     }
                 }

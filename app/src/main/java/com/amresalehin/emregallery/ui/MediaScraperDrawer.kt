@@ -32,6 +32,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -58,6 +60,11 @@ fun MediaScraperDrawer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val historyManager = remember { BrowserHistoryManager(context) }
+    val recentSites by historyManager.allSites.collectAsState(initial = emptyList())
+
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
     val scraper = remember { MediaScraper() }
     val dualExtractor = remember { DualMediaExtractor(context) }
@@ -85,8 +92,15 @@ fun MediaScraperDrawer(
     var showDimensionFilter by remember { mutableStateOf(false) }
     var minWidthFilter by remember { mutableFloatStateOf(0f) }
     var minHeightFilter by remember { mutableFloatStateOf(0f) }
+    var showSvg by remember { mutableStateOf(false) } // By default keep SVG hidden
+
+    var hasSubmittedQuery by remember { mutableStateOf(false) }
+    var lastSubmittedUrl by remember { mutableStateOf("") }
 
     val allScrapedItems = extractorState.items
+    val svgCount = remember(allScrapedItems) {
+        allScrapedItems.count { MediaClassifier.isSvg(it.url, it.mimeType, it.format) }
+    }
 
     // Auto-select newly discovered items if user hasn't explicitly deselected all
     LaunchedEffect(allScrapedItems.size) {
@@ -115,14 +129,20 @@ fun MediaScraperDrawer(
         }
     }
 
-    // Auto-apply dimension filter across all scraped items
-    val dimensionFilteredAll = remember(allScrapedItems, minWidthFilter, minHeightFilter, dynamicDimensions.size) {
+    // Auto-apply dimension and SVG filter across all scraped items (SVG hidden by default)
+    val dimensionFilteredAll = remember(allScrapedItems, minWidthFilter, minHeightFilter, showSvg, dynamicDimensions.size) {
         val targetMinWidth = minWidthFilter.toInt()
         val targetMinHeight = minHeightFilter.toInt()
-        if (targetMinWidth <= 0 && targetMinHeight <= 0) {
-            allScrapedItems
+        val baseList = if (!showSvg) {
+            allScrapedItems.filter { !MediaClassifier.isSvg(it.url, it.mimeType, it.format) }
         } else {
-            allScrapedItems.filter { item ->
+            allScrapedItems
+        }
+
+        if (targetMinWidth <= 0 && targetMinHeight <= 0) {
+            baseList
+        } else {
+            baseList.filter { item ->
                 passesDimensionFilter(item, targetMinWidth, targetMinHeight, dynamicDimensions)
             }
         }
@@ -157,6 +177,29 @@ fun MediaScraperDrawer(
     val isValidUrl = remember(urlInput) { MediaClassifier.isValidWebUrl(urlInput) }
     val isAllSelected = filteredScrapedItems.isNotEmpty() &&
             selectedItemIds.containsAll(filteredScrapedItems.map { it.id })
+
+    fun submitSearch(targetUrl: String) {
+        val trimmed = targetUrl.trim()
+        if (trimmed.isBlank()) return
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        val normalized = if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
+            "https://$trimmed"
+        } else {
+            trimmed
+        }
+        if (MediaClassifier.isValidWebUrl(normalized)) {
+            hasSubmittedQuery = true
+            lastSubmittedUrl = normalized
+            urlInput = normalized
+            selectedItemIds = emptySet()
+            dynamicDimensions.clear()
+            scope.launch {
+                historyManager.recordVisit(normalized)
+            }
+            dualExtractor.extract(normalized, scope)
+        }
+    }
 
     Box(
         modifier = modifier
@@ -219,16 +262,22 @@ fun MediaScraperDrawer(
                                 .padding(horizontal = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Reset Scraper Button (Replaces history button)
+                            // Reset Scraper Button (Clears fetched thumbnails, inputs, and filters)
                             IconButton(
                                 onClick = {
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
                                     urlInput = ""
+                                    hasSubmittedQuery = false
+                                    lastSubmittedUrl = ""
                                     selectedItemIds = emptySet()
-                                    dualExtractor.cancel()
+                                    dynamicDimensions.clear()
+                                    dualExtractor.reset()
                                     selectedFilter = null
                                     sortOption = "Default"
                                     minWidthFilter = 0f
                                     minHeightFilter = 0f
+                                    showSvg = false
                                     showDimensionFilter = false
                                 },
                                 modifier = Modifier
@@ -267,10 +316,7 @@ fun MediaScraperDrawer(
                                     ),
                                     keyboardActions = KeyboardActions(
                                         onGo = {
-                                            if (isValidUrl) {
-                                                selectedItemIds = emptySet()
-                                                dualExtractor.extract(urlInput, scope)
-                                            }
+                                            submitSearch(urlInput)
                                         }
                                     ),
                                     textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -288,8 +334,11 @@ fun MediaScraperDrawer(
                                 IconButton(
                                     onClick = {
                                         urlInput = ""
+                                        hasSubmittedQuery = false
+                                        lastSubmittedUrl = ""
                                         selectedItemIds = emptySet()
-                                        dualExtractor.cancel()
+                                        dynamicDimensions.clear()
+                                        dualExtractor.reset()
                                     },
                                     modifier = Modifier.size(28.dp)
                                 ) {
@@ -303,59 +352,58 @@ fun MediaScraperDrawer(
                                 Spacer(Modifier.width(6.dp))
                             }
 
-                            // Fetch button pill - strictly enabled ONLY when URL is valid and extractor is not running
-                            Surface(
-                                onClick = {
-                                    if (isValidUrl) {
-                                        selectedItemIds = emptySet()
-                                        dualExtractor.extract(urlInput, scope)
-                                    }
-                                },
-                                enabled = !extractorState.isRunning && isValidUrl,
-                                shape = RoundedCornerShape(16.dp),
-                                color = when {
-                                    extractorState.isRunning -> Color(0xFF383C4A)
-                                    isValidUrl -> Color(0xFF535868)
-                                    else -> MaterialTheme.colorScheme.surfaceVariant
-                                },
-                                modifier = Modifier
-                                    .height(36.dp)
-                                    .testTag("scraper_fetch_button")
-                            ) {
-                                Box(
-                                    modifier = Modifier.padding(horizontal = 18.dp),
-                                    contentAlignment = Alignment.Center
+                            // Fetch button pill - removed after submitting query until user edits or resets input
+                            val showFetchButton = !hasSubmittedQuery || (urlInput.isNotBlank() && urlInput.trim() != lastSubmittedUrl)
+                            if (showFetchButton) {
+                                Surface(
+                                    onClick = {
+                                        submitSearch(urlInput)
+                                    },
+                                    enabled = !extractorState.isRunning && isValidUrl,
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = when {
+                                        extractorState.isRunning -> Color(0xFF383C4A)
+                                        isValidUrl -> Color(0xFF535868)
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    },
+                                    modifier = Modifier
+                                        .height(36.dp)
+                                        .testTag("scraper_fetch_button")
                                 ) {
-                                    if (extractorState.isRunning) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            CircularProgressIndicator(
-                                                modifier = Modifier.size(14.dp),
-                                                color = Color.White,
-                                                strokeWidth = 2.dp
-                                            )
+                                    Box(
+                                        modifier = Modifier.padding(horizontal = 18.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (extractorState.isRunning) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(14.dp),
+                                                    color = Color.White,
+                                                    strokeWidth = 2.dp
+                                                )
+                                                Text(
+                                                    text = "Scan",
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                        } else {
                                             Text(
-                                                text = "Scan",
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = FontWeight.SemiBold
+                                                text = "Fetch",
+                                                color = if (isValidUrl) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
                                             )
                                         }
-                                    } else {
-                                        Text(
-                                            text = "Fetch",
-                                            color = if (isValidUrl) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontSize = 14.sp
-                                        )
                                     }
                                 }
+                                Spacer(Modifier.width(6.dp))
                             }
-
-                            Spacer(Modifier.width(6.dp))
 
                             // Browser redirect button beside Fetch button
                             IconButton(
@@ -572,8 +620,8 @@ fun MediaScraperDrawer(
 
                     Spacer(Modifier.width(6.dp))
 
-                    // Pinned Dimension Filter Button (in saved space, opens 2 sliders to filter media by dimension)
-                    val isDimensionFilterActive = minWidthFilter > 0f || minHeightFilter > 0f
+                    // Pinned Dimension & SVG Filter Button
+                    val isDimensionFilterActive = minWidthFilter > 0f || minHeightFilter > 0f || showSvg
                     Surface(
                         onClick = { showDimensionFilter = !showDimensionFilter },
                         shape = RoundedCornerShape(12.dp),
@@ -592,7 +640,7 @@ fun MediaScraperDrawer(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Tune,
-                                contentDescription = "Filter by Dimension",
+                                contentDescription = "Filter media by dimensions and SVG",
                                 tint = if (isDimensionFilterActive || showDimensionFilter) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -678,6 +726,7 @@ fun MediaScraperDrawer(
                                         onClick = {
                                             minWidthFilter = 0f
                                             minHeightFilter = 0f
+                                            showSvg = false
                                         },
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                         modifier = Modifier
@@ -816,6 +865,71 @@ fun MediaScraperDrawer(
                                     }
                                 }
                             }
+                            // SVG Vector Toggle Row
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (showSvg) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (showSvg) MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showSvg = !showSvg }
+                                    .testTag("scraper_filter_svg_toggle_row")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "Show SVG Vectors",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (svgCount > 0) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = if (showSvg) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant,
+                                                    modifier = Modifier.height(18.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier.padding(horizontal = 6.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            text = "$svgCount",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontSize = 11.sp,
+                                                            color = if (showSvg) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Text(
+                                            text = if (showSvg) "SVG vectors are displayed in media grid" else "Hidden by default to focus on photos and videos",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                    Switch(
+                                        checked = showSvg,
+                                        onCheckedChange = { showSvg = it },
+                                        modifier = Modifier.testTag("scraper_filter_svg_switch")
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -890,6 +1004,7 @@ fun MediaScraperDrawer(
                                     onClick = {
                                         minWidthFilter = 0f
                                         minHeightFilter = 0f
+                                        showSvg = false
                                         selectedFilter = null
                                     },
                                     colors = ButtonDefaults.buttonColors(
@@ -901,7 +1016,7 @@ fun MediaScraperDrawer(
                                 }
                             }
                         }
-                    } else {
+                    } else if (extractorState.isRunning) {
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -911,6 +1026,113 @@ fun MediaScraperDrawer(
                         ) {
                             item {
                                 ThreeColumnSkeletonGrid()
+                            }
+                        }
+                    } else {
+                        // Empty State: Show Previous 5 Searches
+                        val displaySites = if (recentSites.isNotEmpty()) {
+                            recentSites.take(5)
+                        } else {
+                            historyManager.defaultTopSites.take(5)
+                        }
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp)
+                                .testTag("scraper_empty_state_recent_searches"),
+                            contentPadding = PaddingValues(top = 12.dp, bottom = 90.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            item {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.History,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = if (recentSites.isNotEmpty()) "Previous Searches" else "Suggested Searches",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+
+                            items(displaySites, key = { it.url }) { site ->
+                                Surface(
+                                    onClick = { submitSearch(site.url) },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("recent_search_item_${site.domain}")
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.History,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(Modifier.width(12.dp))
+
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = site.title.ifBlank { site.domain },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = site.url,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        Spacer(Modifier.width(8.dp))
+
+                                        Icon(
+                                            imageVector = Icons.Default.NorthWest,
+                                            contentDescription = "Search this URL",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -930,7 +1152,13 @@ fun MediaScraperDrawer(
                                 downloadProgress = 0.2f
                                 downloadStatusText = "Queueing persistent download..."
                                 scope.launch {
-                                    val itemsToDownload = filteredScrapedItems.filter { it.id in selectedItemIds }
+                                    val selectedRawItems = filteredScrapedItems.filter { it.id in selectedItemIds }
+                                    // Automatic cross-scraper deduplication before downloading
+                                    val itemsToDownload = MediaClassifier.deduplicateScrapedItems(selectedRawItems)
+                                    val duplicateCount = selectedRawItems.size - itemsToDownload.size
+                                    if (duplicateCount > 0) {
+                                        downloadStatusText = "Deduplicated $duplicateCount duplicate(s) across scrapers..."
+                                    }
                                     val stackId = "stack_${System.currentTimeMillis()}"
                                     val stackTitle = extractorState.pageTitle.ifBlank { extractorState.domain.ifBlank { "Discovered Media" } }
 
@@ -946,7 +1174,12 @@ fun MediaScraperDrawer(
                                     )
 
                                     downloadProgress = 1.0f
-                                    downloadStatusText = "Queued ${itemsToDownload.size} items for background download"
+                                    val notice = if (duplicateCount > 0) {
+                                        "Queued ${itemsToDownload.size} items ($duplicateCount duplicate(s) merged)"
+                                    } else {
+                                        "Queued ${itemsToDownload.size} items for background download"
+                                    }
+                                    downloadStatusText = notice
                                     kotlinx.coroutines.delay(400)
                                     isDownloading = false
                                     onDownloadComplete()

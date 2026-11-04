@@ -3,10 +3,13 @@ package com.amresalehin.emregallery
 import android.content.Context
 import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
+import com.amresalehin.emregallery.data.ContentAwareMediaFilter
+import com.amresalehin.emregallery.data.DualMediaExtractor
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxStack
+import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import com.amresalehin.emregallery.data.ScrapeResult
@@ -227,6 +230,73 @@ class MediaDownloaderTest {
         val resolvedProto = com.amresalehin.emregallery.data.MediaClassifier.resolveOriginalMedia(protoRelative)
         assertEquals("https://upload.wikimedia.org/wikipedia/commons/b/ba/Taj_Mahal-10_%28cropped%29.jpg", resolvedProto.mediaUrl)
         assertEquals("Taj_Mahal-10_(cropped).jpg", resolvedProto.cleanTitle)
+    }
+
+    @Test
+    fun testWikimediaTranscodedVideoResolvesToOriginalMasterFileAndDeduplicates() {
+        val masterUrl = "https://upload.wikimedia.org/wikipedia/commons/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm"
+        val transcode480p = "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm.480p.vp9.webm"
+        val transcode240p = "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm.240p.vp9.webm"
+
+        val resolved480 = com.amresalehin.emregallery.data.MediaClassifier.resolveOriginalMedia(transcode480p)
+        assertEquals(masterUrl, resolved480.mediaUrl)
+        assertEquals(transcode480p, resolved480.thumbnailUrl)
+        assertEquals("Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm", resolved480.cleanTitle)
+
+        // Deduplication keys for transcode variants and master file MUST be identical
+        val keyMaster = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(masterUrl)
+        val key480 = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(transcode480p)
+        val key240 = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(transcode240p)
+        assertEquals(keyMaster, key480)
+        assertEquals(keyMaster, key240)
+
+        // Deduplicate scraped items list merging DOM item with resolution hint and Network intercepted item
+        val domItem = com.amresalehin.emregallery.data.ScrapedMediaItem(
+            id = "dom_1",
+            url = transcode240p,
+            title = "Taj_Mahal_-_Mausoleum_der_Liebe",
+            isVideo = true,
+            resolutionHint = "250x141",
+            thumbnailUrl = transcode240p,
+            provenance = com.amresalehin.emregallery.data.MediaProvenance(extractorEngine = "Static HTML (DOM Scrape)")
+        )
+        val netItem = com.amresalehin.emregallery.data.ScrapedMediaItem(
+            id = "net_1",
+            url = transcode480p,
+            title = "Taj_Mahal_-_Mausoleum_der_Liebe",
+            isVideo = true,
+            resolutionHint = "Network",
+            thumbnailUrl = transcode480p,
+            provenance = com.amresalehin.emregallery.data.MediaProvenance(extractorEngine = "Browser Chromium (Network Intercept)")
+        )
+
+        val deduplicated = com.amresalehin.emregallery.data.MediaClassifier.deduplicateScrapedItems(listOf(domItem, netItem))
+        assertEquals(1, deduplicated.size)
+        val singleItem = deduplicated[0]
+        assertEquals(masterUrl, singleItem.url)
+        assertEquals("250x141", singleItem.resolutionHint)
+        assertTrue(singleItem.provenance.extractorEngine.contains("DOM Scrape"))
+        assertTrue(singleItem.provenance.extractorEngine.contains("Network Intercept"))
+    }
+
+    @Test
+    fun testWebsiteAndRouteAwareMediaExclusions() {
+        // Generic CDN URLs containing gallery, pin, comments, or wiki substrings MUST be accepted
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://mycdn.example.com/gallery/photo.jpg"))
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://mycdn.example.com/pin/12345.png"))
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://mycdn.example.com/comments/image.jpg"))
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://mycdn.example.com/wiki/hero.png"))
+
+        // Direct platform CDNs MUST be accepted
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://i.redd.it/comments/abc.jpg"))
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://i.pinimg.com/736x/ab/cd/ef.jpg"))
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://i.imgur.com/gallery/abcde.jpg"))
+
+        // Platform discussion and album pages MUST be rejected
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://reddit.com/r/pics/comments/abc/pic.jpg"))
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://pinterest.com/pin/12345/"))
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://imgur.com/gallery/abcde"))
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://twitter.com/user/status/12345"))
     }
 
     @Test
@@ -960,6 +1030,177 @@ class MediaDownloaderTest {
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test
+    fun contentAwareFilterRejectsChromeAssetsAndAcceptsContentMedia() {
+        // UI Chrome rejections
+        assertTrue(ContentAwareMediaFilter.isUiChromeUrl("https://en.wikipedia.org/static/images/mobile/copyright/wikipedia-wordmark-en.svg"))
+        assertTrue(ContentAwareMediaFilter.isUiChromeUrl("https://example.com/assets/logo.png"))
+        assertTrue(ContentAwareMediaFilter.isUiChromeUrl("https://example.com/favicon-32x32.png"))
+        assertTrue(ContentAwareMediaFilter.isUiChromeUrl("https://example.com/banners/donate_fundraising_banner.jpg"))
+        assertTrue(ContentAwareMediaFilter.isUiChromeUrl("https://example.com/icons/nav-arrow-right.png"))
+        // Tiny spatial dimensions (< 48x48)
+        assertTrue(ContentAwareMediaFilter.isUiChromeUrl("https://example.com/img.jpg", width = 16, height = 16))
+        // Extreme aspect ratios (> 12:1 line separators)
+        assertTrue(ContentAwareMediaFilter.isUiChromeUrl("https://example.com/divider.png", width = 800, height = 10))
+
+        // Legitimate content media acceptance
+        assertFalse(ContentAwareMediaFilter.isUiChromeUrl("https://upload.wikimedia.org/wikipedia/commons/1/10/Taj_Mahal-10_%28cropped%29.jpg"))
+        assertFalse(ContentAwareMediaFilter.isUiChromeUrl("https://example.com/photos/landscape_2026.jpg", width = 1920, height = 1080))
+        assertFalse(ContentAwareMediaFilter.isUiChromeUrl("https://example.com/stream/playlist.m3u8", isVideoOrAudioOrStream = true))
+    }
+
+    @Test
+    fun dualExtractorResetClearsDiscoveredItems() {
+        val context: Context = ApplicationProvider.getApplicationContext()
+        val extractor = DualMediaExtractor(context)
+
+        val item1 = ScrapedMediaItem(
+            id = "test_item_1",
+            url = "https://example.com/photo.jpg",
+            title = "Photo 1",
+            isVideo = false,
+            provenance = MediaProvenance(
+                extractorEngine = "Static HTML",
+                pageUrl = "https://example.com"
+            ),
+            downloadHeaders = mapOf("Referer" to "https://example.com")
+        )
+        extractor.addDiscoveredItem(item1)
+        assertEquals(1, extractor.state.value.items.size)
+
+        // Reset must clear all items and reset state to initial/idle
+        extractor.reset()
+        assertTrue(extractor.state.value.items.isEmpty())
+        assertFalse(extractor.state.value.isRunning)
+        assertEquals("", extractor.state.value.pageTitle)
+    }
+
+    @Test
+    fun scrapedMediaItemUnifiedCandidateModelHasProvenanceAndHeaders() {
+        val provenance = MediaProvenance(
+            extractorEngine = "Static HTML (img)",
+            pageUrl = "https://example.com/gallery",
+            domSelector = "img"
+        )
+        val headers = mapOf(
+            "User-Agent" to "Mozilla/5.0",
+            "Referer" to "https://example.com/gallery"
+        )
+        val item = ScrapedMediaItem(
+            id = "scraped_item_99",
+            url = "https://example.com/media/hero.jpg",
+            title = "Hero Image",
+            isVideo = false,
+            category = MediaCategory.IMAGES,
+            format = "JPG",
+            provenance = provenance,
+            metadata = mapOf("resolution" to "1920x1080"),
+            downloadHeaders = headers
+        )
+
+        assertEquals("Static HTML (img)", item.provenance.extractorEngine)
+        assertEquals("https://example.com/gallery", item.provenance.pageUrl)
+        assertEquals("img", item.provenance.domSelector)
+        assertEquals("1920x1080", item.metadata["resolution"])
+        assertEquals("https://example.com/gallery", item.downloadHeaders["Referer"])
+    }
+
+    @Test
+    fun isSvgDetectionAndDefaultFiltering() {
+        val svgItem = ScrapedMediaItem(
+            id = "svg_1",
+            url = "https://example.com/vectors/illustration.svg",
+            title = "Illustration",
+            format = "SVG",
+            mimeType = "image/svg+xml"
+        )
+        val rasterItem = ScrapedMediaItem(
+            id = "jpg_1",
+            url = "https://example.com/photos/landscape.jpg",
+            title = "Landscape",
+            format = "JPG",
+            mimeType = "image/jpeg"
+        )
+
+        // isSvg helper verification
+        assertTrue(MediaClassifier.isSvg(svgItem.url, svgItem.mimeType, svgItem.format))
+        assertFalse(MediaClassifier.isSvg(rasterItem.url, rasterItem.mimeType, rasterItem.format))
+
+        val allItems = listOf(svgItem, rasterItem)
+
+        // Default: keep SVG hidden (showSvg = false)
+        val defaultFiltered = allItems.filter { !MediaClassifier.isSvg(it.url, it.mimeType, it.format) }
+        assertEquals(1, defaultFiltered.size)
+        assertEquals("jpg_1", defaultFiltered.first().id)
+
+        // With toggle enabled (showSvg = true)
+        val showSvgFiltered = allItems
+        assertEquals(2, showSvgFiltered.size)
+    }
+
+    @Test
+    fun deduplicateScrapedItemsAcrossMultipleScrapers() {
+        // Scraper 1: Static HTML discovered thumbnail
+        val itemFromStaticHtml = ScrapedMediaItem(
+            id = "static_1",
+            url = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/10/Taj_Mahal-10_%28cropped%29.jpg/500px-Taj_Mahal-10_%28cropped%29.jpg",
+            title = "Taj Mahal Thumbnail",
+            isVideo = false,
+            thumbnailUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/10/Taj_Mahal-10_%28cropped%29.jpg/500px-Taj_Mahal-10_%28cropped%29.jpg",
+            provenance = MediaProvenance(
+                extractorEngine = "Static HTML",
+                pageUrl = "https://en.wikipedia.org/wiki/Taj_Mahal"
+            ),
+            downloadHeaders = mapOf("Referer" to "https://en.wikipedia.org/wiki/Taj_Mahal")
+        )
+
+        // Scraper 2: Chromium Browser discovered full-resolution image with unencoded parens
+        val itemFromBrowser = ScrapedMediaItem(
+            id = "browser_1",
+            url = "https://upload.wikimedia.org/wikipedia/commons/1/10/Taj_Mahal-10_(cropped).jpg",
+            title = "Taj Mahal Original",
+            isVideo = false,
+            resolutionHint = "2048x1536",
+            provenance = MediaProvenance(
+                extractorEngine = "Browser",
+                pageUrl = "https://en.wikipedia.org/wiki/Taj_Mahal"
+            ),
+            downloadHeaders = mapOf("User-Agent" to "Mozilla/5.0")
+        )
+
+        // Scraper 3: Unrelated different image
+        val distinctItem = ScrapedMediaItem(
+            id = "static_2",
+            url = "https://upload.wikimedia.org/wikipedia/commons/2/22/Red_Fort.jpg",
+            title = "Red Fort",
+            isVideo = false,
+            provenance = MediaProvenance(
+                extractorEngine = "Static HTML",
+                pageUrl = "https://en.wikipedia.org/wiki/Taj_Mahal"
+            )
+        )
+
+        val scrapedList = listOf(itemFromStaticHtml, itemFromBrowser, distinctItem)
+
+        // Automatic deduplication before downloading
+        val deduplicated = MediaClassifier.deduplicateScrapedItems(scrapedList)
+
+        // Exactly 2 items remain (the duplicate Taj Mahal items merged into 1)
+        assertEquals(2, deduplicated.size)
+
+        val mergedTaj = deduplicated.first { it.url.contains("Taj_Mahal-10") }
+        // Retains full resolution URL
+        assertEquals("https://upload.wikimedia.org/wikipedia/commons/1/10/Taj_Mahal-10_(cropped).jpg", mergedTaj.url)
+        // Preserves thumbnail from scraper 1
+        assertNotNull(mergedTaj.thumbnailUrl)
+        // Merges provenance to show both scrapers contributed
+        assertTrue(mergedTaj.provenance.extractorEngine.contains("Static HTML"))
+        assertTrue(mergedTaj.provenance.extractorEngine.contains("Browser"))
+        // Merges headers from both scrapers
+        assertTrue(mergedTaj.downloadHeaders.containsKey("Referer"))
+        assertTrue(mergedTaj.downloadHeaders.containsKey("User-Agent"))
     }
 }
 

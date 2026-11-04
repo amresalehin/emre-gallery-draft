@@ -613,6 +613,13 @@ fun GalleryApp() {
                 destination = Destination.SETTINGS
                 viewerStoryTitle = null
             }
+            destination == Destination.VIEWER -> {
+                val targetDest = previousDestination.takeIf { it != Destination.VIEWER } ?: Destination.HOME
+                destination = targetDest
+                selectedMedia = null
+                viewerMediaList = emptyList()
+                viewerStoryTitle = null
+            }
             else -> {
                 destination = Destination.HOME
                 mapFocusItem = null

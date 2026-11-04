@@ -78,7 +78,16 @@ class DirectMediaProvider : ExtractionProvider {
             format = classification.format,
             thumbnailUrl = thumb,
             mimeType = classification.mimeType,
-            source = "Direct Link"
+            source = "Direct Link",
+            provenance = MediaProvenance(
+                extractorEngine = "Direct URL",
+                pageUrl = context.url
+            ),
+            metadata = mapOf("source_url" to context.url),
+            downloadHeaders = mapOf(
+                "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
+                "Referer" to context.url
+            )
         )
         onItemDiscovered(item)
         return MediaExtractionResult(items = listOf(item), pageTitle = fileName)
@@ -266,10 +275,41 @@ class DualMediaExtractor(private val context: Context) {
             ) {
                 var modified = false
                 for (item in newList) {
-                    val key = MediaClassifier.canonicalKey(item.url)
-                    if (!itemsMap.containsKey(key)) {
+                    val key = MediaClassifier.deduplicationKey(item.url)
+                    val existing = itemsMap[key]
+                    if (existing == null) {
                         itemsMap[key] = item
                         modified = true
+                    } else {
+                        // Merge and deduplicate across scrapers
+                        val preferred = when {
+                            !item.url.contains("/thumb/") && !item.url.contains("/transcoded/") &&
+                                    (existing.url.contains("/thumb/") || existing.url.contains("/transcoded/")) -> item
+                            !existing.url.contains("/thumb/") && !existing.url.contains("/transcoded/") &&
+                                    (item.url.contains("/thumb/") || item.url.contains("/transcoded/")) -> existing
+                            (item.sizeBytes ?: 0L) > (existing.sizeBytes ?: 0L) -> item
+                            else -> existing
+                        }
+                        val engines = listOf(existing.provenance.extractorEngine, item.provenance.extractorEngine).distinct()
+                        val mergedEngine = engines.joinToString(" + ")
+                        val mergedThumb = preferred.thumbnailUrl ?: item.thumbnailUrl ?: existing.thumbnailUrl
+                        val mergedResolution = when {
+                            !preferred.resolutionHint.isNullOrBlank() && preferred.resolutionHint != "Network" -> preferred.resolutionHint
+                            !item.resolutionHint.isNullOrBlank() && item.resolutionHint != "Network" -> item.resolutionHint
+                            !existing.resolutionHint.isNullOrBlank() && existing.resolutionHint != "Network" -> existing.resolutionHint
+                            else -> preferred.resolutionHint ?: existing.resolutionHint ?: item.resolutionHint
+                        }
+                        val mergedHeaders = existing.downloadHeaders + item.downloadHeaders
+                        val upgraded = preferred.copy(
+                            thumbnailUrl = mergedThumb,
+                            resolutionHint = mergedResolution,
+                            provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
+                            downloadHeaders = mergedHeaders
+                        )
+                        if (upgraded != existing) {
+                            itemsMap[key] = upgraded
+                            modified = true
+                        }
                     }
                 }
                 if (modified || msg != null || phase != null || title != null) {
@@ -459,14 +499,30 @@ class DualMediaExtractor(private val context: Context) {
     fun addDiscoveredItems(newList: List<ScrapedMediaItem>, title: String? = null, domain: String? = null) {
         val existingMap = LinkedHashMap<String, ScrapedMediaItem>()
         for (item in _state.value.items) {
-            existingMap[MediaClassifier.canonicalKey(item.url)] = item
+            existingMap[MediaClassifier.deduplicationKey(item.url)] = item
         }
         var modified = false
         for (item in newList) {
-            val key = MediaClassifier.canonicalKey(item.url)
-            if (!existingMap.containsKey(key)) {
+            val key = MediaClassifier.deduplicationKey(item.url)
+            val existing = existingMap[key]
+            if (existing == null) {
                 existingMap[key] = item
                 modified = true
+            } else {
+                val preferred = if (!item.url.contains("/thumb/") && existing.url.contains("/thumb/")) item else existing
+                val engines = listOf(existing.provenance.extractorEngine, item.provenance.extractorEngine).distinct()
+                val mergedEngine = engines.joinToString(" + ")
+                val mergedThumb = preferred.thumbnailUrl ?: item.thumbnailUrl ?: existing.thumbnailUrl
+                val mergedHeaders = existing.downloadHeaders + item.downloadHeaders
+                val upgraded = preferred.copy(
+                    thumbnailUrl = mergedThumb,
+                    provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
+                    downloadHeaders = mergedHeaders
+                )
+                if (upgraded != existing) {
+                    existingMap[key] = upgraded
+                    modified = true
+                }
             }
         }
         if (modified || title != null || domain != null) {
@@ -497,7 +553,12 @@ class DualMediaExtractor(private val context: Context) {
         }
     }
 
-    fun cleanup() {
+    fun reset() {
         cancel()
+        _state.value = ExtractionState()
+    }
+
+    fun cleanup() {
+        reset()
     }
 }

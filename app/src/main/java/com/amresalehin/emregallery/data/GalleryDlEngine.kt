@@ -180,7 +180,7 @@ object GalleryDlEngine {
         }
     }
 
-    private fun parseExtractedItems(root: JSONObject): Pair<String, List<ScrapedMediaItem>> {
+    private fun parseExtractedItems(root: JSONObject, pageUrl: String): Pair<String, List<ScrapedMediaItem>> {
         val pageTitle = root.optString("pageTitle", "")
         val itemsArray = root.optJSONArray("items") ?: JSONArray()
         val itemsList = mutableListOf<ScrapedMediaItem>()
@@ -212,7 +212,16 @@ object GalleryDlEngine {
                 thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() },
                 source = obj.optString("source", "gallery-dl"),
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
-                sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null
+                sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
+                provenance = MediaProvenance(
+                    extractorEngine = "gallery-dl / yt-dlp",
+                    pageUrl = pageUrl
+                ),
+                metadata = mapOf("source_url" to pageUrl),
+                downloadHeaders = mapOf(
+                    "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
+                    "Referer" to pageUrl
+                )
             )
             itemsList.add(item)
         }
@@ -254,7 +263,7 @@ object GalleryDlEngine {
             }
 
             val extractorName = root.optString("extractor", root.optString("engine", methodName))
-            val (pageTitle, itemsList) = parseExtractedItems(root)
+            val (pageTitle, itemsList) = parseExtractedItems(root, url.trim())
 
             GalleryDlExtractResult(
                 success = true,

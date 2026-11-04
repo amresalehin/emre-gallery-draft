@@ -5,11 +5,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
+data class MediaProvenance(
+    val extractorEngine: String = "Static HTML",
+    val pageUrl: String = "",
+    val domSelector: String? = null
+)
+
 data class ScrapedMediaItem(
     val id: String,
     val url: String,
     val title: String,
-    val isVideo: Boolean,
+    val isVideo: Boolean = false,
     val isAudio: Boolean = false,
     val isStream: Boolean = false,
     val category: MediaCategory = when {
@@ -34,6 +40,9 @@ data class ScrapedMediaItem(
     },
     val resolutionHint: String? = null,
     val sizeBytes: Long? = null,
+    val provenance: MediaProvenance = MediaProvenance(extractorEngine = source),
+    val metadata: Map<String, String> = emptyMap(),
+    val downloadHeaders: Map<String, String> = emptyMap(),
     val detectedAt: Long = System.currentTimeMillis()
 )
 

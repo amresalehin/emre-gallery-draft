@@ -244,33 +244,55 @@ object MediaClassifier {
         val path = uri?.path?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() } ?: cleanPath
 
         // Host/path-aware non-media webpage rejections:
-        if (path.contains("/geohack") || path.contains("centralautologin") || path.contains("/api.php")) {
+        val isWikiHost = host.contains("wikipedia.org") || host.contains("wikimedia.org") ||
+                host.contains("wiktionary.org") || host.contains("wikidata.org") ||
+                host.contains("wikibooks.org") || host.contains("wikiquote.org") ||
+                host.contains("wikisource.org") || host.contains("wikinews.org") ||
+                host.contains("wikivoyage.org") || host.contains("mediawiki.org")
+
+        if (isWikiHost && (path.contains("/geohack") || path.contains("centralautologin") || path.contains("/api.php"))) {
             return false
         }
-        // Reddit thread / comments pages (not media)
-        if ((host.contains("reddit.com") || host.contains("redd.it")) && path.contains("/comments/")) {
+        // Reddit thread / comments pages (not direct media CDNs)
+        if ((host.contains("reddit.com") || host.contains("redd.it")) &&
+            !host.startsWith("i.") && !host.startsWith("v.") && !host.startsWith("preview.") &&
+            path.contains("/comments/")
+        ) {
             return false
         }
-        // Pinterest pin pages (not media)
-        if ((host.contains("pinterest.com") || host.contains("pin.it")) && path.contains("/pin/")) {
+        // Pinterest pin discussion pages (not direct image CDN)
+        if ((host.contains("pinterest.com") || host.contains("pin.it")) &&
+            !host.startsWith("i.") &&
+            path.contains("/pin/")
+        ) {
             return false
         }
         // Imgur gallery web albums (not direct CDN images)
-        if (host.contains("imgur.com") && !host.startsWith("i.") && path.contains("/gallery/")) {
-            return false
-        }
-        // Twitter/X status pages (not media)
-        if ((host.contains("twitter.com") || host.contains("x.com")) && path.contains("/status/")) {
-            return false
-        }
-        // MediaWiki / Wikipedia article pages (HTML pages)
-        if (path.contains("/wiki/") || path.contains("/w/index.php") || path.contains("/w/api.php") || path.contains("/wiki/special:")) {
-            return false
-        }
-        // Reject MediaWiki namespace links on non-upload domains (e.g. File: or Image:)
-        if ((path.contains("/file:") || path.contains("/image:") || cleanPath.contains("file:") || cleanPath.contains("image:")) &&
-            !host.contains("upload.wikimedia.org") && !host.contains("thumb.wikimedia.org")
+        if (host.contains("imgur.com") && !host.startsWith("i.") &&
+            (path.contains("/gallery/") || path.startsWith("/gallery") || path.startsWith("/a/"))
         ) {
+            return false
+        }
+        // Twitter/X status pages (not direct media CDNs)
+        if ((host.contains("twitter.com") || host.contains("x.com")) &&
+            !host.startsWith("pbs.") && !host.startsWith("video.") &&
+            path.contains("/status/")
+        ) {
+            return false
+        }
+        // MediaWiki / Wikipedia article and discussion pages (HTML pages)
+        if (path.contains("/wiki/file:") || path.contains("/wiki/image:") || path.contains("/wiki/special:")) {
+            return false
+        }
+        if (isWikiHost && !host.contains("upload.wikimedia.org") && !host.contains("thumb.wikimedia.org")) {
+            if (path.contains("/wiki/") || path.contains("/w/index.php") || path.contains("/w/api.php") ||
+                path.contains("/file:") || path.contains("/image:") ||
+                cleanPath.contains("file:") || cleanPath.contains("image:")
+            ) {
+                return false
+            }
+        }
+        if (path.startsWith("/w/index.php") || path.contains("/w/index.php")) {
             return false
         }
         if (isMediaFragment(url)) {
@@ -291,9 +313,15 @@ object MediaClassifier {
     private val MEDIAWIKI_GENERIC_THUMB_REGEX = Regex(
         """^(https?://[^/]+(?:/[^/]+)*?)/thumb/([0-9a-fA-F]/[0-9a-fA-F]{2}/([^/]+))/.+"""
     )
+    private val WIKIMEDIA_TRANSCODE_REGEX = Regex(
+        """^https?://(?:upload|thumb)\.wikimedia\.org/wikipedia/([^/]+)/transcoded/([0-9a-fA-F]/[0-9a-fA-F]{2}/([^/]+))/.+"""
+    )
+    private val MEDIAWIKI_GENERIC_TRANSCODE_REGEX = Regex(
+        """^(https?://[^/]+(?:/[^/]+)*?)/transcoded/([0-9a-fA-F]/[0-9a-fA-F]{2}/([^/]+))/.+"""
+    )
 
     /**
-     * Resolves a media URL (such as a Wikimedia or MediaWiki thumbnail) to its original
+     * Resolves a media URL (such as a Wikimedia or MediaWiki thumbnail or transcoded video) to its original
      * full-resolution file URL, while preserving the sharp thumbnail URL for immediate preview.
      * Preserves custom upload paths without assuming default /images/.
      */
@@ -301,7 +329,7 @@ object MediaClassifier {
         val trimmed = rawUrl.trim()
         val normalized = if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
 
-        // 1. Wikimedia Commons / Wikipedia (upload.wikimedia.org / thumb.wikimedia.org)
+        // 1. Wikimedia Commons / Wikipedia thumbnails
         val wmMatch = WIKIMEDIA_THUMB_REGEX.find(normalized)
         if (wmMatch != null) {
             val project = wmMatch.groupValues[1]
@@ -316,7 +344,22 @@ object MediaClassifier {
             )
         }
 
-        // 2. Generic MediaWiki installations (.../thumb/hash/hash2/filename/...)
+        // 2. Wikimedia Commons / Wikipedia transcoded videos (.../transcoded/hash/hash2/filename.webm/filename.webm.480p.vp9.webm)
+        val wmTranscodeMatch = WIKIMEDIA_TRANSCODE_REGEX.find(normalized)
+        if (wmTranscodeMatch != null) {
+            val project = wmTranscodeMatch.groupValues[1]
+            val subpath = wmTranscodeMatch.groupValues[2]
+            val rawFileName = wmTranscodeMatch.groupValues[3]
+            val originalUrl = "https://upload.wikimedia.org/wikipedia/$project/$subpath"
+            val cleanTitle = runCatching { java.net.URLDecoder.decode(rawFileName, "UTF-8") }.getOrDefault(rawFileName)
+            return ResolvedMediaInfo(
+                mediaUrl = originalUrl,
+                thumbnailUrl = normalized,
+                cleanTitle = cleanTitle
+            )
+        }
+
+        // 3. Generic MediaWiki installations (.../thumb/hash/hash2/filename/...)
         // Preserves custom upload directories without assuming standard /images/
         if (normalized.contains("/thumb/")) {
             val mwMatch = MEDIAWIKI_GENERIC_THUMB_REGEX.find(normalized)
@@ -324,6 +367,23 @@ object MediaClassifier {
                 val uploadBase = mwMatch.groupValues[1]
                 val subpath = mwMatch.groupValues[2]
                 val rawFileName = mwMatch.groupValues[3]
+                val originalUrl = "$uploadBase/$subpath"
+                val cleanTitle = runCatching { java.net.URLDecoder.decode(rawFileName, "UTF-8") }.getOrDefault(rawFileName)
+                return ResolvedMediaInfo(
+                    mediaUrl = originalUrl,
+                    thumbnailUrl = normalized,
+                    cleanTitle = cleanTitle
+                )
+            }
+        }
+
+        // 4. Generic MediaWiki installations transcoded videos
+        if (normalized.contains("/transcoded/")) {
+            val mwTranscodeMatch = MEDIAWIKI_GENERIC_TRANSCODE_REGEX.find(normalized)
+            if (mwTranscodeMatch != null) {
+                val uploadBase = mwTranscodeMatch.groupValues[1]
+                val subpath = mwTranscodeMatch.groupValues[2]
+                val rawFileName = mwTranscodeMatch.groupValues[3]
                 val originalUrl = "$uploadBase/$subpath"
                 val cleanTitle = runCatching { java.net.URLDecoder.decode(rawFileName, "UTF-8") }.getOrDefault(rawFileName)
                 return ResolvedMediaInfo(
@@ -344,21 +404,143 @@ object MediaClassifier {
     /**
      * Creates a canonical deduplication key by removing non-functional tracking query parameters.
      */
-    fun canonicalKey(url: String): String {
+    fun canonicalKey(url: String): String = deduplicationKey(url)
+
+    /**
+     * Creates a high-fidelity deduplication key that identifies identical media discovered
+     * across different extraction engines (Static HTML, Live Browser, gallery-dl, yt-dlp).
+     * Normalizes:
+     * - Scheme (http vs https)
+     * - URL percent-encoding differences (e.g. %28 vs ()
+     * - Wikimedia/MediaWiki thumbnail derivatives vs original full-resolution uploads
+     * - Responsive image dimensions / resize query parameters (?w=, ?h=, ?width=, ?size=, ?quality=, ?fit=, etc.)
+     * - Tracking query parameters
+     */
+    fun deduplicationKey(url: String): String {
         return try {
-            val noHash = url.substringBefore("#")
-            val qIdx = noHash.indexOf('?')
-            if (qIdx == -1) return noHash
-            val base = noHash.substring(0, qIdx)
-            val query = noHash.substring(qIdx + 1)
-            val cleanParams = query.split("&").filter { param ->
-                val key = param.substringBefore("=").lowercase(Locale.ROOT)
-                !TRACKING_QUERY_PARAMS.contains(key)
-            }.sorted()
-            if (cleanParams.isEmpty()) base else "$base?${cleanParams.joinToString("&")}"
+            val resolved = resolveOriginalMedia(url).mediaUrl
+            val clean = cleanMediaUrl(resolved)
+            val noHash = clean.substringBefore("#")
+
+            val withHttps = when {
+                noHash.startsWith("http://", ignoreCase = true) -> "https://" + noHash.substring(7)
+                noHash.startsWith("//") -> "https:$noHash"
+                else -> noHash
+            }
+
+            val qIdx = withHttps.indexOf('?')
+            val basePart = if (qIdx == -1) withHttps else withHttps.substring(0, qIdx)
+            val queryPart = if (qIdx == -1) "" else withHttps.substring(qIdx + 1)
+
+            val normalizedPath = try {
+                java.net.URLDecoder.decode(basePart, "UTF-8").lowercase(Locale.ROOT)
+            } catch (_: Exception) {
+                basePart.lowercase(Locale.ROOT)
+            }
+
+            val normalizedHostAndPath = normalizedPath
+                .replace("thumb.wikimedia.org", "upload.wikimedia.org")
+                .replace(Regex("""https?://i[0-9]\.wp\.com/"""), "https://i.wp.com/")
+
+            // Strip video quality / transcode suffixes to deduplicate multiple transcode qualities of same video
+            val videoQualityRegex = Regex("""(?:\.(?:144|240|360|480|720|1080|1440|2160)p(?:\.vp9|\.av1)?|[._-](?:144|240|360|480|720|1080|1440|2160)p)\.(webm|mp4|mkv)$""", RegexOption.IGNORE_CASE)
+            val normalizedVideoPath = videoQualityRegex.replace(normalizedHostAndPath) { match ->
+                "." + match.groupValues[1]
+            }
+
+            val sizingParams = setOf(
+                "w", "width", "h", "height", "size", "s", "quality", "q",
+                "fit", "crop", "auto", "format", "dpr", "lossless", "strip",
+                "itag", "range", "ratebypass", "rn", "rbuf", "mime", "gir", "clen", "dur", "lmt"
+            )
+            val filteredQuery = if (queryPart.isNotBlank()) {
+                queryPart.split("&").filter { param ->
+                    val key = param.substringBefore("=").lowercase(Locale.ROOT)
+                    !TRACKING_QUERY_PARAMS.contains(key) && !sizingParams.contains(key)
+                }.sorted().joinToString("&")
+            } else ""
+
+            if (filteredQuery.isEmpty()) normalizedVideoPath else "$normalizedVideoPath?$filteredQuery"
         } catch (_: Exception) {
-            url.substringBefore("#")
+            url.lowercase(Locale.ROOT)
         }
+    }
+
+    /**
+     * Deduplicates a list of scraped media items discovered by one or more extraction engines.
+     * When duplicates are identified:
+     * - Retains the item with the highest resolution / quality / full original URL
+     * - Retains valid thumbnails from either source
+     * - Combines provenance info (indicating multiple scrapers identified the item)
+     * - Preserves required download headers
+     */
+    fun deduplicateScrapedItems(items: List<ScrapedMediaItem>): List<ScrapedMediaItem> {
+        if (items.isEmpty()) return emptyList()
+
+        val grouped = LinkedHashMap<String, MutableList<ScrapedMediaItem>>()
+        for (item in items) {
+            val key = deduplicationKey(item.url)
+            val list = grouped.getOrPut(key) { mutableListOf() }
+            list.add(item)
+        }
+
+        val result = mutableListOf<ScrapedMediaItem>()
+        for ((_, group) in grouped) {
+            if (group.size == 1) {
+                result.add(group[0])
+            } else {
+                val best = group.maxWithOrNull(compareBy<ScrapedMediaItem> {
+                    if (!it.url.contains("/thumb/") && !it.url.contains("/transcoded/") && !it.url.contains("resize") && !it.url.contains("?w=")) 2 else 0
+                }.thenBy {
+                    if (!it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network") 2 else 0
+                }.thenBy {
+                    it.resolutionHint?.length ?: 0
+                }.thenBy {
+                    it.sizeBytes ?: 0L
+                }.thenBy {
+                    if (it.thumbnailUrl != null) 1 else 0
+                }) ?: group[0]
+
+                val engines = group.map { it.provenance.extractorEngine }.distinct()
+                val mergedProvenance = if (engines.size > 1) {
+                    best.provenance.copy(
+                        extractorEngine = engines.joinToString(" + ")
+                    )
+                } else {
+                    best.provenance
+                }
+
+                val bestThumb = best.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
+                val mergedResolution = group.firstOrNull { !it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network" }?.resolutionHint
+                    ?: best.resolutionHint
+
+                val mergedHeaders = mutableMapOf<String, String>()
+                for (cand in group) {
+                    mergedHeaders.putAll(cand.downloadHeaders)
+                }
+
+                val resolvedOriginalUrl = resolveOriginalMedia(best.url).mediaUrl
+                val merged = best.copy(
+                    url = resolvedOriginalUrl,
+                    thumbnailUrl = bestThumb,
+                    resolutionHint = mergedResolution,
+                    provenance = mergedProvenance,
+                    downloadHeaders = mergedHeaders
+                )
+                result.add(merged)
+            }
+        }
+        return result
+    }
+
+    /**
+     * Checks if a media item is an SVG vector asset based on format, MIME type, or URL extension.
+     */
+    fun isSvg(url: String, mimeHint: String? = null, format: String? = null): Boolean {
+        if (format?.equals("SVG", ignoreCase = true) == true) return true
+        if (mimeHint?.contains("svg", ignoreCase = true) == true) return true
+        val clean = url.substringBefore('?').substringBefore('#').lowercase(Locale.ROOT)
+        return clean.endsWith(".svg")
     }
 
     /**

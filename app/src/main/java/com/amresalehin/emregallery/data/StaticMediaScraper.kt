@@ -52,7 +52,15 @@ class StaticMediaScraper {
                 format = targetClass.format,
                 thumbnailUrl = thumb,
                 mimeType = targetClass.mimeType,
-                source = ExtractionSource.STATIC_HTML.label
+                source = ExtractionSource.STATIC_HTML.label,
+                provenance = MediaProvenance(
+                    extractorEngine = "Direct URL",
+                    pageUrl = normalizedUrl
+                ),
+                downloadHeaders = mapOf(
+                    "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
+                    "Referer" to normalizedUrl
+                )
             )
             return@withContext StaticScrapeResult(
                 sourceUrl = normalizedUrl,
@@ -90,7 +98,15 @@ class StaticMediaScraper {
                     category = directClass.category,
                     format = directClass.format,
                     mimeType = directClass.mimeType,
-                    source = ExtractionSource.STATIC_HTML.label
+                    source = ExtractionSource.STATIC_HTML.label,
+                    provenance = MediaProvenance(
+                        extractorEngine = "Direct Response Header",
+                        pageUrl = normalizedUrl
+                    ),
+                    downloadHeaders = mapOf(
+                        "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
+                        "Referer" to normalizedUrl
+                    )
                 )
                 return@withContext StaticScrapeResult(
                     sourceUrl = normalizedUrl,
@@ -126,41 +142,93 @@ class StaticMediaScraper {
     private fun parseDocumentMedia(doc: Document, baseUrl: String): List<ScrapedMediaItem> {
         val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
 
-        fun addCandidate(rawUrl: String, source: ExtractionSource, resolution: String? = null, posterUrl: String? = null) {
+        fun addCandidate(
+            rawUrl: String,
+            source: ExtractionSource,
+            resolution: String? = null,
+            posterUrl: String? = null,
+            domSelector: String? = null,
+            declaredWidth: Int? = null,
+            declaredHeight: Int? = null,
+            itemTitleHint: String? = null
+        ) {
             val resolved = MediaClassifier.resolveUrl(rawUrl, baseUrl) ?: return
             if (!MediaClassifier.isValidMedia(resolved)) return
+
+            val classification = MediaClassifier.classify(resolved)
+            val isVidAudStream = classification.isVideo || classification.isAudio || classification.isStream
+            if (ContentAwareMediaFilter.isUiChromeUrl(
+                    url = resolved,
+                    title = itemTitleHint,
+                    width = declaredWidth,
+                    height = declaredHeight,
+                    isVideoOrAudioOrStream = isVidAudStream
+                )
+            ) {
+                return
+            }
 
             // Resolve full-resolution media if URL is a known thumbnail (e.g. Wikimedia / MediaWiki)
             val resolvedInfo = MediaClassifier.resolveOriginalMedia(resolved)
             val downloadUrl = resolvedInfo.mediaUrl
-            val classification = MediaClassifier.classify(downloadUrl)
+            val targetClassification = MediaClassifier.classify(downloadUrl)
+
+            if (ContentAwareMediaFilter.isUiChromeUrl(
+                    url = downloadUrl,
+                    title = resolvedInfo.cleanTitle ?: itemTitleHint,
+                    width = declaredWidth,
+                    height = declaredHeight,
+                    isVideoOrAudioOrStream = targetClassification.isVideo || targetClassification.isAudio || targetClassification.isStream
+                )
+            ) {
+                return
+            }
 
             // Ensure thumbnail URL is always a valid image URL and never null for images
-            val thumb = resolvedInfo.thumbnailUrl ?: posterUrl ?: if (classification.category == MediaCategory.IMAGES) resolved else posterUrl
+            val thumb = resolvedInfo.thumbnailUrl ?: posterUrl ?: if (targetClassification.category == MediaCategory.IMAGES) resolved else posterUrl
 
             val key = MediaClassifier.canonicalKey(downloadUrl)
             if (itemsMap.containsKey(key)) return
 
-            val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, classification.format, itemsMap.size)
+            val title = resolvedInfo.cleanTitle ?: itemTitleHint ?: MediaClassifier.deriveFileName(downloadUrl, targetClassification.format, itemsMap.size)
+
+            val headers = mutableMapOf<String, String>()
+            headers["Referer"] = baseUrl
+            headers["User-Agent"] = OkHttpDownloader.DEFAULT_USER_AGENT
+            val sessionCookies = OkHttpDownloader.sharedCookieJar.getCookieString(baseUrl)
+            if (sessionCookies.isNotBlank()) {
+                headers["Cookie"] = sessionCookies
+            }
+
+            val metadataMap = mutableMapOf<String, String>()
+            resolution?.let { metadataMap["resolution"] = it }
+            metadataMap["source_url"] = baseUrl
 
             val item = ScrapedMediaItem(
                 id = "static_${itemsMap.size}",
                 url = downloadUrl,
                 title = title,
-                isVideo = classification.isVideo,
-                isAudio = classification.isAudio,
-                isStream = classification.isStream,
-                category = classification.category,
-                format = classification.format,
+                isVideo = targetClassification.isVideo,
+                isAudio = targetClassification.isAudio,
+                isStream = targetClassification.isStream,
+                category = targetClassification.category,
+                format = targetClassification.format,
                 thumbnailUrl = thumb,
                 source = source.label,
-                mimeType = classification.mimeType,
-                resolutionHint = resolution
+                mimeType = targetClassification.mimeType,
+                resolutionHint = resolution,
+                provenance = MediaProvenance(
+                    extractorEngine = "Static HTML (${source.label})",
+                    pageUrl = baseUrl,
+                    domSelector = domSelector
+                ),
+                metadata = metadataMap,
+                downloadHeaders = headers
             )
             itemsMap[key] = item
         }
 
-        // 1. OpenGraph, Twitter & schema.org meta tags
+        // 1. OpenGraph, Twitter & schema.org meta tags (Explicit publisher content)
         val metaSelectors = listOf(
             "meta[property=og:video]", "meta[content][property=og:video]",
             "meta[property=og:image]", "meta[content][property=og:image]",
@@ -171,7 +239,7 @@ class StaticMediaScraper {
             for (meta in doc.select(sel)) {
                 val content = meta.attr("content").ifBlank { meta.attr("value") }
                 if (content.isNotBlank()) {
-                    addCandidate(content, ExtractionSource.STATIC_HTML, "OpenGraph")
+                    addCandidate(content, ExtractionSource.STATIC_HTML, "OpenGraph", domSelector = sel)
                 }
             }
         }
@@ -196,10 +264,10 @@ class StaticMediaScraper {
                 }
             }
             if (!chosenUrl.isNullOrBlank()) {
-                addCandidate(chosenUrl, ExtractionSource.DOM_SCRAPE, resolution = vRes, posterUrl = poster)
+                addCandidate(chosenUrl, ExtractionSource.DOM_SCRAPE, resolution = vRes, posterUrl = poster, domSelector = "video")
             }
             if (!poster.isNullOrBlank() && chosenUrl == null) {
-                addCandidate(poster, ExtractionSource.DOM_SCRAPE, resolution = "Poster")
+                addCandidate(poster, ExtractionSource.DOM_SCRAPE, resolution = "Poster", domSelector = "video[poster]")
             }
         }
 
@@ -218,12 +286,14 @@ class StaticMediaScraper {
                 }
             }
             if (!chosenAudio.isNullOrBlank()) {
-                addCandidate(chosenAudio, ExtractionSource.DOM_SCRAPE)
+                addCandidate(chosenAudio, ExtractionSource.DOM_SCRAPE, domSelector = "audio")
             }
         }
 
-        // 4. Img elements with lazy-load support
+        // 4. Img elements with lazy-load support and Content-Aware Chrome filtering
         for (img in doc.select("img")) {
+            if (ContentAwareMediaFilter.isUiChromeElement(img)) continue
+
             val src = img.attr("src").ifBlank {
                 img.attr("data-src").ifBlank {
                     img.attr("data-original").ifBlank {
@@ -235,17 +305,29 @@ class StaticMediaScraper {
             }
             val w = img.attr("width").toIntOrNull() ?: img.attr("data-width").toIntOrNull()
             val h = img.attr("height").toIntOrNull() ?: img.attr("data-height").toIntOrNull()
+            val alt = img.attr("alt").ifBlank { img.attr("title") }.takeIf { it.isNotBlank() }
             val resHint = if (w != null && h != null) "${w}x${h}" else if (w != null) "${w}w" else null
             if (src.isNotBlank()) {
-                addCandidate(src, ExtractionSource.DOM_SCRAPE, resolution = resHint)
+                addCandidate(
+                    rawUrl = src,
+                    source = ExtractionSource.DOM_SCRAPE,
+                    resolution = resHint,
+                    domSelector = "img",
+                    declaredWidth = w,
+                    declaredHeight = h,
+                    itemTitleHint = alt
+                )
             }
         }
 
-        // 5. Srcset parsing (img and picture source elements)
+        // 5. Srcset parsing (img and picture source elements) with Content-Aware Chrome filtering
         for (elem in doc.select("[srcset], [data-srcset]")) {
+            if (ContentAwareMediaFilter.isUiChromeElement(elem)) continue
+
             val rawSrcset = elem.attr("srcset").ifBlank { elem.attr("data-srcset") }
             val w = elem.attr("width").toIntOrNull() ?: elem.attr("data-width").toIntOrNull()
             val h = elem.attr("height").toIntOrNull() ?: elem.attr("data-height").toIntOrNull()
+            val alt = elem.attr("alt").ifBlank { elem.attr("title") }.takeIf { it.isNotBlank() }
             if (rawSrcset.isNotBlank()) {
                 val entries = MediaClassifier.parseSrcset(rawSrcset, baseUrl)
                 for ((url, res) in entries) {
@@ -268,13 +350,23 @@ class StaticMediaScraper {
                     } else {
                         "srcset"
                     }
-                    addCandidate(url, ExtractionSource.SRCSET, resolution = resHint)
+                    addCandidate(
+                        rawUrl = url,
+                        source = ExtractionSource.SRCSET,
+                        resolution = resHint,
+                        domSelector = "[srcset]",
+                        declaredWidth = w,
+                        declaredHeight = h,
+                        itemTitleHint = alt
+                    )
                 }
             }
         }
 
-        // 6. Inline CSS background-image extraction
+        // 6. Content CSS background-image extraction (strictly excludes UI chrome, icons, buttons)
         for (styled in doc.select("[style*='url('], [style*='url(\"'], [style*='url(&quot;']")) {
+            if (!ContentAwareMediaFilter.isAcceptableCssBackground(styled)) continue
+
             val style = styled.attr("style")
             val urlIndex = style.indexOf("url(", ignoreCase = true)
             if (urlIndex != -1) {
@@ -286,8 +378,8 @@ class StaticMediaScraper {
                         .replace("'", "")
                         .replace("&quot;", "")
                         .trim()
-                    if (rawUrl.isNotBlank()) {
-                        addCandidate(rawUrl, ExtractionSource.CSS_BACKGROUND)
+                    if (rawUrl.isNotBlank() && !ContentAwareMediaFilter.isUiChromeUrl(rawUrl)) {
+                        addCandidate(rawUrl, ExtractionSource.CSS_BACKGROUND, domSelector = "style[background-image]")
                     }
                 }
             }
@@ -296,13 +388,15 @@ class StaticMediaScraper {
         // 7. iFrame inspection (video embed frames)
         for (iframe in doc.select("iframe[src]")) {
             val src = iframe.attr("src")
-            if (src.isNotBlank()) {
-                addCandidate(src, ExtractionSource.IFRAME, resolution = "iFrame Embed")
+            if (src.isNotBlank() && !ContentAwareMediaFilter.isUiChromeElement(iframe)) {
+                addCandidate(src, ExtractionSource.IFRAME, resolution = "iFrame Embed", domSelector = "iframe")
             }
         }
 
-        // 8. Direct anchor links to media files
+        // 8. Direct anchor links to media files (content elements only)
         for (link in doc.select("a[href]")) {
+            if (ContentAwareMediaFilter.isUiChromeElement(link)) continue
+
             val href = link.attr("href").trim()
             if (href.isBlank()) continue
             val resolvedHref = MediaClassifier.resolveUrl(href, baseUrl) ?: continue
@@ -316,7 +410,15 @@ class StaticMediaScraper {
                     val childImg = link.selectFirst("img")
                     val childThumb = childImg?.attr("src")?.ifBlank { childImg.attr("data-src") }
                     val poster = if (!childThumb.isNullOrBlank()) MediaClassifier.resolveUrl(childThumb, baseUrl) else null
-                    addCandidate(resolvedHref, ExtractionSource.DOM_SCRAPE, resolution = "Full Link", posterUrl = poster)
+                    val linkTitle = link.attr("title").ifBlank { link.text() }.takeIf { it.isNotBlank() }
+                    addCandidate(
+                        rawUrl = resolvedHref,
+                        source = ExtractionSource.DOM_SCRAPE,
+                        resolution = "Full Link",
+                        posterUrl = poster,
+                        domSelector = "a[href]",
+                        itemTitleHint = linkTitle
+                    )
                 }
             }
         }
