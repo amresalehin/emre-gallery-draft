@@ -13,9 +13,12 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import android.graphics.BitmapFactory
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -322,6 +325,24 @@ object OkHttpDownloader {
                 )
 
                 val mimeType = resp.header("Content-Type")?.lowercase()
+                val isManifest = mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
+
+                // Reject HTML web pages and API error responses masquerading as media
+                if (mimeType != null && !isManifest && (mimeType.startsWith("text/html") || mimeType.startsWith("application/json") ||
+                        (mimeType.startsWith("text/plain") && !mediaUrl.contains("playlist", ignoreCase = true)))
+                ) {
+                    tempFile.delete()
+                    Log.w(TAG, "Download rejected for $mediaUrl: server returned Content-Type $mimeType")
+                    return@withContext DownloadResult(
+                        file = null,
+                        isSuccessful = false,
+                        statusCode = code,
+                        bytesDownloaded = 0L,
+                        totalBytes = -1L,
+                        errorMessage = "Server returned $mimeType webpage instead of media content"
+                    )
+                }
+
                 val contentLength = body.contentLength()
                 val totalBytes = if (isPartial && contentLength > 0L) {
                     existingBytes + contentLength
@@ -347,7 +368,58 @@ object OkHttpDownloader {
                     }
                 }
 
+                // Verify downloaded file integrity before moving to final destination
                 if (tempFile.exists() && tempFile.length() > 0L) {
+                    // Check if file content begins with HTML tags
+                    val isHtmlFile = runCatching {
+                        FileInputStream(tempFile).use { fis ->
+                            val head = ByteArray(512)
+                            val read = fis.read(head)
+                            if (read > 0) {
+                                val headStr = String(head, 0, read).lowercase(Locale.ROOT)
+                                headStr.contains("<!doctype html") || headStr.contains("<html") || headStr.contains("<head")
+                            } else false
+                        }
+                    }.getOrDefault(false)
+
+                    if (isHtmlFile) {
+                        Log.w(TAG, "Downloaded file for $mediaUrl contains HTML text, deleting: ${tempFile.name}")
+                        tempFile.delete()
+                        return@withContext DownloadResult(
+                            file = null,
+                            isSuccessful = false,
+                            statusCode = code,
+                            bytesDownloaded = 0L,
+                            totalBytes = -1L,
+                            errorMessage = "Downloaded file contains HTML webpage content instead of media"
+                        )
+                    }
+
+                    // For raster images, verify that BitmapFactory can decode bounds
+                    val isRasterImage = !fileName.endsWith(".m3u8", true) && !fileName.endsWith(".mpd", true) &&
+                            !fileName.endsWith(".mp4", true) && !fileName.endsWith(".webm", true) &&
+                            !fileName.endsWith(".mov", true) && !fileName.endsWith(".mkv", true) &&
+                            !fileName.endsWith(".mp3", true) && !fileName.endsWith(".m4a", true) &&
+                            !fileName.endsWith(".wav", true) && !fileName.endsWith(".ogg", true) &&
+                            !fileName.endsWith(".svg", true)
+
+                    if (isRasterImage) {
+                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(tempFile.absolutePath, opts)
+                        if (opts.outWidth <= 0 || opts.outHeight <= 0) {
+                            Log.w(TAG, "Downloaded image could not be decoded: ${tempFile.name}")
+                            tempFile.delete()
+                            return@withContext DownloadResult(
+                                file = null,
+                                isSuccessful = false,
+                                statusCode = code,
+                                bytesDownloaded = 0L,
+                                totalBytes = -1L,
+                                errorMessage = "Downloaded file is corrupt or invalid image format"
+                            )
+                        }
+                    }
+
                     val moved = if (tempFile.renameTo(finalFile)) {
                         true
                     } else {

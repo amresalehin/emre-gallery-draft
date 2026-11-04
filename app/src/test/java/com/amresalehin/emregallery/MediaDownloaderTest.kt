@@ -179,6 +179,37 @@ class MediaDownloaderTest {
     }
 
     @Test
+    fun isValidMediaRejectsWikiArticlesAndNonMediaPages() {
+        // Wiki File and article pages should be rejected (they are HTML pages, not raw media files)
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://en.wikipedia.org/wiki/File:Taj_Mahal.jpg"))
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://en.wikipedia.org/wiki/Taj_Mahal"))
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://commons.wikimedia.org/wiki/File:Mumtaz_Mahal.jpg"))
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://example.com/w/index.php?title=File:Photo.png"))
+        assertEquals(false, com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://reddit.com/r/pics/comments/abc/pic.jpg"))
+
+        // Genuine media endpoints on CDN/upload hosts should be accepted
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://upload.wikimedia.org/wikipedia/commons/1/1d/Taj_Mahal_%28Edited%29.jpeg"))
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1d/Taj_Mahal.jpeg/500px-Taj_Mahal.jpeg"))
+        assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://example.com/images/hero.jpg"))
+    }
+
+    @Test
+    fun testWikimediaThumbnailResolvesToFullResolutionOriginal() {
+        val thumbUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Taj_Mahal_%28Edited%29.jpeg/500px-Taj_Mahal_%28Edited%29.jpeg"
+        val resolved = com.amresalehin.emregallery.data.MediaClassifier.resolveOriginalMedia(thumbUrl)
+
+        assertEquals("https://upload.wikimedia.org/wikipedia/commons/1/1d/Taj_Mahal_%28Edited%29.jpeg", resolved.mediaUrl)
+        assertEquals(thumbUrl, resolved.thumbnailUrl)
+        assertEquals("Taj_Mahal_(Edited).jpeg", resolved.cleanTitle)
+
+        // Protocol-relative test
+        val protoRelative = "//thumb.wikimedia.org/wikipedia/commons/thumb/b/ba/Taj_Mahal-10_%28cropped%29.jpg/330px-Taj_Mahal-10_%28cropped%29.jpg"
+        val resolvedProto = com.amresalehin.emregallery.data.MediaClassifier.resolveOriginalMedia(protoRelative)
+        assertEquals("https://upload.wikimedia.org/wikipedia/commons/b/ba/Taj_Mahal-10_%28cropped%29.jpg", resolvedProto.mediaUrl)
+        assertEquals("Taj_Mahal-10_(cropped).jpg", resolvedProto.cleanTitle)
+    }
+
+    @Test
     fun browserUrlFormattingAndNormalization() {
         fun formatUrl(input: String): String {
             val trimmed = input.trim()

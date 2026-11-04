@@ -88,24 +88,28 @@ class BrowserMediaExtractor(private val context: Context) {
                     val resolved = MediaClassifier.resolveUrl(rawUrl, normalizedUrl) ?: return
                     if (!MediaClassifier.isValidMedia(resolved)) return
 
-                    val key = MediaClassifier.canonicalKey(resolved)
+                    val resolvedInfo = MediaClassifier.resolveOriginalMedia(resolved)
+                    val downloadUrl = resolvedInfo.mediaUrl
+
+                    val key = MediaClassifier.canonicalKey(downloadUrl)
                     synchronized(seenKeys) {
                         if (!seenKeys.add(key)) return
                     }
 
-                    val classification = MediaClassifier.classify(resolved, mimeHint)
-                    val title = MediaClassifier.deriveFileName(resolved, classification.format, seenKeys.size)
+                    val classification = MediaClassifier.classify(downloadUrl, mimeHint)
+                    val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, classification.format, seenKeys.size)
+                    val thumb = resolvedInfo.thumbnailUrl ?: poster ?: if (classification.category == MediaCategory.IMAGES) resolved else poster
 
                     val item = ScrapedMediaItem(
                         id = "browser_${seenKeys.size}_${System.currentTimeMillis()}",
-                        url = resolved,
+                        url = downloadUrl,
                         title = title,
                         isVideo = classification.isVideo,
                         isAudio = classification.isAudio,
                         isStream = classification.isStream,
                         category = classification.category,
                         format = classification.format,
-                        thumbnailUrl = if (classification.category == MediaCategory.IMAGES) resolved else poster,
+                        thumbnailUrl = thumb,
                         source = source.label,
                         mimeType = classification.mimeType,
                         resolutionHint = resolution

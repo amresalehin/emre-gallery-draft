@@ -28,24 +28,30 @@ class StaticMediaScraper {
         val domain = runCatching { URL(normalizedUrl).host }.getOrDefault("")
 
         // Check if the input is a direct media file
+        val isValid = MediaClassifier.isValidMedia(normalizedUrl)
         val classification = MediaClassifier.classify(normalizedUrl)
-        val isDirectMedia = classification.isVideo || classification.isAudio || classification.isStream ||
+        val isDirectMedia = isValid && (classification.isVideo || classification.isAudio || classification.isStream ||
                 normalizedUrl.endsWith(".jpg", true) || normalizedUrl.endsWith(".jpeg", true) ||
                 normalizedUrl.endsWith(".png", true) || normalizedUrl.endsWith(".webp", true) ||
-                normalizedUrl.endsWith(".gif", true) || normalizedUrl.endsWith(".svg", true)
+                normalizedUrl.endsWith(".gif", true) || normalizedUrl.endsWith(".svg", true))
 
         if (isDirectMedia) {
-            val fileName = MediaClassifier.deriveFileName(normalizedUrl, classification.format, 0)
+            val resolvedInfo = MediaClassifier.resolveOriginalMedia(normalizedUrl)
+            val downloadUrl = resolvedInfo.mediaUrl
+            val targetClass = MediaClassifier.classify(downloadUrl)
+            val fileName = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, targetClass.format, 0)
+            val thumb = resolvedInfo.thumbnailUrl ?: if (targetClass.category == MediaCategory.IMAGES) downloadUrl else null
             val item = ScrapedMediaItem(
                 id = "static_direct_0",
-                url = normalizedUrl,
+                url = downloadUrl,
                 title = fileName,
-                isVideo = classification.isVideo,
-                isAudio = classification.isAudio,
-                isStream = classification.isStream,
-                category = classification.category,
-                format = classification.format,
-                mimeType = classification.mimeType,
+                isVideo = targetClass.isVideo,
+                isAudio = targetClass.isAudio,
+                isStream = targetClass.isStream,
+                category = targetClass.category,
+                format = targetClass.format,
+                thumbnailUrl = thumb,
+                mimeType = targetClass.mimeType,
                 source = ExtractionSource.STATIC_HTML.label
             )
             return@withContext StaticScrapeResult(
@@ -124,22 +130,29 @@ class StaticMediaScraper {
             val resolved = MediaClassifier.resolveUrl(rawUrl, baseUrl) ?: return
             if (!MediaClassifier.isValidMedia(resolved)) return
 
-            val key = MediaClassifier.canonicalKey(resolved)
+            // Resolve full-resolution media if URL is a known thumbnail (e.g. Wikimedia / MediaWiki)
+            val resolvedInfo = MediaClassifier.resolveOriginalMedia(resolved)
+            val downloadUrl = resolvedInfo.mediaUrl
+            val classification = MediaClassifier.classify(downloadUrl)
+
+            // Ensure thumbnail URL is always a valid image URL and never null for images
+            val thumb = resolvedInfo.thumbnailUrl ?: posterUrl ?: if (classification.category == MediaCategory.IMAGES) resolved else posterUrl
+
+            val key = MediaClassifier.canonicalKey(downloadUrl)
             if (itemsMap.containsKey(key)) return
 
-            val classification = MediaClassifier.classify(resolved)
-            val title = MediaClassifier.deriveFileName(resolved, classification.format, itemsMap.size)
+            val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, classification.format, itemsMap.size)
 
             val item = ScrapedMediaItem(
                 id = "static_${itemsMap.size}",
-                url = resolved,
+                url = downloadUrl,
                 title = title,
                 isVideo = classification.isVideo,
                 isAudio = classification.isAudio,
                 isStream = classification.isStream,
                 category = classification.category,
                 format = classification.format,
-                thumbnailUrl = if (classification.category == MediaCategory.IMAGES) resolved else posterUrl,
+                thumbnailUrl = thumb,
                 source = source.label,
                 mimeType = classification.mimeType,
                 resolutionHint = resolution
@@ -274,7 +287,10 @@ class StaticMediaScraper {
                     lower.endsWith(".webp") || lower.endsWith(".gif") || lower.endsWith(".mp4") ||
                     lower.endsWith(".webm") || lower.endsWith(".mkv") || lower.endsWith(".mp3")
                 ) {
-                    addCandidate(href, ExtractionSource.DOM_SCRAPE, resolution = "Full Link")
+                    val childImg = link.selectFirst("img")
+                    val childThumb = childImg?.attr("src")?.ifBlank { childImg.attr("data-src") }
+                    val poster = if (!childThumb.isNullOrBlank()) MediaClassifier.resolveUrl(childThumb, baseUrl) else null
+                    addCandidate(href, ExtractionSource.DOM_SCRAPE, resolution = "Full Link", posterUrl = poster)
                 }
             }
         }

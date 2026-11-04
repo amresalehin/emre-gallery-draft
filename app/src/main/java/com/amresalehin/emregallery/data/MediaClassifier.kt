@@ -145,13 +145,82 @@ object MediaClassifier {
         ) {
             return false
         }
-        // Reject non-media API and metadata paths (e.g. Wikipedia geohack coordinates or auth hooks)
-        if (cleanPath.contains("/geohack") || cleanPath.contains("/wiki/special:") ||
-            cleanPath.contains("centralautologin") || cleanPath.contains("/api.php")
+        // Reject non-media wiki articles, social post threads, API, and metadata paths
+        if (cleanPath.contains("/wiki/") || cleanPath.contains("/w/index.php") || cleanPath.contains("/w/api.php") ||
+            cleanPath.contains("/geohack") || cleanPath.contains("/wiki/special:") ||
+            cleanPath.contains("centralautologin") || cleanPath.contains("/api.php") ||
+            cleanPath.contains("/comments/") || cleanPath.contains("/status/") ||
+            cleanPath.contains("/gallery/") || cleanPath.contains("/pin/")
+        ) {
+            return false
+        }
+        // Reject MediaWiki namespace links on non-upload domains (e.g. File: or Image:)
+        if ((cleanPath.contains("/file:") || cleanPath.contains("/image:")) &&
+            !lower.contains("upload.wikimedia.org") && !lower.contains("thumb.wikimedia.org")
         ) {
             return false
         }
         return true
+    }
+
+    data class ResolvedMediaInfo(
+        val mediaUrl: String,
+        val thumbnailUrl: String?,
+        val cleanTitle: String? = null
+    )
+
+    private val WIKIMEDIA_THUMB_REGEX = Regex(
+        """^https?://(?:upload|thumb)\.wikimedia\.org/wikipedia/([^/]+)/thumb/([0-9a-fA-F]/[0-9a-fA-F]{2}/([^/]+))/.+"""
+    )
+    private val MEDIAWIKI_GENERIC_THUMB_REGEX = Regex(
+        """^(https?://[^/]+)/.+?/thumb/([0-9a-fA-F]/[0-9a-fA-F]{2}/([^/]+))/.+"""
+    )
+
+    /**
+     * Resolves a media URL (such as a Wikimedia or MediaWiki thumbnail) to its original
+     * full-resolution file URL, while preserving the sharp thumbnail URL for immediate preview.
+     */
+    fun resolveOriginalMedia(rawUrl: String): ResolvedMediaInfo {
+        val trimmed = rawUrl.trim()
+        val normalized = if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
+
+        // 1. Wikimedia Commons / Wikipedia (upload.wikimedia.org / thumb.wikimedia.org)
+        val wmMatch = WIKIMEDIA_THUMB_REGEX.find(normalized)
+        if (wmMatch != null) {
+            val project = wmMatch.groupValues[1]
+            val subpath = wmMatch.groupValues[2]
+            val rawFileName = wmMatch.groupValues[3]
+            val originalUrl = "https://upload.wikimedia.org/wikipedia/$project/$subpath"
+            val cleanTitle = runCatching { java.net.URLDecoder.decode(rawFileName, "UTF-8") }.getOrDefault(rawFileName)
+            return ResolvedMediaInfo(
+                mediaUrl = originalUrl,
+                thumbnailUrl = normalized,
+                cleanTitle = cleanTitle
+            )
+        }
+
+        // 2. Generic MediaWiki installations (.../images/thumb/...)
+        if (normalized.contains("/images/thumb/")) {
+            val mwMatch = MEDIAWIKI_GENERIC_THUMB_REGEX.find(normalized)
+            if (mwMatch != null) {
+                val origin = mwMatch.groupValues[1]
+                val subpath = mwMatch.groupValues[2]
+                val rawFileName = mwMatch.groupValues[3]
+                val originalUrl = "$origin/images/$subpath"
+                val cleanTitle = runCatching { java.net.URLDecoder.decode(rawFileName, "UTF-8") }.getOrDefault(rawFileName)
+                return ResolvedMediaInfo(
+                    mediaUrl = originalUrl,
+                    thumbnailUrl = normalized,
+                    cleanTitle = cleanTitle
+                )
+            }
+        }
+
+        return ResolvedMediaInfo(
+            mediaUrl = normalized,
+            thumbnailUrl = null,
+            cleanTitle = null
+        )
     }
 
     /**

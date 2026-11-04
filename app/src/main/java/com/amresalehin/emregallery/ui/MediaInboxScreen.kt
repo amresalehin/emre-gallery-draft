@@ -48,12 +48,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.MediaScraper
+import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1512,9 +1514,37 @@ fun RealDeckMediaCard(
             contentAlignment = Alignment.Center
         ) {
             if (item != null) {
-                val imageModel = item.localUri.ifBlank { item.sourceUrl }
+                val context = LocalContext.current
+                val localFile = remember(item.localUri) {
+                    if (item.localUri.isNotBlank()) File(item.localUri.removePrefix("file://")) else null
+                }
+                val fileExists = localFile?.exists() == true && (localFile.length() > 0L)
+                val imageSource: Any = if (fileExists) {
+                    localFile!!
+                } else if (item.sourceUrl.isNotBlank()) {
+                    item.sourceUrl
+                } else {
+                    item.localUri
+                }
+
+                val imageRequest = remember(imageSource) {
+                    val rawStr = imageSource.toString()
+                    val resolvedUrl = if (rawStr.startsWith("//")) "https:$rawStr" else rawStr
+                    ImageRequest.Builder(context)
+                        .data(if (imageSource is File) imageSource else resolvedUrl)
+                        .crossfade(true)
+                        .setHeader("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
+                        .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                        .apply {
+                            if (resolvedUrl.contains("wikimedia.org") || resolvedUrl.contains("wikipedia.org")) {
+                                setHeader("Referer", "https://en.wikipedia.org/")
+                            }
+                        }
+                        .build()
+                }
+
                 AsyncImage(
-                    model = imageModel,
+                    model = imageRequest,
                     contentDescription = item.title,
                     modifier = Modifier
                         .fillMaxSize()

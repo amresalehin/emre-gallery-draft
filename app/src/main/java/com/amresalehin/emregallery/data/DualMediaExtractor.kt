@@ -49,6 +49,7 @@ interface ExtractionProvider {
 
 class DirectMediaProvider : ExtractionProvider {
     override fun isApplicable(context: MediaRequestContext): Boolean {
+        if (!MediaClassifier.isValidMedia(context.url)) return false
         val classification = MediaClassifier.classify(context.url)
         return classification.isVideo || classification.isAudio || classification.isStream ||
                 context.url.endsWith(".jpg", true) || context.url.endsWith(".jpeg", true) ||
@@ -61,17 +62,21 @@ class DirectMediaProvider : ExtractionProvider {
         onItemDiscovered: (ScrapedMediaItem) -> Unit,
         onStatusUpdate: (String) -> Unit
     ): MediaExtractionResult {
-        val classification = MediaClassifier.classify(context.url)
-        val fileName = MediaClassifier.deriveFileName(context.url, classification.format, 0)
+        val resolvedInfo = MediaClassifier.resolveOriginalMedia(context.url)
+        val downloadUrl = resolvedInfo.mediaUrl
+        val classification = MediaClassifier.classify(downloadUrl)
+        val fileName = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, classification.format, 0)
+        val thumb = resolvedInfo.thumbnailUrl ?: if (classification.category == MediaCategory.IMAGES) downloadUrl else null
         val item = ScrapedMediaItem(
             id = "direct_${System.currentTimeMillis()}",
-            url = context.url,
+            url = downloadUrl,
             title = fileName,
             isVideo = classification.isVideo,
             isAudio = classification.isAudio,
             isStream = classification.isStream,
             category = classification.category,
             format = classification.format,
+            thumbnailUrl = thumb,
             mimeType = classification.mimeType,
             source = "Direct Link"
         )

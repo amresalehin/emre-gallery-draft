@@ -81,10 +81,10 @@ fun MediaScraperDrawer(
     var sortDropdownExpanded by remember { mutableStateOf(false) }
     var sortOption by remember { mutableStateOf("Default") }
 
-    // Dimension filter states - initial default set to 360px horizontal and vertical
+    // Dimension filter states - initial default set to 0 (all dimensions shown)
     var showDimensionFilter by remember { mutableStateOf(false) }
-    var minWidthFilter by remember { mutableFloatStateOf(360f) }
-    var minHeightFilter by remember { mutableFloatStateOf(360f) }
+    var minWidthFilter by remember { mutableFloatStateOf(0f) }
+    var minHeightFilter by remember { mutableFloatStateOf(0f) }
 
     val allScrapedItems = extractorState.items
 
@@ -227,8 +227,8 @@ fun MediaScraperDrawer(
                                     dualExtractor.cancel()
                                     selectedFilter = null
                                     sortOption = "Default"
-                                    minWidthFilter = 360f
-                                    minHeightFilter = 360f
+                                    minWidthFilter = 0f
+                                    minHeightFilter = 0f
                                     showDimensionFilter = false
                                 },
                                 modifier = Modifier
@@ -573,7 +573,7 @@ fun MediaScraperDrawer(
                     Spacer(Modifier.width(6.dp))
 
                     // Pinned Dimension Filter Button (in saved space, opens 2 sliders to filter media by dimension)
-                    val isDimensionFilterActive = minWidthFilter != 360f || minHeightFilter != 360f
+                    val isDimensionFilterActive = minWidthFilter > 0f || minHeightFilter > 0f
                     Surface(
                         onClick = { showDimensionFilter = !showDimensionFilter },
                         shape = RoundedCornerShape(12.dp),
@@ -676,13 +676,8 @@ fun MediaScraperDrawer(
                                 if (isDimensionFilterActive) {
                                     TextButton(
                                         onClick = {
-                                            if (minWidthFilter == 360f && minHeightFilter == 360f) {
-                                                minWidthFilter = 0f
-                                                minHeightFilter = 0f
-                                            } else {
-                                                minWidthFilter = 360f
-                                                minHeightFilter = 360f
-                                            }
+                                            minWidthFilter = 0f
+                                            minHeightFilter = 0f
                                         },
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                                         modifier = Modifier
@@ -690,7 +685,7 @@ fun MediaScraperDrawer(
                                             .testTag("dimension_filter_reset_button")
                                     ) {
                                         Text(
-                                            text = if (minWidthFilter == 360f && minHeightFilter == 360f) "Clear" else "Reset (360)",
+                                            text = "Clear",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.primary,
                                             fontWeight = FontWeight.SemiBold
