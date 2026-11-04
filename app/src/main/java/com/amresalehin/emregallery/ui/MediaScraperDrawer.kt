@@ -67,7 +67,6 @@ fun MediaScraperDrawer(
     val recentSites by historyManager.allSites.collectAsState(initial = emptyList())
 
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
-    val scraper = remember { MediaScraper() }
     val dualExtractor = remember { DualMediaExtractor(context) }
     val scope = rememberCoroutineScope()
 

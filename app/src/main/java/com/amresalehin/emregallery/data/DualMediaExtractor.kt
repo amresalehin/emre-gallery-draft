@@ -6,216 +6,31 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import java.net.URL
 
-data class MediaRequestContext(
-    val url: String,
-    val domain: String
-) {
+data class MediaRequestContext(val url: String, val domain: String) {
     companion object {
         fun create(targetUrl: String): MediaRequestContext {
             val trimmed = targetUrl.trim()
-            val normalized = if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
+            val normalized = if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
                 "https://$trimmed"
-            } else {
-                trimmed
-            }
-            val domain = runCatching { URL(normalized).host }.getOrDefault("")
-            return MediaRequestContext(url = normalized, domain = domain)
+            } else trimmed
+            return MediaRequestContext(normalized, runCatching { URL(normalized).host }.getOrDefault(""))
         }
-    }
-}
-
-data class MediaExtractionResult(
-    val items: List<ScrapedMediaItem> = emptyList(),
-    val pageTitle: String? = null,
-    val errorMessage: String? = null
-)
-
-interface ExtractionProvider {
-    fun isApplicable(context: MediaRequestContext): Boolean
-    suspend fun extract(
-        context: MediaRequestContext,
-        onItemDiscovered: (ScrapedMediaItem) -> Unit,
-        onStatusUpdate: (String) -> Unit
-    ): MediaExtractionResult
-}
-
-class DirectMediaProvider : ExtractionProvider {
-    override fun isApplicable(context: MediaRequestContext): Boolean {
-        if (!MediaClassifier.isValidMedia(context.url)) return false
-        val classification = MediaClassifier.classify(context.url)
-        return classification.isVideo || classification.isAudio || classification.isStream ||
-                context.url.endsWith(".jpg", true) || context.url.endsWith(".jpeg", true) ||
-                context.url.endsWith(".png", true) || context.url.endsWith(".webp", true) ||
-                context.url.endsWith(".gif", true) || context.url.endsWith(".svg", true)
-    }
-
-    override suspend fun extract(
-        context: MediaRequestContext,
-        onItemDiscovered: (ScrapedMediaItem) -> Unit,
-        onStatusUpdate: (String) -> Unit
-    ): MediaExtractionResult {
-        val resolvedInfo = MediaClassifier.resolveOriginalMedia(context.url)
-        val downloadUrl = resolvedInfo.mediaUrl
-        val classification = MediaClassifier.classify(downloadUrl)
-        val fileName = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, classification.format, 0)
-        val thumb = resolvedInfo.thumbnailUrl ?: if (classification.category == MediaCategory.IMAGES) downloadUrl else null
-        val item = ScrapedMediaItem(
-            id = "direct_${System.currentTimeMillis()}",
-            url = downloadUrl,
-            title = fileName,
-            isVideo = classification.isVideo,
-            isAudio = classification.isAudio,
-            isStream = classification.isStream,
-            category = classification.category,
-            format = classification.format,
-            thumbnailUrl = thumb,
-            mimeType = classification.mimeType,
-            source = "Direct Link",
-            provenance = MediaProvenance(
-                extractorEngine = "Direct URL",
-                pageUrl = context.url
-            ),
-            metadata = mapOf("source_url" to context.url),
-            downloadHeaders = mapOf(
-                "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
-                "Referer" to context.url
-            )
-        )
-        onItemDiscovered(item)
-        return MediaExtractionResult(items = listOf(item), pageTitle = fileName)
-    }
-}
-
-class GalleryDlProvider : ExtractionProvider {
-    override fun isApplicable(context: MediaRequestContext): Boolean {
-        return GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(context.url).isSupported
-    }
-
-    override suspend fun extract(
-        context: MediaRequestContext,
-        onItemDiscovered: (ScrapedMediaItem) -> Unit,
-        onStatusUpdate: (String) -> Unit
-    ): MediaExtractionResult {
-        onStatusUpdate("Extracting with gallery-dl...")
-        val res = GalleryDlEngine.extractGalleryDl(context.url)
-        if (res.success) {
-            for (item in res.items) {
-                onItemDiscovered(item)
-            }
-            return MediaExtractionResult(items = res.items, pageTitle = res.pageTitle)
-        }
-        return MediaExtractionResult(items = emptyList(), errorMessage = res.errorMessage)
-    }
-}
-
-class YtDlpProvider : ExtractionProvider {
-    override fun isApplicable(context: MediaRequestContext): Boolean {
-        if (!GalleryDlEngine.isAvailable()) return false
-        val lower = context.url.lowercase()
-        val videoHosts = listOf(
-            "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
-            "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com"
-        )
-        return videoHosts.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd")
-    }
-
-    override suspend fun extract(
-        context: MediaRequestContext,
-        onItemDiscovered: (ScrapedMediaItem) -> Unit,
-        onStatusUpdate: (String) -> Unit
-    ): MediaExtractionResult {
-        onStatusUpdate("Extracting with yt-dlp...")
-        val res = GalleryDlEngine.extractYtDlp(context.url)
-        if (res.success) {
-            for (item in res.items) {
-                onItemDiscovered(item)
-            }
-            return MediaExtractionResult(items = res.items, pageTitle = res.pageTitle)
-        }
-        return MediaExtractionResult(items = emptyList(), errorMessage = res.errorMessage)
-    }
-}
-
-class StaticHtmlProvider : ExtractionProvider {
-    private val scraper = StaticMediaScraper()
-
-    override fun isApplicable(context: MediaRequestContext): Boolean = true
-
-    override suspend fun extract(
-        context: MediaRequestContext,
-        onItemDiscovered: (ScrapedMediaItem) -> Unit,
-        onStatusUpdate: (String) -> Unit
-    ): MediaExtractionResult {
-        onStatusUpdate("Parsing page HTML & DOM...")
-        val res = scraper.scrape(context.url)
-        for (item in res.items) {
-            onItemDiscovered(item)
-        }
-        return MediaExtractionResult(
-            items = res.items,
-            pageTitle = res.pageTitle,
-            errorMessage = res.errorMessage
-        )
-    }
-}
-
-class BrowserProvider(private val context: Context) : ExtractionProvider {
-    private val browserExtractor = BrowserMediaExtractor(context)
-
-    override fun isApplicable(context: MediaRequestContext): Boolean = true
-
-    override suspend fun extract(
-        context: MediaRequestContext,
-        onItemDiscovered: (ScrapedMediaItem) -> Unit,
-        onStatusUpdate: (String) -> Unit
-    ): MediaExtractionResult = suspendCancellableCoroutine { continuation ->
-        continuation.invokeOnCancellation {
-            browserExtractor.cleanup()
-        }
-        val discoveredList = mutableListOf<ScrapedMediaItem>()
-        browserExtractor.startLiveExtraction(
-            targetUrl = context.url,
-            onStatusUpdate = onStatusUpdate,
-            onMediaDiscovered = { item ->
-                discoveredList.add(item)
-                onItemDiscovered(item)
-            },
-            onFinished = {
-                if (continuation.isActive) {
-                    continuation.resume(
-                        MediaExtractionResult(items = discoveredList),
-                        onCancellation = { browserExtractor.cleanup() }
-                    )
-                }
-            }
-        )
-    }
-
-    fun cleanup() {
-        browserExtractor.cleanup()
     }
 }
 
 /**
- * Multi-Provider Media Extraction Engine Coordinator.
- * Coordinates DirectMediaProvider, GalleryDlProvider, YtDlpProvider, StaticHtmlProvider,
- * and BrowserProvider independently.
- * Progressively merges discovered items with canonical URL deduplication and never
- * terminates prematurely when a single provider completes.
+ * Single-authority extractor coordinator.
+ *
+ * Platform extractors are authoritative. Page-wide HTML and Chromium interception are excluded
+ * because they enumerate posters, previews, navigation art, fragments, and recommendations.
  */
-class DualMediaExtractor(private val context: Context) {
-
-    private var extractionJob: Job? = null
-    private var activeBrowserProvider: BrowserProvider? = null
-
+class DualMediaExtractor(@Suppress("unused") private val context: Context) {
     data class ExtractionState(
         val isRunning: Boolean = false,
         val statusMessage: String = "",
@@ -227,329 +42,149 @@ class DualMediaExtractor(private val context: Context) {
     )
 
     enum class ExtractionPhase {
-        IDLE,
-        DIRECT_MEDIA,
-        GALLERY_DL,
-        STATIC_SCRAPING,
-        BROWSER_INTERCEPTING,
-        AUTO_SCROLLING,
-        COMPLETED,
-        ERROR
+        IDLE, DIRECT_MEDIA, GALLERY_DL, COMPLETED, ERROR
     }
 
     private val _state = MutableStateFlow(ExtractionState())
     val state: StateFlow<ExtractionState> = _state.asStateFlow()
+    private var extractionJob: Job? = null
 
     fun extract(targetUrl: String, scope: CoroutineScope) {
         cancel()
-
-        val trimmed = targetUrl.trim()
-        if (!MediaClassifier.isValidWebUrl(trimmed)) {
+        if (!MediaClassifier.isValidWebUrl(targetUrl.trim())) {
             _state.value = ExtractionState(
-                errorMessage = "Please enter a valid URL (e.g. https://example.com)",
-                isRunning = false,
-                items = emptyList()
+                phase = ExtractionPhase.ERROR,
+                errorMessage = "Please enter a valid URL (for example, https://example.com)."
             )
             return
         }
 
-        val requestContext = MediaRequestContext.create(trimmed)
-        val domain = requestContext.domain
-
+        val request = MediaRequestContext.create(targetUrl)
         _state.value = ExtractionState(
             isRunning = true,
-            statusMessage = "Starting extraction engine...",
+            statusMessage = "Resolving media source…",
             phase = ExtractionPhase.DIRECT_MEDIA,
-            domain = domain,
-            items = emptyList()
+            domain = request.domain
         )
 
-        extractionJob = scope.launch(Dispatchers.Main) {
-            val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
-
-            fun updateItems(
-                newList: List<ScrapedMediaItem>,
-                title: String? = null,
-                msg: String? = null,
-                phase: ExtractionPhase? = null
-            ) {
-                var modified = false
-                for (item in newList) {
-                    val key = MediaClassifier.deduplicationKey(item.url)
-                    val existing = itemsMap[key]
-                    if (existing == null) {
-                        itemsMap[key] = item
-                        modified = true
-                    } else {
-                        // Merge and deduplicate across scrapers
-                        val preferred = when {
-                            !item.url.contains("/thumb/") && !item.url.contains("/transcoded/") &&
-                                    (existing.url.contains("/thumb/") || existing.url.contains("/transcoded/")) -> item
-                            !existing.url.contains("/thumb/") && !existing.url.contains("/transcoded/") &&
-                                    (item.url.contains("/thumb/") || item.url.contains("/transcoded/")) -> existing
-                            (item.sizeBytes ?: 0L) > (existing.sizeBytes ?: 0L) -> item
-                            else -> existing
-                        }
-                        val engines = listOf(existing.provenance.extractorEngine, item.provenance.extractorEngine).distinct()
-                        val mergedEngine = engines.joinToString(" + ")
-                        val mergedThumb = preferred.thumbnailUrl ?: item.thumbnailUrl ?: existing.thumbnailUrl
-                        val mergedResolution = when {
-                            !preferred.resolutionHint.isNullOrBlank() && preferred.resolutionHint != "Network" -> preferred.resolutionHint
-                            !item.resolutionHint.isNullOrBlank() && item.resolutionHint != "Network" -> item.resolutionHint
-                            !existing.resolutionHint.isNullOrBlank() && existing.resolutionHint != "Network" -> existing.resolutionHint
-                            else -> preferred.resolutionHint ?: existing.resolutionHint ?: item.resolutionHint
-                        }
-                        val mergedHeaders = existing.downloadHeaders + item.downloadHeaders
-                        val upgraded = preferred.copy(
-                            thumbnailUrl = mergedThumb,
-                            resolutionHint = mergedResolution,
-                            provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
-                            downloadHeaders = mergedHeaders
-                        )
-                        if (upgraded != existing) {
-                            itemsMap[key] = upgraded
-                            modified = true
-                        }
-                    }
-                }
-                if (modified || msg != null || phase != null || title != null) {
-                    _state.value = _state.value.copy(
-                        items = itemsMap.values.toList(),
-                        pageTitle = if (_state.value.pageTitle.isBlank() && !title.isNullOrBlank()) title else _state.value.pageTitle,
-                        statusMessage = msg ?: _state.value.statusMessage,
-                        phase = phase ?: _state.value.phase
-                    )
-                }
-            }
-
+        extractionJob = scope.launch(Dispatchers.IO) {
             try {
-                // Provider 1: Direct Media Provider
-                val directProvider = DirectMediaProvider()
-                if (directProvider.isApplicable(requestContext)) {
-                    _state.value = _state.value.copy(
-                        phase = ExtractionPhase.DIRECT_MEDIA,
-                        statusMessage = "Identified direct media link..."
-                    )
-                    val directRes = directProvider.extract(
-                        context = requestContext,
-                        onItemDiscovered = { item -> updateItems(listOf(item)) },
-                        onStatusUpdate = {}
-                    )
-                    if (directRes.items.isNotEmpty()) {
-                        updateItems(
-                            newList = directRes.items,
-                            title = directRes.pageTitle ?: domain,
-                            msg = "Discovered direct media file",
-                            phase = ExtractionPhase.COMPLETED
-                        )
-                        _state.value = _state.value.copy(
-                            isRunning = false,
-                            phase = ExtractionPhase.COMPLETED,
-                            statusMessage = "Discovered direct media file"
-                        )
-                        return@launch
-                    }
+                val direct = directMediaItem(request)
+                if (direct != null) {
+                    publish(listOf(direct), request, direct.title, "Direct media link resolved.")
+                    return@launch
                 }
 
-                // Stage 2: Independent Concurrent Extractor Execution (gallery-dl, yt-dlp, static HTML)
                 _state.value = _state.value.copy(
                     phase = ExtractionPhase.GALLERY_DL,
-                    statusMessage = "Querying extraction providers..."
+                    statusMessage = "Checking platform extractors…"
                 )
+                val support = GalleryDlEngine.checkSupport(request.url)
+                var result: GalleryDlExtractResult? = null
 
-                val galleryDlProvider = GalleryDlProvider()
-                val ytDlpProvider = YtDlpProvider()
-                val staticHtmlProvider = StaticHtmlProvider()
-
-                // Launch providers independently without letting one's failure abort others
-                val gdlDeferred = async(Dispatchers.IO) {
-                    try {
-                        if (galleryDlProvider.isApplicable(requestContext)) {
-                            galleryDlProvider.extract(
-                                context = requestContext,
-                                onItemDiscovered = { item ->
-                                    launch(Dispatchers.Main) { updateItems(listOf(item)) }
-                                },
-                                onStatusUpdate = { status ->
-                                    launch(Dispatchers.Main) {
-                                        _state.value = _state.value.copy(statusMessage = status)
-                                    }
-                                }
-                            )
-                        } else null
-                    } catch (e: Exception) {
-                        Log.w("DualMediaExtractor", "gallery-dl extraction error", e)
-                        null
+                if (support.ytDlpSupported) {
+                    _state.value = _state.value.copy(statusMessage = "Extracting primary media with yt-dlp…")
+                    val ytResult = GalleryDlEngine.extractYtDlp(request.url)
+                    if (ytResult.success && ytResult.items.isNotEmpty()) {
+                        result = ytResult
+                    } else {
+                        Log.i(TAG, "yt-dlp returned no media; trying gallery-dl fallback: ${ytResult.errorMessage}")
                     }
                 }
 
-                val ytdlpDeferred = async(Dispatchers.IO) {
-                    try {
-                        if (ytDlpProvider.isApplicable(requestContext)) {
-                            ytDlpProvider.extract(
-                                context = requestContext,
-                                onItemDiscovered = { item ->
-                                    launch(Dispatchers.Main) { updateItems(listOf(item)) }
-                                },
-                                onStatusUpdate = { status ->
-                                    launch(Dispatchers.Main) {
-                                        _state.value = _state.value.copy(statusMessage = status)
-                                    }
-                                }
-                            )
-                        } else null
-                    } catch (e: Exception) {
-                        Log.w("DualMediaExtractor", "yt-dlp extraction error", e)
-                        null
-                    }
+                if ((result == null || result.items.isEmpty()) && support.galleryDlSupported) {
+                    _state.value = _state.value.copy(statusMessage = "Extracting gallery items with gallery-dl…")
+                    result = GalleryDlEngine.extractGalleryDl(request.url)
                 }
 
-                val staticDeferred = async(Dispatchers.IO) {
-                    try {
-                        staticHtmlProvider.extract(
-                            context = requestContext,
-                            onItemDiscovered = { item ->
-                                launch(Dispatchers.Main) { updateItems(listOf(item)) }
-                            },
-                            onStatusUpdate = { status ->
-                                launch(Dispatchers.Main) {
-                                    _state.value = _state.value.copy(statusMessage = status)
-                                }
-                            }
-                        )
-                    } catch (e: Exception) {
-                        Log.w("DualMediaExtractor", "StaticHtmlProvider error", e)
-                        null
-                    }
-                }
-
-                val gdlResult = gdlDeferred.await()
-                val ytdlpResult = ytdlpDeferred.await()
-                val staticResult = staticDeferred.await()
-
-                if (gdlResult != null && gdlResult.items.isNotEmpty()) {
-                    updateItems(gdlResult.items, title = gdlResult.pageTitle)
-                }
-                if (ytdlpResult != null && ytdlpResult.items.isNotEmpty()) {
-                    updateItems(ytdlpResult.items, title = ytdlpResult.pageTitle)
-                }
-                if (staticResult != null && staticResult.items.isNotEmpty()) {
-                    updateItems(staticResult.items, title = staticResult.pageTitle)
-                }
-
-                // Stage 3: Live Chromium Browser Extraction (Network Interception, MutationObserver, Adaptive Scroll)
-                val browserProvider = BrowserProvider(context)
-                activeBrowserProvider = browserProvider
-
-                _state.value = _state.value.copy(
-                    phase = ExtractionPhase.BROWSER_INTERCEPTING,
-                    statusMessage = "Live browser: intercepting streaming requests & dynamic DOM..."
-                )
-
-                try {
-                    browserProvider.extract(
-                        context = requestContext,
-                        onItemDiscovered = { item ->
-                            updateItems(listOf(item))
-                        },
-                        onStatusUpdate = { status ->
-                            val phase = if (status.contains("scrolling", ignoreCase = true)) {
-                                ExtractionPhase.AUTO_SCROLLING
-                            } else {
-                                ExtractionPhase.BROWSER_INTERCEPTING
-                            }
-                            _state.value = _state.value.copy(
-                                statusMessage = status,
-                                phase = phase
-                            )
-                        }
+                val resolved = MediaResolver.resolve(result?.items.orEmpty())
+                if (resolved.isNotEmpty()) {
+                    publish(
+                        resolved, request, result?.pageTitle.orEmpty(),
+                        "Extraction complete. Found ${resolved.size} unique media item(s)."
                     )
-                } catch (ce: CancellationException) {
-                    throw ce
-                } catch (e: Exception) {
-                    Log.w("DualMediaExtractor", "Browser extraction error", e)
-                } finally {
-                    activeBrowserProvider = null
+                } else {
+                    val error = result?.errorMessage?.takeIf { it.isNotBlank() }
+                        ?: if (!support.isSupported) {
+                            "This URL is not supported by the installed gallery-dl or yt-dlp extractors."
+                        } else {
+                            "No primary downloadable media was returned by the platform extractor."
+                        }
+                    _state.value = _state.value.copy(
+                        isRunning = false,
+                        phase = ExtractionPhase.ERROR,
+                        statusMessage = error,
+                        errorMessage = error
+                    )
                 }
-
-                val finalCount = itemsMap.size
+            } catch (cancelled: CancellationException) {
+                _state.value = _state.value.copy(isRunning = false, phase = ExtractionPhase.IDLE, statusMessage = "Extraction stopped.")
+                throw cancelled
+            } catch (error: Exception) {
+                Log.e(TAG, "Media extraction failed", error)
+                val message = error.localizedMessage ?: "Media extraction failed."
                 _state.value = _state.value.copy(
-                    isRunning = false,
-                    phase = ExtractionPhase.COMPLETED,
-                    statusMessage = if (finalCount > 0) "Extraction completed. Discovered $finalCount media items." else "No media discovered on this page."
-                )
-            } catch (ce: CancellationException) {
-                _state.value = _state.value.copy(
-                    isRunning = false,
-                    phase = ExtractionPhase.IDLE,
-                    statusMessage = "Extraction stopped"
-                )
-            } catch (e: Exception) {
-                Log.e("DualMediaExtractor", "Orchestration error", e)
-                _state.value = _state.value.copy(
-                    isRunning = false,
-                    phase = ExtractionPhase.ERROR,
-                    statusMessage = "Extraction failed: ${e.localizedMessage}",
-                    errorMessage = e.localizedMessage
+                    isRunning = false, phase = ExtractionPhase.ERROR, statusMessage = message, errorMessage = message
                 )
             }
         }
+    }
+
+    private fun directMediaItem(request: MediaRequestContext): ScrapedMediaItem? {
+        if (!MediaClassifier.isValidMedia(request.url)) return null
+        val resolved = MediaClassifier.resolveOriginalMedia(request.url)
+        val classification = MediaClassifier.classify(resolved.mediaUrl)
+        if (!(classification.isVideo || classification.isAudio || classification.isStream ||
+                classification.category == MediaCategory.IMAGES)
+        ) return null
+
+        return ScrapedMediaItem(
+            id = "direct_${resolved.mediaUrl.hashCode()}",
+            url = resolved.mediaUrl,
+            title = resolved.cleanTitle ?: MediaClassifier.deriveFileName(resolved.mediaUrl, classification.format, 0),
+            isVideo = classification.isVideo,
+            isAudio = classification.isAudio,
+            isStream = classification.isStream,
+            category = classification.category,
+            format = classification.format,
+            thumbnailUrl = resolved.thumbnailUrl ?: if (classification.category == MediaCategory.IMAGES) resolved.mediaUrl else null,
+            mimeType = classification.mimeType,
+            source = "Direct Link",
+            provenance = MediaProvenance("Direct URL", request.url),
+            metadata = mapOf("source_url" to request.url),
+            downloadHeaders = mapOf("User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT, "Referer" to request.url)
+        )
+    }
+
+    private fun publish(items: List<ScrapedMediaItem>, request: MediaRequestContext, title: String, status: String) {
+        _state.value = _state.value.copy(
+            isRunning = false,
+            phase = ExtractionPhase.COMPLETED,
+            pageTitle = title.ifBlank { _state.value.pageTitle.ifBlank { request.domain } },
+            domain = request.domain,
+            items = MediaResolver.resolve(items),
+            statusMessage = status,
+            errorMessage = null
+        )
     }
 
     fun addDiscoveredItems(newList: List<ScrapedMediaItem>, title: String? = null, domain: String? = null) {
-        val existingMap = LinkedHashMap<String, ScrapedMediaItem>()
-        for (item in _state.value.items) {
-            existingMap[MediaClassifier.deduplicationKey(item.url)] = item
-        }
-        var modified = false
-        for (item in newList) {
-            val key = MediaClassifier.deduplicationKey(item.url)
-            val existing = existingMap[key]
-            if (existing == null) {
-                existingMap[key] = item
-                modified = true
-            } else {
-                val preferred = if (!item.url.contains("/thumb/") && existing.url.contains("/thumb/")) item else existing
-                val engines = listOf(existing.provenance.extractorEngine, item.provenance.extractorEngine).distinct()
-                val mergedEngine = engines.joinToString(" + ")
-                val mergedThumb = preferred.thumbnailUrl ?: item.thumbnailUrl ?: existing.thumbnailUrl
-                val mergedHeaders = existing.downloadHeaders + item.downloadHeaders
-                val upgraded = preferred.copy(
-                    thumbnailUrl = mergedThumb,
-                    provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
-                    downloadHeaders = mergedHeaders
-                )
-                if (upgraded != existing) {
-                    existingMap[key] = upgraded
-                    modified = true
-                }
-            }
-        }
-        if (modified || title != null || domain != null) {
-            _state.value = _state.value.copy(
-                items = existingMap.values.toList(),
-                pageTitle = title ?: _state.value.pageTitle,
-                domain = domain ?: _state.value.domain,
-                statusMessage = "Discovered ${existingMap.size} media items from Browser"
-            )
-        }
+        val resolved = MediaResolver.resolve(_state.value.items + newList)
+        _state.value = _state.value.copy(
+            items = resolved,
+            pageTitle = title?.takeIf { it.isNotBlank() } ?: _state.value.pageTitle,
+            domain = domain?.takeIf { it.isNotBlank() } ?: _state.value.domain,
+            statusMessage = "Showing ${resolved.size} unique media item(s)."
+        )
     }
 
-    fun addDiscoveredItem(item: ScrapedMediaItem) {
-        addDiscoveredItems(listOf(item))
-    }
+    fun addDiscoveredItem(item: ScrapedMediaItem) = addDiscoveredItems(listOf(item))
 
     fun cancel() {
         extractionJob?.cancel()
         extractionJob = null
-        activeBrowserProvider?.cleanup()
-        activeBrowserProvider = null
         if (_state.value.isRunning) {
-            _state.value = _state.value.copy(
-                isRunning = false,
-                phase = ExtractionPhase.IDLE,
-                statusMessage = "Extraction stopped"
-            )
+            _state.value = _state.value.copy(isRunning = false, phase = ExtractionPhase.IDLE, statusMessage = "Extraction stopped.")
         }
     }
 
@@ -558,7 +193,9 @@ class DualMediaExtractor(private val context: Context) {
         _state.value = ExtractionState()
     }
 
-    fun cleanup() {
-        reset()
+    fun cleanup() = reset()
+
+    companion object {
+        private const val TAG = "DualMediaExtractor"
     }
 }

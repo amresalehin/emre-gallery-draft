@@ -57,7 +57,6 @@ import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
-import com.amresalehin.emregallery.data.MediaScraper
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import kotlinx.coroutines.delay
@@ -1936,7 +1935,6 @@ fun FullScreenBrowserView(
 ) {
     val context = LocalContext.current
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
-    val scraper = remember { MediaScraper() }
     val scope = rememberCoroutineScope()
 
     var currentUrl by remember(initialUrl) { mutableStateOf(initialUrl) }

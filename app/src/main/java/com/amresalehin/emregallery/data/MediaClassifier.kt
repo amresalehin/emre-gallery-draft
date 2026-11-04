@@ -665,68 +665,9 @@ object MediaClassifier {
      * - Combines provenance info (indicating multiple scrapers identified the item)
      * - Preserves required download headers
      */
-    fun deduplicateScrapedItems(items: List<ScrapedMediaItem>): List<ScrapedMediaItem> {
-        if (items.isEmpty()) return emptyList()
+    fun deduplicateScrapedItems(items: List<ScrapedMediaItem>): List<ScrapedMediaItem> =
+        MediaResolver.resolve(items)
 
-        val grouped = LinkedHashMap<String, MutableList<ScrapedMediaItem>>()
-        for (item in items) {
-            val key = deduplicationKey(item.url)
-            val list = grouped.getOrPut(key) { mutableListOf() }
-            list.add(item)
-        }
-
-        val result = mutableListOf<ScrapedMediaItem>()
-        for ((_, group) in grouped) {
-            if (group.size == 1) {
-                result.add(group[0])
-            } else {
-                val best = group.maxWithOrNull(compareBy<ScrapedMediaItem> {
-                    if (!it.url.contains("/thumb/") && !it.url.contains("/transcoded/") && !it.url.contains("resize") && !it.url.contains("?w=")) 2 else 0
-                }.thenBy {
-                    if (!it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network") 2 else 0
-                }.thenBy {
-                    it.resolutionHint?.length ?: 0
-                }.thenBy {
-                    it.sizeBytes ?: 0L
-                }.thenBy {
-                    if (it.thumbnailUrl != null) 1 else 0
-                }) ?: group[0]
-
-                val engines = group.map { it.provenance.extractorEngine }.distinct()
-                val mergedProvenance = if (engines.size > 1) {
-                    best.provenance.copy(
-                        extractorEngine = engines.joinToString(" + ")
-                    )
-                } else {
-                    best.provenance
-                }
-
-                val bestThumb = best.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
-                val mergedResolution = group.firstOrNull { !it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network" }?.resolutionHint
-                    ?: best.resolutionHint
-
-                val mergedHeaders = mutableMapOf<String, String>()
-                for (cand in group) {
-                    mergedHeaders.putAll(cand.downloadHeaders)
-                }
-
-                val resolvedOriginalUrl = resolveOriginalMedia(best.url).mediaUrl
-                val merged = best.copy(
-                    url = resolvedOriginalUrl,
-                    thumbnailUrl = bestThumb,
-                    resolutionHint = mergedResolution,
-                    provenance = mergedProvenance,
-                    downloadHeaders = mergedHeaders
-                )
-                result.add(merged)
-            }
-        }
-        return result
-    }
-
-    /**
-     * Checks if a media item is an SVG vector asset based on format, MIME type, or URL extension.
-     */
     fun isSvg(url: String, mimeHint: String? = null, format: String? = null): Boolean {
         if (format?.equals("SVG", ignoreCase = true) == true) return true
         if (mimeHint?.contains("svg", ignoreCase = true) == true) return true

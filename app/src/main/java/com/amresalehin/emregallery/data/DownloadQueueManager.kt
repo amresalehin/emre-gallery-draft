@@ -36,6 +36,9 @@ object DownloadQueueManager {
 
         val inputData = Data.Builder()
             .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
+            .putString(MediaDownloadWorker.KEY_AUDIO_URL, item.audioUrl)
+            .putBoolean(MediaDownloadWorker.KEY_HAS_AUDIO, item.hasAudio == true)
+            .putString(MediaDownloadWorker.KEY_CANONICAL_MEDIA_ID, item.canonicalMediaId)
             .putString(MediaDownloadWorker.KEY_FILE_NAME, item.title)
             .putString(MediaDownloadWorker.KEY_REFERER, referer)
             .putString(MediaDownloadWorker.KEY_ITEM_ID, item.id)
@@ -76,10 +79,13 @@ object DownloadQueueManager {
         val url = sourceUrl ?: referer ?: ""
 
         val workManager = WorkManager.getInstance(context)
-        val distinctItems = MediaClassifier.deduplicateScrapedItems(items)
+        val distinctItems = MediaResolver.resolve(items)
         val requests = distinctItems.map { item ->
             val inputData = Data.Builder()
                 .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
+                .putString(MediaDownloadWorker.KEY_AUDIO_URL, item.audioUrl)
+                .putBoolean(MediaDownloadWorker.KEY_HAS_AUDIO, item.hasAudio == true)
+                .putString(MediaDownloadWorker.KEY_CANONICAL_MEDIA_ID, item.canonicalMediaId)
                 .putString(MediaDownloadWorker.KEY_FILE_NAME, item.title)
                 .putString(MediaDownloadWorker.KEY_REFERER, referer)
                 .putString(MediaDownloadWorker.KEY_ITEM_ID, item.id)

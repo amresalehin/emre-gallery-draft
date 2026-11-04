@@ -31,7 +31,10 @@ data class GalleryDlSupportInfo(
     val category: String,
     val subcategory: String,
     val extractorName: String,
-    val displayName: String
+    val displayName: String,
+    val galleryDlSupported: Boolean = false,
+    val ytDlpSupported: Boolean = false,
+    val preferredEngine: String = ""
 )
 
 data class GalleryDlOptions(
@@ -155,7 +158,10 @@ object GalleryDlEngine {
                         category = site.name.lowercase(),
                         subcategory = "",
                         extractorName = "${site.name}Extractor",
-                        displayName = site.name
+                        displayName = site.name,
+                        galleryDlSupported = true,
+                        ytDlpSupported = false,
+                        preferredEngine = "gallery-dl"
                     )
                 }
             }
@@ -172,7 +178,10 @@ object GalleryDlEngine {
                 category = json.optString("category", ""),
                 subcategory = json.optString("subcategory", ""),
                 extractorName = json.optString("extractor", ""),
-                displayName = json.optString("display_name", json.optString("category", ""))
+                displayName = json.optString("display_name", json.optString("category", "")),
+                galleryDlSupported = json.optBoolean("gallery_dl_supported", json.optBoolean("supported", false)),
+                ytDlpSupported = json.optBoolean("yt_dlp_supported", false),
+                preferredEngine = json.optString("preferred_engine", "")
             )
         } catch (e: Exception) {
             Log.e(TAG, "checkSupport error", e)
@@ -214,10 +223,23 @@ object GalleryDlEngine {
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
                 provenance = MediaProvenance(
-                    extractorEngine = "gallery-dl / yt-dlp",
+                    extractorEngine = obj.optString("source", "gallery-dl / yt-dlp"),
                     pageUrl = pageUrl
                 ),
-                metadata = mapOf("source_url" to pageUrl),
+                metadata = buildMap {
+                    put("source_url", pageUrl)
+                    obj.optJSONObject("metadata")?.let { metadata ->
+                        metadata.keys().forEach { key -> put(key, metadata.optString(key)) }
+                    }
+                },
+                audioUrl = obj.optString("audioUrl").takeIf { it.isNotBlank() && it != "null" },
+                hasAudio = if (obj.has("hasAudio") && !obj.isNull("hasAudio")) obj.optBoolean("hasAudio") else null,
+                canonicalMediaId = obj.optString("canonicalMediaId").takeIf { it.isNotBlank() && it != "null" },
+                width = if (obj.has("width") && !obj.isNull("width")) obj.optInt("width") else null,
+                height = if (obj.has("height") && !obj.isNull("height")) obj.optInt("height") else null,
+                frameRate = if (obj.has("frameRate") && !obj.isNull("frameRate")) obj.optDouble("frameRate") else null,
+                audioCodec = obj.optString("audioCodec").takeIf { it.isNotBlank() && it != "null" },
+                videoCodec = obj.optString("videoCodec").takeIf { it.isNotBlank() && it != "null" },
                 downloadHeaders = mapOf(
                     "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
                     "Referer" to pageUrl
@@ -285,9 +307,6 @@ object GalleryDlEngine {
 
     suspend fun extractYtDlp(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_yt_dlp", url, options)
-
-    suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        executePythonExtractor("extract_media", url, options)
 
     /**
      * Downloads a media file with proper referer header via Python requests or fallback.

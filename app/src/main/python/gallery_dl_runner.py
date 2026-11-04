@@ -49,52 +49,53 @@ def get_engine_status():
     })
 
 def check_support(url):
-    """
-    Checks if a URL is handled by gallery-dl or yt-dlp extractors.
-    """
+    """Return independently detected capabilities for both supported extractors."""
     if not url:
-        return json.dumps({"supported": False, "category": "", "extractor": ""})
+        return json.dumps({"supported": False, "gallery_dl_supported": False, "yt_dlp_supported": False})
 
     clean_url = url.strip()
-
-    # 1. Check gallery-dl
+    gallery_supported = False
+    gallery_category = ""
+    gallery_name = ""
     if GALLERY_DL_AVAILABLE:
         try:
             ext = gdl_extractor.find(clean_url)
             if ext is not None:
-                cat = getattr(ext, "category", "") or ext.__class__.__name__.lower().replace("extractor", "")
-                subcat = getattr(ext, "subcategory", "") or ""
-                name = ext.__class__.__name__
-                return json.dumps({
-                    "supported": True,
-                    "category": cat,
-                    "subcategory": subcat,
-                    "extractor": name,
-                    "engine": "gallery-dl"
-                })
+                gallery_supported = True
+                gallery_category = getattr(ext, "category", "") or ext.__class__.__name__.lower().replace("extractor", "")
+                gallery_name = ext.__class__.__name__
         except Exception:
             pass
 
-    # 2. Check yt-dlp
+    yt_supported = False
+    yt_category = ""
+    yt_name = ""
     if YTDLP_AVAILABLE:
         try:
-            lower = clean_url.lower()
-            video_hosts = [
-                "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
-                "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com/reel"
-            ]
-            if any(vh in lower for vh in video_hosts):
-                return json.dumps({
-                    "supported": True,
-                    "category": "video",
-                    "subcategory": "stream",
-                    "extractor": "YoutubeDL",
-                    "engine": "yt-dlp"
-                })
+            for ie in yt_dlp.extractor.gen_extractors():
+                ie_name = getattr(ie, "IE_NAME", "") or ie.__class__.__name__
+                if ie_name.lower() in ("generic", "default"):
+                    continue
+                if ie.suitable(clean_url):
+                    yt_supported = True
+                    yt_name = ie_name
+                    yt_category = "audio" if "soundcloud" in ie_name.lower() else "video"
+                    break
         except Exception:
             pass
 
-    return json.dumps({"supported": False, "category": "", "extractor": ""})
+    preferred = "yt-dlp" if yt_supported else ("gallery-dl" if gallery_supported else "")
+    return json.dumps({
+        "supported": gallery_supported or yt_supported,
+        "gallery_dl_supported": gallery_supported,
+        "yt_dlp_supported": yt_supported,
+        "preferred_engine": preferred,
+        "category": yt_category or gallery_category,
+        "subcategory": "",
+        "extractor": yt_name or gallery_name,
+        "display_name": yt_name or gallery_name
+    })
+
 
 def extract_gallery_dl(url, options_json="{}"):
     """
@@ -229,9 +230,29 @@ def extract_gallery_dl(url, options_json="{}"):
         "items": items
     })
 
+def _format_quality_score(fmt):
+    if not isinstance(fmt, dict):
+        return (0, 0.0, 0.0, 0)
+    width = int(fmt.get("width") or 0)
+    height = int(fmt.get("height") or 0)
+    fps = float(fmt.get("fps") or 0.0)
+    bitrate = float(fmt.get("tbr") or fmt.get("vbr") or fmt.get("abr") or 0.0)
+    size = int(fmt.get("filesize") or fmt.get("filesize_approx") or 0)
+    return (width * height, fps, bitrate, size)
+
+
+def _has_video(fmt):
+    return isinstance(fmt, dict) and fmt.get("vcodec") not in (None, "none")
+
+
+def _has_audio(fmt):
+    return isinstance(fmt, dict) and fmt.get("acodec") not in (None, "none")
+
+
 def extract_yt_dlp(url, options_json="{}"):
     """
-    Extracts media items using yt-dlp exclusively.
+    Return one logical item per video/audio post, with split A/V represented as linked streams.
+    Thumbnail URLs are preview metadata only and never become downloadable media items.
     """
     clean_url = url.strip() if url else ""
     if not clean_url or not YTDLP_AVAILABLE:
@@ -241,77 +262,139 @@ def extract_yt_dlp(url, options_json="{}"):
         opts = json.loads(options_json) if options_json else {}
     except Exception:
         opts = {}
-
     user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
     items = []
     page_title = ""
-    seen_urls = set()
-
     try:
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "format": "bestvideo+bestaudio/best",
-            "socket_timeout": 20,
-            "user_agent": user_agent
+            "format": "bv*+ba/b",
+            "socket_timeout": int(opts.get("timeout", 30)),
+            "user_agent": user_agent,
+            "noplaylist": False
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
-            if info:
-                entries = info.get("entries") or [info]
-                for entry in entries:
-                    if not entry or not isinstance(entry, dict):
+            if not info:
+                raise ValueError("yt-dlp returned no media metadata")
+
+            for entry in (info.get("entries") or [info]):
+                if not isinstance(entry, dict):
+                    continue
+
+                formats = [f for f in (entry.get("formats") or []) if isinstance(f, dict) and f.get("url")]
+                requested = [f for f in (entry.get("requested_formats") or []) if isinstance(f, dict) and f.get("url")]
+                candidates = requested if requested else formats
+
+                video_only = [f for f in candidates if _has_video(f) and not _has_audio(f)]
+                audio_only = [f for f in candidates if _has_audio(f) and not _has_video(f)]
+                muxed = [f for f in candidates if _has_video(f) and _has_audio(f)]
+
+                video_format = max(video_only, key=_format_quality_score) if video_only else None
+                audio_format = max(audio_only, key=_format_quality_score) if audio_only else None
+
+                # If the selector metadata is incomplete, inspect the available format list.
+                if not requested and formats:
+                    all_video = [f for f in formats if _has_video(f) and not _has_audio(f)]
+                    all_audio = [f for f in formats if _has_audio(f) and not _has_video(f)]
+                    if not video_format and all_video:
+                        video_format = max(all_video, key=_format_quality_score)
+                    if not audio_format and all_audio:
+                        audio_format = max(all_audio, key=_format_quality_score)
+
+                best_muxed = max(muxed, key=_format_quality_score) if muxed else None
+                if video_format and not audio_format and best_muxed:
+                    # Do not choose a silent video-only format when no separate audio rendition exists.
+                    video_format = None
+
+                if video_format:
+                    primary = video_format
+                    is_audio_only = False
+                elif best_muxed:
+                    primary = best_muxed
+                    audio_format = None
+                    is_audio_only = False
+                elif audio_format:
+                    primary = audio_format
+                    is_audio_only = True
+                else:
+                    primary = entry if entry.get("url") else None
+                    if not primary:
                         continue
+                    is_audio_only = entry.get("vcodec") == "none"
 
-                    direct_url = entry.get("url")
-                    if not direct_url and "formats" in entry and entry["formats"]:
-                        direct_url = entry["formats"][-1].get("url")
+                direct_url = primary.get("url")
+                if not direct_url:
+                    continue
+                separate_audio_url = None
+                if not is_audio_only and audio_format and audio_format.get("url") != direct_url:
+                    separate_audio_url = audio_format.get("url")
 
-                    if not direct_url or direct_url in seen_urls:
-                        continue
+                vcodec = primary.get("vcodec")
+                acodec = primary.get("acodec")
+                has_audio = bool(separate_audio_url) or _has_audio(primary)
+                is_stream = ".m3u8" in direct_url.lower() or ".mpd" in direct_url.lower()
+                category = "AUDIO" if is_audio_only else ("STREAMS" if is_stream else "VIDEOS")
 
-                    seen_urls.add(direct_url)
+                media_id = str(entry.get("id") or primary.get("format_id") or abs(hash(direct_url)))
+                extractor_key = str(entry.get("extractor_key") or entry.get("extractor") or "yt-dlp")
+                canonical_id = extractor_key + ":" + media_id
 
-                    v_title = entry.get("title") or entry.get("id") or f"media_{len(items) + 1}"
-                    v_ext = entry.get("ext") or "mp4"
-                    item_title = f"{v_title}.{v_ext}" if not v_title.endswith(f".{v_ext}") else v_title
+                title = str(entry.get("title") or entry.get("id") or "media")
+                ext = str(primary.get("ext") or entry.get("ext") or ("mkv" if separate_audio_url else "mp4")).lower()
+                item_title = title if title.lower().endswith("." + ext) else title + "." + ext
+                if not page_title:
+                    page_title = str(info.get("title") or title)
 
-                    if not page_title:
-                        page_title = v_title
+                width = primary.get("width") or entry.get("width")
+                height = primary.get("height") or entry.get("height")
+                resolution_hint = str(width) + "x" + str(height) if width and height else primary.get("resolution")
+                video_size = primary.get("filesize") or primary.get("filesize_approx") or 0
+                audio_size = (audio_format or {}).get("filesize") or (audio_format or {}).get("filesize_approx") or 0
+                try:
+                    total_size = int(video_size or 0) + int(audio_size or 0)
+                except Exception:
+                    total_size = None
+                if not total_size:
+                    total_size = None
 
-                    width = entry.get("width")
-                    height = entry.get("height")
-                    resolution_hint = f"{width}x{height}" if width and height else None
-                    thumb = entry.get("thumbnail")
-                    filesize = entry.get("filesize") or entry.get("filesize_approx")
+                fps = primary.get("fps") or entry.get("fps")
+                tbr = primary.get("tbr") or entry.get("tbr")
+                items.append({
+                    "id": "ytdlp_" + canonical_id,
+                    "canonicalMediaId": canonical_id,
+                    "url": direct_url,
+                    "audioUrl": separate_audio_url,
+                    "hasAudio": has_audio,
+                    "audioCodec": (audio_format or {}).get("acodec") or acodec,
+                    "videoCodec": vcodec,
+                    "title": item_title,
+                    "category": category,
+                    "format": ext.upper(),
+                    "mimeType": "audio/" + ext if is_audio_only else ("application/x-mpegURL" if is_stream else "video/" + ext),
+                    "isVideo": not is_audio_only,
+                    "isAudio": is_audio_only,
+                    "isStream": is_stream,
+                    "thumbnailUrl": entry.get("thumbnail"),
+                    "resolutionHint": resolution_hint,
+                    "width": width,
+                    "height": height,
+                    "frameRate": fps,
+                    "sizeBytes": total_size,
+                    "metadata": {
+                        "fps": str(fps or ""),
+                        "tbr": str(tbr or ""),
+                        "audio_codec": str((audio_format or {}).get("acodec") or acodec or ""),
+                        "video_codec": str(vcodec or "")
+                    },
+                    "source": "yt-dlp"
+                })
 
-                    is_audio_only = entry.get("vcodec") == "none" or v_ext in ["mp3", "m4a", "opus", "aac"]
-                    is_stream = (".m3u8" in direct_url) or (".mpd" in direct_url)
-                    category = "AUDIO" if is_audio_only else ("STREAMS" if is_stream else "VIDEOS")
-
-                    items.append({
-                        "id": f"ytdlp_{len(items)}_{abs(hash(direct_url))}",
-                        "url": direct_url,
-                        "title": item_title,
-                        "category": category,
-                        "format": v_ext.upper(),
-                        "mimeType": f"audio/{v_ext}" if is_audio_only else ("application/x-mpegURL" if is_stream else f"video/{v_ext}"),
-                        "isVideo": not is_audio_only,
-                        "isAudio": is_audio_only,
-                        "isStream": is_stream,
-                        "thumbnailUrl": thumb,
-                        "resolutionHint": resolution_hint,
-                        "sizeBytes": filesize,
-                        "source": "yt-dlp"
-                    })
     except Exception as e:
-        return json.dumps({
-            "success": False,
-            "error": f"{e.__class__.__name__}: {str(e)}",
-            "items": []
-        })
+        return json.dumps({"success": False, "error": f"{e.__class__.__name__}: {str(e)}", "items": []})
 
     return json.dumps({
         "success": len(items) > 0,
@@ -321,58 +404,6 @@ def extract_yt_dlp(url, options_json="{}"):
         "items": items
     })
 
-def extract_media(url, options_json="{}"):
-    """
-    Extracts all media items using gallery-dl AND yt-dlp progressively.
-    Does not allow partial gallery-dl results to prevent yt-dlp from running.
-    """
-    clean_url = url.strip() if url else ""
-    if not clean_url:
-        return json.dumps({
-            "success": False,
-            "error": "URL cannot be empty",
-            "items": []
-        })
-
-    all_items = []
-    seen_urls = set()
-    page_title = ""
-
-    # 1. Run gallery-dl
-    gdl_res_str = extract_gallery_dl(clean_url, options_json)
-    try:
-        gdl_res = json.loads(gdl_res_str)
-        if gdl_res.get("pageTitle"):
-            page_title = gdl_res["pageTitle"]
-        for itm in gdl_res.get("items", []):
-            u = itm.get("url")
-            if u and u not in seen_urls:
-                seen_urls.add(u)
-                all_items.append(itm)
-    except Exception:
-        pass
-
-    # 2. Run yt-dlp (ALWAYS run, even if gallery-dl found items, e.g. embedded video in social post)
-    ytdlp_res_str = extract_yt_dlp(clean_url, options_json)
-    try:
-        ytdlp_res = json.loads(ytdlp_res_str)
-        if not page_title and ytdlp_res.get("pageTitle"):
-            page_title = ytdlp_res["pageTitle"]
-        for itm in ytdlp_res.get("items", []):
-            u = itm.get("url")
-            if u and u not in seen_urls:
-                seen_urls.add(u)
-                all_items.append(itm)
-    except Exception:
-        pass
-
-    return json.dumps({
-        "success": len(all_items) > 0,
-        "engine": "hybrid (gallery-dl + yt-dlp)",
-        "pageTitle": str(page_title) if page_title else "",
-        "itemsCount": len(all_items),
-        "items": all_items
-    })
 
 def download_media_file(media_url, target_path, referer=None, user_agent=None):
     """
