@@ -22,6 +22,7 @@ class MediaResolverTest {
             height = 393,
             sizeBytes = 12000
         )
+        val smallWithPreview = small.copy(thumbnailUrl = small.url)
         val large = small.copy(
             id = "large",
             url = "https://i.pinimg.com/736x/aa/bb/cc/image.jpg",
@@ -29,17 +30,18 @@ class MediaResolverTest {
             width = 736,
             height = 1227,
             sizeBytes = 95000
-        )
+        ).copy(thumbnailUrl = "https://i.pinimg.com/736x/aa/bb/cc/image.jpg")
         val original = small.copy(
             id = "original",
             url = "https://i.pinimg.com/originals/aa/bb/cc/image.jpg",
             title = "image-original.jpg",
             sizeBytes = 110000
-        )
+        ).copy(thumbnailUrl = "https://i.pinimg.com/originals/aa/bb/cc/image.jpg")
 
-        val resolved = MediaResolver.resolve(listOf(small, large, original))
+        val resolved = MediaResolver.resolve(listOf(smallWithPreview, large, original))
         assertEquals(1, resolved.size)
         assertEquals(original.url, resolved.single().url)
+        assertEquals("Grid preview must use the selected primary image rendition", original.url, resolved.single().thumbnailUrl)
     }
 
     @Test
