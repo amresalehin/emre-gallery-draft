@@ -11,7 +11,184 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.net.URL
+
+data class MediaRequestContext(
+    val url: String,
+    val domain: String
+) {
+    companion object {
+        fun create(targetUrl: String): MediaRequestContext {
+            val trimmed = targetUrl.trim()
+            val normalized = if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
+                "https://$trimmed"
+            } else {
+                trimmed
+            }
+            val domain = runCatching { URL(normalized).host }.getOrDefault("")
+            return MediaRequestContext(url = normalized, domain = domain)
+        }
+    }
+}
+
+data class MediaExtractionResult(
+    val items: List<ScrapedMediaItem> = emptyList(),
+    val pageTitle: String? = null,
+    val errorMessage: String? = null
+)
+
+interface ExtractionProvider {
+    fun isApplicable(context: MediaRequestContext): Boolean
+    suspend fun extract(
+        context: MediaRequestContext,
+        onItemDiscovered: (ScrapedMediaItem) -> Unit,
+        onStatusUpdate: (String) -> Unit
+    ): MediaExtractionResult
+}
+
+class DirectMediaProvider : ExtractionProvider {
+    override fun isApplicable(context: MediaRequestContext): Boolean {
+        val classification = MediaClassifier.classify(context.url)
+        return classification.isVideo || classification.isAudio || classification.isStream ||
+                context.url.endsWith(".jpg", true) || context.url.endsWith(".jpeg", true) ||
+                context.url.endsWith(".png", true) || context.url.endsWith(".webp", true) ||
+                context.url.endsWith(".gif", true) || context.url.endsWith(".svg", true)
+    }
+
+    override suspend fun extract(
+        context: MediaRequestContext,
+        onItemDiscovered: (ScrapedMediaItem) -> Unit,
+        onStatusUpdate: (String) -> Unit
+    ): MediaExtractionResult {
+        val classification = MediaClassifier.classify(context.url)
+        val fileName = MediaClassifier.deriveFileName(context.url, classification.format, 0)
+        val item = ScrapedMediaItem(
+            id = "direct_${System.currentTimeMillis()}",
+            url = context.url,
+            title = fileName,
+            isVideo = classification.isVideo,
+            isAudio = classification.isAudio,
+            isStream = classification.isStream,
+            category = classification.category,
+            format = classification.format,
+            mimeType = classification.mimeType,
+            source = "Direct Link"
+        )
+        onItemDiscovered(item)
+        return MediaExtractionResult(items = listOf(item), pageTitle = fileName)
+    }
+}
+
+class GalleryDlProvider : ExtractionProvider {
+    override fun isApplicable(context: MediaRequestContext): Boolean {
+        return GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(context.url).isSupported
+    }
+
+    override suspend fun extract(
+        context: MediaRequestContext,
+        onItemDiscovered: (ScrapedMediaItem) -> Unit,
+        onStatusUpdate: (String) -> Unit
+    ): MediaExtractionResult {
+        onStatusUpdate("Extracting with gallery-dl...")
+        val res = GalleryDlEngine.extractGalleryDl(context.url)
+        if (res.success) {
+            for (item in res.items) {
+                onItemDiscovered(item)
+            }
+            return MediaExtractionResult(items = res.items, pageTitle = res.pageTitle)
+        }
+        return MediaExtractionResult(items = emptyList(), errorMessage = res.errorMessage)
+    }
+}
+
+class YtDlpProvider : ExtractionProvider {
+    override fun isApplicable(context: MediaRequestContext): Boolean {
+        if (!GalleryDlEngine.isAvailable()) return false
+        val lower = context.url.lowercase()
+        val videoHosts = listOf(
+            "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
+            "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com"
+        )
+        return videoHosts.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd")
+    }
+
+    override suspend fun extract(
+        context: MediaRequestContext,
+        onItemDiscovered: (ScrapedMediaItem) -> Unit,
+        onStatusUpdate: (String) -> Unit
+    ): MediaExtractionResult {
+        onStatusUpdate("Extracting with yt-dlp...")
+        val res = GalleryDlEngine.extractYtDlp(context.url)
+        if (res.success) {
+            for (item in res.items) {
+                onItemDiscovered(item)
+            }
+            return MediaExtractionResult(items = res.items, pageTitle = res.pageTitle)
+        }
+        return MediaExtractionResult(items = emptyList(), errorMessage = res.errorMessage)
+    }
+}
+
+class StaticHtmlProvider : ExtractionProvider {
+    private val scraper = StaticMediaScraper()
+
+    override fun isApplicable(context: MediaRequestContext): Boolean = true
+
+    override suspend fun extract(
+        context: MediaRequestContext,
+        onItemDiscovered: (ScrapedMediaItem) -> Unit,
+        onStatusUpdate: (String) -> Unit
+    ): MediaExtractionResult {
+        onStatusUpdate("Parsing page HTML & DOM...")
+        val res = scraper.scrape(context.url)
+        for (item in res.items) {
+            onItemDiscovered(item)
+        }
+        return MediaExtractionResult(
+            items = res.items,
+            pageTitle = res.pageTitle,
+            errorMessage = res.errorMessage
+        )
+    }
+}
+
+class BrowserProvider(private val context: Context) : ExtractionProvider {
+    private val browserExtractor = BrowserMediaExtractor(context)
+
+    override fun isApplicable(context: MediaRequestContext): Boolean = true
+
+    override suspend fun extract(
+        context: MediaRequestContext,
+        onItemDiscovered: (ScrapedMediaItem) -> Unit,
+        onStatusUpdate: (String) -> Unit
+    ): MediaExtractionResult = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation {
+            browserExtractor.cleanup()
+        }
+        val discoveredList = mutableListOf<ScrapedMediaItem>()
+        browserExtractor.startLiveExtraction(
+            targetUrl = context.url,
+            onStatusUpdate = onStatusUpdate,
+            onMediaDiscovered = { item ->
+                discoveredList.add(item)
+                onItemDiscovered(item)
+            },
+            onFinished = {
+                if (continuation.isActive) {
+                    continuation.resume(
+                        MediaExtractionResult(items = discoveredList),
+                        onCancellation = { browserExtractor.cleanup() }
+                    )
+                }
+            }
+        )
+    }
+
+    fun cleanup() {
+        browserExtractor.cleanup()
+    }
+}
 
 /**
  * Multi-Provider Media Extraction Engine Coordinator.

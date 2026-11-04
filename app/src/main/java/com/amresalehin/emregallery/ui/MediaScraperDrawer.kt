@@ -1,5 +1,7 @@
 package com.amresalehin.emregallery.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -9,6 +11,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -36,13 +41,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import android.graphics.BitmapFactory
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 @Composable
 fun MediaScraperDrawer(
     onClose: () -> Unit,
     onDownloadComplete: () -> Unit,
+    onOpenBrowser: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -69,6 +81,11 @@ fun MediaScraperDrawer(
     var sortDropdownExpanded by remember { mutableStateOf(false) }
     var sortOption by remember { mutableStateOf("Default") }
 
+    // Dimension filter states - initial default set to 360px horizontal and vertical
+    var showDimensionFilter by remember { mutableStateOf(false) }
+    var minWidthFilter by remember { mutableFloatStateOf(360f) }
+    var minHeightFilter by remember { mutableFloatStateOf(360f) }
+
     val allScrapedItems = extractorState.items
 
     // Auto-select newly discovered items if user hasn't explicitly deselected all
@@ -79,28 +96,60 @@ fun MediaScraperDrawer(
     }
 
     val filterOptions = listOf("Images", "Videos", "Audio", "Streams")
+    val dynamicDimensions = remember { mutableStateMapOf<String, Pair<Int, Int>>() }
 
-    // Dynamic counts
-    val imageCount = remember(allScrapedItems) { allScrapedItems.count { it.category == MediaCategory.IMAGES } }
-    val videoCount = remember(allScrapedItems) { allScrapedItems.count { it.category == MediaCategory.VIDEOS } }
-    val audioCount = remember(allScrapedItems) { allScrapedItems.count { it.category == MediaCategory.AUDIO } }
-    val streamCount = remember(allScrapedItems) { allScrapedItems.count { it.category == MediaCategory.STREAMS } }
-
-    // Filter & Sort
-    val filteredScrapedItems = remember(selectedFilter, allScrapedItems, sortOption) {
-        val filtered = when (selectedFilter) {
-            "Images" -> allScrapedItems.filter { it.category == MediaCategory.IMAGES }
-            "Videos" -> allScrapedItems.filter { it.category == MediaCategory.VIDEOS }
-            "Audio" -> allScrapedItems.filter { it.category == MediaCategory.AUDIO }
-            "Streams" -> allScrapedItems.filter { it.category == MediaCategory.STREAMS }
-            else -> allScrapedItems
+    // Background probing of items with undetermined dimensions
+    LaunchedEffect(allScrapedItems) {
+        val itemsToProbe = allScrapedItems.filter { item ->
+            item.category == MediaCategory.IMAGES &&
+                    dynamicDimensions[item.id] == null &&
+                    parseScrapedMediaDimensions(item).let { (w, h) -> w == null && h == null }
         }
+        for (item in itemsToProbe.take(60)) {
+            launch {
+                val probed = ImageDimensionProber.probe(item.url, referer = urlInput)
+                if (probed != null) {
+                    dynamicDimensions[item.id] = probed
+                }
+            }
+        }
+    }
+
+    // Auto-apply dimension filter across all scraped items
+    val dimensionFilteredAll = remember(allScrapedItems, minWidthFilter, minHeightFilter, dynamicDimensions.size) {
+        val targetMinWidth = minWidthFilter.toInt()
+        val targetMinHeight = minHeightFilter.toInt()
+        if (targetMinWidth <= 0 && targetMinHeight <= 0) {
+            allScrapedItems
+        } else {
+            allScrapedItems.filter { item ->
+                passesDimensionFilter(item, targetMinWidth, targetMinHeight, dynamicDimensions)
+            }
+        }
+    }
+
+    // Dynamic counts (reflecting active dimension filter)
+    val imageCount = remember(dimensionFilteredAll) { dimensionFilteredAll.count { it.category == MediaCategory.IMAGES } }
+    val videoCount = remember(dimensionFilteredAll) { dimensionFilteredAll.count { it.category == MediaCategory.VIDEOS } }
+    val audioCount = remember(dimensionFilteredAll) { dimensionFilteredAll.count { it.category == MediaCategory.AUDIO } }
+    val streamCount = remember(dimensionFilteredAll) { dimensionFilteredAll.count { it.category == MediaCategory.STREAMS } }
+
+    // Filter by Category & Sort
+    val filteredScrapedItems = remember(selectedFilter, dimensionFilteredAll, sortOption) {
+        val categoryFiltered = when (selectedFilter) {
+            "Images" -> dimensionFilteredAll.filter { it.category == MediaCategory.IMAGES }
+            "Videos" -> dimensionFilteredAll.filter { it.category == MediaCategory.VIDEOS }
+            "Audio" -> dimensionFilteredAll.filter { it.category == MediaCategory.AUDIO }
+            "Streams" -> dimensionFilteredAll.filter { it.category == MediaCategory.STREAMS }
+            else -> dimensionFilteredAll
+        }
+
         when (sortOption) {
-            "Title (A-Z)" -> filtered.sortedBy { it.title.lowercase() }
-            "Streams First" -> filtered.sortedByDescending { it.isStream }
-            "Videos First" -> filtered.sortedByDescending { it.isVideo && !it.isStream }
-            "Images First" -> filtered.sortedBy { it.isVideo || it.isAudio || it.isStream }
-            else -> filtered
+            "Title (A-Z)" -> categoryFiltered.sortedBy { it.title.lowercase() }
+            "Streams First" -> categoryFiltered.sortedByDescending { it.isStream }
+            "Videos First" -> categoryFiltered.sortedByDescending { it.isVideo && !it.isStream }
+            "Images First" -> categoryFiltered.sortedBy { it.isVideo || it.isAudio || it.isStream }
+            else -> categoryFiltered
         }
     }
 
@@ -170,14 +219,31 @@ fun MediaScraperDrawer(
                                 .padding(horizontal = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Link,
-                                contentDescription = "Link",
-                                tint = if (urlInput.isNotBlank() && !isValidUrl) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(24.dp)
-                            )
+                            // Reset Scraper Button (Replaces history button)
+                            IconButton(
+                                onClick = {
+                                    urlInput = ""
+                                    selectedItemIds = emptySet()
+                                    dualExtractor.cancel()
+                                    selectedFilter = null
+                                    sortOption = "Default"
+                                    minWidthFilter = 360f
+                                    minHeightFilter = 360f
+                                    showDimensionFilter = false
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("scraper_reset_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.RestartAlt,
+                                    contentDescription = "Reset Scraper",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
 
-                            Spacer(Modifier.width(12.dp))
+                            Spacer(Modifier.width(8.dp))
 
                             Box(
                                 modifier = Modifier.weight(1f),
@@ -185,7 +251,7 @@ fun MediaScraperDrawer(
                             ) {
                                 if (urlInput.isEmpty()) {
                                     Text(
-                                        text = "Paste a link (URL)",
+                                        text = "Search or enter URL",
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 15.sp
@@ -216,27 +282,6 @@ fun MediaScraperDrawer(
                                         .fillMaxWidth()
                                         .testTag("scraper_url_input")
                                 )
-                            }
-
-                            // Quick paste from clipboard button
-                            if (urlInput.isEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        val clip = clipboardManager.getText()?.text?.trim().orEmpty()
-                                        if (clip.isNotEmpty()) {
-                                            urlInput = clip
-                                        }
-                                    },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ContentPaste,
-                                        contentDescription = "Paste from clipboard",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(19.dp)
-                                    )
-                                }
-                                Spacer(Modifier.width(4.dp))
                             }
 
                             if (urlInput.isNotEmpty()) {
@@ -305,6 +350,54 @@ fun MediaScraperDrawer(
                                             style = MaterialTheme.typography.labelLarge,
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 14.sp
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.width(6.dp))
+
+                            // Browser redirect button beside Fetch button
+                            IconButton(
+                                onClick = {
+                                    val targetUrl = when {
+                                        isValidUrl -> urlInput.trim()
+                                        urlInput.isNotBlank() && (urlInput.contains(".") || urlInput.startsWith("http")) -> {
+                                            if (!urlInput.startsWith("http://") && !urlInput.startsWith("https://")) "https://${urlInput.trim()}" else urlInput.trim()
+                                        }
+                                        else -> "https://google.com"
+                                    }
+                                    if (onOpenBrowser != null) {
+                                        onOpenBrowser(targetUrl)
+                                    } else {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        runCatching { context.startActivity(intent) }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("scraper_browser_redirect_button")
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (urlInput.isNotBlank()) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isValidUrl) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f) else Color.Transparent
+                                    ),
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.OpenInNew,
+                                            contentDescription = "Open in browser",
+                                            tint = if (urlInput.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
@@ -416,95 +509,31 @@ fun MediaScraperDrawer(
                         }
                     }
 
-                    Spacer(Modifier.width(8.dp))
-
-                    // Pinned Select All Pill
-                    Surface(
-                        onClick = {
-                            val currentFilteredIds = filteredScrapedItems.map { it.id }.toSet()
-                            selectedItemIds = if (isAllSelected) {
-                                selectedItemIds - currentFilteredIds
-                            } else {
-                                selectedItemIds + currentFilteredIds
-                            }
-                        },
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .height(34.dp)
-                            .testTag("scraper_select_all_button")
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(3.dp),
-                                color = if (isAllSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                border = BorderStroke(
-                                    1.2.dp,
-                                    if (isAllSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                modifier = Modifier.size(14.dp)
-                            ) {
-                                if (isAllSelected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.size(10.dp)
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = if (isAllSelected) "Deselect" else "Select All",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 12.sp
-                            )
-                        }
-                    }
-
                     Spacer(Modifier.width(6.dp))
 
-                    // Pinned Sort Dropdown Pill
+                    // Pinned Sort Button (Icon only to save space)
                     Box {
                         Surface(
                             onClick = { sortDropdownExpanded = true },
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (sortOption != "Default") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(
+                                1.dp,
+                                if (sortOption != "Default") MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            ),
                             modifier = Modifier
-                                .height(34.dp)
+                                .size(34.dp)
                                 .testTag("scraper_sort_button")
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.SwapVert,
-                                    contentDescription = "Sort",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = if (sortOption != "Default") sortOption else "Sort",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 12.sp
-                                )
-                                Spacer(Modifier.width(2.dp))
-                                Icon(
-                                    imageVector = Icons.Default.ArrowDropDown,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
+                                    contentDescription = "Sort ($sortOption)",
+                                    tint = if (sortOption != "Default") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -515,12 +544,282 @@ fun MediaScraperDrawer(
                         ) {
                             listOf("Default", "Title (A-Z)", "Streams First", "Videos First", "Images First").forEach { opt ->
                                 DropdownMenuItem(
-                                    text = { Text(opt) },
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (sortOption == opt) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                                Spacer(Modifier.width(8.dp))
+                                            }
+                                            Text(
+                                                text = opt,
+                                                fontWeight = if (sortOption == opt) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+                                    },
                                     onClick = {
                                         sortOption = opt
                                         sortDropdownExpanded = false
                                     }
                                 )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.width(6.dp))
+
+                    // Pinned Dimension Filter Button (in saved space, opens 2 sliders to filter media by dimension)
+                    val isDimensionFilterActive = minWidthFilter != 360f || minHeightFilter != 360f
+                    Surface(
+                        onClick = { showDimensionFilter = !showDimensionFilter },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isDimensionFilterActive || showDimensionFilter) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(
+                            1.dp,
+                            if (isDimensionFilterActive || showDimensionFilter) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("scraper_dimension_filter_button")
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Filter by Dimension",
+                                tint = if (isDimensionFilterActive || showDimensionFilter) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.width(6.dp))
+
+                    // Pinned Select All Checkbox (Right-most position, no text, checkbox only)
+                    Surface(
+                        onClick = {
+                            val currentFilteredIds = filteredScrapedItems.map { it.id }.toSet()
+                            selectedItemIds = if (isAllSelected) {
+                                selectedItemIds - currentFilteredIds
+                            } else {
+                                selectedItemIds + currentFilteredIds
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isAllSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(
+                            1.dp,
+                            if (isAllSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier
+                            .size(34.dp)
+                            .testTag("scraper_select_all_checkbox")
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(3.dp),
+                                color = if (isAllSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                border = BorderStroke(
+                                    1.4.dp,
+                                    if (isAllSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                modifier = Modifier.size(16.dp)
+                            ) {
+                                if (isAllSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Select All",
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Expandable Dimension Filter Section with 2 Sliders
+                AnimatedVisibility(
+                    visible = showDimensionFilter,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    val isDimensionFilterActive = minWidthFilter != 360f || minHeightFilter != 360f || minWidthFilter > 0f
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .testTag("dimension_filter_panel")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Dimension filter top actions (Reset & Close)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isDimensionFilterActive) {
+                                    TextButton(
+                                        onClick = {
+                                            if (minWidthFilter == 360f && minHeightFilter == 360f) {
+                                                minWidthFilter = 0f
+                                                minHeightFilter = 0f
+                                            } else {
+                                                minWidthFilter = 360f
+                                                minHeightFilter = 360f
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        modifier = Modifier
+                                            .height(28.dp)
+                                            .testTag("dimension_filter_reset_button")
+                                    ) {
+                                        Text(
+                                            text = if (minWidthFilter == 360f && minHeightFilter == 360f) "Clear" else "Reset (360)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                    Spacer(Modifier.width(6.dp))
+                                }
+                                IconButton(
+                                    onClick = { showDimensionFilter = false },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Close filter panel",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            // Slider 1: Width Slider
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Min Width",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = if (minWidthFilter > 0f) "${minWidthFilter.toInt()} px" else "Any width",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (minWidthFilter > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Slider(
+                                    value = minWidthFilter,
+                                    onValueChange = { minWidthFilter = it },
+                                    valueRange = 0f..3840f,
+                                    steps = 38,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = MaterialTheme.colorScheme.primary,
+                                        activeTrackColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("dimension_filter_width_slider")
+                                )
+                            }
+
+                            // Slider 2: Height Slider
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Min Height",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = if (minHeightFilter > 0f) "${minHeightFilter.toInt()} px" else "Any height",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (minHeightFilter > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Slider(
+                                    value = minHeightFilter,
+                                    onValueChange = { minHeightFilter = it },
+                                    valueRange = 0f..2160f,
+                                    steps = 21,
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = MaterialTheme.colorScheme.primary,
+                                        activeTrackColor = MaterialTheme.colorScheme.primary
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("dimension_filter_height_slider")
+                                )
+                            }
+
+                            // Quick preset chips
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf(
+                                    "360p" to Pair(360f, 360f),
+                                    "SD (480p)" to Pair(640f, 480f),
+                                    "HD (720p)" to Pair(1280f, 720f),
+                                    "FHD (1080p)" to Pair(1920f, 1080f),
+                                    "4K (UHD)" to Pair(3840f, 2160f)
+                                ).forEach { (label, dims) ->
+                                    val isCurrentPreset = minWidthFilter == dims.first && minHeightFilter == dims.second
+                                    Surface(
+                                        onClick = {
+                                            if (isCurrentPreset) {
+                                                minWidthFilter = 0f
+                                                minHeightFilter = 0f
+                                            } else {
+                                                minWidthFilter = dims.first
+                                                minHeightFilter = dims.second
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isCurrentPreset) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        modifier = Modifier.height(24.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.padding(horizontal = 8.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isCurrentPreset) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isCurrentPreset) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -532,81 +831,90 @@ fun MediaScraperDrawer(
                         .weight(1f)
                         .fillMaxWidth()
                 ) {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp),
-                        contentPadding = PaddingValues(top = 4.dp, bottom = 90.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        item {
-                            if (filteredScrapedItems.isNotEmpty()) {
-                                val col0 = filteredScrapedItems.filterIndexed { idx, _ -> idx % 3 == 0 }
-                                val col1 = filteredScrapedItems.filterIndexed { idx, _ -> idx % 3 == 1 }
-                                val col2 = filteredScrapedItems.filterIndexed { idx, _ -> idx % 3 == 2 }
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    if (filteredScrapedItems.isNotEmpty()) {
+                        val columnCount = when {
+                            filteredScrapedItems.size == 1 -> 1
+                            filteredScrapedItems.size == 2 -> 2
+                            else -> 3
+                        }
+                        LazyVerticalStaggeredGrid(
+                            columns = StaggeredGridCells.Fixed(columnCount),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 90.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalItemSpacing = 8.dp
+                        ) {
+                            items(filteredScrapedItems, key = { it.id }) { itm ->
+                                RealScrapedCard(
+                                    item = itm,
+                                    isSelected = itm.id in selectedItemIds,
+                                    dynamicDimensions = dynamicDimensions,
+                                    onToggle = {
+                                        selectedItemIds = if (itm.id in selectedItemIds) {
+                                            selectedItemIds - itm.id
+                                        } else {
+                                            selectedItemIds + itm.id
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    } else if (allScrapedItems.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Text(
+                                    text = "No media matches the filters",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Try reducing min width/height or clearing category filter",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Button(
+                                    onClick = {
+                                        minWidthFilter = 0f
+                                        minHeightFilter = 0f
+                                        selectedFilter = null
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        contentColor = MaterialTheme.colorScheme.primary
+                                    )
                                 ) {
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        col0.forEach { itm ->
-                                            RealScrapedCard(
-                                                item = itm,
-                                                isSelected = itm.id in selectedItemIds,
-                                                onToggle = {
-                                                    selectedItemIds = if (itm.id in selectedItemIds) {
-                                                        selectedItemIds - itm.id
-                                                    } else {
-                                                        selectedItemIds + itm.id
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    }
-
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        col1.forEach { itm ->
-                                            RealScrapedCard(
-                                                item = itm,
-                                                isSelected = itm.id in selectedItemIds,
-                                                onToggle = {
-                                                    selectedItemIds = if (itm.id in selectedItemIds) {
-                                                        selectedItemIds - itm.id
-                                                    } else {
-                                                        selectedItemIds + itm.id
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    }
-
-                                    Column(
-                                        modifier = Modifier.weight(1f),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        col2.forEach { itm ->
-                                            RealScrapedCard(
-                                                item = itm,
-                                                isSelected = itm.id in selectedItemIds,
-                                                onToggle = {
-                                                    selectedItemIds = if (itm.id in selectedItemIds) {
-                                                        selectedItemIds - itm.id
-                                                    } else {
-                                                        selectedItemIds + itm.id
-                                                    }
-                                                }
-                                            )
-                                        }
-                                    }
+                                    Text("Reset Filters")
                                 }
-                            } else {
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 90.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            item {
                                 ThreeColumnSkeletonGrid()
                             }
                         }
@@ -718,25 +1026,52 @@ fun RealScrapedCard(
     item: ScrapedMediaItem,
     isSelected: Boolean,
     onToggle: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dynamicDimensions: Map<String, Pair<Int, Int>> = emptyMap()
 ) {
-    ElevatedCard(
+    val mosaicHeight = remember(item, dynamicDimensions[item.id]) {
+        val (width, height) = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item)
+        if (width != null && height != null && width > 0) {
+            val ratio = height.toFloat() / width.toFloat()
+            when {
+                ratio > 1.25f -> 160.dp // portrait
+                ratio < 0.75f -> 100.dp // landscape
+                else -> 125.dp
+            }
+        } else if (item.isStream || item.isVideo) {
+            130.dp
+        } else if (item.isAudio) {
+            95.dp
+        } else {
+            // True staggered mosaic variation
+            val mod = Math.abs(item.url.hashCode()) % 4
+            when (mod) {
+                0 -> 155.dp
+                1 -> 115.dp
+                2 -> 140.dp
+                else -> 120.dp
+            }
+        }
+    }
+
+    Card(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .clickable { onToggle() }
             .testTag("scraped_media_card_${item.id}"),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(
+        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+        colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(110.dp)
+                    .height(mosaicHeight)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             ) {
                 val previewUrl = item.thumbnailUrl ?: item.url
@@ -755,8 +1090,25 @@ fun RealScrapedCard(
                         )
                     }
                 } else {
+                    val resolvedUrl = remember(previewUrl) {
+                        if (previewUrl.startsWith("//")) "https:$previewUrl" else previewUrl
+                    }
+                    val context = LocalContext.current
+                    val imageRequest = remember(resolvedUrl) {
+                        ImageRequest.Builder(context)
+                            .data(resolvedUrl)
+                            .crossfade(true)
+                            .setHeader("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
+                            .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                            .apply {
+                                if (resolvedUrl.contains("wikimedia.org") || resolvedUrl.contains("wikipedia.org")) {
+                                    setHeader("Referer", "https://en.wikipedia.org/")
+                                }
+                            }
+                            .build()
+                    }
                     AsyncImage(
-                        model = previewUrl,
+                        model = imageRequest,
                         contentDescription = item.title,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -882,8 +1234,16 @@ fun RealScrapedCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val (w, h) = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item)
+                    val dimensionDisplay = if (w != null && h != null) {
+                        "${w}x${h}"
+                    } else if (w != null) {
+                        "${w}px"
+                    } else {
+                        item.resolutionHint ?: item.source
+                    }
                     Text(
-                        text = item.resolutionHint ?: item.source,
+                        text = dimensionDisplay,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 8.sp,
@@ -1010,5 +1370,161 @@ fun ThreeColumnSkeletonCard(heightDp: Int) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Comprehensive parser for media dimensions from resolution hints, URL patterns, and titles.
+ */
+fun parseScrapedMediaDimensions(item: ScrapedMediaItem): Pair<Int?, Int?> {
+    val hint = item.resolutionHint?.trim()
+    if (!hint.isNullOrBlank()) {
+        val match = Regex("""(\d{2,5})\s*[xX×]\s*(\d{2,5})""").find(hint)
+        if (match != null) {
+            val w = match.groupValues[1].toIntOrNull()
+            val h = match.groupValues[2].toIntOrNull()
+            if (w != null && h != null && w > 0 && h > 0) return Pair(w, h)
+        }
+        val pMatch = Regex("""(\d{3,4})p""", RegexOption.IGNORE_CASE).find(hint)
+        if (pMatch != null) {
+            val h = pMatch.groupValues[1].toIntOrNull()
+            if (h != null && h > 0) {
+                return Pair((h * 16) / 9, h)
+            }
+        }
+        val wMatch = Regex("""(\d{2,5})w""", RegexOption.IGNORE_CASE).find(hint)
+        if (wMatch != null) {
+            val w = wMatch.groupValues[1].toIntOrNull()
+            if (w != null && w > 0) return Pair(w, null)
+        }
+        val pxMatch = Regex("""(\d{2,5})px""", RegexOption.IGNORE_CASE).find(hint)
+        if (pxMatch != null) {
+            val w = pxMatch.groupValues[1].toIntOrNull()
+            if (w != null && w > 0) return Pair(w, null)
+        }
+    }
+
+    // 1. WxH in URL or Title (e.g., 800x600, 1920x1080)
+    val urlMatch = Regex("""(?:^|[/_.-])(\d{2,5})\s*[xX×]\s*(\d{2,5})(?:[/_.-]|$)""").find(item.url)
+        ?: Regex("""(?:^|[/_.-])(\d{2,5})\s*[xX×]\s*(\d{2,5})(?:[/_.-]|$)""").find(item.title)
+    if (urlMatch != null) {
+        val w = urlMatch.groupValues[1].toIntOrNull()
+        val h = urlMatch.groupValues[2].toIntOrNull()
+        if (w != null && h != null && w >= 10 && h >= 10) {
+            return Pair(w, h)
+        }
+    }
+
+    // 2. Wikimedia / standard thumbnail pattern: /(\d+)px- or title starting with (\d+)px
+    val pxMatch = Regex("""(?:^|[/_-])(\d{2,5})px(?:[-_./]|$)""", RegexOption.IGNORE_CASE).find(item.url)
+        ?: Regex("""(?:^|[/_-])(\d{2,5})px(?:[-_./]|$)""", RegexOption.IGNORE_CASE).find(item.title)
+    if (pxMatch != null) {
+        val w = pxMatch.groupValues[1].toIntOrNull()
+        if (w != null && w >= 10) {
+            return Pair(w, null)
+        }
+    }
+
+    // 3. Query params: ?width=800&height=600 or ?w=800&h=600
+    val wQuery = Regex("""[?&](?:width|w)=(\d{2,5})""", RegexOption.IGNORE_CASE).find(item.url)?.groupValues?.get(1)?.toIntOrNull()
+    val hQuery = Regex("""[?&](?:height|h)=(\d{2,5})""", RegexOption.IGNORE_CASE).find(item.url)?.groupValues?.get(1)?.toIntOrNull()
+    if (wQuery != null || hQuery != null) {
+        return Pair(wQuery, hQuery)
+    }
+
+    return Pair(null, null)
+}
+
+/**
+ * Evaluates whether a media item satisfies the active dimension filter.
+ */
+fun passesDimensionFilter(
+    item: ScrapedMediaItem,
+    targetMinWidth: Int,
+    targetMinHeight: Int,
+    dynamicDimensions: Map<String, Pair<Int, Int>>
+): Boolean {
+    if (targetMinWidth <= 0 && targetMinHeight <= 0) return true
+    if (item.category == MediaCategory.AUDIO) return false
+
+    // Reject decorative small UI elements, buttons, icons, or donate badges
+    val lowerUrl = item.url.lowercase(Locale.ROOT)
+    val lowerTitle = item.title.lowercase(Locale.ROOT)
+    val isTinyUiMedia = lowerUrl.contains("donate") || lowerUrl.contains("/icon") ||
+            lowerUrl.contains("-icon.") || lowerUrl.contains("_icon.") ||
+            lowerUrl.contains("favicon") || lowerUrl.contains("badge") ||
+            lowerTitle.contains("donate") || lowerTitle.contains("favicon") ||
+            lowerTitle.contains("icon")
+    if (isTinyUiMedia) {
+        return false
+    }
+
+    val (w, h) = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item)
+
+    // Strict rejection if known dimension is less than threshold
+    if (w != null && targetMinWidth > 0 && w < targetMinWidth) {
+        return false
+    }
+    if (h != null && targetMinHeight > 0 && h < targetMinHeight) {
+        return false
+    }
+
+    // Pass if at least one dimension meets or exceeds threshold
+    if (w != null && targetMinWidth > 0 && w >= targetMinWidth) {
+        return true
+    }
+    if (h != null && targetMinHeight > 0 && h >= targetMinHeight) {
+        return true
+    }
+
+    // For images where dimension is not yet probed/known, allow only if not an icon/favicon format
+    return w == null && h == null && !lowerUrl.endsWith(".ico") && !lowerUrl.endsWith(".svg")
+}
+
+/**
+ * Lightweight background prober for media items with undetermined dimensions.
+ * Uses OkHttp with HTTP Range 0-8191 to read image headers without downloading the full image.
+ */
+object ImageDimensionProber {
+    private val cache = ConcurrentHashMap<String, Pair<Int, Int>>()
+
+    suspend fun probe(url: String, referer: String? = null): Pair<Int, Int>? = withContext(Dispatchers.IO) {
+        val cleanUrl = if (url.startsWith("//")) "https:$url" else url
+        cache[cleanUrl]?.let { return@withContext it }
+
+        try {
+            val reqBuilder = okhttp3.Request.Builder()
+                .url(cleanUrl)
+                .header("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
+                .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                .header("Range", "bytes=0-8191")
+
+            if (!referer.isNullOrBlank()) {
+                reqBuilder.header("Referer", referer)
+            } else if (cleanUrl.contains("wikimedia.org") || cleanUrl.contains("wikipedia.org")) {
+                reqBuilder.header("Referer", "https://en.wikipedia.org/")
+            }
+
+            OkHttpDownloader.client.newCall(reqBuilder.build()).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val bytes = resp.body?.bytes()
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                        if (opts.outWidth > 0 && opts.outHeight > 0) {
+                            val dims = Pair(opts.outWidth, opts.outHeight)
+                            cache[cleanUrl] = dims
+                            return@withContext dims
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        null
+    }
+
+    fun getCached(url: String): Pair<Int, Int>? {
+        val cleanUrl = if (url.startsWith("//")) "https:$url" else url
+        return cache[cleanUrl]
     }
 }

@@ -28,7 +28,8 @@ data class MediaInboxStack(
     val sourceDomain: String,
     val sourceUrl: String,
     val items: List<MediaInboxItem>,
-    val timestampMillis: Long = System.currentTimeMillis()
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val description: String = ""
 )
 
 class MediaInboxRepository(private val context: Context) {
@@ -59,6 +60,7 @@ class MediaInboxRepository(private val context: Context) {
                 val sourceDomain = stackObj.optString("sourceDomain", "")
                 val sourceUrl = stackObj.optString("sourceUrl", "")
                 val timestamp = stackObj.optLong("timestampMillis", System.currentTimeMillis())
+                val description = stackObj.optString("description", "")
 
                 val itemsArray = stackObj.optJSONArray("items") ?: JSONArray()
                 val itemsList = mutableListOf<MediaInboxItem>()
@@ -87,7 +89,8 @@ class MediaInboxRepository(private val context: Context) {
                         sourceDomain = sourceDomain,
                         sourceUrl = sourceUrl,
                         items = itemsList,
-                        timestampMillis = timestamp
+                        timestampMillis = timestamp,
+                        description = description
                     )
                 )
             }
@@ -107,6 +110,7 @@ class MediaInboxRepository(private val context: Context) {
                     put("sourceDomain", stack.sourceDomain)
                     put("sourceUrl", stack.sourceUrl)
                     put("timestampMillis", stack.timestampMillis)
+                    put("description", stack.description)
 
                     val itemsArr = JSONArray()
                     stack.items.forEach { itm ->

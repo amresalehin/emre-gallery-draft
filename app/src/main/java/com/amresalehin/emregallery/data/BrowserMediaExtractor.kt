@@ -126,25 +126,31 @@ class BrowserMediaExtractor(private val context: Context) {
                         val headers = request.requestHeaders ?: emptyMap()
                         val acceptHeader = headers["Accept"]?.lowercase() ?: ""
 
-                        // Resource and response-aware media classification
-                        val isStream = reqLower.contains(".m3u8") || reqLower.contains(".mpd") ||
+                        val isNonMediaPage = reqLower.contains(".html") || reqLower.contains(".htm") ||
+                                reqLower.contains(".php") || reqLower.contains(".js") || reqLower.contains(".css") ||
+                                reqLower.contains(".json") || reqLower.contains("/wiki/") || reqLower.contains("/geohack") ||
+                                reqLower.contains("centralautologin")
+
+                        val isStream = !isNonMediaPage && (reqLower.contains(".m3u8") || reqLower.contains(".mpd") ||
                                 reqLower.contains("/hls/") || reqLower.contains("/dash/") ||
                                 reqLower.contains("chunklist") || acceptHeader.contains("mpegurl") ||
-                                acceptHeader.contains("dash+xml")
+                                acceptHeader.contains("dash+xml"))
 
-                        val isVideo = isStream || reqLower.contains(".mp4") || reqLower.contains(".webm") ||
+                        val isVideo = !isNonMediaPage && (isStream || reqLower.contains(".mp4") || reqLower.contains(".webm") ||
                                 reqLower.contains(".mov") || reqLower.contains(".mkv") ||
-                                acceptHeader.contains("video/")
+                                acceptHeader.contains("video/"))
 
-                        val isAudio = reqLower.contains(".mp3") || reqLower.contains(".m4a") ||
+                        val isAudio = !isNonMediaPage && (reqLower.contains(".mp3") || reqLower.contains(".m4a") ||
                                 reqLower.contains(".aac") || reqLower.contains(".wav") ||
                                 reqLower.contains(".ogg") || reqLower.contains(".flac") ||
-                                reqLower.contains(".opus") || acceptHeader.contains("audio/")
+                                reqLower.contains(".opus") || acceptHeader.contains("audio/"))
 
-                        val isImage = reqLower.contains(".jpg") || reqLower.contains(".jpeg") ||
+                        val hasImageExt = reqLower.contains(".jpg") || reqLower.contains(".jpeg") ||
                                 reqLower.contains(".png") || reqLower.contains(".webp") ||
                                 reqLower.contains(".gif") || reqLower.contains(".avif") ||
-                                acceptHeader.contains("image/")
+                                reqLower.contains(".svg") || reqLower.contains(".bmp")
+
+                        val isImage = !isNonMediaPage && (hasImageExt || (acceptHeader.startsWith("image/") && !acceptHeader.contains("text/html")))
 
                         if (isVideo || isAudio || isImage) {
                             mainHandler.post {
@@ -275,26 +281,61 @@ class BrowserMediaExtractor(private val context: Context) {
         val script = """
             (function() {
                 var list = [];
+                function resolveAbs(u) {
+                    if (!u) return null;
+                    try {
+                        return new URL(u, document.baseURI || window.location.href).href;
+                    } catch(e) {
+                        if (u.indexOf('//') === 0) return 'https:' + u;
+                        return u;
+                    }
+                }
+
                 // 1. Images, picture sources, lazy-load attributes, and srcset
                 var imgs = document.querySelectorAll('img, picture source');
                 for (var i = 0; i < imgs.length; i++) {
                     var el = imgs[i];
+                    var nw = el.naturalWidth || parseInt(el.getAttribute('width')) || el.clientWidth || 0;
+                    var nh = el.naturalHeight || parseInt(el.getAttribute('height')) || el.clientHeight || 0;
+                    var res = (nw > 0 && nh > 0) ? (nw + 'x' + nh) : ((nw > 0) ? (nw + 'w') : null);
+
                     if (el.src && !el.src.startsWith('data:')) {
-                        var res = (el.naturalWidth && el.naturalHeight) ? (el.naturalWidth + 'x' + el.naturalHeight) : null;
-                        list.push({u: el.src, s: 'DOM', r: res});
+                        var absUrl = resolveAbs(el.src);
+                        if (absUrl) list.push({u: absUrl, s: 'DOM', r: res});
                     }
                     var dSrc = el.getAttribute('data-src') || el.getAttribute('data-original') ||
                                el.getAttribute('data-lazy-src') || el.getAttribute('data-zoom-src') ||
                                el.getAttribute('data-hires') || el.getAttribute('data-full');
                     if (dSrc && !dSrc.startsWith('data:')) {
-                        list.push({u: dSrc, s: 'DOM', r: 'data-src'});
+                        var absD = resolveAbs(dSrc);
+                        if (absD) list.push({u: absD, s: 'DOM', r: res || 'data-src'});
                     }
                     var srcset = el.getAttribute('srcset') || el.getAttribute('data-srcset');
                     if (srcset) {
                         var parts = srcset.split(',');
                         for (var p = 0; p < parts.length; p++) {
                             var bits = parts[p].trim().split(/\s+/);
-                            if (bits[0]) list.push({u: bits[0], s: 'SRCSET', r: bits[1] || 'srcset'});
+                            if (bits[0]) {
+                                var absS = resolveAbs(bits[0]);
+                                if (absS) {
+                                    var desc = bits[1] || '';
+                                    var rDesc = null;
+                                    var pxMatch = absS.match(/[/_-](\d{2,5})px[-_./]/);
+                                    if (pxMatch && pxMatch[1]) {
+                                        rDesc = pxMatch[1] + 'px';
+                                    } else if (desc.endsWith('w')) {
+                                        rDesc = desc;
+                                    } else if (desc.endsWith('x')) {
+                                        var mult = parseFloat(desc) || 1;
+                                        if (nw > 0 && nh > 0) {
+                                            rDesc = Math.round(nw * mult) + 'x' + Math.round(nh * mult);
+                                        } else if (nw > 0) {
+                                            rDesc = Math.round(nw * mult) + 'w';
+                                        }
+                                    }
+                                    list.push({u: absS, s: 'SRCSET', r: rDesc || res || desc || 'srcset'});
+                                }
+                            }
                         }
                     }
                 }
@@ -303,11 +344,14 @@ class BrowserMediaExtractor(private val context: Context) {
                 var vids = document.querySelectorAll('video');
                 for (var j = 0; j < vids.length; j++) {
                     var v = vids[j];
-                    if (v.src) list.push({u: v.src, s: 'DOM', p: v.poster || null, r: 'video'});
-                    if (v.poster) list.push({u: v.poster, s: 'DOM', r: 'poster'});
+                    var vSrc = resolveAbs(v.src);
+                    var vPoster = resolveAbs(v.poster);
+                    if (vSrc) list.push({u: vSrc, s: 'DOM', p: vPoster, r: 'video'});
+                    if (vPoster) list.push({u: vPoster, s: 'DOM', r: 'poster'});
                     var sources = v.querySelectorAll('source');
                     for (var s = 0; s < sources.length; s++) {
-                        if (sources[s].src) list.push({u: sources[s].src, s: 'DOM', p: v.poster || null, r: 'video-source'});
+                        var sSrc = resolveAbs(sources[s].src);
+                        if (sSrc) list.push({u: sSrc, s: 'DOM', p: vPoster, r: 'video-source'});
                     }
                 }
 
@@ -315,10 +359,12 @@ class BrowserMediaExtractor(private val context: Context) {
                 var auds = document.querySelectorAll('audio');
                 for (var a = 0; a < auds.length; a++) {
                     var au = auds[a];
-                    if (au.src) list.push({u: au.src, s: 'DOM', r: 'audio'});
+                    var aSrc = resolveAbs(au.src);
+                    if (aSrc) list.push({u: aSrc, s: 'DOM', r: 'audio'});
                     var asources = au.querySelectorAll('source');
                     for (var k = 0; k < asources.length; k++) {
-                        if (asources[k].src) list.push({u: asources[k].src, s: 'DOM', r: 'audio-source'});
+                        var asSrc = resolveAbs(asources[k].src);
+                        if (asSrc) list.push({u: asSrc, s: 'DOM', r: 'audio-source'});
                     }
                 }
 
@@ -330,9 +376,18 @@ class BrowserMediaExtractor(private val context: Context) {
                         var arr = Array.isArray(parsed) ? parsed : [parsed];
                         for (var idx = 0; idx < arr.length; idx++) {
                             var item = arr[idx];
-                            if (item.contentUrl) list.push({u: item.contentUrl, s: 'DOM', r: 'json-ld'});
-                            if (item.thumbnailUrl) list.push({u: item.thumbnailUrl, s: 'DOM', r: 'json-ld-thumb'});
-                            if (item.image && typeof item.image === 'string') list.push({u: item.image, s: 'DOM', r: 'json-ld-image'});
+                            if (item.contentUrl) {
+                                var cu = resolveAbs(item.contentUrl);
+                                if (cu) list.push({u: cu, s: 'DOM', r: 'json-ld'});
+                            }
+                            if (item.thumbnailUrl) {
+                                var tu = resolveAbs(item.thumbnailUrl);
+                                if (tu) list.push({u: tu, s: 'DOM', r: 'json-ld-thumb'});
+                            }
+                            if (item.image && typeof item.image === 'string') {
+                                var iu = resolveAbs(item.image);
+                                if (iu) list.push({u: iu, s: 'DOM', r: 'json-ld-image'});
+                            }
                         }
                     } catch(e) {}
                 }
@@ -346,7 +401,8 @@ class BrowserMediaExtractor(private val context: Context) {
                     if (bg && bg.indexOf('url(') !== -1) {
                         var match = bg.match(/url\(['"]?(.*?)['"]?\)/);
                         if (match && match[1] && !match[1].startsWith('data:')) {
-                            list.push({u: match[1], s: 'CSS', r: 'background'});
+                            var bgu = resolveAbs(match[1]);
+                            if (bgu) list.push({u: bgu, s: 'CSS', r: 'background'});
                         }
                     }
                 }
@@ -354,7 +410,8 @@ class BrowserMediaExtractor(private val context: Context) {
                 // 6. iFrames (e.g., media players or embeds)
                 var iframes = document.querySelectorAll('iframe');
                 for (var f = 0; f < iframes.length; f++) {
-                    if (iframes[f].src) list.push({u: iframes[f].src, s: 'IFRAME', r: 'iframe'});
+                    var ifr = resolveAbs(iframes[f].src);
+                    if (ifr) list.push({u: ifr, s: 'IFRAME', r: 'iframe'});
                 }
 
                 return JSON.stringify(list);

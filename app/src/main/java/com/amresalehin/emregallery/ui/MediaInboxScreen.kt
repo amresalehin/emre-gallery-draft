@@ -7,13 +7,19 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -25,8 +31,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -41,11 +50,14 @@ import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.MediaScraper
 import com.amresalehin.emregallery.data.ScrapedMediaItem
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +75,7 @@ fun MediaInboxScreen(
     var showFilterSheet by remember { mutableStateOf(false) }
     var showScraperDrawer by remember { mutableStateOf(false) }
     var showFullScreenBrowser by remember { mutableStateOf(false) }
+    var browserInitialUrl by remember { mutableStateOf("") }
     var sortOrder by remember { mutableStateOf("Newest") }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -155,62 +168,37 @@ fun MediaInboxScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(top = 80.dp, bottom = 96.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // If there are real image stacks, render the real masonry grid
-                if (filteredStacks.isNotEmpty()) {
-                    item {
-                        val leftStacks = filteredStacks.filterIndexed { idx, _ -> idx % 2 == 0 }
-                        val rightStacks = filteredStacks.filterIndexed { idx, _ -> idx % 2 == 1 }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                leftStacks.forEach { stack ->
-                                    ImageStackCard(
-                                        stack = stack,
-                                        onClick = { selectedStackForDetail = stack },
-                                        onDelete = {
-                                            inboxRepo.deleteStack(stack.id)
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar("Stack removed from Inbox")
-                                            }
-                                        }
-                                    )
+            if (filteredStacks.isNotEmpty()) {
+                LazyVerticalStaggeredGrid(
+                    columns = StaggeredGridCells.Fixed(2),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(top = 80.dp, bottom = 96.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalItemSpacing = 14.dp
+                ) {
+                    items(filteredStacks, key = { it.id }) { stack ->
+                        ImageStackCard(
+                            stack = stack,
+                            onClick = { selectedStackForDetail = stack },
+                            onDelete = {
+                                inboxRepo.deleteStack(stack.id)
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Stack removed from Inbox")
                                 }
                             }
-
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                rightStacks.forEach { stack ->
-                                    ImageStackCard(
-                                        stack = stack,
-                                        onClick = { selectedStackForDetail = stack },
-                                        onDelete = {
-                                            inboxRepo.deleteStack(stack.id)
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar("Stack removed from Inbox")
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                        )
                     }
-                } else {
-                    // Skeleton wireframe layout matching Screenshot 1 empty state
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    contentPadding = PaddingValues(top = 80.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
                     item {
                         SkeletonWireframeGrid()
                     }
@@ -380,97 +368,35 @@ fun MediaInboxScreen(
         }
     }
 
-    // Detail Dialog for an Image Stack
-    selectedStackForDetail?.let { stack ->
-        AlertDialog(
-            onDismissRequest = { selectedStackForDetail = null },
-            title = {
-                Text(
-                    text = stack.title.ifBlank { stack.sourceDomain.ifBlank { "Media Stack" } },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            },
-            text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "Contains ${stack.items.size} ${if (stack.items.size == 1) "media file" else "media files"} from ${stack.sourceDomain.ifBlank { "web" }}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    // First item preview
-                    val firstItem = stack.items.firstOrNull()
-                    if (firstItem != null) {
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(160.dp)
-                        ) {
-                            AsyncImage(
-                                model = firstItem.localUri,
-                                contentDescription = firstItem.title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        }
+    // Stack Detail Tab with stacked card carousel and bottom drawer (replacing modal)
+    AnimatedVisibility(
+        visible = selectedStackForDetail != null,
+        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+        modifier = Modifier.fillMaxSize().zIndex(20f)
+    ) {
+        selectedStackForDetail?.let { stack ->
+            MediaStackDetailTab(
+                stack = stack,
+                onClose = { selectedStackForDetail = null },
+                onOpenMedia = { uri ->
+                    selectedStackForDetail = null
+                    onOpenMediaItem?.invoke(uri)
+                },
+                onOpenBrowser = { url ->
+                    browserInitialUrl = url
+                    showFullScreenBrowser = true
+                },
+                onDeleteStack = {
+                    inboxRepo.deleteStack(stack.id)
+                    selectedStackForDetail = null
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Stack removed from Inbox")
                     }
-
-                    // List item names
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        stack.items.take(4).forEach { itm ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = if (itm.isVideo) Icons.Default.PlayArrow else Icons.Default.Image,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = itm.title,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val firstItem = stack.items.firstOrNull()
-                        selectedStackForDetail = null
-                        if (firstItem != null && onOpenMediaItem != null) {
-                            onOpenMediaItem(firstItem.localUri)
-                        }
-                    }
-                ) {
-                    Text("View Media")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        inboxRepo.deleteStack(stack.id)
-                        selectedStackForDetail = null
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Delete Stack")
-                }
-            }
-        )
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 
     // Media Scraper Drawer opening from below up to 80% of screen height with 20% scrim at top
@@ -509,6 +435,11 @@ fun MediaInboxScreen(
                         snackbarHostState.showSnackbar("Media stack added to Inbox!")
                     }
                 },
+                onOpenBrowser = { url ->
+                    browserInitialUrl = url
+                    showFullScreenBrowser = true
+                    showScraperDrawer = false
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -522,7 +453,11 @@ fun MediaInboxScreen(
         modifier = Modifier.fillMaxSize().zIndex(25f)
     ) {
         FullScreenBrowserView(
-            onClose = { showFullScreenBrowser = false },
+            initialUrl = browserInitialUrl,
+            onClose = {
+                showFullScreenBrowser = false
+                browserInitialUrl = ""
+            },
             onDownloadComplete = { count ->
                 scope.launch {
                     snackbarHostState.showSnackbar("Downloaded $count media items to Inbox!")
@@ -535,7 +470,183 @@ fun MediaInboxScreen(
 }
 
 /**
- * Image Stack Card displaying real downloaded media in stacked format
+ * True Mosaic Thumbnail component for media stacks.
+ * Supports:
+ * - 0 items: Empty placeholder
+ * - 1 item: Full image
+ * - 2 items: 2 equal vertical columns (50% / 50%) side-by-side
+ * - 3 items: 1 tall on left (58%), 2 stacked on right (42%)
+ * - 4+ items: 2x2 quadrant grid with +N counter on the 4th quadrant
+ */
+@Composable
+fun TrueMediaMosaicThumbnail(
+    items: List<MediaInboxItem>,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+    ) {
+        when {
+            items.isEmpty() -> {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Image,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+            }
+            items.size == 1 -> {
+                AsyncImage(
+                    model = items[0].localUri,
+                    contentDescription = items[0].title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            items.size == 2 -> {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    AsyncImage(
+                        model = items[0].localUri,
+                        contentDescription = items[0].title,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentScale = ContentScale.Crop
+                    )
+                    AsyncImage(
+                        model = items[1].localUri,
+                        contentDescription = items[1].title,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+            items.size == 3 -> {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    AsyncImage(
+                        model = items[0].localUri,
+                        contentDescription = items[0].title,
+                        modifier = Modifier
+                            .weight(0.58f)
+                            .fillMaxHeight(),
+                        contentScale = ContentScale.Crop
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(0.42f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        AsyncImage(
+                            model = items[1].localUri,
+                            contentDescription = items[1].title,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentScale = ContentScale.Crop
+                        )
+                        AsyncImage(
+                            model = items[2].localUri,
+                            contentDescription = items[2].title,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                }
+            }
+            else -> {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        AsyncImage(
+                            model = items[0].localUri,
+                            contentDescription = items[0].title,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            contentScale = ContentScale.Crop
+                        )
+                        AsyncImage(
+                            model = items[1].localUri,
+                            contentDescription = items[1].title,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        AsyncImage(
+                            model = items[2].localUri,
+                            contentDescription = items[2].title,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                        ) {
+                            AsyncImage(
+                                model = items[3].localUri,
+                                contentDescription = items[3].title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                            if (items.size > 4) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.58f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "+${items.size - 3}",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Image Stack Card displaying real downloaded media in True Mosaic format
  */
 @Composable
 fun ImageStackCard(
@@ -544,9 +655,19 @@ fun ImageStackCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val firstItem = stack.items.firstOrNull()
     val dateStr = remember(stack.timestampMillis) {
         SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(stack.timestampMillis))
+    }
+    val hasVideo = remember(stack.items) { stack.items.any { it.isVideo || it.isStream } }
+
+    val cardThumbnailHeight = remember(stack.items) {
+        when {
+            stack.items.size == 1 && (stack.items[0].isVideo || stack.items[0].isStream) -> 145.dp
+            stack.items.size == 1 -> 175.dp
+            stack.items.size == 2 -> 160.dp
+            stack.items.size == 3 -> 180.dp
+            else -> 190.dp
+        }
     }
 
     Box(
@@ -556,16 +677,14 @@ fun ImageStackCard(
             .testTag("inbox_image_stack_${stack.id}")
     ) {
         // Stack visual effect: Subtle layered card underneath to look like an image stack
-        if (stack.items.size > 1) {
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp, start = 4.dp, end = 4.dp)
-                    .height(180.dp)
-            ) {}
-        }
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 5.dp, start = 4.dp, end = 4.dp)
+                .height(cardThumbnailHeight + 60.dp)
+        ) {}
 
         ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
@@ -576,40 +695,51 @@ fun ImageStackCard(
             elevation = CardDefaults.elevatedCardElevation(defaultElevation = 3.dp)
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // Media thumbnail container
+                // Media thumbnail container with True Mosaic
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(160.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .height(cardThumbnailHeight)
                 ) {
-                    if (firstItem != null) {
-                        AsyncImage(
-                            model = firstItem.localUri,
-                            contentDescription = stack.title,
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TrueMediaMosaicThumbnail(
+                        items = stack.items,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // Video Play Icon overlay if stack has video
+                    if (hasVideo) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.6f),
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(34.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Video",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
 
-                    // Stack Count Badge in top right corner (indicates image stack)
+                    // Stack Count Badge in top right corner
                     Surface(
-                        shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.7f),
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.Black.copy(alpha = 0.72f),
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .padding(8.dp)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Collections,
+                                imageVector = if (hasVideo) Icons.Default.VideoLibrary else Icons.Default.PhotoLibrary,
                                 contentDescription = null,
                                 tint = Color.White,
                                 modifier = Modifier.size(12.dp)
@@ -617,8 +747,8 @@ fun ImageStackCard(
                             Spacer(Modifier.width(4.dp))
                             Text(
                                 text = "${stack.items.size}",
-                                style = MaterialTheme.typography.labelSmall,
                                 color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
                             )
@@ -667,6 +797,763 @@ fun ImageStackCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * Detail Tab with stacked card carousel and lower drawer (matches screenshots)
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MediaStackDetailTab(
+    stack: MediaInboxStack,
+    onClose: () -> Unit,
+    onOpenMedia: (String) -> Unit,
+    onOpenBrowser: (String) -> Unit,
+    onDeleteStack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var menuExpanded by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var isDrawerExpanded by remember { mutableStateOf(true) }
+
+    val items = stack.items
+    var currentIndex by remember(stack.id) { mutableIntStateOf(0) }
+    val activeIndex = currentIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+    val activeItem = items.getOrNull(activeIndex) ?: items.firstOrNull()
+
+    val dragOffsetX = remember { Animatable(0f) }
+    val dragOffsetY = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current.density
+
+    val formattedDateTime = remember(stack.timestampMillis) {
+        SimpleDateFormat("MMM dd, yyyy • hh:mm a", Locale.getDefault()).format(Date(stack.timestampMillis))
+    }
+
+    val totalBytes = remember(items) { items.sumOf { it.sizeBytes } }
+    val formattedTotalSize = remember(totalBytes) {
+        when {
+            totalBytes >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB", totalBytes / (1024f * 1024f))
+            totalBytes >= 1024 -> String.format(Locale.US, "%.1f KB", totalBytes / 1024f)
+            totalBytes > 0 -> "$totalBytes B"
+            else -> "Ready"
+        }
+    }
+
+    val domain = remember(stack.sourceDomain, stack.sourceUrl) {
+        if (stack.sourceDomain.isNotBlank()) {
+            stack.sourceDomain
+        } else {
+            runCatching { URL(stack.sourceUrl).host }.getOrDefault("Web")
+        }
+    }
+
+    val faviconUrl = remember(domain) {
+        "https://www.google.com/s2/favicons?domain=$domain&sz=64"
+    }
+
+    val extractedTitle = remember(stack.title, activeItem) {
+        if (activeItem != null && activeItem.title.isNotBlank()) {
+            activeItem.title
+        } else if (stack.title.isNotBlank() && stack.title != "Untitled Stack" && stack.title != "Discovered Media") {
+            stack.title
+        } else {
+            domain
+        }
+    }
+
+    val extractedDescription = remember(stack.description, activeItem, items, domain, formattedTotalSize) {
+        if (activeItem != null) {
+            val formatStr = if (activeItem.format.isNotBlank()) "${activeItem.format} format" else "media file"
+            val typeStr = if (activeItem.isVideo) "Video" else if (activeItem.isStream) "Live Stream" else "Image"
+            val itemSizeStr = if (activeItem.sizeBytes > 0) {
+                when {
+                    activeItem.sizeBytes >= 1024 * 1024 -> String.format(Locale.US, "%.1f MB", activeItem.sizeBytes / (1024f * 1024f))
+                    activeItem.sizeBytes >= 1024 -> String.format(Locale.US, "%.1f KB", activeItem.sizeBytes / 1024f)
+                    else -> "${activeItem.sizeBytes} B"
+                }
+            } else formattedTotalSize
+            "File ${activeIndex + 1} of ${items.size}: $typeStr in $formatStr ($itemSizeStr) extracted from $domain."
+        } else if (stack.description.isNotBlank()) {
+            stack.description
+        } else {
+            "Contains ${items.size} media files extracted from $domain. Total size: $formattedTotalSize."
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .testTag("media_stack_detail_tab")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
+            // 1. Top Bar with Circular Back Button and Circular More Button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Circular Back Button
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface,
+                    shadowElevation = 3.dp,
+                    tonalElevation = 2.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.testTag("stack_detail_back_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                // Circular More Button
+                Box {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 3.dp,
+                        tonalElevation = 2.dp,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        IconButton(
+                            onClick = { menuExpanded = true },
+                            modifier = Modifier.testTag("stack_detail_more_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreHoriz,
+                                contentDescription = "More",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Open in Browser") },
+                            leadingIcon = { Icon(Icons.Default.OpenInNew, null) },
+                            onClick = {
+                                menuExpanded = false
+                                onOpenBrowser(stack.sourceUrl.ifBlank { "https://$domain" })
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("View in Gallery") },
+                            leadingIcon = { Icon(Icons.Default.Visibility, null) },
+                            onClick = {
+                                menuExpanded = false
+                                activeItem?.let { onOpenMedia(it.localUri) }
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Delete Stack", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                menuExpanded = false
+                                showDeleteConfirmDialog = true
+                            }
+                        )
+                    }
+                }
+            }
+
+            // 2. Functional Stacked Photo Deck Area (Real images physically coming forward from below stack)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .testTag("functional_stacked_photo_deck"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (items.isEmpty()) {
+                        RealDeckMediaCard(
+                            item = null,
+                            elevation = 8.dp,
+                            modifier = Modifier,
+                            onClick = {}
+                        )
+                    } else {
+                        val maxDepth = 3
+                        val maxVisibleIndex = (currentIndex + maxDepth).coerceAtMost(items.size - 1)
+                        val dragDistance = sqrt(dragOffsetX.value * dragOffsetX.value + dragOffsetY.value * dragOffsetY.value)
+                        val swipeProgress = (dragDistance / 350f).coerceIn(0f, 1f)
+
+                        // Render cards in reverse order so the deepest card is at the back, top card on top
+                        for (i in maxVisibleIndex downTo currentIndex) {
+                            val depth = i - currentIndex
+                            val item = items[i]
+
+                            // Dynamic interpolation: as top card is swiped away, card directly below comes forward!
+                            val cardScale = when (depth) {
+                                0 -> 1.0f
+                                1 -> 0.93f + (1.0f - 0.93f) * swipeProgress
+                                2 -> 0.86f + (0.93f - 0.86f) * swipeProgress
+                                else -> 0.80f + (0.86f - 0.80f) * swipeProgress
+                            }
+
+                            val cardRotZ = when (depth) {
+                                0 -> dragOffsetX.value * 0.04f
+                                1 -> 3.5f * (1f - swipeProgress)
+                                2 -> -4.5f + (3.5f - -4.5f) * swipeProgress
+                                else -> 5.5f + (-4.5f - 5.5f) * swipeProgress
+                            }
+
+                            val cardTransX = when (depth) {
+                                0 -> dragOffsetX.value
+                                1 -> (14f * density) * (1f - swipeProgress)
+                                2 -> (-16f * density) + ((14f * density) - (-16f * density)) * swipeProgress
+                                else -> (18f * density) + ((-16f * density) - (18f * density)) * swipeProgress
+                            }
+
+                            val cardTransY = when (depth) {
+                                0 -> dragOffsetY.value
+                                1 -> (8f * density) * (1f - swipeProgress)
+                                2 -> (16f * density) + ((8f * density) - (16f * density)) * swipeProgress
+                                else -> (24f * density) + ((16f * density) - (24f * density)) * swipeProgress
+                            }
+
+                            val cardAlpha = when (depth) {
+                                0 -> (1f - swipeProgress * 0.25f).coerceIn(0.75f, 1f)
+                                else -> (0.88f + 0.12f * swipeProgress).coerceIn(0.88f, 1f)
+                            }
+
+                            val cardElevation = when (depth) {
+                                0 -> 16.dp
+                                1 -> 10.dp
+                                2 -> 6.dp
+                                else -> 3.dp
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        scaleX = cardScale
+                                        scaleY = cardScale
+                                        rotationZ = cardRotZ
+                                        translationX = cardTransX
+                                        translationY = cardTransY
+                                        alpha = cardAlpha
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                RealDeckMediaCard(
+                                    item = item,
+                                    elevation = cardElevation,
+                                    modifier = if (depth == 0) {
+                                        Modifier.pointerInput(currentIndex, items.size) {
+                                            detectDragGestures(
+                                                onDragStart = { },
+                                                onDragEnd = {
+                                                    val dist = sqrt(dragOffsetX.value * dragOffsetX.value + dragOffsetY.value * dragOffsetY.value)
+                                                    if (dist < 12f) {
+                                                        // Tap without dragging: open media view
+                                                        onOpenMedia(item.localUri)
+                                                        scope.launch {
+                                                            dragOffsetX.animateTo(0f)
+                                                            dragOffsetY.animateTo(0f)
+                                                        }
+                                                    } else if ((dragOffsetX.value < -140f || dragOffsetY.value < -150f) && currentIndex < items.size - 1) {
+                                                        // Swiped left or up: top card exits and card below comes forward to the top!
+                                                        scope.launch {
+                                                            val exitX = if (abs(dragOffsetX.value) > 20f) (if (dragOffsetX.value < 0) -1300f else 1300f) else 0f
+                                                            val exitY = if (abs(dragOffsetY.value) > 20f) (if (dragOffsetY.value < 0) -1300f else 1300f) else 0f
+                                                            launch { dragOffsetX.animateTo(exitX, tween(160)) }
+                                                            launch { dragOffsetY.animateTo(exitY, tween(160)) }
+                                                            delay(160)
+                                                            currentIndex = (currentIndex + 1).coerceAtMost(items.size - 1)
+                                                            dragOffsetX.snapTo(0f)
+                                                            dragOffsetY.snapTo(0f)
+                                                        }
+                                                    } else if (dragOffsetX.value > 140f && currentIndex > 0) {
+                                                        // Swiped right: bring previous card back
+                                                        scope.launch {
+                                                            launch { dragOffsetX.animateTo(1300f, tween(160)) }
+                                                            delay(160)
+                                                            currentIndex = (currentIndex - 1).coerceAtLeast(0)
+                                                            dragOffsetX.snapTo(0f)
+                                                            dragOffsetY.snapTo(0f)
+                                                        }
+                                                    } else {
+                                                        // Snap back to resting position with bouncy spring
+                                                        scope.launch {
+                                                            launch { dragOffsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)) }
+                                                            launch { dragOffsetY.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)) }
+                                                        }
+                                                    }
+                                                },
+                                                onDragCancel = {
+                                                    scope.launch {
+                                                        launch { dragOffsetX.animateTo(0f) }
+                                                        launch { dragOffsetY.animateTo(0f) }
+                                                    }
+                                                },
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    scope.launch {
+                                                        dragOffsetX.snapTo(dragOffsetX.value + dragAmount.x)
+                                                        dragOffsetY.snapTo(dragOffsetY.value + dragAmount.y)
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    } else {
+                                        // Tapping the card peeking below immediately promotes it to the top!
+                                        Modifier.clickable {
+                                            scope.launch {
+                                                dragOffsetX.snapTo(0f)
+                                                dragOffsetY.snapTo(0f)
+                                                currentIndex = i
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        if (depth == 0) {
+                                            onOpenMedia(item.localUri)
+                                        } else {
+                                            scope.launch {
+                                                currentIndex = i
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Page Indicator Dots (matching exact number of media items in stack)
+                val dotCount = items.size.coerceAtLeast(1)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 10.dp)
+                ) {
+                    repeat(dotCount) { index ->
+                        val isSelected = index == currentIndex
+                        val width = if (isSelected) 18.dp else 6.dp
+                        val color = if (isSelected) {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .height(5.dp)
+                                .width(width)
+                                .clip(CircleShape)
+                                .background(color)
+                                .clickable {
+                                    scope.launch {
+                                        dragOffsetX.snapTo(0f)
+                                        dragOffsetY.snapTo(0f)
+                                        currentIndex = index
+                                    }
+                                }
+                        )
+                    }
+                }
+            }
+
+            // 3. Lower Drawer Sheet (occupying lower portion of the screen)
+            Surface(
+                shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                shadowElevation = 20.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("stack_detail_lower_drawer")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 24.dp)
+                        .animateContentSize()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Drag handle pill at the top (tapping toggles drawer expand/collapse)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp, bottom = 6.dp)
+                            .clickable { isDrawerExpanded = !isDrawerExpanded },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(44.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                        )
+                    }
+
+                    // Row 1: Date & Time
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CalendarToday,
+                                contentDescription = "Date and Time",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = formattedDateTime,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    // Row 2: URL with Favicon and Redirect Button
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Favicon
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                AsyncImage(
+                                    model = faviconUrl,
+                                    contentDescription = "Favicon",
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(4.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = stack.sourceUrl.ifBlank { "https://$domain" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        onOpenBrowser(stack.sourceUrl.ifBlank { "https://$domain" })
+                                    }
+                            )
+                            IconButton(
+                                onClick = {
+                                    onOpenBrowser(stack.sourceUrl.ifBlank { "https://$domain" })
+                                },
+                                modifier = Modifier.size(32.dp).testTag("stack_detail_redirect_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.OpenInNew,
+                                    contentDescription = "Open in browser",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Rows 3, 4, 5 (visible when expanded)
+                    if (isDrawerExpanded) {
+                        // Row 3: Extracted Title
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Description,
+                                    contentDescription = "Title",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = extractedTitle,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        // Row 4: Extracted Description
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Notes,
+                                    contentDescription = "Description",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp).padding(top = 2.dp)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = extractedDescription,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                        }
+
+                        // Row 5: Tags and Format Chips with + action button matching image_4867641c.png
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LocalOffer,
+                                    contentDescription = "Tags",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    item {
+                                        DetailTagChip(label = activeItem?.format?.ifBlank { "MEDIA" } ?: "MEDIA")
+                                    }
+                                    item {
+                                        DetailTagChip(label = if (activeItem?.isVideo == true) "Video" else "Image")
+                                    }
+                                    item {
+                                        DetailTagChip(label = formattedTotalSize)
+                                    }
+                                    item {
+                                        DetailTagChip(label = domain)
+                                    }
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                // Quick Action (+) button matching image_4867641c.png
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clickable {
+                                            activeItem?.let { onOpenMedia(it.localUri) }
+                                        }
+                                        .testTag("detail_tags_add_button")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Actions",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("Delete Stack?") },
+            text = { Text("This will remove this stack and its downloaded files from your device.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        onDeleteStack()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+/**
+ * Real Media Card for the functional stacked photo deck (renders actual downloaded media items)
+ */
+@Composable
+fun RealDeckMediaCard(
+    item: MediaInboxItem?,
+    elevation: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(32.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        tonalElevation = 8.dp,
+        shadowElevation = elevation,
+        border = BorderStroke(2.dp, Color.White.copy(alpha = 0.95f)),
+        modifier = modifier
+            .fillMaxWidth(0.82f)
+            .fillMaxHeight(0.94f)
+            .clip(RoundedCornerShape(32.dp))
+            .clickable { onClick() }
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (item != null) {
+                AsyncImage(
+                    model = item.localUri,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+
+                if (item.isVideo || item.isStream) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.Black.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(56.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Play",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color.Black.copy(alpha = 0.72f),
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(14.dp)
+                    ) {
+                        Text(
+                            text = if (item.isStream) "STREAM" else item.format.ifBlank { "VIDEO" },
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Landscape,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                        modifier = Modifier.size(96.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailTagChip(label: String) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            maxLines = 1
+        )
     }
 }
 
@@ -763,6 +1650,7 @@ fun SkeletonCard(heightDp: Int) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullScreenBrowserView(
+    initialUrl: String = "",
     onClose: () -> Unit,
     onDownloadComplete: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -772,7 +1660,7 @@ fun FullScreenBrowserView(
     val scraper = remember { MediaScraper() }
     val scope = rememberCoroutineScope()
 
-    var currentUrl by remember { mutableStateOf("") }
+    var currentUrl by remember(initialUrl) { mutableStateOf(initialUrl) }
     var pageTitle by remember { mutableStateOf("") }
     var discoveredItems by remember { mutableStateOf<List<ScrapedMediaItem>>(emptyList()) }
     var showDiscoveredMediaSheet by remember { mutableStateOf(false) }

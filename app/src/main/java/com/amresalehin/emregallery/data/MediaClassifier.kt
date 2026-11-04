@@ -116,15 +116,39 @@ object MediaClassifier {
         }
     }
 
+    val KNOWN_MEDIA_EXTENSIONS = setOf(
+        "jpg", "jpeg", "png", "webp", "gif", "svg", "avif", "bmp", "heic", "heif", "ico",
+        "mp4", "webm", "mov", "mkv", "avi", "flv", "3gp", "m4v", "ts", "m3u8", "mpd",
+        "mp3", "m4a", "aac", "wav", "ogg", "opus", "flac", "wma"
+    )
+
     /**
-     * Checks whether the URL is valid media and not tracking/pixel.
+     * Checks whether the URL is valid media and not tracking/pixel/non-media page.
      */
     fun isValidMedia(url: String): Boolean {
         val lower = url.lowercase(Locale.ROOT)
         for (pattern in TRACKING_PATTERNS) {
             if (lower.contains(pattern)) return false
         }
-        if (lower.contains("favicon.ico") || lower.contains("/avatar_default") || lower.contains("/blank.gif")) {
+        if (lower.contains("favicon.ico") || lower.contains("/avatar_default") ||
+            lower.contains("/blank.gif") || lower.contains("transparent.gif") ||
+            lower.contains("spacer.gif") || lower.contains("spinner.gif")
+        ) {
+            return false
+        }
+        val cleanPath = lower.substringBefore("?").substringBefore("#")
+        // Reject web document and script endpoints
+        if (cleanPath.endsWith(".html") || cleanPath.endsWith(".htm") || cleanPath.endsWith(".php") ||
+            cleanPath.endsWith(".jsp") || cleanPath.endsWith(".asp") || cleanPath.endsWith(".aspx") ||
+            cleanPath.endsWith(".js") || cleanPath.endsWith(".css") || cleanPath.endsWith(".json") ||
+            cleanPath.endsWith(".xml") || cleanPath.endsWith(".txt") || cleanPath.endsWith(".do")
+        ) {
+            return false
+        }
+        // Reject non-media API and metadata paths (e.g. Wikipedia geohack coordinates or auth hooks)
+        if (cleanPath.contains("/geohack") || cleanPath.contains("/wiki/special:") ||
+            cleanPath.contains("centralautologin") || cleanPath.contains("/api.php")
+        ) {
             return false
         }
         return true
@@ -333,7 +357,8 @@ object MediaClassifier {
             val cleanUrl = url.substringBefore("?").substringBefore("#")
             val lastSlash = cleanUrl.lastIndexOf('/')
             val segment = if (lastSlash != -1 && lastSlash < cleanUrl.length - 1) cleanUrl.substring(lastSlash + 1) else ""
-            if (segment.length > 2 && segment.contains(".")) {
+            val extInSegment = segment.substringAfterLast('.', "").lowercase(Locale.ROOT)
+            if (segment.length > 2 && extInSegment in KNOWN_MEDIA_EXTENSIONS) {
                 segment
             } else {
                 val ext = when (format.uppercase(Locale.ROOT)) {

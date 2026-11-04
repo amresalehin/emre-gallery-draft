@@ -167,8 +167,11 @@ class StaticMediaScraper {
         for (video in doc.select("video")) {
             val src = video.attr("src").ifBlank { video.attr("data-src") }
             val poster = video.attr("poster").ifBlank { null }
+            val vw = video.attr("width").toIntOrNull()
+            val vh = video.attr("height").toIntOrNull()
+            val vRes = if (vw != null && vh != null) "${vw}x${vh}" else null
             if (src.isNotBlank()) {
-                addCandidate(src, ExtractionSource.DOM_SCRAPE, posterUrl = poster)
+                addCandidate(src, ExtractionSource.DOM_SCRAPE, resolution = vRes, posterUrl = poster)
             }
             if (!poster.isNullOrBlank()) {
                 addCandidate(poster, ExtractionSource.DOM_SCRAPE, resolution = "Poster")
@@ -194,18 +197,42 @@ class StaticMediaScraper {
                     }
                 }
             }
+            val w = img.attr("width").toIntOrNull() ?: img.attr("data-width").toIntOrNull()
+            val h = img.attr("height").toIntOrNull() ?: img.attr("data-height").toIntOrNull()
+            val resHint = if (w != null && h != null) "${w}x${h}" else if (w != null) "${w}w" else null
             if (src.isNotBlank()) {
-                addCandidate(src, ExtractionSource.DOM_SCRAPE)
+                addCandidate(src, ExtractionSource.DOM_SCRAPE, resolution = resHint)
             }
         }
 
         // 5. Srcset parsing (img and picture source elements)
         for (elem in doc.select("[srcset], [data-srcset]")) {
             val rawSrcset = elem.attr("srcset").ifBlank { elem.attr("data-srcset") }
+            val w = elem.attr("width").toIntOrNull() ?: elem.attr("data-width").toIntOrNull()
+            val h = elem.attr("height").toIntOrNull() ?: elem.attr("data-height").toIntOrNull()
             if (rawSrcset.isNotBlank()) {
                 val entries = MediaClassifier.parseSrcset(rawSrcset, baseUrl)
                 for ((url, res) in entries) {
-                    addCandidate(url, ExtractionSource.SRCSET, resolution = res.ifBlank { "srcset" })
+                    val pxMatch = Regex("""[/_-](\d{2,5})px[-_./]""").find(url)
+                    val resHint = if (pxMatch != null) {
+                        "${pxMatch.groupValues[1]}px"
+                    } else if (res.isNotBlank() && res != "srcset") {
+                        if (res.endsWith("x", true) && w != null) {
+                            val mult = res.removeSuffix("x").removeSuffix("X").toFloatOrNull() ?: 1f
+                            val scaledW = (w * mult).toInt()
+                            val scaledH = if (h != null) (h * mult).toInt() else null
+                            if (scaledH != null) "${scaledW}x${scaledH}" else "${scaledW}w"
+                        } else {
+                            res
+                        }
+                    } else if (w != null && h != null) {
+                        "${w}x${h}"
+                    } else if (w != null) {
+                        "${w}w"
+                    } else {
+                        "srcset"
+                    }
+                    addCandidate(url, ExtractionSource.SRCSET, resolution = resHint)
                 }
             }
         }
