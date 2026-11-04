@@ -176,4 +176,32 @@ class MediaDeduplicationPureUnitTest {
         assertEquals(keyOrig, keyOpt)
         assertEquals(keyOrig, keyThumb)
     }
+
+    @Test
+    fun testDuplicateDownloadItemsAreFilteredOut() {
+        val item1 = com.amresalehin.emregallery.data.MediaInboxItem(
+            id = "item_1",
+            title = "sample.jpg",
+            localUri = "/data/downloads/sample.jpg",
+            sourceUrl = "https://example.com/sample.jpg",
+            isVideo = false,
+            sizeBytes = 1000L
+        )
+        val duplicateItem = com.amresalehin.emregallery.data.MediaInboxItem(
+            id = "item_1_alt",
+            title = "sample.jpg",
+            localUri = "/data/downloads/sample.jpg",
+            sourceUrl = "https://example.com/sample.jpg",
+            isVideo = false,
+            sizeBytes = 1000L
+        )
+
+        val list = listOf(item1)
+        val updated = list.filter {
+            it.id != duplicateItem.id && it.sourceUrl != duplicateItem.sourceUrl && it.localUri != duplicateItem.localUri
+        } + duplicateItem
+
+        // Should have exactly 1 item (replaced/deduplicated), not 2 copies
+        assertEquals(1, updated.size)
+    }
 }

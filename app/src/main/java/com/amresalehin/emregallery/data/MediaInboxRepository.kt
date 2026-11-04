@@ -156,7 +156,9 @@ class MediaInboxRepository(private val context: Context) {
         val existingIndex = current.indexOfFirst { it.id == stackId }
         if (existingIndex >= 0) {
             val existing = current[existingIndex]
-            val updatedItems = existing.items.filter { it.id != item.id } + item
+            val updatedItems = existing.items.filter {
+                it.id != item.id && it.sourceUrl != item.sourceUrl && it.localUri != item.localUri
+            } + item
             current[existingIndex] = existing.copy(items = updatedItems)
         } else {
             val newStack = MediaInboxStack(

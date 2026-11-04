@@ -3,6 +3,7 @@ package com.amresalehin.emregallery.data
 import android.content.Context
 import androidx.work.Constraints
 import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
@@ -57,7 +58,12 @@ object DownloadQueueManager {
             .addTag("item_${item.id}")
             .build()
 
-        WorkManager.getInstance(context).enqueue(request)
+        val uniqueWorkName = "download_${MediaClassifier.deduplicationKey(item.url).hashCode()}_${item.id}"
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            uniqueWorkName,
+            ExistingWorkPolicy.KEEP,
+            request
+        )
         return request.id
     }
 
@@ -94,16 +100,23 @@ object DownloadQueueManager {
                 .putString(MediaDownloadWorker.KEY_SOURCE_URL, url)
                 .build()
 
-            OneTimeWorkRequestBuilder<MediaDownloadWorker>()
+            val request = OneTimeWorkRequestBuilder<MediaDownloadWorker>()
                 .setConstraints(networkConstraints)
                 .setInputData(inputData)
                 .addTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
                 .addTag("item_${item.id}")
                 .build()
+
+            val uniqueWorkName = "download_${MediaClassifier.deduplicationKey(item.url).hashCode()}_${item.id}"
+            workManager.enqueueUniqueWork(
+                uniqueWorkName,
+                ExistingWorkPolicy.KEEP,
+                request
+            )
+            request.id
         }
 
-        workManager.enqueue(requests)
-        return requests.map { it.id }
+        return requests
     }
 
     fun getActiveDownloadsFlow(context: Context): Flow<List<WorkInfo>> {

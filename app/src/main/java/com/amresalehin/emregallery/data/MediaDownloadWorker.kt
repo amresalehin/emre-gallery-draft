@@ -80,6 +80,7 @@ class MediaDownloadWorker(
 
                 if (result.isSuccessful && result.file != null && result.file.exists() && result.file.length() > 0L) {
                     downloadedFile = result.file
+                } else {
                     errorDiagnostic = result.errorMessage
                     val isInvalidContent = result.errorMessage?.let { msg ->
                         msg.contains("webpage", ignoreCase = true) ||
@@ -88,7 +89,7 @@ class MediaDownloadWorker(
                         msg.contains("corrupt or invalid raster", ignoreCase = true)
                     } ?: false
 
-                    // 3. Fallback to Python runner only if failure was due to network/engine and NOT an invalid non-media response
+                    // 3. Fallback to Python runner only if OkHttp download failed and NOT an invalid non-media response
                     if (!isInvalidContent && GalleryDlEngine.isAvailable()) {
                         setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Attempting engine fallback for $title..."))
                         downloadedFile = GalleryDlEngine.downloadMedia(
