@@ -7,7 +7,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -64,6 +69,7 @@ import kotlin.math.sqrt
 fun MediaInboxScreen(
     onBack: () -> Unit,
     onOpenMediaItem: ((String) -> Unit)? = null,
+    onOpenMediaWithList: ((String, List<String>) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -381,7 +387,12 @@ fun MediaInboxScreen(
                 onClose = { selectedStackForDetail = null },
                 onOpenMedia = { uri ->
                     selectedStackForDetail = null
-                    onOpenMediaItem?.invoke(uri)
+                    val allUris = stack.items.map { it.localUri.ifBlank { it.sourceUrl } }
+                    if (onOpenMediaWithList != null) {
+                        onOpenMediaWithList(uri, allUris)
+                    } else {
+                        onOpenMediaItem?.invoke(uri)
+                    }
                 },
                 onOpenBrowser = { url ->
                     browserInitialUrl = url
@@ -1072,22 +1083,52 @@ fun MediaStackDetailTab(
                                     elevation = cardElevation,
                                     modifier = if (depth == 0) {
                                         Modifier.pointerInput(currentIndex, items.size) {
-                                            detectDragGestures(
-                                                onDragStart = { },
-                                                onDragEnd = {
-                                                    val dist = sqrt(dragOffsetX.value * dragOffsetX.value + dragOffsetY.value * dragOffsetY.value)
-                                                    if (dist < 12f) {
-                                                        // Tap without dragging: open media view
-                                                        onOpenMedia(item.localUri)
-                                                        scope.launch {
-                                                            dragOffsetX.animateTo(0f)
-                                                            dragOffsetY.animateTo(0f)
+                                            awaitEachGesture {
+                                                val down = awaitFirstDown(requireUnconsumed = false)
+                                                var hasMoved = false
+                                                var dragDeltaX = 0f
+                                                var dragDeltaY = 0f
+                                                val touchSlop = viewConfiguration.touchSlop
+
+                                                while (true) {
+                                                    val event = awaitPointerEvent()
+                                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                                    if (change.changedToUp()) {
+                                                        change.consume()
+                                                        break
+                                                    }
+
+                                                    val posDelta = change.positionChange()
+                                                    if (posDelta != Offset.Zero) {
+                                                        dragDeltaX += posDelta.x
+                                                        dragDeltaY += posDelta.y
+                                                        val dist = sqrt(dragDeltaX * dragDeltaX + dragDeltaY * dragDeltaY)
+                                                        if (dist > touchSlop) {
+                                                            hasMoved = true
                                                         }
-                                                    } else if ((dragOffsetX.value < -140f || dragOffsetY.value < -150f) && currentIndex < items.size - 1) {
+                                                        if (hasMoved) {
+                                                            change.consume()
+                                                            scope.launch {
+                                                                dragOffsetX.snapTo(dragOffsetX.value + posDelta.x)
+                                                                dragOffsetY.snapTo(dragOffsetY.value + posDelta.y)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                if (!hasMoved) {
+                                                    // Tap without dragging: open media viewer!
+                                                    val targetUri = item.localUri.ifBlank { item.sourceUrl }
+                                                    onOpenMedia(targetUri)
+                                                } else {
+                                                    val offsetX = dragOffsetX.value
+                                                    val offsetY = dragOffsetY.value
+                                                    if ((offsetX < -140f || offsetY < -150f) && currentIndex < items.size - 1) {
                                                         // Swiped left or up: top card exits and card below comes forward to the top!
                                                         scope.launch {
-                                                            val exitX = if (abs(dragOffsetX.value) > 20f) (if (dragOffsetX.value < 0) -1300f else 1300f) else 0f
-                                                            val exitY = if (abs(dragOffsetY.value) > 20f) (if (dragOffsetY.value < 0) -1300f else 1300f) else 0f
+                                                            val exitX = if (abs(offsetX) > 20f) (if (offsetX < 0) -1300f else 1300f) else 0f
+                                                            val exitY = if (abs(offsetY) > 20f) (if (offsetY < 0) -1300f else 1300f) else 0f
                                                             launch { dragOffsetX.animateTo(exitX, tween(160)) }
                                                             launch { dragOffsetY.animateTo(exitY, tween(160)) }
                                                             delay(160)
@@ -1095,7 +1136,7 @@ fun MediaStackDetailTab(
                                                             dragOffsetX.snapTo(0f)
                                                             dragOffsetY.snapTo(0f)
                                                         }
-                                                    } else if (dragOffsetX.value > 140f && currentIndex > 0) {
+                                                    } else if (offsetX > 140f && currentIndex > 0) {
                                                         // Swiped right: bring previous card back
                                                         scope.launch {
                                                             launch { dragOffsetX.animateTo(1300f, tween(160)) }
@@ -1111,21 +1152,8 @@ fun MediaStackDetailTab(
                                                             launch { dragOffsetY.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)) }
                                                         }
                                                     }
-                                                },
-                                                onDragCancel = {
-                                                    scope.launch {
-                                                        launch { dragOffsetX.animateTo(0f) }
-                                                        launch { dragOffsetY.animateTo(0f) }
-                                                    }
-                                                },
-                                                onDrag = { change, dragAmount ->
-                                                    change.consume()
-                                                    scope.launch {
-                                                        dragOffsetX.snapTo(dragOffsetX.value + dragAmount.x)
-                                                        dragOffsetY.snapTo(dragOffsetY.value + dragAmount.y)
-                                                    }
                                                 }
-                                            )
+                                            }
                                         }
                                     } else {
                                         // Tapping the card peeking below immediately promotes it to the top!
@@ -1138,13 +1166,8 @@ fun MediaStackDetailTab(
                                         }
                                     },
                                     onClick = {
-                                        if (depth == 0) {
-                                            onOpenMedia(item.localUri)
-                                        } else {
-                                            scope.launch {
-                                                currentIndex = i
-                                            }
-                                        }
+                                        val targetUri = item.localUri.ifBlank { item.sourceUrl }
+                                        onOpenMedia(targetUri)
                                     }
                                 )
                             }
@@ -1152,35 +1175,37 @@ fun MediaStackDetailTab(
                     }
                 }
 
-                // Page Indicator Dots (matching exact number of media items in stack)
-                val dotCount = items.size.coerceAtLeast(1)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 10.dp, bottom = 10.dp)
-                ) {
-                    repeat(dotCount) { index ->
-                        val isSelected = index == currentIndex
-                        val width = if (isSelected) 18.dp else 6.dp
-                        val color = if (isSelected) {
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
-                        } else {
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-                        }
-                        Box(
+                // Numeric Page Indicator (replaces overflowing dot pagination)
+                if (items.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .padding(top = 8.dp, bottom = 10.dp)
+                            .testTag("numeric_pagination_indicator")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
                             modifier = Modifier
-                                .height(5.dp)
-                                .width(width)
-                                .clip(CircleShape)
-                                .background(color)
-                                .clickable {
-                                    scope.launch {
-                                        dragOffsetX.snapTo(0f)
-                                        dragOffsetY.snapTo(0f)
-                                        currentIndex = index
-                                    }
-                                }
-                        )
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "${activeIndex + 1}",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                text = " / ${items.size}",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                 }
             }
@@ -1480,13 +1505,22 @@ fun RealDeckMediaCard(
             .clip(RoundedCornerShape(32.dp))
             .clickable { onClick() }
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            contentAlignment = Alignment.Center
+        ) {
             if (item != null) {
+                val imageModel = item.localUri.ifBlank { item.sourceUrl }
                 AsyncImage(
-                    model = item.localUri,
+                    model = imageModel,
                     contentDescription = item.title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(24.dp)),
+                    contentScale = ContentScale.Fit
                 )
 
                 if (item.isVideo || item.isStream) {

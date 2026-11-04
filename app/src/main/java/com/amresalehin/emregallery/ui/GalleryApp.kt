@@ -1212,10 +1212,57 @@ fun GalleryApp() {
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
                         onBack = { performBackNavigation() },
                         onOpenMediaItem = { uri ->
-                            val match = media.firstOrNull { it.uri == uri }
-                            if (match != null) {
-                                openMediaInViewer(match, media)
+                            val match = media.firstOrNull { it.uri == uri || (it.name.isNotBlank() && uri.contains(it.name)) }
+                            val targetItem = match ?: run {
+                                val file = java.io.File(uri)
+                                val name = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }
+                                val isVid = name.endsWith(".mp4", ignoreCase = true) ||
+                                            name.endsWith(".webm", ignoreCase = true) ||
+                                            name.endsWith(".mkv", ignoreCase = true) ||
+                                            name.endsWith(".mov", ignoreCase = true)
+                                MediaItem(
+                                    id = uri.hashCode().toLong(),
+                                    uri = uri,
+                                    name = name,
+                                    mimeType = if (isVid) "video/*" else "image/*",
+                                    dateAddedSeconds = System.currentTimeMillis() / 1000,
+                                    dateTakenMillis = System.currentTimeMillis(),
+                                    sizeBytes = if (file.exists()) file.length() else 0L,
+                                    width = 0,
+                                    height = 0,
+                                    relativePath = "",
+                                    isVideo = isVid
+                                )
                             }
+                            openMediaInViewer(targetItem, listOf(targetItem))
+                        },
+                        onOpenMediaWithList = { uri, allUris ->
+                            val safeUris = if (allUris.contains(uri)) allUris else (listOf(uri) + allUris)
+                            val viewerItems = safeUris.map { u ->
+                                media.firstOrNull { it.uri == u || (it.name.isNotBlank() && u.contains(it.name)) } ?: run {
+                                    val file = java.io.File(u)
+                                    val name = if (file.exists()) file.name else u.substringAfterLast('/').ifBlank { "media_item" }
+                                    val isVid = name.endsWith(".mp4", ignoreCase = true) ||
+                                                name.endsWith(".webm", ignoreCase = true) ||
+                                                name.endsWith(".mkv", ignoreCase = true) ||
+                                                name.endsWith(".mov", ignoreCase = true)
+                                    MediaItem(
+                                        id = u.hashCode().toLong(),
+                                        uri = u,
+                                        name = name,
+                                        mimeType = if (isVid) "video/*" else "image/*",
+                                        dateAddedSeconds = System.currentTimeMillis() / 1000,
+                                        dateTakenMillis = System.currentTimeMillis(),
+                                        sizeBytes = if (file.exists()) file.length() else 0L,
+                                        width = 0,
+                                        height = 0,
+                                        relativePath = "",
+                                        isVideo = isVid
+                                    )
+                                }
+                            }
+                            val target = viewerItems.firstOrNull { it.uri == uri } ?: viewerItems.first()
+                            openMediaInViewer(target, viewerItems)
                         }
                     )
                     Destination.SEARCH -> {
