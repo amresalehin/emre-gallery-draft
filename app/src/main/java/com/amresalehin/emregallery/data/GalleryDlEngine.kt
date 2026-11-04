@@ -347,6 +347,10 @@ object GalleryDlEngine {
                 }
             }
 
+            // Remove an incomplete Python output before retrying through OkHttp. Both
+            // engines must not leave separate files for one logical download.
+            if (targetFile.exists()) targetFile.delete()
+
             // Fallback to OkHttp download with shared session cookies
             OkHttpDownloader.downloadMediaFile(
                 context = context,
