@@ -9,6 +9,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.flow.Flow
+import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -82,10 +83,21 @@ object DownloadQueueManager {
         val url = sourceUrl ?: referer ?: ""
 
         val workManager = WorkManager.getInstance(context)
-        // Deduplicate both within this batch and against any queued/running download,
-        // including a second request from the in-app browser or a rapid repeated tap.
+        val downloadedKeys = MediaInboxRepository.getInstance(context).stacks.value
+            .asSequence()
+            .flatMap { it.items.asSequence() }
+            .filter { saved ->
+                val file = File(saved.localUri.removePrefix("file://"))
+                file.exists() && file.isFile && file.length() > 0L
+            }
+            .map { saved -> MediaClassifier.deduplicationKey(saved.sourceUrl) }
+            .toSet()
+
+        // Deduplicate within the batch, against completed Inbox files, and against active
+        // WorkManager requests. This covers both browser entry points and repeated taps.
         val distinctItems = MediaClassifier.deduplicateScrapedItems(items)
             .distinctBy(::uniqueWorkName)
+            .filterNot { item -> MediaClassifier.deduplicationKey(item.url) in downloadedKeys }
         val requests = distinctItems.map { item ->
             val inputData = Data.Builder()
                 .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
