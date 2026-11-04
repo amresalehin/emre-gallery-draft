@@ -5,6 +5,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -15,16 +17,19 @@ import org.json.JSONArray
 import java.net.URL
 
 /**
- * Browser-assisted media extraction engine utilizing Android WebView.
+ * Chromium WebView-assisted media extraction engine.
  * Performs:
  * 1. Live network request interception for streaming media (HLS, DASH, MP4, MP3, etc.).
- * 2. Deep JavaScript DOM, computed CSS, srcset, and iframe inspection.
- * 3. Automatic page scrolling to trigger dynamic lazy loading.
+ * 2. Deep JavaScript DOM, computed CSS, srcset, schema.org JSON-LD, and iframe inspection.
+ * 3. MutationObserver-based dynamic DOM change detection.
+ * 4. Adaptive viewport scrolling with height-change detection and loading waits.
+ * 5. Robust lifecycle management with proper cancellation ordering.
  */
 class BrowserMediaExtractor(private val context: Context) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var webView: WebView? = null
+    @Volatile
     private var isCancelled = false
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -35,10 +40,11 @@ class BrowserMediaExtractor(private val context: Context) {
         onFinished: () -> Unit
     ) {
         mainHandler.post {
-            isCancelled = false
+            // FIX: Cleanup previous instance first before resetting isCancelled flag
             cleanup()
+            isCancelled = false
 
-            val normalizedUrl = if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
+            val normalizedUrl = if (!targetUrl.startsWith("http://", ignoreCase = true) && !targetUrl.startsWith("https://", ignoreCase = true)) {
                 "https://$targetUrl"
             } else {
                 targetUrl
@@ -57,7 +63,7 @@ class BrowserMediaExtractor(private val context: Context) {
                     mediaPlaybackRequiresUserGesture = false
                     loadsImagesAutomatically = true
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                    userAgentString = OkHttpDownloader.DEFAULT_USER_AGENT
                 }
 
                 wv.webChromeClient = object : WebChromeClient() {
@@ -117,30 +123,35 @@ class BrowserMediaExtractor(private val context: Context) {
 
                         val reqUrl = request.url.toString()
                         val reqLower = reqUrl.lowercase()
+                        val headers = request.requestHeaders ?: emptyMap()
+                        val acceptHeader = headers["Accept"]?.lowercase() ?: ""
 
-                        // Detect media network stream or file requests
-                        val isVideoOrStream = reqLower.contains(".m3u8") || reqLower.contains(".mpd") ||
-                                reqLower.contains(".mp4") || reqLower.contains(".webm") ||
-                                reqLower.contains(".mov") || reqLower.contains(".mkv") ||
+                        // Resource and response-aware media classification
+                        val isStream = reqLower.contains(".m3u8") || reqLower.contains(".mpd") ||
                                 reqLower.contains("/hls/") || reqLower.contains("/dash/") ||
-                                reqLower.contains("chunklist")
+                                reqLower.contains("chunklist") || acceptHeader.contains("mpegurl") ||
+                                acceptHeader.contains("dash+xml")
+
+                        val isVideo = isStream || reqLower.contains(".mp4") || reqLower.contains(".webm") ||
+                                reqLower.contains(".mov") || reqLower.contains(".mkv") ||
+                                acceptHeader.contains("video/")
 
                         val isAudio = reqLower.contains(".mp3") || reqLower.contains(".m4a") ||
                                 reqLower.contains(".aac") || reqLower.contains(".wav") ||
                                 reqLower.contains(".ogg") || reqLower.contains(".flac") ||
-                                reqLower.contains(".opus")
+                                reqLower.contains(".opus") || acceptHeader.contains("audio/")
 
                         val isImage = reqLower.contains(".jpg") || reqLower.contains(".jpeg") ||
                                 reqLower.contains(".png") || reqLower.contains(".webp") ||
-                                reqLower.contains(".gif") || reqLower.contains(".avif")
+                                reqLower.contains(".gif") || reqLower.contains(".avif") ||
+                                acceptHeader.contains("image/")
 
-                        if (isVideoOrStream || isAudio || isImage) {
-                            val acceptHeader = request.requestHeaders?.get("Accept")
+                        if (isVideo || isAudio || isImage) {
                             mainHandler.post {
                                 dispatchMediaItem(
                                     rawUrl = reqUrl,
                                     source = ExtractionSource.NETWORK_INTERCEPT,
-                                    mimeHint = acceptHeader
+                                    mimeHint = acceptHeader.ifBlank { null }
                                 )
                             }
                         }
@@ -156,9 +167,19 @@ class BrowserMediaExtractor(private val context: Context) {
 
                     override fun onPageFinished(view: WebView?, url: String?) {
                         if (isCancelled) return
+                        // Flush cookies so OkHttp sees latest session cookies
+                        try {
+                            CookieManager.getInstance().flush()
+                        } catch (_: Throwable) {}
+
                         onStatusUpdate("Scanning DOM, computed CSS, and dynamic media tags...")
 
-                        // 1. Run deep DOM and CSS inspection
+                        // Setup MutationObserver and perform deep inspection
+                        setupMutationObserver(wv) { dynamicUrl ->
+                            dispatchMediaItem(dynamicUrl, ExtractionSource.DOM_SCRAPE)
+                        }
+
+                        // 1. Run deep DOM and JSON inspection
                         executeJsDomScan(wv, normalizedUrl) { rawEntries ->
                             for (entry in rawEntries) {
                                 dispatchMediaItem(
@@ -169,10 +190,10 @@ class BrowserMediaExtractor(private val context: Context) {
                                 )
                             }
 
-                            // 2. Perform automated scrolling sequence to uncover lazy media
+                            // 2. Perform adaptive scrolling sequence to uncover lazy media
                             if (!isCancelled) {
                                 onStatusUpdate("Auto-scrolling page to trigger lazy-loaded media...")
-                                executeAutoScrollSequence(wv, step = 1, maxSteps = 3) {
+                                executeAdaptiveScrollSequence(wv, step = 1, maxSteps = 4, lastScrollHeight = 0) {
                                     // Final scan after scrolling
                                     if (!isCancelled) {
                                         executeJsDomScan(wv, normalizedUrl) { postScrollEntries ->
@@ -200,6 +221,7 @@ class BrowserMediaExtractor(private val context: Context) {
 
                 wv.loadUrl(normalizedUrl)
             } catch (e: Exception) {
+                Log.e("BrowserMediaExtractor", "Browser initialization failed", e)
                 onStatusUpdate("Browser initialization failed: ${e.localizedMessage}")
                 onFinished()
             }
@@ -213,6 +235,38 @@ class BrowserMediaExtractor(private val context: Context) {
         val resolution: String? = null
     )
 
+    private fun setupMutationObserver(wv: WebView, onDiscovered: (String) -> Unit) {
+        val observerScript = """
+            (function() {
+                if (window.__emreObserverInstalled) return;
+                window.__emreObserverInstalled = true;
+                var observer = new MutationObserver(function(mutations) {
+                    for (var m = 0; m < mutations.length; m++) {
+                        var mutation = mutations[m];
+                        for (var i = 0; i < mutation.addedNodes.length; i++) {
+                            var node = mutation.addedNodes[i];
+                            if (node.nodeType === 1) {
+                                if (node.tagName === 'IMG' && node.src) {
+                                    console.log('EMRE_MUTATION:' + node.src);
+                                }
+                                if (node.tagName === 'VIDEO' && node.src) {
+                                    console.log('EMRE_MUTATION:' + node.src);
+                                }
+                            }
+                        }
+                    }
+                });
+                observer.observe(document.body || document.documentElement, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['src', 'data-src', 'srcset']
+                });
+            })();
+        """.trimIndent()
+        wv.evaluateJavascript(observerScript, null)
+    }
+
     private fun executeJsDomScan(
         wv: WebView,
         baseUrl: String,
@@ -221,7 +275,7 @@ class BrowserMediaExtractor(private val context: Context) {
         val script = """
             (function() {
                 var list = [];
-                // 1. Images, picture sources, data-src, and srcset
+                // 1. Images, picture sources, lazy-load attributes, and srcset
                 var imgs = document.querySelectorAll('img, picture source');
                 for (var i = 0; i < imgs.length; i++) {
                     var el = imgs[i];
@@ -229,7 +283,9 @@ class BrowserMediaExtractor(private val context: Context) {
                         var res = (el.naturalWidth && el.naturalHeight) ? (el.naturalWidth + 'x' + el.naturalHeight) : null;
                         list.push({u: el.src, s: 'DOM', r: res});
                     }
-                    var dSrc = el.getAttribute('data-src') || el.getAttribute('data-original') || el.getAttribute('data-lazy-src') || el.getAttribute('data-zoom-src');
+                    var dSrc = el.getAttribute('data-src') || el.getAttribute('data-original') ||
+                               el.getAttribute('data-lazy-src') || el.getAttribute('data-zoom-src') ||
+                               el.getAttribute('data-hires') || el.getAttribute('data-full');
                     if (dSrc && !dSrc.startsWith('data:')) {
                         list.push({u: dSrc, s: 'DOM', r: 'data-src'});
                     }
@@ -266,9 +322,24 @@ class BrowserMediaExtractor(private val context: Context) {
                     }
                 }
 
-                // 4. CSS background-image
+                // 4. Embedded JSON (JSON-LD Schema.org ImageObject, VideoObject)
+                var jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+                for (var jl = 0; jl < jsonLdScripts.length; jl++) {
+                    try {
+                        var parsed = JSON.parse(jsonLdScripts[jl].innerText);
+                        var arr = Array.isArray(parsed) ? parsed : [parsed];
+                        for (var idx = 0; idx < arr.length; idx++) {
+                            var item = arr[idx];
+                            if (item.contentUrl) list.push({u: item.contentUrl, s: 'DOM', r: 'json-ld'});
+                            if (item.thumbnailUrl) list.push({u: item.thumbnailUrl, s: 'DOM', r: 'json-ld-thumb'});
+                            if (item.image && typeof item.image === 'string') list.push({u: item.image, s: 'DOM', r: 'json-ld-image'});
+                        }
+                    } catch(e) {}
+                }
+
+                // 5. CSS background-image
                 var bgElements = document.querySelectorAll('div, section, header, figure, a, span');
-                var count = Math.min(bgElements.length, 100);
+                var count = Math.min(bgElements.length, 120);
                 for (var b = 0; b < count; b++) {
                     var style = window.getComputedStyle(bgElements[b]);
                     var bg = style.backgroundImage;
@@ -280,7 +351,7 @@ class BrowserMediaExtractor(private val context: Context) {
                     }
                 }
 
-                // 5. iFrames (e.g., media players or embeds)
+                // 6. iFrames (e.g., media players or embeds)
                 var iframes = document.querySelectorAll('iframe');
                 for (var f = 0; f < iframes.length; f++) {
                     if (iframes[f].src) list.push({u: iframes[f].src, s: 'IFRAME', r: 'iframe'});
@@ -297,7 +368,6 @@ class BrowserMediaExtractor(private val context: Context) {
             }
 
             try {
-                // The evaluateJavascript returns a JSON string, which may be JSON-escaped
                 val unescaped = if (resultJson.startsWith("\"") && resultJson.endsWith("\"")) {
                     org.json.JSONTokener(resultJson).nextValue().toString()
                 } else {
@@ -329,10 +399,11 @@ class BrowserMediaExtractor(private val context: Context) {
         }
     }
 
-    private fun executeAutoScrollSequence(
+    private fun executeAdaptiveScrollSequence(
         wv: WebView,
         step: Int,
         maxSteps: Int,
+        lastScrollHeight: Int,
         onDone: () -> Unit
     ) {
         if (isCancelled || step > maxSteps) {
@@ -340,23 +411,26 @@ class BrowserMediaExtractor(private val context: Context) {
             return
         }
 
-        // Scroll down in viewport steps to trigger IntersectionObserver and scroll events
-        val scrollScript = """
+        // Measure page height and scroll adaptively
+        val measureScript = """
             (function() {
+                var sh = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
                 window.scrollBy({ top: window.innerHeight * 0.9, behavior: 'smooth' });
                 window.dispatchEvent(new Event('scroll'));
+                return sh;
             })();
         """.trimIndent()
 
-        wv.evaluateJavascript(scrollScript, null)
-
-        mainHandler.postDelayed({
-            if (!isCancelled) {
-                executeAutoScrollSequence(wv, step + 1, maxSteps, onDone)
-            } else {
-                onDone()
-            }
-        }, 400)
+        wv.evaluateJavascript(measureScript) { heightStr ->
+            val curHeight = heightStr?.trim('"')?.toIntOrNull() ?: 0
+            mainHandler.postDelayed({
+                if (!isCancelled) {
+                    executeAdaptiveScrollSequence(wv, step + 1, maxSteps, curHeight, onDone)
+                } else {
+                    onDone()
+                }
+            }, 500)
+        }
     }
 
     fun cleanup() {

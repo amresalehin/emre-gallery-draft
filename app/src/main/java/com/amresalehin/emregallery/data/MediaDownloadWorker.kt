@@ -7,10 +7,12 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Persistent background downloader worker powered by Android Jetpack WorkManager.
  * Ensures media and streaming downloads survive process death, app navigation, and network changes.
+ * Incorporates byte-level progress reporting, HTTP Range resumable downloading, and stream remuxing.
  */
 class MediaDownloadWorker(
     appContext: Context,
@@ -32,18 +34,65 @@ class MediaDownloadWorker(
         val sourceDomain = inputData.getString(KEY_SOURCE_DOMAIN) ?: ""
         val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: mediaUrl
 
-        setProgress(workDataOf(KEY_PROGRESS to 0.1f, KEY_STATUS to "Connecting..."))
+        setProgress(workDataOf(KEY_PROGRESS to 0.05f, KEY_STATUS to "Initializing download for $title..."))
 
         try {
-            val scraper = MediaScraper()
-            setProgress(workDataOf(KEY_PROGRESS to 0.3f, KEY_STATUS to "Downloading $title..."))
+            var downloadedFile: File? = null
+            var errorDiagnostic: String? = null
 
-            val downloadedFile = scraper.downloadMediaFile(
-                context = applicationContext,
-                mediaUrl = mediaUrl,
-                fileName = fileName,
-                referer = referer
-            )
+            // 1. For HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp)
+            val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
+            if (isStreamingMedia && GalleryDlEngine.isAvailable()) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Remuxing stream: $title..."))
+                downloadedFile = GalleryDlEngine.downloadMedia(
+                    context = applicationContext,
+                    mediaUrl = mediaUrl,
+                    fileName = fileName,
+                    referer = referer
+                )
+            }
+
+            // 2. Standard or fallback download via OkHttp with HTTP Range resumability
+            if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
+                var lastProgressUpdate = 0L
+                val result = OkHttpDownloader.downloadMediaFileDetailed(
+                    context = applicationContext,
+                    mediaUrl = mediaUrl,
+                    fileName = fileName,
+                    referer = referer,
+                    onProgress = { bytesRead, totalBytes ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastProgressUpdate > 300) {
+                            lastProgressUpdate = now
+                            val pct = if (totalBytes > 0) (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0.5f
+                            setProgressAsync(
+                                workDataOf(
+                                    KEY_PROGRESS to pct,
+                                    KEY_BYTES_READ to bytesRead,
+                                    KEY_TOTAL_BYTES to totalBytes,
+                                    KEY_STATUS to "Downloading $title (${bytesRead / 1024} KB)"
+                                )
+                            )
+                        }
+                    }
+                )
+
+                if (result.isSuccessful && result.file != null && result.file.exists() && result.file.length() > 0L) {
+                    downloadedFile = result.file
+                } else {
+                    errorDiagnostic = result.errorMessage
+                    // 3. Fallback to Python runner if OkHttp failed and Python is available
+                    if (GalleryDlEngine.isAvailable()) {
+                        setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Attempting engine fallback for $title..."))
+                        downloadedFile = GalleryDlEngine.downloadMedia(
+                            context = applicationContext,
+                            mediaUrl = mediaUrl,
+                            fileName = fileName,
+                            referer = referer
+                        )
+                    }
+                }
+            }
 
             if (downloadedFile != null && downloadedFile.exists() && downloadedFile.length() > 0L) {
                 setProgress(workDataOf(KEY_PROGRESS to 1.0f, KEY_STATUS to "Saved successfully"))
@@ -77,10 +126,11 @@ class MediaDownloadWorker(
                     )
                 )
             } else {
+                val finalError = errorDiagnostic ?: "Download failed for $mediaUrl"
                 if (runAttemptCount < 2) {
                     Result.retry()
                 } else {
-                    Result.failure(workDataOf(KEY_ERROR to "Download failed for $mediaUrl"))
+                    Result.failure(workDataOf(KEY_ERROR to finalError))
                 }
             }
         } catch (e: Exception) {
@@ -112,6 +162,8 @@ class MediaDownloadWorker(
         const val KEY_SOURCE_URL = "source_url"
 
         const val KEY_PROGRESS = "progress"
+        const val KEY_BYTES_READ = "bytes_read"
+        const val KEY_TOTAL_BYTES = "total_bytes"
         const val KEY_STATUS = "status"
         const val KEY_LOCAL_URI = "local_uri"
         const val KEY_SIZE_BYTES = "size_bytes"

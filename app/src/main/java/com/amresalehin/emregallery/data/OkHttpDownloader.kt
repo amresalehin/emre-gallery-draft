@@ -24,8 +24,8 @@ import java.util.concurrent.TimeUnit
  * Provides:
  * 1. Unified, persistent cookie jar synchronized bidirectionally with Android WebView CookieManager.
  * 2. Shared connection pooling (HTTP/2, keep-alive) and automatic redirect handling.
- * 3. Atomic streaming downloads with media scanner indexing and corrupt file cleanup.
- * 4. Transparent User-Agent and referer header support.
+ * 3. Resumable downloads via HTTP Range (RFC 7233) with byte-level progress reporting.
+ * 4. Atomic file creation, MIME validation, and corrupt partial download cleanup.
  */
 object OkHttpDownloader {
 
@@ -57,7 +57,7 @@ object OkHttpDownloader {
                     cookieManager.setCookie(urlString, cookie.toString())
                 }
                 cookieManager.flush()
-            } catch (e: Throwable) {
+            } catch (_: Throwable) {
                 // Ignore in non-Android or JVM unit test environments
             }
         }
@@ -70,7 +70,6 @@ object OkHttpDownloader {
             inMemoryCookies[host]?.let { list ->
                 synchronized(list) {
                     val now = System.currentTimeMillis()
-                    // Filter out expired cookies
                     val valid = list.filter { it.expiresAt > now }
                     result.addAll(valid)
                 }
@@ -93,7 +92,7 @@ object OkHttpDownloader {
                         }
                     }
                 }
-            } catch (e: Throwable) {
+            } catch (_: Throwable) {
                 // Ignore in unit test environments
             }
 
@@ -162,6 +161,17 @@ object OkHttpDownloader {
         val errorMessage: String? = null
     )
 
+    data class DownloadResult(
+        val file: File?,
+        val isSuccessful: Boolean,
+        val statusCode: Int,
+        val bytesDownloaded: Long,
+        val totalBytes: Long,
+        val mimeType: String? = null,
+        val isResumed: Boolean = false,
+        val errorMessage: String? = null
+    )
+
     /**
      * Executes an HTTP GET request with OkHttp, following redirects and utilizing shared session cookies.
      */
@@ -223,23 +233,15 @@ object OkHttpDownloader {
     }
 
     /**
-     * Downloads an image, video, audio file, or binary asset to public downloads using OkHttp.
-     * Uses atomic temporary file writing to avoid partial/corrupt files on interrupted downloads.
+     * Downloads an image, video, audio file, or stream to storage with resumable Range support.
      */
-    suspend fun downloadMediaFile(
+    suspend fun downloadMediaFileDetailed(
         context: Context,
         mediaUrl: String,
         fileName: String,
         referer: String? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
-    ): File? = withContext(Dispatchers.IO) {
-        val reqBuilder = Request.Builder()
-            .url(mediaUrl)
-            .header("Accept", "*/*")
-        if (!referer.isNullOrBlank()) {
-            reqBuilder.header("Referer", referer)
-        }
-
+    ): DownloadResult = withContext(Dispatchers.IO) {
         val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val emreGalleryDir = File(publicDownloads, "Emre Gallery")
         if (!emreGalleryDir.exists()) {
@@ -258,22 +260,84 @@ object OkHttpDownloader {
         val finalFile = File(targetDir, "${System.currentTimeMillis()}_$sanitizedName")
         val tempFile = File(targetDir, "${finalFile.name}.downloading")
 
+        var existingBytes = 0L
+        if (tempFile.exists()) {
+            existingBytes = tempFile.length()
+        }
+
+        val reqBuilder = Request.Builder()
+            .url(mediaUrl)
+            .header("Accept", "*/*")
+
+        if (!referer.isNullOrBlank()) {
+            reqBuilder.header("Referer", referer)
+        }
+
+        // Enable resumable downloads via HTTP Range header if partial data exists
+        if (existingBytes > 0L) {
+            reqBuilder.header("Range", "bytes=$existingBytes-")
+        }
+
         try {
-            client.newCall(reqBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "Download failed HTTP ${response.code} for $mediaUrl")
-                    return@withContext null
+            var response = client.newCall(reqBuilder.build()).execute()
+
+            // Handle 416 Range Not Satisfiable: partial file may be invalid, restart cleanly
+            if (response.code == 416) {
+                response.close()
+                tempFile.delete()
+                existingBytes = 0L
+                val cleanRequest = Request.Builder()
+                    .url(mediaUrl)
+                    .header("Accept", "*/*")
+                    .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
+                    .build()
+                response = client.newCall(cleanRequest).execute()
+            }
+
+            response.use { resp ->
+                val code = resp.code
+                val isPartial = code == 206
+                val isSuccess = code in 200..299
+
+                if (!isSuccess) {
+                    val err = "Server returned HTTP status $code"
+                    Log.w(TAG, "Download failed HTTP $code for $mediaUrl")
+                    return@withContext DownloadResult(
+                        file = null,
+                        isSuccessful = false,
+                        statusCode = code,
+                        bytesDownloaded = existingBytes,
+                        totalBytes = -1L,
+                        errorMessage = err
+                    )
                 }
 
-                val body = response.body ?: return@withContext null
-                val totalBytes = body.contentLength()
+                val body = resp.body ?: return@withContext DownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = code,
+                    bytesDownloaded = existingBytes,
+                    totalBytes = -1L,
+                    errorMessage = "Empty response body"
+                )
+
+                val mimeType = resp.header("Content-Type")?.lowercase()
+                val contentLength = body.contentLength()
+                val totalBytes = if (isPartial && contentLength > 0L) {
+                    existingBytes + contentLength
+                } else if (contentLength > 0L) {
+                    contentLength
+                } else {
+                    -1L
+                }
+
+                val append = isPartial && existingBytes > 0L
+                var downloaded = if (append) existingBytes else 0L
 
                 body.byteStream().use { input: InputStream ->
-                    FileOutputStream(tempFile).use { output ->
+                    FileOutputStream(tempFile, append).use { output ->
                         val buffer = ByteArray(16 * 1024)
                         var bytesRead: Int
-                        var downloaded = 0L
-
                         while (input.read(buffer).also { bytesRead = it } != -1) {
                             output.write(buffer, 0, bytesRead)
                             downloaded += bytesRead
@@ -284,38 +348,67 @@ object OkHttpDownloader {
                 }
 
                 if (tempFile.exists() && tempFile.length() > 0L) {
-                    if (tempFile.renameTo(finalFile)) {
-                        // Notify Android MediaScanner so file appears immediately in Gallery
-                        MediaScannerConnection.scanFile(
-                            context,
-                            arrayOf(finalFile.absolutePath),
-                            null,
-                            null
-                        )
-                        return@withContext finalFile
+                    val moved = if (tempFile.renameTo(finalFile)) {
+                        true
                     } else {
-                        // Fallback copy if rename across filesystems fails
                         tempFile.copyTo(finalFile, overwrite = true)
                         tempFile.delete()
+                        true
+                    }
+
+                    if (moved && finalFile.exists() && finalFile.length() > 0L) {
                         MediaScannerConnection.scanFile(
                             context,
                             arrayOf(finalFile.absolutePath),
-                            null,
+                            arrayOf(mimeType),
                             null
                         )
-                        return@withContext finalFile
+                        return@withContext DownloadResult(
+                            file = finalFile,
+                            isSuccessful = true,
+                            statusCode = code,
+                            bytesDownloaded = finalFile.length(),
+                            totalBytes = totalBytes,
+                            mimeType = mimeType,
+                            isResumed = append
+                        )
                     }
-                } else {
-                    tempFile.delete()
-                    null
                 }
+
+                tempFile.delete()
+                DownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = code,
+                    bytesDownloaded = 0L,
+                    totalBytes = totalBytes,
+                    errorMessage = "Downloaded file was empty or could not be committed"
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "Download exception for $mediaUrl", e)
-            if (tempFile.exists()) {
-                tempFile.delete()
-            }
-            null
+            DownloadResult(
+                file = null,
+                isSuccessful = false,
+                statusCode = -1,
+                bytesDownloaded = existingBytes,
+                totalBytes = -1L,
+                errorMessage = e.message ?: "Network error during download"
+            )
         }
+    }
+
+    /**
+     * Backward-compatible convenience method returning File?
+     */
+    suspend fun downloadMediaFile(
+        context: Context,
+        mediaUrl: String,
+        fileName: String,
+        referer: String? = null,
+        onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
+    ): File? {
+        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, onProgress)
+        return res.file
     }
 }

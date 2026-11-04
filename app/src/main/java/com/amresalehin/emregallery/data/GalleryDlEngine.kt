@@ -180,94 +180,105 @@ object GalleryDlEngine {
         }
     }
 
-    /**
-     * Executes gallery-dl extraction via Chaquopy in IO dispatcher.
-     */
-    suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
-        withContext(Dispatchers.IO) {
-            if (!isAvailable()) {
+    private fun parseExtractedItems(root: JSONObject): Pair<String, List<ScrapedMediaItem>> {
+        val pageTitle = root.optString("pageTitle", "")
+        val itemsArray = root.optJSONArray("items") ?: JSONArray()
+        val itemsList = mutableListOf<ScrapedMediaItem>()
+
+        for (i in 0 until itemsArray.length()) {
+            val obj = itemsArray.getJSONObject(i)
+            val catStr = obj.optString("category", "IMAGES")
+            val mediaCategory = when (catStr.uppercase()) {
+                "VIDEOS" -> MediaCategory.VIDEOS
+                "AUDIO" -> MediaCategory.AUDIO
+                "STREAMS" -> MediaCategory.STREAMS
+                else -> MediaCategory.IMAGES
+            }
+
+            val isVideo = obj.optBoolean("isVideo", false)
+            val isAudio = obj.optBoolean("isAudio", false)
+            val isStream = obj.optBoolean("isStream", false)
+
+            val item = ScrapedMediaItem(
+                id = obj.optString("id", "gdl_${System.currentTimeMillis()}_$i"),
+                url = obj.getString("url"),
+                title = obj.optString("title", "media_${i + 1}"),
+                isVideo = isVideo,
+                isAudio = isAudio,
+                isStream = isStream,
+                category = mediaCategory,
+                format = obj.optString("format", "IMAGE"),
+                mimeType = obj.optString("mimeType", if (isVideo) "video/mp4" else "image/jpeg"),
+                thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() },
+                source = obj.optString("source", "gallery-dl"),
+                resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
+                sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null
+            )
+            itemsList.add(item)
+        }
+        return Pair(pageTitle, itemsList)
+    }
+
+    private suspend fun executePythonExtractor(
+        methodName: String,
+        url: String,
+        options: GalleryDlOptions
+    ): GalleryDlExtractResult = withContext(Dispatchers.IO) {
+        if (!isAvailable()) {
+            return@withContext GalleryDlExtractResult(
+                success = false,
+                errorMessage = "Chaquopy Python runtime is not active."
+            )
+        }
+
+        try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+
+            val optsJson = JSONObject().apply {
+                options.userAgent?.let { put("user_agent", it) }
+                options.cookies?.let { put("cookies", it) }
+                put("timeout", options.timeoutSeconds)
+            }.toString()
+
+            val rawResult = runner.callAttr(methodName, url.trim(), optsJson).toString()
+            val root = JSONObject(rawResult)
+
+            val success = root.optBoolean("success", false)
+            if (!success) {
+                val err = root.optString("error", "Extraction failed or produced no items")
                 return@withContext GalleryDlExtractResult(
                     success = false,
-                    errorMessage = "Chaquopy Python runtime is not active."
+                    errorMessage = err
                 )
             }
 
-            try {
-                val py = Python.getInstance()
-                val runner = py.getModule("gallery_dl_runner")
+            val extractorName = root.optString("extractor", root.optString("engine", methodName))
+            val (pageTitle, itemsList) = parseExtractedItems(root)
 
-                val optsJson = JSONObject().apply {
-                    options.userAgent?.let { put("user_agent", it) }
-                    options.cookies?.let { put("cookies", it) }
-                    put("timeout", options.timeoutSeconds)
-                }.toString()
-
-                val rawResult = runner.callAttr("extract_media", url.trim(), optsJson).toString()
-                val root = JSONObject(rawResult)
-
-                val success = root.optBoolean("success", false)
-                if (!success) {
-                    val err = root.optString("error", "Unknown extraction error")
-                    return@withContext GalleryDlExtractResult(
-                        success = false,
-                        errorMessage = err
-                    )
-                }
-
-                val extractorName = root.optString("extractor", "")
-                val category = root.optString("category", "")
-                val pageTitle = root.optString("pageTitle", "")
-
-                val itemsArray = root.optJSONArray("items") ?: JSONArray()
-                val itemsList = mutableListOf<ScrapedMediaItem>()
-
-                for (i in 0 until itemsArray.length()) {
-                    val obj = itemsArray.getJSONObject(i)
-                    val catStr = obj.optString("category", "IMAGES")
-                    val mediaCategory = when (catStr.uppercase()) {
-                        "VIDEOS" -> MediaCategory.VIDEOS
-                        "AUDIO" -> MediaCategory.AUDIO
-                        "STREAMS" -> MediaCategory.STREAMS
-                        else -> MediaCategory.IMAGES
-                    }
-
-                    val isVideo = obj.optBoolean("isVideo", false)
-                    val isAudio = obj.optBoolean("isAudio", false)
-                    val isStream = obj.optBoolean("isStream", false)
-
-                    val item = ScrapedMediaItem(
-                        id = obj.optString("id", "gdl_${System.currentTimeMillis()}_$i"),
-                        url = obj.getString("url"),
-                        title = obj.optString("title", "media_${i + 1}"),
-                        isVideo = isVideo,
-                        isAudio = isAudio,
-                        isStream = isStream,
-                        category = mediaCategory,
-                        format = obj.optString("format", "IMAGE"),
-                        mimeType = obj.optString("mimeType", if (isVideo) "video/mp4" else "image/jpeg"),
-                        thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() },
-                        source = obj.optString("source", "gallery-dl"),
-                        resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
-                        sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null
-                    )
-                    itemsList.add(item)
-                }
-
-                GalleryDlExtractResult(
-                    success = true,
-                    extractorName = extractorName,
-                    category = category,
-                    pageTitle = pageTitle,
-                    items = itemsList
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "extractMedia execution failed", e)
-                GalleryDlExtractResult(
-                    success = false,
-                    errorMessage = e.localizedMessage ?: "gallery-dl extraction failed"
-                )
-            }
+            GalleryDlExtractResult(
+                success = true,
+                extractorName = extractorName,
+                pageTitle = pageTitle,
+                items = itemsList
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "$methodName execution failed", e)
+            GalleryDlExtractResult(
+                success = false,
+                errorMessage = e.localizedMessage ?: "$methodName execution failed"
+            )
         }
+    }
+
+    suspend fun extractGalleryDl(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_gallery_dl", url, options)
+
+    suspend fun extractYtDlp(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_yt_dlp", url, options)
+
+    suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
+        executePythonExtractor("extract_media", url, options)
 
     /**
      * Downloads a media file with proper referer header via Python requests or fallback.
