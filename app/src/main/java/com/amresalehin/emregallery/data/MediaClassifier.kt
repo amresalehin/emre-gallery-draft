@@ -5,6 +5,7 @@ import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import kotlin.math.abs
 
 /**
  * High-level category for discovered media.
@@ -47,12 +48,72 @@ object MediaClassifier {
         "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
         "fbclid", "gclid", "msclkid", "ref", "source", "_ga", "_gl", "_t", "cachebust",
         "range", "bytestart", "byteend", "bytes", "rn", "sq", "sver", "live", "cpn",
-        "chunk", "seg", "segment", "frag", "part"
+        "chunk", "seg", "segment", "frag", "part", "subpart"
     )
 
     private val STREAMING_SLICE_PARAMS = setOf(
-        "range", "bytestart", "byteend", "bytes", "rn", "sq", "live", "cpn"
+        "range", "bytestart", "byteend", "bytes", "rn", "sq", "live", "cpn", "sver", "chunk", "seg", "part"
     )
+
+    /**
+     * Checks if a string is a substantial, legitimate Base64 inline data URI (e.g. artwork, canvas exports),
+     * while rejecting tiny spacer GIFs, 1x1 transparent tracking pixels, and empty vectors.
+     */
+    fun isSubstantialDataUri(url: String): Boolean {
+        val trimmed = url.trim()
+        if (!trimmed.startsWith("data:image/", ignoreCase = true)) return false
+        // Exclude tiny spacers, 1x1 pixel tracking GIFs (< 2048 characters base64)
+        if (trimmed.length < 2048) return false
+        // Known 1x1 transparent GIF signature
+        if (trimmed.contains("R0lGODlhAQABA", ignoreCase = true)) return false
+        return trimmed.contains(";base64,", ignoreCase = true)
+    }
+
+    data class DataUriInfo(
+        val mimeType: String,
+        val format: String,
+        val estimatedSizeBytes: Long,
+        val cleanTitle: String
+    )
+
+    fun parseDataUriInfo(dataUri: String): DataUriInfo? {
+        if (!isSubstantialDataUri(dataUri)) return null
+        val header = dataUri.substringBefore(";base64,").removePrefix("data:").trim().lowercase(Locale.ROOT)
+        val mimeType = if (header.isBlank()) "image/png" else header
+        val format = when {
+            mimeType.contains("png") -> "PNG"
+            mimeType.contains("webp") -> "WEBP"
+            mimeType.contains("gif") -> "GIF"
+            mimeType.contains("svg") -> "SVG"
+            else -> "JPEG"
+        }
+        val ext = format.lowercase(Locale.ROOT)
+        val base64Payload = dataUri.substringAfter(";base64,", "")
+        val estimatedBytes = (base64Payload.length * 3L) / 4L
+        val cleanTitle = "embedded_artwork_${abs(dataUri.hashCode()) % 100000}.$ext"
+        return DataUriInfo(
+            mimeType = mimeType,
+            format = format,
+            estimatedSizeBytes = estimatedBytes,
+            cleanTitle = cleanTitle
+        )
+    }
+
+    /**
+     * Estimates the size in bytes of a data URI without loading full bitmap into memory.
+     */
+    fun estimateDataUriSizeBytes(url: String): Long? {
+        if (!url.startsWith("data:", ignoreCase = true)) return null
+        val base64Payload = url.substringAfter(";base64,", "")
+        if (base64Payload.isNotEmpty()) {
+            return (base64Payload.length * 3L) / 4L
+        }
+        val commaIdx = url.indexOf(',')
+        if (commaIdx != -1) {
+            return (url.length - commaIdx - 1).toLong()
+        }
+        return null
+    }
 
     /**
      * Cleans streaming slice and sequence query parameters from a media URL.
@@ -81,12 +142,17 @@ object MediaClassifier {
      */
     fun isMediaFragment(url: String): Boolean {
         val lower = url.lowercase(Locale.ROOT)
-        if (lower.startsWith("blob:") || lower.startsWith("data:")) return true
+        if (lower.startsWith("blob:")) return true
+        if (lower.startsWith("data:")) {
+            return !isSubstantialDataUri(url)
+        }
 
         val clean = lower.substringBefore("?").substringBefore("#")
 
-        // 1. Fragment-only file extensions
-        if (clean.endsWith(".m4s") || clean.endsWith(".m4f") || clean.endsWith(".f4f") || clean.endsWith(".f4m")) {
+        // 1. Fragment-only streaming container extensions
+        if (clean.endsWith(".m4s") || clean.endsWith(".m4f") || clean.endsWith(".f4f") || clean.endsWith(".f4m") ||
+            clean.endsWith(".dash") || clean.endsWith(".cmfv") || clean.endsWith(".cmfa")
+        ) {
             return true
         }
 
@@ -94,27 +160,34 @@ object MediaClassifier {
         // Standalone videos on websites are MP4/WebM/MKV/MOV/M3U8. A .ts with numeric/segment numbering is an HLS chunk
         if (clean.endsWith(".ts")) {
             val fileName = clean.substringAfterLast('/')
-            val isSegmentTs = fileName.matches(Regex("""(?i)(?:seg|segment|chunk|frag|fragment)?[_\-.]?\d+\.ts""")) ||
+            val isSegmentTs = fileName.matches(Regex("""(?i)(?:seg|segment|chunk|frag|fragment|track|stream|hls)?[_\-.]?\d+\.ts""")) ||
+                    fileName.matches(Regex("""(?i)\d+\.ts""")) ||
                     fileName.contains("slice") || fileName.contains("stream") ||
-                    clean.contains("/hls/") || clean.contains("/dash/") || clean.contains("/segments/") || clean.contains("/chunks/")
+                    clean.contains("/hls/") || clean.contains("/dash/") || clean.contains("/segments/") || clean.contains("/chunks/") ||
+                    clean.contains("/live/")
             if (isSegmentTs) return true
         }
 
         // 3. Initialization segments (contain metadata only, no playable frames)
         if (clean.contains("/init.") || clean.contains("/init-") || clean.contains("_init.") ||
             clean.endsWith("init.mp4") || clean.endsWith("init.m4s") || clean.contains("init-stream") ||
-            clean.contains("/header.mp4") || clean.contains("/init_")
+            clean.contains("/header.mp4") || clean.contains("/init_") || clean.contains("init_video") ||
+            clean.contains("init_audio")
         ) {
             return true
         }
 
         // 4. Fragment / segment naming in URL path
-        val segmentPattern = Regex("""[/_.-](?:seg|segment|frag|fragment|chunk)[-_.]?\d+""", RegexOption.IGNORE_CASE)
+        val segmentPattern = Regex("""[/_.-](?:seg|segment|frag|fragment|chunk|part)[-_.]?\d+""", RegexOption.IGNORE_CASE)
         if (segmentPattern.containsMatchIn(clean)) {
             return true
         }
-        val numberedFragment = Regex("""\d+-(?:frag|seg|segment)\.(?:mp4|ts|m4s|m4v)""", RegexOption.IGNORE_CASE)
+        val numberedFragment = Regex("""\d+-(?:frag|seg|segment|chunk)\.(?:mp4|ts|m4s|m4v)""", RegexOption.IGNORE_CASE)
         if (numberedFragment.containsMatchIn(clean)) {
+            return true
+        }
+        val chunkStreamPattern = Regex("""chunk-stream\d+-\d+\.m4s""", RegexOption.IGNORE_CASE)
+        if (chunkStreamPattern.containsMatchIn(clean)) {
             return true
         }
 
@@ -123,11 +196,14 @@ object MediaClassifier {
         if (query.isNotBlank()) {
             val params = query.split("&")
             for (p in params) {
-                val key = p.substringBefore("=")
+                val key = p.substringBefore("=").lowercase(Locale.ROOT)
                 val value = p.substringAfter("=", "")
-                if ((key == "sq" || key == "seg" || key == "segment" || key == "frag" || key == "chunk") &&
+                if ((key == "sq" || key == "seg" || key == "segment" || key == "frag" || key == "chunk" || key == "part") &&
                     value.toIntOrNull() != null
                 ) {
+                    return true
+                }
+                if (key == "bytestart" || key == "byteend") {
                     return true
                 }
             }
@@ -141,8 +217,11 @@ object MediaClassifier {
      */
     fun resolveUrl(rawUrl: String, baseUrl: String): String? {
         val trimmed = rawUrl.trim()
-        if (trimmed.isBlank() || trimmed.startsWith("javascript:") || trimmed.startsWith("data:") || trimmed.startsWith("mailto:")) {
+        if (trimmed.isBlank() || trimmed.startsWith("javascript:") || trimmed.startsWith("mailto:")) {
             return null
+        }
+        if (trimmed.startsWith("data:", ignoreCase = true)) {
+            return if (isSubstantialDataUri(trimmed)) trimmed else null
         }
 
         return try {
@@ -215,6 +294,17 @@ object MediaClassifier {
      */
     fun isValidMedia(url: String): Boolean {
         val lower = url.lowercase(Locale.ROOT)
+
+        // 1. Check AdBlockEngine for ad networks and tracking scripts
+        if (AdBlockEngine.isAdOrTracker(url)) {
+            return false
+        }
+
+        // 2. Data URI validation: allow substantial artwork, reject tiny tracking pixels
+        if (lower.startsWith("data:")) {
+            return isSubstantialDataUri(url)
+        }
+
         for (pattern in TRACKING_PATTERNS) {
             if (lower.contains(pattern)) return false
         }
@@ -321,15 +411,89 @@ object MediaClassifier {
     )
 
     /**
-     * Resolves a media URL (such as a Wikimedia or MediaWiki thumbnail or transcoded video) to its original
-     * full-resolution file URL, while preserving the sharp thumbnail URL for immediate preview.
-     * Preserves custom upload paths without assuming default /images/.
+     * Resolves a media URL to its original full-resolution master file URL across major CDNs
+     * (Wikimedia, Reddit, Imgur, Twitter/X, WordPress/Jetpack, Base64 Data URIs)
+     * while preserving the sharp thumbnail URL for immediate preview.
      */
     fun resolveOriginalMedia(rawUrl: String): ResolvedMediaInfo {
         val trimmed = rawUrl.trim()
         val normalized = if (trimmed.startsWith("//")) "https:$trimmed" else trimmed
 
-        // 1. Wikimedia Commons / Wikipedia thumbnails
+        // 0. Base64 Data URI handling (embedded artwork)
+        if (normalized.startsWith("data:image/", ignoreCase = true)) {
+            val dataInfo = parseDataUriInfo(normalized)
+            if (dataInfo != null) {
+                return ResolvedMediaInfo(
+                    mediaUrl = normalized,
+                    thumbnailUrl = normalized,
+                    cleanTitle = dataInfo.cleanTitle
+                )
+            }
+        }
+
+        // 1. Reddit Preview CDN (preview.redd.it / external-preview.redd.it -> i.redd.it)
+        if (normalized.contains("preview.redd.it") || normalized.contains("external-preview.redd.it")) {
+            val cleanPath = normalized.substringBefore("?")
+            val fileName = cleanPath.substringAfterLast('/')
+            val originalUrl = "https://i.redd.it/$fileName"
+            val cleanTitle = runCatching { java.net.URLDecoder.decode(fileName, "UTF-8") }.getOrDefault(fileName)
+            return ResolvedMediaInfo(
+                mediaUrl = originalUrl,
+                thumbnailUrl = normalized,
+                cleanTitle = cleanTitle
+            )
+        }
+
+        // 2. Imgur thumbnail suffix stripping (i.imgur.com/{id}{s|m|l|h|b|_d}.{ext} -> full resolution)
+        if (normalized.contains("i.imgur.com/")) {
+            val cleanUrl = normalized.substringBefore("?")
+            val fileName = cleanUrl.substringAfterLast('/')
+            val baseId = fileName.substringBeforeLast('.')
+            val ext = fileName.substringAfterLast('.', "")
+            val imgurThumbRegex = Regex("""^([a-zA-Z0-9]{5,8})(?:[smlhbt]|_d)$""")
+            val match = imgurThumbRegex.find(baseId)
+            if (match != null) {
+                val masterId = match.groupValues[1]
+                val originalExt = if (ext.equals("webp", ignoreCase = true) || ext.isEmpty()) "jpg" else ext
+                val originalUrl = "https://i.imgur.com/$masterId.$originalExt"
+                return ResolvedMediaInfo(
+                    mediaUrl = originalUrl,
+                    thumbnailUrl = normalized,
+                    cleanTitle = "$masterId.$originalExt"
+                )
+            }
+        }
+
+        // 3. Twitter / X Media CDN (pbs.twimg.com/media/{id}?name=small -> name=orig)
+        if (normalized.contains("pbs.twimg.com/media/")) {
+            val noHash = normalized.substringBefore("#")
+            val qIdx = noHash.indexOf('?')
+            val base = if (qIdx == -1) noHash else noHash.substring(0, qIdx)
+            val query = if (qIdx == -1) "" else noHash.substring(qIdx + 1)
+            val formatParam = query.split("&").firstOrNull { it.startsWith("format=", ignoreCase = true) } ?: "format=jpg"
+            val originalUrl = "$base?$formatParam&name=orig"
+            val fileName = base.substringAfterLast('/')
+            val ext = formatParam.substringAfter("format=").ifBlank { "jpg" }
+            return ResolvedMediaInfo(
+                mediaUrl = originalUrl,
+                thumbnailUrl = normalized,
+                cleanTitle = "$fileName.$ext"
+            )
+        }
+
+        // 4. WordPress / Jetpack Photon CDN (i0.wp.com, i1.wp.com -> original unscaled image)
+        if (Regex("""https?://i[0-3]\.wp\.com/""").containsMatchIn(normalized)) {
+            val unwrapped = normalized.replace(Regex("""https?://i[0-3]\.wp\.com/"""), "https://")
+            val cleanOriginal = unwrapped.substringBefore("?")
+            val fileName = cleanOriginal.substringAfterLast('/')
+            return ResolvedMediaInfo(
+                mediaUrl = cleanOriginal,
+                thumbnailUrl = normalized,
+                cleanTitle = fileName
+            )
+        }
+
+        // 5. Wikimedia Commons / Wikipedia thumbnails
         val wmMatch = WIKIMEDIA_THUMB_REGEX.find(normalized)
         if (wmMatch != null) {
             val project = wmMatch.groupValues[1]
@@ -344,7 +508,7 @@ object MediaClassifier {
             )
         }
 
-        // 2. Wikimedia Commons / Wikipedia transcoded videos (.../transcoded/hash/hash2/filename.webm/filename.webm.480p.vp9.webm)
+        // 6. Wikimedia Commons / Wikipedia transcoded videos (.../transcoded/hash/hash2/filename.webm/filename.webm.480p.vp9.webm)
         val wmTranscodeMatch = WIKIMEDIA_TRANSCODE_REGEX.find(normalized)
         if (wmTranscodeMatch != null) {
             val project = wmTranscodeMatch.groupValues[1]
@@ -359,8 +523,7 @@ object MediaClassifier {
             )
         }
 
-        // 3. Generic MediaWiki installations (.../thumb/hash/hash2/filename/...)
-        // Preserves custom upload directories without assuming standard /images/
+        // 7. Generic MediaWiki installations (.../thumb/hash/hash2/filename/...)
         if (normalized.contains("/thumb/")) {
             val mwMatch = MEDIAWIKI_GENERIC_THUMB_REGEX.find(normalized)
             if (mwMatch != null) {
@@ -377,7 +540,7 @@ object MediaClassifier {
             }
         }
 
-        // 4. Generic MediaWiki installations transcoded videos
+        // 8. Generic MediaWiki installations transcoded videos
         if (normalized.contains("/transcoded/")) {
             val mwTranscodeMatch = MEDIAWIKI_GENERIC_TRANSCODE_REGEX.find(normalized)
             if (mwTranscodeMatch != null) {
@@ -410,8 +573,12 @@ object MediaClassifier {
      * Creates a high-fidelity deduplication key that identifies identical media discovered
      * across different extraction engines (Static HTML, Live Browser, gallery-dl, yt-dlp).
      * Normalizes:
+     * - Multi-Host CDN mirrors (Reddit preview -> i.redd.it, WordPress i0-i3 -> i.wp.com)
+     * - Cloudinary / Imgix transformation segments
+     * - Imgur thumbnail suffixes
+     * - Twitter pbs.twimg name queries
      * - Scheme (http vs https)
-     * - URL percent-encoding differences (e.g. %28 vs ()
+     * - URL percent-encoding differences
      * - Wikimedia/MediaWiki thumbnail derivatives vs original full-resolution uploads
      * - Responsive image dimensions / resize query parameters (?w=, ?h=, ?width=, ?size=, ?quality=, ?fit=, etc.)
      * - Tracking query parameters
@@ -419,6 +586,12 @@ object MediaClassifier {
     fun deduplicationKey(url: String): String {
         return try {
             val resolved = resolveOriginalMedia(url).mediaUrl
+
+            // If it's a data URI, hash its base64 content
+            if (resolved.startsWith("data:", ignoreCase = true)) {
+                return "data_uri_${abs(resolved.hashCode())}"
+            }
+
             val clean = cleanMediaUrl(resolved)
             val noHash = clean.substringBefore("#")
 
@@ -438,9 +611,27 @@ object MediaClassifier {
                 basePart.lowercase(Locale.ROOT)
             }
 
-            val normalizedHostAndPath = normalizedPath
+            var normalizedHostAndPath = normalizedPath
                 .replace("thumb.wikimedia.org", "upload.wikimedia.org")
-                .replace(Regex("""https?://i[0-9]\.wp\.com/"""), "https://i.wp.com/")
+                .replace(Regex("""https?://preview\.redd\.it/"""), "https://i.redd.it/")
+                .replace(Regex("""https?://external-preview\.redd\.it/"""), "https://i.redd.it/")
+                .replace(Regex("""https?://i[0-3]\.wp\.com/"""), "https://i.wp.com/")
+
+            // Imgur suffix stripping in deduplication key
+            if (normalizedHostAndPath.contains("i.imgur.com/")) {
+                val fn = normalizedHostAndPath.substringAfterLast('/')
+                val id = fn.substringBeforeLast('.')
+                val ext = fn.substringAfterLast('.', "")
+                val m = Regex("""^([a-zA-Z0-9]{5,8})(?:[smlhbt]|_d)$""").find(id)
+                if (m != null) {
+                    val root = normalizedHostAndPath.substringBeforeLast('/')
+                    normalizedHostAndPath = "$root/${m.groupValues[1]}.$ext"
+                }
+            }
+
+            // Cloudinary / Imgix dynamic resize transform stripping (e.g. /c_scale,w_500/ -> /)
+            normalizedHostAndPath = normalizedHostAndPath
+                .replace(Regex("""/(?:c_[a-z]+,)?(?:w_\d+,?)?(?:h_\d+,?)?(?:q_[a-z0-9]+,?)?(?:f_[a-z]+)?/"""), "/")
 
             // Strip video quality / transcode suffixes to deduplicate multiple transcode qualities of same video
             val videoQualityRegex = Regex("""(?:\.(?:144|240|360|480|720|1080|1440|2160)p(?:\.vp9|\.av1)?|[._-](?:144|240|360|480|720|1080|1440|2160)p)\.(webm|mp4|mkv)$""", RegexOption.IGNORE_CASE)

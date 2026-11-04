@@ -77,8 +77,10 @@ class BrowserMediaExtractor(private val context: Context) {
                 ) {
                     if (isCancelled) return
                     val trimmed = rawUrl.trim()
-                    if (trimmed.startsWith("blob:", ignoreCase = true) || trimmed.startsWith("data:", ignoreCase = true)) return
+                    if (trimmed.startsWith("blob:", ignoreCase = true)) return
+                    if (trimmed.startsWith("data:", ignoreCase = true) && !MediaClassifier.isSubstantialDataUri(trimmed)) return
                     if (MediaClassifier.isMediaFragment(trimmed)) return
+                    if (AdBlockEngine.isAdOrTracker(trimmed)) return
 
                     val resolved = MediaClassifier.resolveUrl(trimmed, normalizedUrl) ?: return
                     if (!MediaClassifier.isValidMedia(resolved)) return
@@ -172,6 +174,17 @@ class BrowserMediaExtractor(private val context: Context) {
                         if (isCancelled || request == null) return null
 
                         val reqUrl = request.url.toString()
+
+                        // 1. Block ad networks and tracking requests with instant zero payload
+                        if (AdBlockEngine.isAdOrTracker(reqUrl)) {
+                            return AdBlockEngine.createEmptyResponse()
+                        }
+
+                        // 2. Reject streaming fragments and slices
+                        if (MediaClassifier.isMediaFragment(reqUrl)) {
+                            return null
+                        }
+
                         val reqLower = reqUrl.lowercase()
                         val headers = request.requestHeaders ?: emptyMap()
                         val acceptHeader = headers["Accept"]?.lowercase() ?: ""
@@ -181,7 +194,7 @@ class BrowserMediaExtractor(private val context: Context) {
                                 reqLower.contains(".json") || reqLower.contains("/wiki/") || reqLower.contains("/geohack") ||
                                 reqLower.contains("centralautologin")
 
-                        if (isNonMediaPage || MediaClassifier.isMediaFragment(reqUrl)) return null
+                        if (isNonMediaPage) return null
 
                         val isStream = reqLower.contains(".m3u8") || reqLower.contains(".mpd") ||
                                 reqLower.contains("chunklist") || acceptHeader.contains("mpegurl") ||
@@ -205,7 +218,7 @@ class BrowserMediaExtractor(private val context: Context) {
 
                         if (isVideo || isAudio || isImage) {
                             val cleanReqUrl = if (isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
-                            if (!MediaClassifier.isMediaFragment(cleanReqUrl)) {
+                            if (!MediaClassifier.isMediaFragment(cleanReqUrl) && !AdBlockEngine.isAdOrTracker(cleanReqUrl)) {
                                 mainHandler.post {
                                     dispatchMediaItem(
                                         rawUrl = cleanReqUrl,
@@ -218,6 +231,32 @@ class BrowserMediaExtractor(private val context: Context) {
 
                         // Let the WebView continue loading normally
                         return null
+                    }
+
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): Boolean {
+                        val reqUrl = request?.url?.toString() ?: return false
+                        val lower = reqUrl.lowercase()
+                        if (!lower.startsWith("http://") && !lower.startsWith("https://") &&
+                            !lower.startsWith("about:") && !lower.startsWith("data:")
+                        ) {
+                            return true // Suppress external app launches and ERR_UNKNOWN_URL_SCHEME in background extractor
+                        }
+                        return false
+                    }
+
+                    @Suppress("DEPRECATION")
+                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                        val reqUrl = url ?: return false
+                        val lower = reqUrl.lowercase()
+                        if (!lower.startsWith("http://") && !lower.startsWith("https://") &&
+                            !lower.startsWith("about:") && !lower.startsWith("data:")
+                        ) {
+                            return true
+                        }
+                        return false
                     }
 
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {

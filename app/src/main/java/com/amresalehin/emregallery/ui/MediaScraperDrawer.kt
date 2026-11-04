@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,11 +89,12 @@ fun MediaScraperDrawer(
     var sortDropdownExpanded by remember { mutableStateOf(false) }
     var sortOption by remember { mutableStateOf("Default") }
 
-    // Dimension filter states - initial default set to 0 (all dimensions shown)
+    // Dimension & Size filter states - initial default set to 0 (all dimensions shown), 1 KB minimum
     var showDimensionFilter by remember { mutableStateOf(false) }
     var minWidthFilter by remember { mutableFloatStateOf(0f) }
     var minHeightFilter by remember { mutableFloatStateOf(0f) }
     var showSvg by remember { mutableStateOf(false) } // By default keep SVG hidden
+    var minKbInput by remember { mutableStateOf("1") } // By default hide media less than 1 KB
 
     var hasSubmittedQuery by remember { mutableStateOf(false) }
     var lastSubmittedUrl by remember { mutableStateOf("") }
@@ -129,26 +131,52 @@ fun MediaScraperDrawer(
         }
     }
 
-    // Auto-apply dimension and SVG filter across all scraped items (SVG hidden by default)
-    val dimensionFilteredAll = remember(allScrapedItems, minWidthFilter, minHeightFilter, showSvg, dynamicDimensions.size) {
+    val minKbVal = minKbInput.toFloatOrNull() ?: 0f
+    val minBytesThreshold = (minKbVal * 1024L).toLong()
+
+    // Auto-apply dimension, size (< 1KB), and SVG filters across all scraped items
+    val dimensionFilteredAll = remember(
+        allScrapedItems,
+        minWidthFilter,
+        minHeightFilter,
+        showSvg,
+        minBytesThreshold,
+        dynamicDimensions.size
+    ) {
         val targetMinWidth = minWidthFilter.toInt()
         val targetMinHeight = minHeightFilter.toInt()
-        val baseList = if (!showSvg) {
-            allScrapedItems.filter { !MediaClassifier.isSvg(it.url, it.mimeType, it.format) }
-        } else {
-            allScrapedItems
-        }
 
-        if (targetMinWidth <= 0 && targetMinHeight <= 0) {
-            baseList
-        } else {
-            baseList.filter { item ->
-                passesDimensionFilter(item, targetMinWidth, targetMinHeight, dynamicDimensions)
+        allScrapedItems.filter { item ->
+            // 1. SVG Filter
+            if (!showSvg && MediaClassifier.isSvg(item.url, item.mimeType, item.format)) {
+                return@filter false
             }
+
+            // 2. Hide media less than __ KB (by default 1 KB)
+            if (minBytesThreshold > 0L) {
+                val knownSize = item.sizeBytes
+                    ?: if (item.url.startsWith("data:", ignoreCase = true)) {
+                        MediaClassifier.estimateDataUriSizeBytes(item.url)
+                    } else {
+                        ImageDimensionProber.getCachedSize(item.url)
+                    }
+                if (knownSize != null && knownSize < minBytesThreshold) {
+                    return@filter false
+                }
+            }
+
+            // 3. Dimension Filter (Width & Height)
+            if (targetMinWidth > 0 || targetMinHeight > 0) {
+                if (!passesDimensionFilter(item, targetMinWidth, targetMinHeight, dynamicDimensions)) {
+                    return@filter false
+                }
+            }
+
+            true
         }
     }
 
-    // Dynamic counts (reflecting active dimension filter)
+    // Dynamic counts (reflecting active dimension and size filter)
     val imageCount = remember(dimensionFilteredAll) { dimensionFilteredAll.count { it.category == MediaCategory.IMAGES } }
     val videoCount = remember(dimensionFilteredAll) { dimensionFilteredAll.count { it.category == MediaCategory.VIDEOS } }
     val audioCount = remember(dimensionFilteredAll) { dimensionFilteredAll.count { it.category == MediaCategory.AUDIO } }
@@ -278,6 +306,7 @@ fun MediaScraperDrawer(
                                     minWidthFilter = 0f
                                     minHeightFilter = 0f
                                     showSvg = false
+                                    minKbInput = "1"
                                     showDimensionFilter = false
                                 },
                                 modifier = Modifier
@@ -621,7 +650,7 @@ fun MediaScraperDrawer(
                     Spacer(Modifier.width(6.dp))
 
                     // Pinned Dimension & SVG Filter Button
-                    val isDimensionFilterActive = minWidthFilter > 0f || minHeightFilter > 0f || showSvg
+                    val isDimensionFilterActive = minWidthFilter > 0f || minHeightFilter > 0f || showSvg || (minKbInput.isNotBlank() && minKbInput != "1")
                     Surface(
                         onClick = { showDimensionFilter = !showDimensionFilter },
                         shape = RoundedCornerShape(12.dp),
@@ -695,93 +724,116 @@ fun MediaScraperDrawer(
                     }
                 }
 
-                // Expandable Dimension Filter Section with 2 Sliders
+                // Expandable Dimension & Size Filter Section matching clean compact mockup
                 AnimatedVisibility(
                     visible = showDimensionFilter,
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically()
                 ) {
-                    val isDimensionFilterActive = minWidthFilter != 360f || minHeightFilter != 360f || minWidthFilter > 0f
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        color = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(24.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                        tonalElevation = 2.dp,
+                        shadowElevation = 4.dp,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
                             .testTag("dimension_filter_panel")
                     ) {
                         Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            // Dimension filter top actions (Reset & Close)
+                            // Top action buttons: Clear and Close
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                if (isDimensionFilterActive) {
-                                    TextButton(
-                                        onClick = {
-                                            minWidthFilter = 0f
-                                            minHeightFilter = 0f
-                                            showSvg = false
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                        modifier = Modifier
-                                            .height(28.dp)
-                                            .testTag("dimension_filter_reset_button")
+                                Surface(
+                                    onClick = {
+                                        minWidthFilter = 0f
+                                        minHeightFilter = 0f
+                                        showSvg = false
+                                        minKbInput = "1"
+                                    },
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier
+                                        .height(32.dp)
+                                        .testTag("dimension_filter_reset_button")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "Clear",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
                                         Text(
                                             text = "Clear",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.SemiBold
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
-                                    Spacer(Modifier.width(6.dp))
                                 }
-                                IconButton(
+
+                                Spacer(Modifier.width(8.dp))
+
+                                Surface(
                                     onClick = { showDimensionFilter = false },
-                                    modifier = Modifier.size(24.dp)
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("dimension_filter_close_button")
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Close filter panel",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Close filter panel",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 }
                             }
 
-                            // Slider 1: Width Slider
-                            Column {
+                            // Slider 1: Width
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Min Width",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = "Width",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = if (minWidthFilter > 0f) "${minWidthFilter.toInt()} px" else "Any width",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (minWidthFilter > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = if (minWidthFilter <= 0f) "∞" else "${minWidthFilter.toInt()}",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Normal,
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                                 Slider(
                                     value = minWidthFilter,
                                     onValueChange = { minWidthFilter = it },
                                     valueRange = 0f..3840f,
-                                    steps = 38,
+                                    steps = 3,
                                     colors = SliderDefaults.colors(
-                                        thumbColor = MaterialTheme.colorScheme.primary,
-                                        activeTrackColor = MaterialTheme.colorScheme.primary
+                                        thumbColor = MaterialTheme.colorScheme.surface,
+                                        activeTrackColor = MaterialTheme.colorScheme.outlineVariant,
+                                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -789,33 +841,35 @@ fun MediaScraperDrawer(
                                 )
                             }
 
-                            // Slider 2: Height Slider
-                            Column {
+                            // Slider 2: Height
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "Min Height",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = "Height",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = if (minHeightFilter > 0f) "${minHeightFilter.toInt()} px" else "Any height",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (minHeightFilter > 0f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        text = if (minHeightFilter <= 0f) "∞" else "${minHeightFilter.toInt()}",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Normal,
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                                 Slider(
                                     value = minHeightFilter,
                                     onValueChange = { minHeightFilter = it },
                                     valueRange = 0f..2160f,
-                                    steps = 21,
+                                    steps = 3,
                                     colors = SliderDefaults.colors(
-                                        thumbColor = MaterialTheme.colorScheme.primary,
-                                        activeTrackColor = MaterialTheme.colorScheme.primary
+                                        thumbColor = MaterialTheme.colorScheme.surface,
+                                        activeTrackColor = MaterialTheme.colorScheme.outlineVariant,
+                                        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                                     ),
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -823,18 +877,18 @@ fun MediaScraperDrawer(
                                 )
                             }
 
-                            // Quick preset chips
+                            // Presets Row: 360p, 480p, 720p, 1080p, 4K
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 listOf(
                                     "360p" to Pair(360f, 360f),
-                                    "SD (480p)" to Pair(640f, 480f),
-                                    "HD (720p)" to Pair(1280f, 720f),
-                                    "FHD (1080p)" to Pair(1920f, 1080f),
-                                    "4K (UHD)" to Pair(3840f, 2160f)
+                                    "480p" to Pair(640f, 480f),
+                                    "720p" to Pair(1280f, 720f),
+                                    "1080p" to Pair(1920f, 1080f),
+                                    "4K" to Pair(3840f, 2160f)
                                 ).forEach { (label, dims) ->
                                     val isCurrentPreset = minWidthFilter == dims.first && minHeightFilter == dims.second
                                     Surface(
@@ -847,87 +901,141 @@ fun MediaScraperDrawer(
                                                 minHeightFilter = dims.second
                                             }
                                         },
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = if (isCurrentPreset) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        modifier = Modifier.height(24.dp)
+                                        shape = RoundedCornerShape(18.dp),
+                                        color = if (isCurrentPreset) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isCurrentPreset) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(36.dp)
+                                            .testTag("scraper_preset_$label")
                                     ) {
                                         Box(
-                                            modifier = Modifier.padding(horizontal = 8.dp),
+                                            modifier = Modifier.fillMaxSize(),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = label,
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.labelLarge,
                                                 fontWeight = if (isCurrentPreset) FontWeight.Bold else FontWeight.Medium,
-                                                color = if (isCurrentPreset) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = if (isCurrentPreset) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                                             )
                                         }
                                     }
                                 }
                             }
-                            // SVG Vector Toggle Row
+
+                            // Bottom Capsule: SVG [Switch] | Hide < [ 1 ] KB
                             Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (showSvg) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (showSvg) MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                                ),
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { showSvg = !showSvg }
-                                    .testTag("scraper_filter_svg_toggle_row")
+                                    .testTag("scraper_bottom_capsule")
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Text(
-                                                text = "Show SVG Vectors",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            if (svgCount > 0) {
-                                                Surface(
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    color = if (showSvg) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant,
-                                                    modifier = Modifier.height(18.dp)
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier.padding(horizontal = 6.dp),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = "$svgCount",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            fontSize = 11.sp,
-                                                            color = if (showSvg) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
+                                    // Left side: SVG and Switch
+                                    Row(
+                                        modifier = Modifier.weight(1f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
                                         Text(
-                                            text = if (showSvg) "SVG vectors are displayed in media grid" else "Hidden by default to focus on photos and videos",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontSize = 12.sp
+                                            text = "SVG",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Switch(
+                                            checked = showSvg,
+                                            onCheckedChange = { showSvg = it },
+                                            modifier = Modifier.testTag("scraper_filter_svg_switch")
                                         )
                                     }
-                                    Switch(
-                                        checked = showSvg,
-                                        onCheckedChange = { showSvg = it },
-                                        modifier = Modifier.testTag("scraper_filter_svg_switch")
+
+                                    Spacer(Modifier.width(14.dp))
+
+                                    // Vertical divider
+                                    Box(
+                                        modifier = Modifier
+                                            .width(1.dp)
+                                            .height(26.dp)
+                                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
                                     )
+
+                                    Spacer(Modifier.width(14.dp))
+
+                                    // Right side: Hide < [ 1 ] KB
+                                    Row(
+                                        modifier = Modifier.weight(1.3f),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Text(
+                                            text = "Hide <",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f)),
+                                            color = MaterialTheme.colorScheme.surface,
+                                            modifier = Modifier
+                                                .width(68.dp)
+                                                .height(34.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (minKbInput.isEmpty()) {
+                                                    Text(
+                                                        text = "1",
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            textAlign = TextAlign.Center,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                                                        )
+                                                    )
+                                                }
+                                                BasicTextField(
+                                                    value = minKbInput,
+                                                    onValueChange = { input ->
+                                                        if (input.all { it.isDigit() } && input.length <= 6) {
+                                                            minKbInput = input
+                                                        }
+                                                    },
+                                                    singleLine = true,
+                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                        textAlign = TextAlign.Center,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    ),
+                                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .testTag("scraper_filter_min_kb_input")
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "KB",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1712,11 +1820,12 @@ fun passesDimensionFilter(
  * Uses OkHttp with HTTP Range 0-8191 and enforces a hard limit of 8192 bytes read from stream.
  */
 object ImageDimensionProber {
-    private val cache = ConcurrentHashMap<String, Pair<Int, Int>>()
+    private val dimCache = ConcurrentHashMap<String, Pair<Int, Int>>()
+    private val sizeCache = ConcurrentHashMap<String, Long>()
 
     suspend fun probe(url: String, referer: String? = null): Pair<Int, Int>? = withContext(Dispatchers.IO) {
         val cleanUrl = if (url.startsWith("//")) "https:$url" else url
-        cache[cleanUrl]?.let { return@withContext it }
+        dimCache[cleanUrl]?.let { return@withContext it }
 
         try {
             val reqBuilder = okhttp3.Request.Builder()
@@ -1733,6 +1842,17 @@ object ImageDimensionProber {
 
             OkHttpDownloader.client.newCall(reqBuilder.build()).execute().use { resp ->
                 if (resp.isSuccessful) {
+                    val contentRange = resp.header("Content-Range")
+                    val totalSize = if (!contentRange.isNullOrBlank() && contentRange.contains("/")) {
+                        contentRange.substringAfterLast("/").trim().toLongOrNull()
+                    } else if (resp.code == 200) {
+                        resp.header("Content-Length")?.toLongOrNull()
+                    } else null
+
+                    if (totalSize != null && totalSize > 0L) {
+                        sizeCache[cleanUrl] = totalSize
+                    }
+
                     val stream = resp.body?.byteStream() ?: return@withContext null
                     val maxProbeBytes = 8192
                     val buffer = ByteArray(maxProbeBytes)
@@ -1747,7 +1867,7 @@ object ImageDimensionProber {
                         BitmapFactory.decodeByteArray(buffer, 0, totalRead, opts)
                         if (opts.outWidth > 0 && opts.outHeight > 0) {
                             val dims = Pair(opts.outWidth, opts.outHeight)
-                            cache[cleanUrl] = dims
+                            dimCache[cleanUrl] = dims
                             return@withContext dims
                         }
                     }
@@ -1759,6 +1879,11 @@ object ImageDimensionProber {
 
     fun getCached(url: String): Pair<Int, Int>? {
         val cleanUrl = if (url.startsWith("//")) "https:$url" else url
-        return cache[cleanUrl]
+        return dimCache[cleanUrl]
+    }
+
+    fun getCachedSize(url: String): Long? {
+        val cleanUrl = if (url.startsWith("//")) "https:$url" else url
+        return sizeCache[cleanUrl]
     }
 }

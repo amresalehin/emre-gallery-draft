@@ -1202,5 +1202,179 @@ class MediaDownloaderTest {
         assertTrue(mergedTaj.downloadHeaders.containsKey("Referer"))
         assertTrue(mergedTaj.downloadHeaders.containsKey("User-Agent"))
     }
+
+    @Test
+    fun testEnhancedFragmentAndSegmentFiltering() {
+        val fragmentCases = listOf(
+            "https://cdn.example.com/stream/segment-001.ts",
+            "https://cdn.example.com/hls/seg_12.ts",
+            "https://cdn.example.com/live/hls-50.ts",
+            "https://cdn.example.com/video/track-1-frag-5.ts",
+            "https://cdn.example.com/dash/chunk-stream0-00001.m4s",
+            "https://cdn.example.com/dash/init-stream0.m4s",
+            "https://cdn.example.com/video/init.mp4",
+            "https://cdn.example.com/video/init_video.mp4",
+            "https://cdn.example.com/video/header.mp4",
+            "https://cdn.example.com/video/frag-1.mp4",
+            "https://cdn.example.com/stream.mp4?sq=3&rn=2",
+            "https://cdn.example.com/stream.mp4?bytestart=0&byteend=5000",
+            "https://cdn.example.com/stream/part-1.dash",
+            "blob:https://example.com/abc-123"
+        )
+
+        for (frag in fragmentCases) {
+            assertTrue("Expected fragment detection for $frag", MediaClassifier.isMediaFragment(frag))
+            assertFalse("Expected non-valid media for $frag", MediaClassifier.isValidMedia(frag))
+        }
+
+        val validVideos = listOf(
+            "https://cdn.example.com/videos/full_trailer.mp4",
+            "https://cdn.example.com/hls/master.m3u8",
+            "https://cdn.example.com/dash/manifest.mpd",
+            "https://cdn.example.com/assets/animation.webm",
+            "https://cdn.example.com/shows/episode_01.mkv"
+        )
+
+        for (vid in validVideos) {
+            assertFalse("Valid video should not be fragment: $vid", MediaClassifier.isMediaFragment(vid))
+            assertTrue("Valid video should be accepted as media: $vid", MediaClassifier.isValidMedia(vid))
+        }
+    }
+
+    @Test
+    fun testMultiHostCdnNormalizationAndDeduplication() {
+        // 1. Reddit: preview.redd.it -> i.redd.it
+        val redditPreview = "https://preview.redd.it/abcdef123.jpg?width=640&crop=smart&auto=webp&s=xyz789"
+        val redditResolved = MediaClassifier.resolveOriginalMedia(redditPreview)
+        assertEquals("https://i.redd.it/abcdef123.jpg", redditResolved.mediaUrl)
+        assertEquals(redditPreview, redditResolved.thumbnailUrl)
+
+        val redditKey1 = MediaClassifier.deduplicationKey(redditPreview)
+        val redditKey2 = MediaClassifier.deduplicationKey("https://i.redd.it/abcdef123.jpg")
+        assertEquals(redditKey1, redditKey2)
+
+        // 2. Imgur: i.imgur.com/{id}m.jpg -> i.imgur.com/{id}.jpg
+        val imgurThumb = "https://i.imgur.com/vAbCdEm.jpg"
+        val imgurResolved = MediaClassifier.resolveOriginalMedia(imgurThumb)
+        assertEquals("https://i.imgur.com/vAbCdE.jpg", imgurResolved.mediaUrl)
+
+        val imgurKey1 = MediaClassifier.deduplicationKey(imgurThumb)
+        val imgurKey2 = MediaClassifier.deduplicationKey("https://i.imgur.com/vAbCdE.jpg")
+        assertEquals(imgurKey1, imgurKey2)
+
+        // 3. Twitter / X: pbs.twimg.com name query -> name=orig
+        val twitterThumb = "https://pbs.twimg.com/media/F123456?format=jpg&name=small"
+        val twitterResolved = MediaClassifier.resolveOriginalMedia(twitterThumb)
+        assertEquals("https://pbs.twimg.com/media/F123456?format=jpg&name=orig", twitterResolved.mediaUrl)
+
+        val twitterKey1 = MediaClassifier.deduplicationKey(twitterThumb)
+        val twitterKey2 = MediaClassifier.deduplicationKey("https://pbs.twimg.com/media/F123456?format=jpg&name=orig")
+        assertEquals(twitterKey1, twitterKey2)
+
+        // 4. WordPress / Jetpack Photon CDN: i0.wp.com -> master
+        val wpThumb = "https://i0.wp.com/example.com/wp-content/uploads/2026/04/photo.jpg?resize=300%2C200"
+        val wpResolved = MediaClassifier.resolveOriginalMedia(wpThumb)
+        assertEquals("https://example.com/wp-content/uploads/2026/04/photo.jpg", wpResolved.mediaUrl)
+
+        val wpKey1 = MediaClassifier.deduplicationKey(wpThumb)
+        val wpKey2 = MediaClassifier.deduplicationKey("https://example.com/wp-content/uploads/2026/04/photo.jpg")
+        assertEquals(wpKey1, wpKey2)
+    }
+
+    @Test
+    fun testBase64InlineDataUriSupport() = runBlocking {
+        // 1. Tiny spacer GIF must be rejected
+        val tinySpacer = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+        assertFalse(MediaClassifier.isSubstantialDataUri(tinySpacer))
+        assertFalse(MediaClassifier.isValidMedia(tinySpacer))
+
+        // 2. Substantial Base64 image (> 2048 chars) must be accepted
+        val dummyData = "A".repeat(2500)
+        val largeDataUri = "data:image/png;base64,$dummyData"
+        assertTrue(MediaClassifier.isSubstantialDataUri(largeDataUri))
+        assertTrue(MediaClassifier.isValidMedia(largeDataUri))
+
+        val parsedInfo = MediaClassifier.parseDataUriInfo(largeDataUri)
+        assertNotNull(parsedInfo)
+        assertEquals("image/png", parsedInfo?.mimeType)
+        assertEquals("PNG", parsedInfo?.format)
+
+        // 3. OkHttpDownloader decode data URI
+        val context: Context = ApplicationProvider.getApplicationContext()
+        // 1x1 valid PNG in Base64 padded to > 2048 chars for test
+        // Valid 1x1 PNG bytes:
+        val validPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        val validDataUri = "data:image/png;base64,$validPngBase64"
+        val res = OkHttpDownloader.downloadMediaFileDetailed(context, validDataUri, "embedded_canvas.png")
+        assertTrue(res.isSuccessful)
+        assertNotNull(res.file)
+        assertTrue(res.file?.exists() == true)
+        assertEquals("image/png", res.mimeType)
+    }
+
+    @Test
+    fun testAdBlockEngineIntegration() {
+        val adUrls = listOf(
+            "https://googleads.g.doubleclick.net/pagead/ads?client=ca-pub-123",
+            "https://www.google-analytics.com/analytics.js",
+            "https://static.criteo.net/js/ld/ld.js",
+            "https://cdn.taboola.com/libtrc/unip/123/tfa.js",
+            "https://widgets.outbrain.com/outbrain.js",
+            "https://ib.adnxs.com/seg?add=1",
+            "https://main.exoclick.com/tag.js",
+            "https://b.clarity.ms/collect",
+            "https://static.hotjar.com/c/hotjar-123.js",
+            "https://connect.facebook.net/en_us/fbevents.js"
+        )
+
+        for (ad in adUrls) {
+            assertTrue("Expected AdBlock detection for $ad", com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker(ad))
+            assertFalse("Expected isValidMedia to reject ad URL $ad", MediaClassifier.isValidMedia(ad))
+        }
+
+        val emptyResp = com.amresalehin.emregallery.data.AdBlockEngine.createEmptyResponse()
+        assertEquals("text/plain", emptyResp.mimeType)
+        assertEquals("UTF-8", emptyResp.encoding)
+        assertNotNull(emptyResp.data)
+        assertEquals(0, emptyResp.data.available())
+
+        val regularMedia = "https://images.unsplash.com/photo-123.jpg"
+        assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker(regularMedia))
+        assertTrue(MediaClassifier.isValidMedia(regularMedia))
+    }
+
+    @Test
+    fun testCloudflareAndAntiBotChallengePayloadRejection() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val context: Context = ApplicationProvider.getApplicationContext()
+            // Server returns HTTP 200 with Cloudflare anti-bot challenge page
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setHeader("Content-Type", "text/html; charset=UTF-8")
+                    .setBody("""
+                        <!DOCTYPE html>
+                        <html>
+                        <head><title>Just a moment...</title></head>
+                        <body>
+                            <h2>DDoS protection by Cloudflare</h2>
+                            <p>Ray ID: 7abc123456</p>
+                        </body>
+                        </html>
+                    """.trimIndent())
+            )
+
+            val url = server.url("/protected_video.mp4").toString()
+            val result = OkHttpDownloader.downloadMediaFileDetailed(context, url, "protected_video.mp4")
+            assertFalse(result.isSuccessful)
+            assertNull(result.file)
+            assertTrue(result.errorMessage?.contains("webpage") == true || result.errorMessage?.contains("HTML") == true)
+        } finally {
+            server.shutdown()
+        }
+    }
 }
+
 

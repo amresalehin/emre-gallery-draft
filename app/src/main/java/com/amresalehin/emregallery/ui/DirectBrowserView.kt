@@ -1,7 +1,11 @@
 package com.amresalehin.emregallery.ui
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
+import android.util.Log
 import android.webkit.*
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -38,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.amresalehin.emregallery.data.AdBlockEngine
 import com.amresalehin.emregallery.data.BrowserHistoryManager
 import com.amresalehin.emregallery.data.BrowserSite
 import com.amresalehin.emregallery.data.MediaClassifier
@@ -460,6 +465,105 @@ fun DirectBrowserView(
                             }
 
                             webViewClient = object : WebViewClient() {
+                                private fun handleExternalNavigation(view: WebView?, urlString: String): Boolean {
+                                    if (urlString.isBlank()) return false
+                                    val lower = urlString.trim().lowercase()
+
+                                    // Internal browser schemes should load within Chromium WebView
+                                    if (lower.startsWith("http://") || lower.startsWith("https://") ||
+                                        lower.startsWith("about:") || lower.startsWith("data:") ||
+                                        lower.startsWith("javascript:") || lower.startsWith("blob:") ||
+                                        lower.startsWith("file:///android_asset/")
+                                    ) {
+                                        return false
+                                    }
+
+                                    val context = view?.context ?: return false
+
+                                    // 1. Handle intent:// URI scheme (e.g. intent://...#Intent;scheme=...;package=...;end)
+                                    if (lower.startsWith("intent://") || lower.startsWith("intent:")) {
+                                        try {
+                                            val intent = Intent.parseUri(urlString, Intent.URI_INTENT_SCHEME)
+                                            if (intent != null) {
+                                                val pm = context.packageManager
+                                                val resolveInfo = intent.resolveActivity(pm)
+                                                if (resolveInfo != null) {
+                                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    context.startActivity(intent)
+                                                    return true
+                                                }
+
+                                                // If target app is not installed, check for browser_fallback_url
+                                                val fallbackUrl = intent.getStringExtra("browser_fallback_url")
+                                                if (!fallbackUrl.isNullOrBlank() &&
+                                                    (fallbackUrl.startsWith("http://", ignoreCase = true) || fallbackUrl.startsWith("https://", ignoreCase = true))
+                                                ) {
+                                                    view?.loadUrl(fallbackUrl)
+                                                    return true
+                                                }
+
+                                                // If intent specifies target package, route to Google Play Store
+                                                val packageName = intent.`package`
+                                                if (!packageName.isNullOrBlank()) {
+                                                    val marketIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$packageName")).apply {
+                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                    }
+                                                    if (marketIntent.resolveActivity(pm) != null) {
+                                                        context.startActivity(marketIntent)
+                                                        return true
+                                                    } else {
+                                                        view?.loadUrl("https://play.google.com/store/apps/details?id=$packageName")
+                                                        return true
+                                                    }
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.w("DirectBrowserView", "Failed to resolve intent scheme: $urlString", e)
+                                        }
+                                        return true // Prevent Chromium from displaying net::ERR_UNKNOWN_URL_SCHEME
+                                    }
+
+                                    // 2. Handle specific app/system schemes: market://, tel:, mailto:, sms:, geo:, whatsapp:, tg:, etc.
+                                    try {
+                                        val uri = Uri.parse(urlString)
+                                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        val pm = context.packageManager
+                                        if (intent.resolveActivity(pm) != null) {
+                                            context.startActivity(intent)
+                                            return true
+                                        } else if (lower.startsWith("market://details?id=")) {
+                                            val pkg = uri.getQueryParameter("id")
+                                            if (!pkg.isNullOrBlank()) {
+                                                view?.loadUrl("https://play.google.com/store/apps/details?id=$pkg")
+                                                return true
+                                            }
+                                        }
+                                    } catch (e: ActivityNotFoundException) {
+                                        Log.w("DirectBrowserView", "No app available to handle scheme: $urlString", e)
+                                        return true
+                                    } catch (e: Exception) {
+                                        Log.w("DirectBrowserView", "Failed to handle external URI: $urlString", e)
+                                        return true
+                                    }
+
+                                    return true
+                                }
+
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?
+                                ): Boolean {
+                                    val reqUrl = request?.url?.toString() ?: return false
+                                    return handleExternalNavigation(view, reqUrl)
+                                }
+
+                                @Suppress("DEPRECATION")
+                                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                                    if (url.isNullOrBlank()) return false
+                                    return handleExternalNavigation(view, url)
+                                }
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     isLoading = true
                                     url?.let {
@@ -505,21 +609,34 @@ fun DirectBrowserView(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): WebResourceResponse? {
-                                    if (currentUrl.isBlank()) return null
                                     val reqUrl = request?.url?.toString() ?: return null
                                     if (reqUrl.startsWith("about:")) return null
+
+                                    // 1. Block ad networks and tracking requests with empty response
+                                    if (AdBlockEngine.isAdOrTracker(reqUrl)) {
+                                        return AdBlockEngine.createEmptyResponse()
+                                    }
+
+                                    // 2. Reject streaming fragments and slices
+                                    if (MediaClassifier.isMediaFragment(reqUrl)) {
+                                        return null
+                                    }
+
+                                    if (currentUrl.isBlank()) return null
                                     val classified = MediaClassifier.classify(reqUrl)
 
                                     // Intercept video streams (HLS/DASH), standalone videos, audio files, or quality media
                                     if (classified.isStream || classified.isVideo || classified.isAudio ||
                                         (classified.category == com.amresalehin.emregallery.data.MediaCategory.IMAGES &&
                                                 (reqUrl.contains("jpg") || reqUrl.contains("png") || reqUrl.contains("webp")) &&
+                                                !AdBlockEngine.isAdOrTracker(reqUrl) &&
                                                 !reqUrl.contains("analytics") && !reqUrl.contains("tracker") && !reqUrl.contains("pixel"))
                                     ) {
-                                        val fileName = MediaClassifier.deriveFileName(reqUrl, classified.format, 0)
+                                        val cleanReqUrl = if (classified.isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
+                                        val fileName = MediaClassifier.deriveFileName(cleanReqUrl, classified.format, 0)
                                         val item = ScrapedMediaItem(
-                                            id = "intercept_${System.currentTimeMillis()}_${reqUrl.hashCode()}",
-                                            url = reqUrl,
+                                            id = "intercept_${System.currentTimeMillis()}_${cleanReqUrl.hashCode()}",
+                                            url = cleanReqUrl,
                                             title = fileName,
                                             isVideo = classified.isVideo,
                                             isAudio = classified.isAudio,

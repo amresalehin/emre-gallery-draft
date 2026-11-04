@@ -418,14 +418,14 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None):
                     if chunk:
                         if first_chunk:
                             first_chunk = False
-                            prefix = chunk[:512].lower()
-                            if b"<!doctype html" in prefix or b"<html" in prefix or b"<head" in prefix:
+                            prefix = chunk[:1024].lower()
+                            if b"<!doctype html" in prefix or b"<html" in prefix or b"<head" in prefix or b"cloudflare" in prefix or b"just a moment..." in prefix or b"403 forbidden" in prefix or b"404 not found" in prefix or b"access denied" in prefix:
                                 f.close()
                                 if os.path.exists(target_path):
                                     os.remove(target_path)
                                 return False
                             trimmed = prefix.strip()
-                            if trimmed.startswith(b"{") and (b'"error"' in trimmed or b'"message"' in trimmed):
+                            if (trimmed.startswith(b"{") or trimmed.startswith(b"[")) and (b'"error"' in trimmed or b'"message"' in trimmed or b'"status"' in trimmed or b'"forbidden"' in trimmed):
                                 f.close()
                                 if os.path.exists(target_path):
                                     os.remove(target_path)
