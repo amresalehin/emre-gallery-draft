@@ -167,27 +167,49 @@ def extract_gallery_dl(url, options_json="{}"):
                     page_title = kwdict.get("gallery_title") or kwdict.get("album_title") or kwdict.get("title") or kwdict.get("author") or ""
 
                 lower_url = item_url.lower()
-                lower_ext = ext_suffix.lower() if ext_suffix else ""
-                is_video = lower_ext in ["mp4", "webm", "mkv", "mov", "avi"] or lower_url.endswith(".mp4") or lower_url.endswith(".webm") or ".mp4?" in lower_url
-                is_stream = lower_ext in ["m3u8", "mpd"] or lower_url.endswith(".m3u8") or ".m3u8?" in lower_url or lower_url.endswith(".mpd")
-                is_audio = lower_ext in ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"] or lower_url.endswith(".mp3") or lower_url.endswith(".m4a")
+                clean_url_path = lower_url.split("?", 1)[0].split("#", 1)[0]
+                lower_ext = (ext_suffix or os.path.splitext(clean_url_path)[1].lstrip(".")).lower()
+                raw_mime = (
+                    kwdict.get("mime_type") or kwdict.get("mimetype") or
+                    kwdict.get("mime") or kwdict.get("content_type") or ""
+                )
+                detected_mime = str(raw_mime).split(";", 1)[0].strip().lower()
+
+                # Signed CDN URLs frequently have no file extension. Prefer extractor MIME
+                # metadata when available, then fall back to the URL/filename extension.
+                mime_is_video = detected_mime.startswith("video/")
+                mime_is_audio = detected_mime.startswith("audio/")
+                mime_is_stream = (
+                    "mpegurl" in detected_mime or "dash+xml" in detected_mime or
+                    detected_mime in ("application/vnd.apple.mpegurl", "application/x-mpegurl")
+                )
+                is_stream = (
+                    lower_ext in ("m3u8", "mpd") or mime_is_stream or
+                    ".m3u8" in clean_url_path or ".mpd" in clean_url_path
+                )
+                is_video = mime_is_video or (
+                    not mime_is_audio and lower_ext in ("mp4", "m4v", "webm", "mkv", "mov", "avi", "flv", "3gp")
+                )
+                is_audio = mime_is_audio or (
+                    not mime_is_video and lower_ext in ("mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma")
+                )
 
                 if is_stream:
                     category = "STREAMS"
                     format_label = "HLS/DASH"
-                    mime_type = "application/x-mpegURL"
+                    mime_type = detected_mime or "application/x-mpegURL"
                 elif is_video:
                     category = "VIDEOS"
-                    format_label = ext_suffix.upper() if ext_suffix else "MP4"
-                    mime_type = f"video/{lower_ext}" if lower_ext else "video/mp4"
+                    format_label = lower_ext.upper() if lower_ext else "VIDEO"
+                    mime_type = detected_mime or (f"video/{lower_ext}" if lower_ext else "video/mp4")
                 elif is_audio:
                     category = "AUDIO"
-                    format_label = ext_suffix.upper() if ext_suffix else "MP3"
-                    mime_type = f"audio/{lower_ext}" if lower_ext else "audio/mpeg"
+                    format_label = lower_ext.upper() if lower_ext else "AUDIO"
+                    mime_type = detected_mime or (f"audio/{lower_ext}" if lower_ext else "audio/mpeg")
                 else:
                     category = "IMAGES"
-                    format_label = ext_suffix.upper() if ext_suffix else "IMAGE"
-                    mime_type = f"image/{lower_ext}" if lower_ext in ["png", "jpeg", "jpg", "webp", "gif", "avif"] else "image/jpeg"
+                    format_label = lower_ext.upper() if lower_ext else "IMAGE"
+                    mime_type = detected_mime or (f"image/{lower_ext}" if lower_ext in ["png", "jpeg", "jpg", "webp", "gif", "avif"] else "image/jpeg")
 
                 width = kwdict.get("width")
                 height = kwdict.get("height")
@@ -229,6 +251,43 @@ def extract_gallery_dl(url, options_json="{}"):
         "itemsCount": len(items),
         "items": items
     })
+
+def _best_thumbnail_url(entry):
+    """Choose the largest usable poster from yt-dlp's thumbnail candidates."""
+    if not isinstance(entry, dict):
+        return None
+
+    candidates = []
+    for index, thumb in enumerate(entry.get("thumbnails") or []):
+        if not isinstance(thumb, dict) or not thumb.get("url"):
+            continue
+        try:
+            width = int(thumb.get("width") or 0)
+        except (TypeError, ValueError):
+            width = 0
+        try:
+            height = int(thumb.get("height") or 0)
+        except (TypeError, ValueError):
+            height = 0
+        try:
+            preference = float(thumb.get("preference") or 0)
+        except (TypeError, ValueError):
+            preference = 0.0
+        thumb_id = str(thumb.get("id") or "").lower()
+        quality_rank = (
+            4 if "maxres" in thumb_id else
+            3 if "sd" in thumb_id else
+            2 if "hq" in thumb_id else
+            1 if "mq" in thumb_id else 0
+        )
+        candidates.append(((width * height, quality_rank, preference, index), thumb["url"]))
+
+    if candidates:
+        return max(candidates, key=lambda item: item[0])[1]
+
+    # yt-dlp's normalized field is a useful fallback when no candidate list exists.
+    return entry.get("thumbnail")
+
 
 def _format_quality_score(fmt):
     if not isinstance(fmt, dict):
@@ -378,7 +437,7 @@ def extract_yt_dlp(url, options_json="{}"):
                     "isVideo": not is_audio_only,
                     "isAudio": is_audio_only,
                     "isStream": is_stream,
-                    "thumbnailUrl": entry.get("thumbnail"),
+                    "thumbnailUrl": _best_thumbnail_url(entry),
                     "resolutionHint": resolution_hint,
                     "width": width,
                     "height": height,
