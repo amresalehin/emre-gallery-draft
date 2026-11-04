@@ -1987,20 +1987,26 @@ fun FullScreenBrowserView(
                 onClose = onClose,
                 onUrlChange = { currentUrl = it },
                 onPageTitleChanged = { pageTitle = it },
-                discoveredCount = discoveredItems.size,
                 onMediaExtracted = { item ->
                     val key = MediaClassifier.canonicalKey(item.url)
-                    if (discoveredItems.none { MediaClassifier.canonicalKey(it.url) == key }) {
+                    val existingIndex = discoveredItems.indexOfFirst { MediaClassifier.canonicalKey(it.url) == key }
+                    if (existingIndex == -1) {
                         discoveredItems = discoveredItems + item
+                    } else {
+                        val existing = discoveredItems[existingIndex]
+                        if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
+                            val updated = discoveredItems.toMutableList()
+                            updated[existingIndex] = item.copy(
+                                id = existing.id,
+                                thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
+                            )
+                            discoveredItems = updated
+                        }
                     }
                 },
                 onBatchExtracted = { batch, title, domain ->
                     title?.let { if (it.isNotBlank()) pageTitle = it }
-                    val existingKeys = discoveredItems.map { MediaClassifier.canonicalKey(it.url) }.toSet()
-                    val newItems = batch.filter { MediaClassifier.canonicalKey(it.url) !in existingKeys }
-                    if (newItems.isNotEmpty()) {
-                        discoveredItems = discoveredItems + newItems
-                    }
+                    discoveredItems = MediaClassifier.deduplicateScrapedItems(discoveredItems + batch)
                 },
                 onSwitchToMediaTab = {
                     showDiscoveredMediaSheet = true

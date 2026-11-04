@@ -99,7 +99,9 @@ fun MediaScraperDrawer(
     var hasSubmittedQuery by remember { mutableStateOf(false) }
     var lastSubmittedUrl by remember { mutableStateOf("") }
 
-    val allScrapedItems = extractorState.items
+    val allScrapedItems = remember(extractorState.items) {
+        MediaClassifier.deduplicateScrapedItems(extractorState.items)
+    }
     val svgCount = remember(allScrapedItems) {
         allScrapedItems.count { MediaClassifier.isSvg(it.url, it.mimeType, it.format) }
     }
@@ -1766,6 +1768,12 @@ fun parseScrapedMediaDimensions(item: ScrapedMediaItem): Pair<Int?, Int?> {
     val hQuery = Regex("""[?&](?:height|h)=(\d{2,5})""", RegexOption.IGNORE_CASE).find(item.url)?.groupValues?.get(1)?.toIntOrNull()
     if (wQuery != null || hQuery != null) {
         return Pair(wQuery, hQuery)
+    }
+
+    // 4. Folder dimension descriptor e.g. /736x/, /474x/, /236x/
+    val folderDim = Regex("""/(\d{2,5})x/""").find(item.url)?.groupValues?.get(1)?.toIntOrNull()
+    if (folderDim != null && folderDim >= 10) {
+        return Pair(folderDim, null)
     }
 
     return Pair(null, null)

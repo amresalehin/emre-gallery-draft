@@ -281,26 +281,27 @@ class DualMediaExtractor(private val context: Context) {
                         itemsMap[key] = item
                         modified = true
                     } else {
-                        // Merge and deduplicate across scrapers
-                        val preferred = when {
-                            !item.url.contains("/thumb/") && !item.url.contains("/transcoded/") &&
-                                    (existing.url.contains("/thumb/") || existing.url.contains("/transcoded/")) -> item
-                            !existing.url.contains("/thumb/") && !existing.url.contains("/transcoded/") &&
-                                    (item.url.contains("/thumb/") || item.url.contains("/transcoded/")) -> existing
-                            (item.sizeBytes ?: 0L) > (existing.sizeBytes ?: 0L) -> item
-                            else -> existing
-                        }
+                        // Merge and deduplicate across scrapers and variants
+                        val cmp = MediaClassifier.compareMediaQuality(item, existing)
+                        val preferred = if (cmp > 0) item else existing
+                        val secondary = if (preferred === item) existing else item
+
                         val engines = listOf(existing.provenance.extractorEngine, item.provenance.extractorEngine).distinct()
                         val mergedEngine = engines.joinToString(" + ")
-                        val mergedThumb = preferred.thumbnailUrl ?: item.thumbnailUrl ?: existing.thumbnailUrl
+                        val mergedThumb = preferred.thumbnailUrl ?: secondary.thumbnailUrl
                         val mergedResolution = when {
+                            MediaClassifier.parsePixelArea(preferred) != null -> preferred.resolutionHint ?: secondary.resolutionHint
+                            MediaClassifier.parsePixelArea(secondary) != null -> secondary.resolutionHint ?: preferred.resolutionHint
                             !preferred.resolutionHint.isNullOrBlank() && preferred.resolutionHint != "Network" -> preferred.resolutionHint
-                            !item.resolutionHint.isNullOrBlank() && item.resolutionHint != "Network" -> item.resolutionHint
-                            !existing.resolutionHint.isNullOrBlank() && existing.resolutionHint != "Network" -> existing.resolutionHint
-                            else -> preferred.resolutionHint ?: existing.resolutionHint ?: item.resolutionHint
+                            !secondary.resolutionHint.isNullOrBlank() && secondary.resolutionHint != "Network" -> secondary.resolutionHint
+                            else -> preferred.resolutionHint ?: secondary.resolutionHint
                         }
-                        val mergedHeaders = existing.downloadHeaders + item.downloadHeaders
+                        val mergedHeaders = secondary.downloadHeaders + preferred.downloadHeaders
+                        val resolvedUrl = MediaClassifier.resolveOriginalMedia(preferred.url).mediaUrl
+
                         val upgraded = preferred.copy(
+                            id = existing.id, // Preserve ID for stable Compose keys & selection
+                            url = resolvedUrl,
                             thumbnailUrl = mergedThumb,
                             resolutionHint = mergedResolution,
                             provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
@@ -509,12 +510,17 @@ class DualMediaExtractor(private val context: Context) {
                 existingMap[key] = item
                 modified = true
             } else {
-                val preferred = if (!item.url.contains("/thumb/") && existing.url.contains("/thumb/")) item else existing
+                val cmp = MediaClassifier.compareMediaQuality(item, existing)
+                val preferred = if (cmp > 0) item else existing
+                val secondary = if (preferred === item) existing else item
                 val engines = listOf(existing.provenance.extractorEngine, item.provenance.extractorEngine).distinct()
                 val mergedEngine = engines.joinToString(" + ")
-                val mergedThumb = preferred.thumbnailUrl ?: item.thumbnailUrl ?: existing.thumbnailUrl
-                val mergedHeaders = existing.downloadHeaders + item.downloadHeaders
+                val mergedThumb = preferred.thumbnailUrl ?: secondary.thumbnailUrl
+                val mergedHeaders = secondary.downloadHeaders + preferred.downloadHeaders
+                val resolvedUrl = MediaClassifier.resolveOriginalMedia(preferred.url).mediaUrl
                 val upgraded = preferred.copy(
+                    id = existing.id,
+                    url = resolvedUrl,
                     thumbnailUrl = mergedThumb,
                     provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
                     downloadHeaders = mergedHeaders

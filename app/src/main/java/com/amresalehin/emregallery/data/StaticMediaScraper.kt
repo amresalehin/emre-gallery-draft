@@ -188,8 +188,6 @@ class StaticMediaScraper {
             val thumb = resolvedInfo.thumbnailUrl ?: posterUrl ?: if (targetClassification.category == MediaCategory.IMAGES) resolved else posterUrl
 
             val key = MediaClassifier.canonicalKey(downloadUrl)
-            if (itemsMap.containsKey(key)) return
-
             val title = resolvedInfo.cleanTitle ?: itemTitleHint ?: MediaClassifier.deriveFileName(downloadUrl, targetClassification.format, itemsMap.size)
 
             val headers = mutableMapOf<String, String>()
@@ -225,6 +223,18 @@ class StaticMediaScraper {
                 metadata = metadataMap,
                 downloadHeaders = headers
             )
+
+            val existing = itemsMap[key]
+            if (existing != null) {
+                if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
+                    itemsMap[key] = item.copy(
+                        id = existing.id,
+                        thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
+                    )
+                }
+                return
+            }
+
             itemsMap[key] = item
         }
 

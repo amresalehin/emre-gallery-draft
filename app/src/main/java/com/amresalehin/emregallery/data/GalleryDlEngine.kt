@@ -296,8 +296,7 @@ object GalleryDlEngine {
         context: Context,
         mediaUrl: String,
         fileName: String,
-        referer: String? = null,
-        downloadId: String? = null
+        referer: String? = null
     ): File? = withContext(Dispatchers.IO) {
         try {
             val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -315,14 +314,7 @@ object GalleryDlEngine {
             }
 
             val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-            val stableId = downloadId?.takeIf { it.isNotBlank() }
-                ?.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-            // A WorkManager retry must overwrite the same output rather than creating another
-            // timestamped file for the same logical media item.
-            val targetFile = File(
-                dir,
-                if (stableId != null) "${stableId}_$sanitizedName" else "${System.currentTimeMillis()}_$sanitizedName"
-            )
+            val targetFile = File(dir, "${System.currentTimeMillis()}_$sanitizedName")
 
             // Try Python download if available
             if (isAvailable()) {
@@ -347,17 +339,12 @@ object GalleryDlEngine {
                 }
             }
 
-            // Remove an incomplete Python output before retrying through OkHttp. Both
-            // engines must not leave separate files for one logical download.
-            if (targetFile.exists()) targetFile.delete()
-
             // Fallback to OkHttp download with shared session cookies
             OkHttpDownloader.downloadMediaFile(
                 context = context,
                 mediaUrl = mediaUrl,
                 fileName = fileName,
-                referer = referer,
-                downloadId = downloadId
+                referer = referer
             )
         } catch (e: Exception) {
             Log.e(TAG, "downloadMedia failed", e)

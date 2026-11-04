@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery.data
 
-import android.net.Uri
 import java.net.URI
 import java.net.URL
 import java.net.URLEncoder
@@ -431,6 +430,27 @@ object MediaClassifier {
             }
         }
 
+        // 0b. Pinterest image CDN (i.pinimg.com / *.pinimg.com -> originals full resolution master)
+        if (normalized.contains("pinimg.com")) {
+            val cleanUrl = normalized.substringBefore("?").substringBefore("#").trimEnd('/')
+            val pinHexRegex = Regex("""([0-9a-fA-F]{32})(?:\.([a-zA-Z0-9]+))?""")
+            val match = pinHexRegex.find(cleanUrl)
+            if (match != null) {
+                val hash = match.groupValues[1]
+                val rawExt = match.groupValues.getOrNull(2)?.lowercase(Locale.ROOT)
+                val ext = if (rawExt.isNullOrBlank() || rawExt == "jpeg" || rawExt == "webp") "jpg" else rawExt
+                val p1 = hash.substring(0, 2)
+                val p2 = hash.substring(2, 4)
+                val p3 = hash.substring(4, 6)
+                val originalUrl = "https://i.pinimg.com/originals/$p1/$p2/$p3/$hash.$ext"
+                return ResolvedMediaInfo(
+                    mediaUrl = originalUrl,
+                    thumbnailUrl = normalized,
+                    cleanTitle = "$hash.$ext"
+                )
+            }
+        }
+
         // 1. Reddit Preview CDN (preview.redd.it / external-preview.redd.it -> i.redd.it)
         if (normalized.contains("preview.redd.it") || normalized.contains("external-preview.redd.it")) {
             val cleanPath = normalized.substringBefore("?")
@@ -490,6 +510,47 @@ object MediaClassifier {
                 mediaUrl = cleanOriginal,
                 thumbnailUrl = normalized,
                 cleanTitle = fileName
+            )
+        }
+
+        // 4b. WordPress resized uploads (-WxH or -scaled before extension -> master file)
+        if (normalized.contains("/wp-content/uploads/")) {
+            val cleanUrl = normalized.substringBefore("?")
+            val wpResizeRegex = Regex("""-(?:\d{2,5}x\d{2,5}|scaled)\.([a-zA-Z0-9]+)$""", RegexOption.IGNORE_CASE)
+            if (wpResizeRegex.containsMatchIn(cleanUrl)) {
+                val masterUrl = wpResizeRegex.replace(cleanUrl, ".$1")
+                val fileName = masterUrl.substringAfterLast('/')
+                return ResolvedMediaInfo(
+                    mediaUrl = masterUrl,
+                    thumbnailUrl = normalized,
+                    cleanTitle = fileName
+                )
+            }
+        }
+
+        // 4c. Shopify CDN resized images (_WxH or _large etc. before extension)
+        if (normalized.contains("cdn.shopify.com")) {
+            val cleanUrl = normalized.substringBefore("?")
+            val shopifyRegex = Regex("""_(?:\d{2,5}x\d{2,5}|\d{2,5}x|x\d{2,5}|pico|icon|thumb|small|compact|medium|large|grande|original|master|1024x1024|2048x2048)\.([a-zA-Z0-9]+)$""", RegexOption.IGNORE_CASE)
+            if (shopifyRegex.containsMatchIn(cleanUrl)) {
+                val masterUrl = shopifyRegex.replace(cleanUrl, ".$1")
+                val fileName = masterUrl.substringAfterLast('/')
+                return ResolvedMediaInfo(
+                    mediaUrl = masterUrl,
+                    thumbnailUrl = normalized,
+                    cleanTitle = fileName
+                )
+            }
+        }
+
+        // 4d. Google User Content (lh3.googleusercontent.com etc. =w... / =s...)
+        if (normalized.contains("googleusercontent.com")) {
+            val base = normalized.substringBefore("=")
+            val originalUrl = "$base=s0"
+            return ResolvedMediaInfo(
+                mediaUrl = originalUrl,
+                thumbnailUrl = normalized,
+                cleanTitle = base.substringAfterLast('/')
             )
         }
 
@@ -574,13 +635,15 @@ object MediaClassifier {
      * across different extraction engines (Static HTML, Live Browser, gallery-dl, yt-dlp).
      * Normalizes:
      * - Multi-Host CDN mirrors (Reddit preview -> i.redd.it, WordPress i0-i3 -> i.wp.com)
+     * - Pinterest pin hashes across resolution variants (236x, 474x, 736x, 1200x, originals, RS) and format variants
      * - Cloudinary / Imgix transformation segments
      * - Imgur thumbnail suffixes
-     * - Twitter pbs.twimg name queries
-     * - Scheme (http vs https)
-     * - URL percent-encoding differences
+     * - WordPress / Shopify / Retina resolution suffixes (-300x200, _1024x1024, @2x)
+     * - Generic path folder resolution descriptors (/736x/, /300x200/, /w1200/)
+     * - Raster format variants (.jpg, .jpeg, .webp, .avif, .png of the same asset)
+     * - Scheme (http vs https) and URL percent-encoding differences
      * - Wikimedia/MediaWiki thumbnail derivatives vs original full-resolution uploads
-     * - Responsive image dimensions / resize query parameters (?w=, ?h=, ?width=, ?size=, ?quality=, ?fit=, etc.)
+     * - Responsive image dimensions / resize query parameters (?w=, ?h=, ?width=, ?size=, ?quality=, ?fit=, ?format=, etc.)
      * - Tracking query parameters
      */
     fun deduplicationKey(url: String): String {
@@ -617,7 +680,20 @@ object MediaClassifier {
                 .replace(Regex("""https?://external-preview\.redd\.it/"""), "https://i.redd.it/")
                 .replace(Regex("""https?://i[0-3]\.wp\.com/"""), "https://i.wp.com/")
 
-            // Imgur suffix stripping in deduplication key
+            // 1. Pinterest Deduplication Key: Content-addressable 32-hex hash
+            if (normalizedHostAndPath.contains("pinimg.com")) {
+                val pinHash = Regex("""([0-9a-fA-F]{32})""").find(normalizedHostAndPath)?.groupValues?.get(1)
+                if (pinHash != null) {
+                    return "pinimg:$pinHash"
+                }
+            }
+
+            // 2. Google User Content: Strip dynamic sizing modifiers (=w... / =s...)
+            if (normalizedHostAndPath.contains("googleusercontent.com")) {
+                normalizedHostAndPath = normalizedHostAndPath.substringBefore("=")
+            }
+
+            // 3. Imgur suffix stripping in deduplication key
             if (normalizedHostAndPath.contains("i.imgur.com/")) {
                 val fn = normalizedHostAndPath.substringAfterLast('/')
                 val id = fn.substringBeforeLast('.')
@@ -629,19 +705,53 @@ object MediaClassifier {
                 }
             }
 
-            // Cloudinary / Imgix dynamic resize transform stripping (e.g. /c_scale,w_500/ -> /)
-            normalizedHostAndPath = normalizedHostAndPath
-                .replace(Regex("""/(?:c_[a-z]+,)?(?:w_\d+,?)?(?:h_\d+,?)?(?:q_[a-z0-9]+,?)?(?:f_[a-z]+)?/"""), "/")
+            // 4. WordPress / CMS resized image files (-300x200, -scaled, -thumb before extension)
+            normalizedHostAndPath = normalizedHostAndPath.replace(
+                Regex("""-(?:\d{2,5}x\d{2,5}|scaled|thumb|medium|large|small)\.([a-zA-Z0-9]+)$"""),
+                ".$1"
+            )
 
-            // Strip video quality / transcode suffixes to deduplicate multiple transcode qualities of same video
+            // 5. Shopify CDN image size suffix (_1024x1024, _grande, _medium etc. before extension)
+            normalizedHostAndPath = normalizedHostAndPath.replace(
+                Regex("""_(?:\d{2,5}x\d{2,5}|\d{2,5}x|x\d{2,5}|pico|icon|thumb|small|compact|medium|large|grande|original|master|1024x1024|2048x2048)\.([a-zA-Z0-9]+)$"""),
+                ".$1"
+            )
+
+            // 6. Retina display image suffixes (@2x, @3x)
+            normalizedHostAndPath = normalizedHostAndPath.replace(
+                Regex("""@(?:\d+x|\d+\.\d+x)\.([a-zA-Z0-9]+)$"""),
+                ".$1"
+            )
+
+            // 7. Generic path folder dimension descriptors (e.g. /736x/, /236x/, /474x/, /1200x/, /300x200/, /w1200/, /h800/)
+            normalizedHostAndPath = normalizedHostAndPath.replace(
+                Regex("""/(?:\d{2,5}x\d{0,5}|\d{0,5}x\d{2,5}|w\d{2,5}|h\d{2,5}|s\d{2,5}|width[_-]\d+|height[_-]\d+)/"""),
+                "/"
+            )
+
+            // 8. Cloudflare Image Resizing / Cloudinary / Imgix dynamic resize transform stripping (e.g. /cdn-cgi/image/.../ -> /, /c_scale,w_500/ -> /)
+            normalizedHostAndPath = normalizedHostAndPath
+                .replace(Regex("""/cdn-cgi/image/[^/]+/"""), "/")
+                .replace(Regex("""/(?:[a-z]_[a-zA-Z0-9_-]+,?)+/"""), "/")
+
+            // 9. Strip video quality / transcode suffixes to deduplicate multiple transcode qualities of same video
             val videoQualityRegex = Regex("""(?:\.(?:144|240|360|480|720|1080|1440|2160)p(?:\.vp9|\.av1)?|[._-](?:144|240|360|480|720|1080|1440|2160)p)\.(webm|mp4|mkv)$""", RegexOption.IGNORE_CASE)
             val normalizedVideoPath = videoQualityRegex.replace(normalizedHostAndPath) { match ->
                 "." + match.groupValues[1]
             }
 
+            // 10. Format variants normalization (raster image formats .jpg, .jpeg, .webp, .avif, .png of the same asset)
+            // Deduplicate format variants by normalizing raster image extensions to .img
+            val normalizedFormatPath = if (Regex("""\.(?:jpe?g|webp|png|avif)$""", RegexOption.IGNORE_CASE).containsMatchIn(normalizedVideoPath)) {
+                normalizedVideoPath.replace(Regex("""\.(?:jpe?g|webp|png|avif)$""", RegexOption.IGNORE_CASE), ".img")
+            } else {
+                normalizedVideoPath
+            }
+
             val sizingParams = setOf(
                 "w", "width", "h", "height", "size", "s", "quality", "q",
-                "fit", "crop", "auto", "format", "dpr", "lossless", "strip",
+                "fit", "crop", "auto", "format", "fmt", "fm", "f", "dpr", "lossless", "strip",
+                "scale", "resize", "maxwidth", "maxheight",
                 "itag", "range", "ratebypass", "rn", "rbuf", "mime", "gir", "clen", "dur", "lmt"
             )
             val filteredQuery = if (queryPart.isNotBlank()) {
@@ -651,10 +761,128 @@ object MediaClassifier {
                 }.sorted().joinToString("&")
             } else ""
 
-            if (filteredQuery.isEmpty()) normalizedVideoPath else "$normalizedVideoPath?$filteredQuery"
+            if (filteredQuery.isEmpty()) normalizedFormatPath else "$normalizedFormatPath?$filteredQuery"
         } catch (_: Exception) {
             url.lowercase(Locale.ROOT)
         }
+    }
+
+    /**
+     * Parses an approximate pixel area (width * height) from a media item's resolution hint or URL,
+     * used for deterministic quality comparisons when deduplicating variants.
+     */
+    fun parsePixelArea(item: ScrapedMediaItem): Long? {
+        return parsePixelArea(item.resolutionHint, item.url)
+    }
+
+    /**
+     * Parses pixel area from resolution hint string or URL path.
+     */
+    fun parsePixelArea(resolutionHint: String?, url: String?): Long? {
+        if (!resolutionHint.isNullOrBlank()) {
+            val resMatch = Regex("""(\d{2,5})\s*[xX*×]\s*(\d{2,5})""").find(resolutionHint)
+            if (resMatch != null) {
+                val w = resMatch.groupValues[1].toLongOrNull()
+                val h = resMatch.groupValues[2].toLongOrNull()
+                if (w != null && h != null && w > 0 && h > 0) {
+                    return w * h
+                }
+            }
+            val pMatch = Regex("""(\d{3,4})p""", RegexOption.IGNORE_CASE).find(resolutionHint)
+            if (pMatch != null) {
+                val h = pMatch.groupValues[1].toLongOrNull()
+                if (h != null && h > 0) return ((h * 16L) / 9L) * h
+            }
+            val wMatch = Regex("""(\d{2,5})[wW]""").find(resolutionHint)
+            if (wMatch != null) {
+                val w = wMatch.groupValues[1].toLongOrNull()
+                if (w != null && w > 0) return w * w
+            }
+            val pxMatch = Regex("""(\d{2,5})px""", RegexOption.IGNORE_CASE).find(resolutionHint)
+            if (pxMatch != null) {
+                val px = pxMatch.groupValues[1].toLongOrNull()
+                if (px != null && px > 0) return px * px
+            }
+        }
+
+        if (!url.isNullOrBlank()) {
+            if (url.contains("/originals/", ignoreCase = true)) {
+                return 25_000_000L // Original master file ranks highest
+            }
+            val urlResMatch = Regex("""[/_-](\d{2,5})x(\d{2,5})[._/-]""").find(url)
+            if (urlResMatch != null) {
+                val w = urlResMatch.groupValues[1].toLongOrNull()
+                val h = urlResMatch.groupValues[2].toLongOrNull()
+                if (w != null && h != null && w > 0 && h > 0) {
+                    return w * h
+                }
+            }
+            val folderDimMatch = Regex("""/(\d{2,5})x/""").find(url)
+            if (folderDimMatch != null) {
+                val w = folderDimMatch.groupValues[1].toLongOrNull()
+                if (w != null && w > 0) return w * w
+            }
+            val pxUrlMatch = Regex("""[/_-](\d{2,5})px[._/-]""").find(url)
+            if (pxUrlMatch != null) {
+                val px = pxUrlMatch.groupValues[1].toLongOrNull()
+                if (px != null && px > 0) return px * px
+            }
+            val queryWidthMatch = Regex("""[?&](?:w|width)=(\d{2,5})""").find(url)
+            if (queryWidthMatch != null) {
+                val w = queryWidthMatch.groupValues[1].toLongOrNull()
+                if (w != null && w > 0) return w * w
+            }
+        }
+        return null
+    }
+
+    /**
+     * Compares two duplicate scraped media items to determine which offers superior quality
+     * (e.g. master original over thumbnail, higher pixel resolution, larger file size, preferred format).
+     * Returns > 0 if [a] is higher quality, < 0 if [b] is higher quality, 0 if equivalent.
+     */
+    fun compareMediaQuality(a: ScrapedMediaItem, b: ScrapedMediaItem): Int {
+        // 1. Originals master URL preference
+        val aIsOriginals = a.url.contains("/originals/", ignoreCase = true)
+        val bIsOriginals = b.url.contains("/originals/", ignoreCase = true)
+        if (aIsOriginals && !bIsOriginals) return 1
+        if (!aIsOriginals && bIsOriginals) return -1
+
+        // 2. Direct upload vs thumbnail/transcoded path
+        val aIsThumb = a.url.contains("/thumb/") || a.url.contains("/transcoded/")
+        val bIsThumb = b.url.contains("/thumb/") || b.url.contains("/transcoded/")
+        if (!aIsThumb && bIsThumb) return 1
+        if (aIsThumb && !bIsThumb) return -1
+
+        // 3. Pixel area from resolutionHint or URL
+        val aArea = parsePixelArea(a)
+        val bArea = parsePixelArea(b)
+        if (aArea != null && bArea != null && aArea != bArea) {
+            return aArea.compareTo(bArea)
+        }
+        if (aArea != null && bArea == null) return 1
+        if (aArea == null && bArea != null) return -1
+
+        // 4. File size in bytes
+        val aSize = a.sizeBytes ?: 0L
+        val bSize = b.sizeBytes ?: 0L
+        if (aSize != bSize) {
+            return aSize.compareTo(bSize)
+        }
+
+        // 5. Format preference for master downloads (JPEG / JPG / PNG over lossy WEBP / AVIF)
+        val formatPriority = mapOf("PNG" to 4, "JPEG" to 3, "JPG" to 3, "WEBP" to 2, "AVIF" to 1)
+        val aFmt = formatPriority[a.format.uppercase(Locale.ROOT)] ?: 0
+        val bFmt = formatPriority[b.format.uppercase(Locale.ROOT)] ?: 0
+        if (aFmt != bFmt) {
+            return aFmt.compareTo(bFmt)
+        }
+
+        // 6. Prefer candidate with existing thumbnail preview
+        if (a.thumbnailUrl != null && b.thumbnailUrl == null) return 1
+        if (a.thumbnailUrl == null && b.thumbnailUrl != null) return -1
+
+        return 0
     }
 
     /**
@@ -680,17 +908,12 @@ object MediaClassifier {
             if (group.size == 1) {
                 result.add(group[0])
             } else {
-                val best = group.maxWithOrNull(compareBy<ScrapedMediaItem> {
-                    if (!it.url.contains("/thumb/") && !it.url.contains("/transcoded/") && !it.url.contains("resize") && !it.url.contains("?w=")) 2 else 0
-                }.thenBy {
-                    if (!it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network") 2 else 0
-                }.thenBy {
-                    it.resolutionHint?.length ?: 0
-                }.thenBy {
-                    it.sizeBytes ?: 0L
-                }.thenBy {
-                    if (it.thumbnailUrl != null) 1 else 0
-                }) ?: group[0]
+                var best = group[0]
+                for (i in 1 until group.size) {
+                    if (compareMediaQuality(group[i], best) > 0) {
+                        best = group[i]
+                    }
+                }
 
                 val engines = group.map { it.provenance.extractorEngine }.distinct()
                 val mergedProvenance = if (engines.size > 1) {
@@ -702,8 +925,9 @@ object MediaClassifier {
                 }
 
                 val bestThumb = best.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
-                val mergedResolution = group.firstOrNull { !it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network" }?.resolutionHint
-                    ?: best.resolutionHint
+                val mergedResolution = group.firstOrNull {
+                    !it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network"
+                }?.resolutionHint ?: best.resolutionHint
 
                 val mergedHeaders = mutableMapOf<String, String>()
                 for (cand in group) {

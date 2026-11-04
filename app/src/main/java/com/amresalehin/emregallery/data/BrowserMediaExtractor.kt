@@ -66,7 +66,7 @@ class BrowserMediaExtractor(private val context: Context) {
                     userAgentString = OkHttpDownloader.DEFAULT_USER_AGENT
                 }
 
-                val seenKeys = mutableSetOf<String>()
+                val seenMap = mutableMapOf<String, ScrapedMediaItem>()
 
                 fun dispatchMediaItem(
                     rawUrl: String,
@@ -90,14 +90,9 @@ class BrowserMediaExtractor(private val context: Context) {
                     val cleanedUrl = MediaClassifier.cleanMediaUrl(resolvedInfo.mediaUrl)
                     if (MediaClassifier.isMediaFragment(cleanedUrl)) return
 
-                    val key = MediaClassifier.canonicalKey(cleanedUrl)
-                    synchronized(seenKeys) {
-                        if (!seenKeys.add(key)) return
-                    }
-
                     val classification = MediaClassifier.classify(cleanedUrl, mimeHint)
                     val isVidAudStream = classification.isVideo || classification.isAudio || classification.isStream
-                    val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, seenKeys.size)
+                    val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, seenMap.size)
 
                     if (ContentAwareMediaFilter.isUiChromeUrl(
                             url = cleanedUrl,
@@ -123,8 +118,9 @@ class BrowserMediaExtractor(private val context: Context) {
                     mimeHint?.let { metadataMap["mime_hint"] = it }
                     metadataMap["source_url"] = normalizedUrl
 
-                    val item = ScrapedMediaItem(
-                        id = "browser_${seenKeys.size}_${System.currentTimeMillis()}",
+                    val key = MediaClassifier.canonicalKey(cleanedUrl)
+                    val candidateItem = ScrapedMediaItem(
+                        id = "browser_${seenMap.size}_${System.currentTimeMillis()}",
                         url = cleanedUrl,
                         title = title,
                         isVideo = classification.isVideo,
@@ -144,7 +140,18 @@ class BrowserMediaExtractor(private val context: Context) {
                         metadata = metadataMap,
                         downloadHeaders = headers
                     )
-                    onMediaDiscovered(item)
+
+                    synchronized(seenMap) {
+                        val existing = seenMap[key]
+                        if (existing != null) {
+                            if (MediaClassifier.compareMediaQuality(candidateItem, existing) <= 0) {
+                                return
+                            }
+                        }
+                        seenMap[key] = candidateItem
+                    }
+
+                    onMediaDiscovered(candidateItem)
                 }
 
                 wv.addJavascriptInterface(
