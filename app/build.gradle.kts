@@ -93,6 +93,8 @@ dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Shared by ContentAwareMediaFilter DOM relevance helpers; the page-wide scraper itself is removed.
+    implementation("org.jsoup:jsoup:1.18.3")
     // Maintained FFmpegKit continuation; provides Android-native FFmpeg/FFprobe for audio/video muxing.
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.7")
     testImplementation("junit:junit:4.13.2")
