@@ -316,7 +316,7 @@ object MediaClassifier {
             return false
         }
         val cleanPath = lower.substringBefore("?").substringBefore("#")
-        // Reject web document and script endpoints
+        // Reject web document, script, and non-media endpoint paths
         if (cleanPath.endsWith(".html") || cleanPath.endsWith(".htm") || cleanPath.endsWith(".php") ||
             cleanPath.endsWith(".jsp") || cleanPath.endsWith(".asp") || cleanPath.endsWith(".aspx") ||
             cleanPath.endsWith(".js") || cleanPath.endsWith(".css") || cleanPath.endsWith(".json") ||
@@ -324,6 +324,19 @@ object MediaClassifier {
         ) {
             return false
         }
+
+        // Reject non-media API, stats, logging, telemetry, and embed document endpoints
+        if (cleanPath.contains("/api/") || cleanPath.contains("/apis/") || cleanPath.contains("/youtubei/") ||
+            cleanPath.contains("/stats/") || cleanPath.contains("/log") || cleanPath.contains("/logging") ||
+            cleanPath.contains("/ptracking") || cleanPath.contains("/beacon") || cleanPath.contains("/telemetry") ||
+            cleanPath.contains("/track") || cleanPath.contains("/metrics") || cleanPath.contains("/collect") ||
+            cleanPath.contains("generate_204") || cleanPath.contains("/recaptcha") ||
+            cleanPath.contains("play.google.com/log") ||
+            ((cleanPath.contains("/embed/") || cleanPath.contains("/iframe")) && !KNOWN_MEDIA_EXTENSIONS.any { cleanPath.endsWith(".$it") })
+        ) {
+            return false
+        }
+
         val candidate = when {
             lower.startsWith("http://") || lower.startsWith("https://") -> url
             lower.startsWith("//") -> "https:$url"
@@ -333,6 +346,21 @@ object MediaClassifier {
         val uri = runCatching { URI(candidate) }.getOrNull()
         val host = uri?.host?.lowercase(Locale.ROOT)?.takeIf { it != "placeholder.invalid" } ?: ""
         val path = uri?.path?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() } ?: cleanPath
+
+        if (host == "accounts.google.com" || host == "play.google.com" || host == "myactivity.google.com" ||
+            host == "consent.youtube.com" || host == "consent.google.com"
+        ) {
+            return false
+        }
+
+        // YouTube HTML pages (shorts, watch, channel, embed, feed) are web documents, not direct media items
+        if ((host.contains("youtube.com") || host.contains("youtu.be")) &&
+            (path.contains("/watch") || path.contains("/shorts/") || path.contains("/channel/") ||
+             path.contains("/feed/") || path.contains("/embed/") || path.contains("/results")) &&
+            !KNOWN_MEDIA_EXTENSIONS.any { cleanPath.endsWith(".$it") }
+        ) {
+            return false
+        }
 
         // Host/path-aware non-media webpage rejections:
         val isWikiHost = host.contains("wikipedia.org") || host.contains("wikimedia.org") ||
@@ -451,6 +479,21 @@ object MediaClassifier {
                     cleanTitle = "$hash.$ext"
                 )
             }
+        }
+
+        // 0c. YouTube video thumbnails (i.ytimg.com/vi/<id>/... -> clean master resolution)
+        val ytThumbRegex = Regex("""^https?://(?:i[0-4]?|img)\.ytimg\.com/(?:vi|vi_webp)/([a-zA-Z0-9_-]{11})/([a-zA-Z0-9_-]+)""")
+        val ytMatch = ytThumbRegex.find(normalized)
+        if (ytMatch != null) {
+            val videoId = ytMatch.groupValues[1]
+            val variant = ytMatch.groupValues[2]
+            val masterVariant = if (variant == "oar2") "oar2" else if (variant == "frame0") "maxresdefault" else variant
+            val originalUrl = "https://i.ytimg.com/vi/$videoId/$masterVariant.jpg"
+            return ResolvedMediaInfo(
+                mediaUrl = originalUrl,
+                thumbnailUrl = normalized,
+                cleanTitle = "youtube_${videoId}_$variant.jpg"
+            )
         }
 
         // 1. Reddit Preview CDN (preview.redd.it / external-preview.redd.it -> i.redd.it)
@@ -690,6 +733,13 @@ object MediaClassifier {
                 }
             }
 
+            // 1b. YouTube Video Thumbnails: All resolution, crop, and format variants of the same video's thumbnail
+            val ytThumbMatch = Regex("""(?:ytimg\.com|youtube\.com)/(?:vi|vi_webp)/([a-zA-Z0-9_-]{11})/""").find(normalizedHostAndPath)
+            if (ytThumbMatch != null) {
+                val videoId = ytThumbMatch.groupValues[1]
+                return "ytthumb:$videoId"
+            }
+
             // 2. Google User Content: Strip dynamic sizing modifiers (=w... / =s...)
             if (normalizedHostAndPath.contains("googleusercontent.com")) {
                 normalizedHostAndPath = normalizedHostAndPath.substringBefore("=")
@@ -754,6 +804,7 @@ object MediaClassifier {
                 "w", "width", "h", "height", "size", "s", "quality", "q",
                 "fit", "crop", "auto", "format", "fmt", "fm", "f", "dpr", "lossless", "strip",
                 "scale", "resize", "maxwidth", "maxheight",
+                "sqp", "rs", "sigh", "sig", "sparams",
                 "itag", "range", "ratebypass", "rn", "rbuf", "mime", "gir", "clen", "dur", "lmt"
             )
             val filteredQuery = if (queryPart.isNotBlank()) {
@@ -947,7 +998,62 @@ object MediaClassifier {
                 result.add(merged)
             }
         }
-        return result
+
+        // Video poster folding: If a video is present, fold standalone images matching its poster/thumbnail into the video
+        val videoThumbKeys = mutableSetOf<String>()
+        for (item in result) {
+            if (item.isVideo) {
+                item.thumbnailUrl?.let { videoThumbKeys.add(deduplicationKey(it)) }
+                val ytId = extractYouTubeVideoId(item.url) ?:
+                           item.thumbnailUrl?.let { extractYouTubeVideoId(it) } ?:
+                           extractYouTubeVideoId(item.provenance.pageUrl)
+                if (ytId != null) {
+                    videoThumbKeys.add("ytthumb:${ytId.lowercase(Locale.ROOT)}")
+                }
+            }
+        }
+
+        if (videoThumbKeys.isEmpty()) {
+            return result
+        }
+
+        val finalResult = mutableListOf<ScrapedMediaItem>()
+        for (item in result) {
+            if (!item.isVideo) {
+                val itemKey = deduplicationKey(item.url)
+                if (itemKey in videoThumbKeys) {
+                    val matchingVideoIdx = finalResult.indexOfFirst { v ->
+                        v.isVideo && (
+                            (v.thumbnailUrl != null && deduplicationKey(v.thumbnailUrl) == itemKey) ||
+                            (extractYouTubeVideoId(v.url) != null && "ytthumb:${extractYouTubeVideoId(v.url)!!.lowercase(Locale.ROOT)}" == itemKey) ||
+                            (v.thumbnailUrl != null && extractYouTubeVideoId(v.thumbnailUrl) != null && "ytthumb:${extractYouTubeVideoId(v.thumbnailUrl)!!.lowercase(Locale.ROOT)}" == itemKey) ||
+                            (extractYouTubeVideoId(v.provenance.pageUrl) != null && "ytthumb:${extractYouTubeVideoId(v.provenance.pageUrl)!!.lowercase(Locale.ROOT)}" == itemKey)
+                        )
+                    }
+                    if (matchingVideoIdx != -1) {
+                        val matchingVideo = finalResult[matchingVideoIdx]
+                        if (matchingVideo.thumbnailUrl == null || compareMediaQuality(item, matchingVideo.copy(url = matchingVideo.thumbnailUrl)) > 0) {
+                            finalResult[matchingVideoIdx] = matchingVideo.copy(thumbnailUrl = item.thumbnailUrl ?: item.url)
+                        }
+                    }
+                    continue
+                }
+            }
+            finalResult.add(item)
+        }
+        return finalResult
+    }
+
+    /**
+     * Extracts an 11-character YouTube video ID from a watch/shorts/embed URL or thumbnail CDN URL.
+     */
+    fun extractYouTubeVideoId(url: String?): String? {
+        if (url.isNullOrBlank()) return null
+        val regex = Regex("""(?:youtu\.be/|youtube\.com/(?:embed/|v/|shorts/|watch\?v=|watch\?.+&v=))([a-zA-Z0-9_-]{11})""")
+        val m = regex.find(url)
+        if (m != null) return m.groupValues[1]
+        val thumbRegex = Regex("""(?:ytimg\.com|youtube\.com)/(?:vi|vi_webp)/([a-zA-Z0-9_-]{11})""")
+        return thumbRegex.find(url)?.groupValues?.get(1)
     }
 
     /**

@@ -438,11 +438,15 @@ class StaticMediaScraper {
             }
         }
 
-        // 7. iFrame inspection (video embed frames)
+        // 7. iFrame inspection (only direct media files embedded in iframes, reject web pages)
         for (iframe in doc.select("iframe[src]")) {
-            val src = iframe.attr("src")
+            val src = iframe.attr("src").trim()
             if (src.isNotBlank() && !ContentAwareMediaFilter.isUiChromeElement(iframe)) {
-                addCandidate(src, ExtractionSource.IFRAME, resolution = "iFrame Embed", domSelector = "iframe")
+                val cleanPath = src.substringBefore("?").substringBefore("#").lowercase(java.util.Locale.ROOT)
+                val isDirectMediaFile = MediaClassifier.KNOWN_MEDIA_EXTENSIONS.any { cleanPath.endsWith(".$it") }
+                if (isDirectMediaFile) {
+                    addCandidate(src, ExtractionSource.IFRAME, resolution = "iFrame Media", domSelector = "iframe")
+                }
             }
         }
 

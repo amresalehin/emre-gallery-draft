@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery
 
+import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.ScrapedMediaItem
@@ -262,4 +263,116 @@ class MediaDeduplicationPureUnitTest {
             MediaClassifier.isValidMedia(svgXmlDataUri)
         )
     }
+
+    @Test
+    fun testYouTubeThumbnailDeduplicationAndResolutionFolding() {
+        val oar2Url = "https://i.ytimg.com/vi/FaEeQPmv1D4/oar2.jpg"
+        val frame0_268 = "https://i.ytimg.com/vi/FaEeQPmv1D4/frame0.jpg?sqp=-oaymwEdCJUDENAFSFWQAgHyq4qpAw8IARUAAIhCcAHAAQ==&rs=AOn4CLB..."
+        val frame0_270 = "https://i.ytimg.com/vi/FaEeQPmv1D4/frame0.jpg?sqp=-oaymwEdCK4DENAFSFWQAgHyq4qpAw8IARUAAIhCcAHAAQ==&rs=AOn4CLB..."
+
+        // All share the same canonical YouTube thumbnail key
+        val key1 = MediaClassifier.deduplicationKey(oar2Url)
+        val key2 = MediaClassifier.deduplicationKey(frame0_268)
+        val key3 = MediaClassifier.deduplicationKey(frame0_270)
+
+        assertEquals("ytthumb:${"FaEeQPmv1D4".lowercase(java.util.Locale.ROOT)}", key1)
+        assertEquals(key1, key2)
+        assertEquals(key1, key3)
+
+        val item1 = ScrapedMediaItem(
+            id = "item_1",
+            url = oar2Url,
+            title = "oar2.jpg",
+            isVideo = false,
+            resolutionHint = "405x720",
+            category = MediaCategory.IMAGES
+        )
+        val item2 = ScrapedMediaItem(
+            id = "item_2",
+            url = frame0_268,
+            title = "frame0.jpg",
+            isVideo = false,
+            resolutionHint = "268x480",
+            category = MediaCategory.IMAGES
+        )
+        val item3 = ScrapedMediaItem(
+            id = "item_3",
+            url = frame0_270,
+            title = "frame0.jpg",
+            isVideo = false,
+            resolutionHint = "270x480",
+            category = MediaCategory.IMAGES
+        )
+
+        val deduplicated = MediaClassifier.deduplicateScrapedItems(listOf(item1, item2, item3))
+        // Multiple frame and size variants must collapse to exactly 1 highest-quality thumbnail
+        assertEquals(1, deduplicated.size)
+        // High resolution 405x720 must be selected over 268x480 or 270x480
+        assertEquals("405x720", deduplicated[0].resolutionHint)
+    }
+
+    @Test
+    fun testVideoPosterFoldingLeavesOnlyVideo() {
+        val videoItem = ScrapedMediaItem(
+            id = "video_1",
+            url = "https://rr1---sn-uxa-i5ne.googlevideo.com/videoplayback?expire=123&id=FaEeQPmv1D4",
+            title = "Abba Harmonium Bajate...",
+            isVideo = true,
+            category = MediaCategory.VIDEOS,
+            format = "WEBM",
+            resolutionHint = "720x1280",
+            thumbnailUrl = "https://i.ytimg.com/vi/FaEeQPmv1D4/hqdefault.jpg"
+        )
+
+        val oar2PosterItem = ScrapedMediaItem(
+            id = "img_oar2",
+            url = "https://i.ytimg.com/vi/FaEeQPmv1D4/oar2.jpg",
+            title = "oar2.jpg",
+            isVideo = false,
+            category = MediaCategory.IMAGES,
+            resolutionHint = "405x720"
+        )
+
+        val frame0PosterItem = ScrapedMediaItem(
+            id = "img_frame0",
+            url = "https://i.ytimg.com/vi/FaEeQPmv1D4/frame0.jpg?sqp=abc",
+            title = "frame0.jpg",
+            isVideo = false,
+            category = MediaCategory.IMAGES,
+            resolutionHint = "270x480"
+        )
+
+        val result = MediaClassifier.deduplicateScrapedItems(listOf(videoItem, oar2PosterItem, frame0PosterItem))
+
+        // Standalone poster/storyboard image duplicates of the video must be folded into the video
+        assertEquals(1, result.size)
+        val finalVideo = result[0]
+        assertTrue(finalVideo.isVideo)
+        assertEquals("Abba Harmonium Bajate...", finalVideo.title)
+        // Thumbnail should be upgraded to oar2.jpg (405x720) from the folded poster item
+        assertTrue(finalVideo.thumbnailUrl?.contains("FaEeQPmv1D4") == true)
+    }
+
+    @Test
+    fun testNonMediaEndpointsAndIframeWebPagesAreRejected() {
+        val rejectedUrls = listOf(
+            "https://www.youtube.com/embed/FaEeQPmv1D4",
+            "https://www.youtube.com/shorts/FaEeQPmv1D4",
+            "https://www.youtube.com/watch?v=FaEeQPmv1D4",
+            "https://www.youtube.com/api/stats/playback?ns=yt&cpn=123",
+            "https://play.google.com/log?format=json&has_webp=1",
+            "https://i.ytimg.com/generate_204",
+            "https://accounts.google.com/ServiceLogin?service=youtube",
+            "https://example.com/embed/player_widget",
+            "https://example.com/tracking/pixel"
+        )
+
+        for (url in rejectedUrls) {
+            org.junit.Assert.assertFalse(
+                "Expected $url to be rejected by isValidMedia",
+                MediaClassifier.isValidMedia(url)
+            )
+        }
+    }
 }
+

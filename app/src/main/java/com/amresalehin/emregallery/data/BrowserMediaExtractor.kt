@@ -193,35 +193,51 @@ class BrowserMediaExtractor(private val context: Context) {
                         }
 
                         val reqLower = reqUrl.lowercase()
+                        val cleanReqPath = reqLower.substringBefore("?").substringBefore("#")
                         val headers = request.requestHeaders ?: emptyMap()
                         val acceptHeader = headers["Accept"]?.lowercase() ?: ""
 
-                        val isNonMediaPage = reqLower.contains(".html") || reqLower.contains(".htm") ||
-                                reqLower.contains(".php") || reqLower.contains(".js") || reqLower.contains(".css") ||
-                                reqLower.contains(".json") || reqLower.contains("/wiki/") || reqLower.contains("/geohack") ||
-                                reqLower.contains("centralautologin")
+                        // Reject non-media, API, logging, telemetry, and tracking endpoints
+                        val isNonMediaEndpoint = cleanReqPath.contains("/api/") || cleanReqPath.contains("/apis/") ||
+                                cleanReqPath.contains("/youtubei/") || cleanReqPath.contains("/stats/") ||
+                                cleanReqPath.contains("/log") || cleanReqPath.contains("/logging") ||
+                                cleanReqPath.contains("/ptracking") || cleanReqPath.contains("/beacon") ||
+                                cleanReqPath.contains("/telemetry") || cleanReqPath.contains("/metrics") ||
+                                cleanReqPath.contains("generate_204") || cleanReqPath.contains("/recaptcha") ||
+                                cleanReqPath.contains("/embed/") || cleanReqPath.contains("play.google.com/log") ||
+                                cleanReqPath.contains("youtube.com/api/") || cleanReqPath.contains("/wiki/") ||
+                                cleanReqPath.contains("/geohack") || cleanReqPath.contains("centralautologin")
+
+                        if (isNonMediaEndpoint) return null
+
+                        val isNonMediaPage = cleanReqPath.endsWith(".html") || cleanReqPath.endsWith(".htm") ||
+                                cleanReqPath.endsWith(".php") || cleanReqPath.endsWith(".js") || cleanReqPath.endsWith(".css") ||
+                                cleanReqPath.endsWith(".json") || cleanReqPath.endsWith(".xml") || cleanReqPath.endsWith(".txt") ||
+                                cleanReqPath.endsWith(".do") || cleanReqPath.endsWith(".asp") || cleanReqPath.endsWith(".aspx")
 
                         if (isNonMediaPage) return null
 
-                        val isStream = reqLower.contains(".m3u8") || reqLower.contains(".mpd") ||
-                                reqLower.contains("chunklist") || acceptHeader.contains("mpegurl") ||
+                        val isStream = cleanReqPath.endsWith(".m3u8") || cleanReqPath.endsWith(".mpd") ||
+                                cleanReqPath.contains("chunklist") || acceptHeader.contains("mpegurl") ||
                                 acceptHeader.contains("dash+xml")
 
-                        val isVideo = isStream || reqLower.contains(".mp4") || reqLower.contains(".webm") ||
-                                reqLower.contains(".mov") || reqLower.contains(".mkv") ||
+                        val isVideo = isStream || cleanReqPath.endsWith(".mp4") || cleanReqPath.endsWith(".webm") ||
+                                cleanReqPath.endsWith(".mov") || cleanReqPath.endsWith(".mkv") ||
                                 acceptHeader.contains("video/")
 
-                        val isAudio = reqLower.contains(".mp3") || reqLower.contains(".m4a") ||
-                                reqLower.contains(".aac") || reqLower.contains(".wav") ||
-                                reqLower.contains(".ogg") || reqLower.contains(".flac") ||
-                                reqLower.contains(".opus") || acceptHeader.contains("audio/")
+                        val isAudio = cleanReqPath.endsWith(".mp3") || cleanReqPath.endsWith(".m4a") ||
+                                cleanReqPath.endsWith(".aac") || cleanReqPath.endsWith(".wav") ||
+                                cleanReqPath.endsWith(".ogg") || cleanReqPath.endsWith(".flac") ||
+                                cleanReqPath.endsWith(".opus") || acceptHeader.contains("audio/")
 
-                        val hasImageExt = reqLower.contains(".jpg") || reqLower.contains(".jpeg") ||
-                                reqLower.contains(".png") || reqLower.contains(".webp") ||
-                                reqLower.contains(".gif") || reqLower.contains(".avif") ||
-                                reqLower.contains(".svg") || reqLower.contains(".bmp")
+                        val hasImageExt = cleanReqPath.endsWith(".jpg") || cleanReqPath.endsWith(".jpeg") ||
+                                cleanReqPath.endsWith(".png") || cleanReqPath.endsWith(".webp") ||
+                                cleanReqPath.endsWith(".gif") || cleanReqPath.endsWith(".avif") ||
+                                cleanReqPath.endsWith(".svg") || cleanReqPath.endsWith(".bmp") ||
+                                cleanReqPath.contains("/vi/") || cleanReqPath.contains("/vi_webp/") ||
+                                Regex("""[?&](?:format|fmt|ext)=(?:jpg|jpeg|png|webp|avif)""").containsMatchIn(reqLower)
 
-                        val isImage = hasImageExt || (acceptHeader.startsWith("image/") && !acceptHeader.contains("text/html"))
+                        val isImage = hasImageExt && !acceptHeader.contains("text/html")
 
                         if (isVideo || isAudio || isImage) {
                             val cleanReqUrl = if (isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
@@ -230,7 +246,7 @@ class BrowserMediaExtractor(private val context: Context) {
                                     dispatchMediaItem(
                                         rawUrl = cleanReqUrl,
                                         source = ExtractionSource.NETWORK_INTERCEPT,
-                                        mimeHint = acceptHeader.ifBlank { null }
+                                        mimeHint = null
                                     )
                                 }
                             }
@@ -637,11 +653,13 @@ class BrowserMediaExtractor(private val context: Context) {
                     }
                 }
 
-                // 6. iFrames (e.g., media players or embeds)
+                // 6. iFrames (only if direct media file)
                 var iframes = document.querySelectorAll('iframe');
                 for (var f = 0; f < iframes.length; f++) {
                     var ifr = resolveAbs(iframes[f].src);
-                    if (ifr) list.push({u: ifr, s: 'IFRAME', r: 'iframe'});
+                    if (ifr && /\.(?:mp4|webm|mkv|mov|mp3|m4a|wav|jpe?g|png|webp|gif|avif)(?:[?#]|$)/i.test(ifr)) {
+                        list.push({u: ifr, s: 'IFRAME', r: 'iframe'});
+                    }
                 }
 
                 return JSON.stringify(list);

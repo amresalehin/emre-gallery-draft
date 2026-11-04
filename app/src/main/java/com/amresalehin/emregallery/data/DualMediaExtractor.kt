@@ -274,8 +274,88 @@ class DualMediaExtractor(private val context: Context) {
                 phase: ExtractionPhase? = null
             ) {
                 var modified = false
+
+                fun getVideoThumbKeys(): Set<String> {
+                    val keys = mutableSetOf<String>()
+                    for (entry in itemsMap.values) {
+                        if (entry.isVideo) {
+                            entry.thumbnailUrl?.let { keys.add(MediaClassifier.deduplicationKey(it)) }
+                            val ytId = MediaClassifier.extractYouTubeVideoId(entry.url) ?:
+                                       entry.thumbnailUrl?.let { MediaClassifier.extractYouTubeVideoId(it) } ?:
+                                       MediaClassifier.extractYouTubeVideoId(entry.provenance.pageUrl)
+                            if (ytId != null) {
+                                keys.add("ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}")
+                            }
+                        }
+                    }
+                    return keys
+                }
+
                 for (item in newList) {
                     val key = MediaClassifier.deduplicationKey(item.url)
+
+                    // Case A: Incoming item is a Video
+                    if (item.isVideo) {
+                        val ytId = MediaClassifier.extractYouTubeVideoId(item.url) ?:
+                                   item.thumbnailUrl?.let { MediaClassifier.extractYouTubeVideoId(it) } ?:
+                                   MediaClassifier.extractYouTubeVideoId(item.provenance.pageUrl)
+                        val videoPosterKeys = mutableSetOf<String>()
+                        item.thumbnailUrl?.let { videoPosterKeys.add(MediaClassifier.deduplicationKey(it)) }
+                        if (ytId != null) videoPosterKeys.add("ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}")
+
+                        var bestThumb = item.thumbnailUrl
+                        for (pKey in videoPosterKeys) {
+                            val existingImg = itemsMap[pKey]
+                            if (existingImg != null && !existingImg.isVideo) {
+                                if (bestThumb == null || MediaClassifier.compareMediaQuality(existingImg, item.copy(url = bestThumb)) > 0) {
+                                    bestThumb = existingImg.thumbnailUrl ?: existingImg.url
+                                }
+                                itemsMap.remove(pKey)
+                                modified = true
+                            }
+                        }
+                        val candidateVideo = if (bestThumb != item.thumbnailUrl) item.copy(thumbnailUrl = bestThumb) else item
+                        val existing = itemsMap[key]
+                        if (existing == null) {
+                            itemsMap[key] = candidateVideo
+                            modified = true
+                        } else {
+                            val cmp = MediaClassifier.compareMediaQuality(candidateVideo, existing)
+                            val preferred = if (cmp > 0) candidateVideo else existing
+                            val secondary = if (preferred === candidateVideo) existing else candidateVideo
+                            val upgraded = preferred.copy(
+                                id = existing.id,
+                                thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl
+                            )
+                            if (upgraded != existing) {
+                                itemsMap[key] = upgraded
+                                modified = true
+                            }
+                        }
+                        continue
+                    }
+
+                    // Case B: Incoming item is an Image
+                    val currentVideoThumbKeys = getVideoThumbKeys()
+                    if (key in currentVideoThumbKeys) {
+                        for ((vKey, vItem) in itemsMap.entries.toList()) {
+                            if (vItem.isVideo) {
+                                val ytId = MediaClassifier.extractYouTubeVideoId(vItem.url) ?:
+                                           vItem.thumbnailUrl?.let { MediaClassifier.extractYouTubeVideoId(it) } ?:
+                                           MediaClassifier.extractYouTubeVideoId(vItem.provenance.pageUrl)
+                                val matches = (vItem.thumbnailUrl != null && MediaClassifier.deduplicationKey(vItem.thumbnailUrl) == key) ||
+                                              (ytId != null && "ytthumb:${ytId.lowercase(java.util.Locale.ROOT)}" == key)
+                                if (matches) {
+                                    if (vItem.thumbnailUrl == null || MediaClassifier.compareMediaQuality(item, vItem.copy(url = vItem.thumbnailUrl)) > 0) {
+                                        itemsMap[vKey] = vItem.copy(thumbnailUrl = item.thumbnailUrl ?: item.url)
+                                        modified = true
+                                    }
+                                }
+                            }
+                        }
+                        continue
+                    }
+
                     val existing = itemsMap[key]
                     if (existing == null) {
                         itemsMap[key] = item
