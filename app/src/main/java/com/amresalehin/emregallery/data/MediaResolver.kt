@@ -41,7 +41,13 @@ object MediaResolver {
         if (group.size == 1) {
             val single = group.first()
             val original = MediaClassifier.resolveOriginalMedia(single.url).mediaUrl
-            return if (original != single.url) single.copy(url = original) else single
+            val resolved = if (original != single.url) single.copy(url = original) else single
+            // An image card should preview the resolved primary rendition, not an older thumbnail URL.
+            return if (resolved.category == MediaCategory.IMAGES) {
+                resolved.copy(thumbnailUrl = resolved.url)
+            } else {
+                resolved
+            }
         }
 
         val best = group.maxByOrNull(::qualityScore) ?: group.first()
@@ -58,8 +64,13 @@ object MediaResolver {
 
         return best.copy(
             url = normalizedUrl,
-            thumbnailUrl = group.firstNotNullOfOrNull { it.thumbnailUrl }
-                ?: if (best.category == MediaCategory.IMAGES) normalizedUrl else null,
+            // For images the selected primary rendition is itself the correct grid preview.
+            // Do not keep the first (often lowest-resolution) thumbnail from the merged group.
+            thumbnailUrl = if (best.category == MediaCategory.IMAGES) {
+                normalizedUrl
+            } else {
+                best.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
+            },
             resolutionHint = best.resolutionHint?.takeIf { it.isNotBlank() }
                 ?: group.firstNotNullOfOrNull { it.resolutionHint?.takeIf { value -> value.isNotBlank() && value != "Network" } },
             audioUrl = audioUrl,
