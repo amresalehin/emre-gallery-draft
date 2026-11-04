@@ -3,11 +3,13 @@ package com.amresalehin.emregallery.data
 import android.content.Context
 import androidx.work.Constraints
 import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.flow.Flow
+import java.security.MessageDigest
 import java.util.UUID
 
 /**
@@ -57,7 +59,11 @@ object DownloadQueueManager {
             .addTag("item_${item.id}")
             .build()
 
-        WorkManager.getInstance(context).enqueue(request)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            uniqueWorkName(item),
+            ExistingWorkPolicy.KEEP,
+            request
+        )
         return request.id
     }
 
@@ -76,7 +82,10 @@ object DownloadQueueManager {
         val url = sourceUrl ?: referer ?: ""
 
         val workManager = WorkManager.getInstance(context)
+        // Deduplicate both within this batch and against any queued/running download,
+        // including a second request from the in-app browser or a rapid repeated tap.
         val distinctItems = MediaClassifier.deduplicateScrapedItems(items)
+            .distinctBy(::uniqueWorkName)
         val requests = distinctItems.map { item ->
             val inputData = Data.Builder()
                 .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
@@ -102,8 +111,29 @@ object DownloadQueueManager {
                 .build()
         }
 
-        workManager.enqueue(requests)
+        requests.forEachIndexed { index, request ->
+            workManager.enqueueUniqueWork(
+                uniqueWorkName(distinctItems[index]),
+                ExistingWorkPolicy.KEEP,
+                request
+            )
+        }
         return requests.map { it.id }
+    }
+
+    /**
+     * Stable WorkManager identity for one logical media asset.
+     *
+     * URL tracking/sizing parameters are normalized by MediaClassifier so the same media
+     * discovered through multiple routes maps to one unfinished work request.
+     */
+    internal fun uniqueWorkName(item: ScrapedMediaItem): String {
+        val identity = "${item.category.name}:${MediaClassifier.deduplicationKey(item.url)}"
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(identity.toByteArray(Charsets.UTF_8))
+            .take(16)
+            .joinToString("") { byte -> "%02x".format(byte) }
+        return "media-download-$digest"
     }
 
     fun getActiveDownloadsFlow(context: Context): Flow<List<WorkInfo>> {
