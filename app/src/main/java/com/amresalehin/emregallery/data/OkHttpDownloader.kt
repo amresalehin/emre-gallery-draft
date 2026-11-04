@@ -236,21 +236,29 @@ object OkHttpDownloader {
     }
 
     /**
-     * Downloads an image, video, audio file, or stream to storage with resumable Range support.
+     * Generates a deterministic file identifier from URL and file name to persist partial downloads across retries.
      */
-    suspend fun downloadMediaFileDetailed(
-        context: Context,
-        mediaUrl: String,
-        fileName: String,
-        referer: String? = null,
-        onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
-    ): DownloadResult = withContext(Dispatchers.IO) {
+    fun generateDeterministicId(mediaUrl: String, fileName: String): String {
+        val hash = runCatching {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            val bytes = md.digest(mediaUrl.toByteArray(Charsets.UTF_8))
+            bytes.take(8).joinToString("") { "%02x".format(it) }
+        }.getOrDefault(Integer.toHexString(mediaUrl.hashCode()))
+        val base = fileName.substringBeforeLast('.').replace(Regex("[^a-zA-Z0-9_-]"), "_").take(32)
+        val ext = fileName.substringAfterLast('.', "")
+        return if (ext.isNotEmpty()) "${base}_$hash.$ext" else "${base}_$hash"
+    }
+
+    /**
+     * Resolves and ensures existence of the target storage directory (public Downloads or app external storage).
+     */
+    fun getTargetStorageDir(context: Context): File {
         val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val emreGalleryDir = File(publicDownloads, "Emre Gallery")
         if (!emreGalleryDir.exists()) {
             emreGalleryDir.mkdirs()
         }
-        val targetDir = if (emreGalleryDir.exists() && emreGalleryDir.canWrite()) {
+        return if (emreGalleryDir.exists() && emreGalleryDir.canWrite()) {
             emreGalleryDir
         } else {
             val appExternal = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
@@ -258,15 +266,56 @@ object OkHttpDownloader {
             if (!fallbackFolder.exists()) fallbackFolder.mkdirs()
             fallbackFolder
         }
+    }
+
+    /**
+     * Downloads an image, video, audio file, or stream to storage with resumable Range support.
+     */
+    suspend fun downloadMediaFileDetailed(
+        context: Context,
+        mediaUrl: String,
+        fileName: String,
+        referer: String? = null,
+        downloadId: String? = null,
+        onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
+    ): DownloadResult = withContext(Dispatchers.IO) {
+        val targetDir = getTargetStorageDir(context)
 
         val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-        val finalFile = File(targetDir, "${System.currentTimeMillis()}_$sanitizedName")
-        val tempFile = File(targetDir, "${finalFile.name}.downloading")
-
-        var existingBytes = 0L
-        if (tempFile.exists()) {
-            existingBytes = tempFile.length()
+        val deterministicBase = if (!downloadId.isNullOrBlank()) {
+            val cleanId = downloadId.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val ext = sanitizedName.substringAfterLast('.', "")
+            if (ext.isNotEmpty() && !cleanId.endsWith(".$ext", ignoreCase = true)) {
+                "${cleanId}.$ext"
+            } else {
+                cleanId
+            }
+        } else {
+            generateDeterministicId(mediaUrl, sanitizedName)
         }
+
+        val finalFile = File(targetDir, deterministicBase)
+        val tempFile = File(targetDir, "$deterministicBase.downloading")
+        val metaFile = File(targetDir, "$deterministicBase.meta")
+
+        var savedEtag: String? = null
+        var savedLastModified: String? = null
+
+        if (metaFile.exists()) {
+            runCatching {
+                metaFile.readLines().forEach { line ->
+                    val parts = line.split("=", limit = 2)
+                    if (parts.size == 2) {
+                        when (parts[0].trim().lowercase(Locale.ROOT)) {
+                            "etag" -> savedEtag = parts[1].trim().takeIf { it.isNotEmpty() }
+                            "last_modified" -> savedLastModified = parts[1].trim().takeIf { it.isNotEmpty() }
+                        }
+                    }
+                }
+            }
+        }
+
+        var existingBytes = if (tempFile.exists()) tempFile.length() else 0L
 
         val reqBuilder = Request.Builder()
             .url(mediaUrl)
@@ -279,25 +328,80 @@ object OkHttpDownloader {
         // Enable resumable downloads via HTTP Range header if partial data exists
         if (existingBytes > 0L) {
             reqBuilder.header("Range", "bytes=$existingBytes-")
+            if (!savedEtag.isNullOrBlank()) {
+                reqBuilder.header("If-Range", savedEtag!!)
+            } else if (!savedLastModified.isNullOrBlank()) {
+                reqBuilder.header("If-Range", savedLastModified!!)
+            }
         }
 
         try {
             var response = client.newCall(reqBuilder.build()).execute()
 
-            // Handle 416 Range Not Satisfiable: partial file may be invalid, restart cleanly
+            // Handle 416 Range Not Satisfiable:
             if (response.code == 416) {
-                response.close()
+                val cr = response.header("Content-Range")
+                val totalLength = cr?.substringAfterLast('/', "")?.toLongOrNull()
+                if (totalLength != null && totalLength > 0L && existingBytes == totalLength && tempFile.exists() && tempFile.length() == totalLength) {
+                    response.close()
+                    val commitRes = validateAndCommitDownloadedFile(
+                        context = context,
+                        mediaUrl = mediaUrl,
+                        fileName = fileName,
+                        tempFile = tempFile,
+                        metaFile = metaFile,
+                        finalFile = finalFile,
+                        code = 200,
+                        totalBytes = totalLength,
+                        mimeType = null,
+                        isResumed = true
+                    )
+                    return@withContext commitRes
+                } else {
+                    response.close()
+                    tempFile.delete()
+                    metaFile.delete()
+                    existingBytes = 0L
+                    val cleanRequest = Request.Builder()
+                        .url(mediaUrl)
+                        .header("Accept", "*/*")
+                        .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
+                        .build()
+                    response = client.newCall(cleanRequest).execute()
+                }
+            }
+
+            var activeResponse = response
+            var shouldRestartFromZero = false
+
+            // Check Content-Range start match before entering processing
+            if (activeResponse.code == 206 && existingBytes > 0L) {
+                val cr = activeResponse.header("Content-Range")
+                if (!cr.isNullOrBlank()) {
+                    val rangeRegex = Regex("""bytes\s+(\d+)-\d+/.*""", RegexOption.IGNORE_CASE)
+                    val match = rangeRegex.find(cr)
+                    val startByte = match?.groupValues?.get(1)?.toLongOrNull()
+                    if (startByte != null && startByte != existingBytes) {
+                        Log.w(TAG, "Content-Range start mismatch: expected $existingBytes, got $startByte. Restarting from byte 0.")
+                        shouldRestartFromZero = true
+                    }
+                }
+            }
+
+            if (shouldRestartFromZero) {
+                activeResponse.close()
                 tempFile.delete()
+                metaFile.delete()
                 existingBytes = 0L
                 val cleanRequest = Request.Builder()
                     .url(mediaUrl)
                     .header("Accept", "*/*")
                     .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
                     .build()
-                response = client.newCall(cleanRequest).execute()
+                activeResponse = client.newCall(cleanRequest).execute()
             }
 
-            response.use { resp ->
+            activeResponse.use { resp ->
                 val code = resp.code
                 val isPartial = code == 206
                 val isSuccess = code in 200..299
@@ -324,14 +428,22 @@ object OkHttpDownloader {
                     errorMessage = "Empty response body"
                 )
 
-                val mimeType = resp.header("Content-Type")?.lowercase()
-                val isManifest = mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
+                val rawMime = resp.header("Content-Type")?.lowercase(Locale.ROOT)
+                val mimeType = rawMime?.substringBefore(";")?.trim()
 
-                // Reject HTML web pages and API error responses masquerading as media
-                if (mimeType != null && !isManifest && (mimeType.startsWith("text/html") || mimeType.startsWith("application/json") ||
-                        (mimeType.startsWith("text/plain") && !mediaUrl.contains("playlist", ignoreCase = true)))
+                val isHlsManifest = mediaUrl.contains(".m3u8", ignoreCase = true) || fileName.endsWith(".m3u8", ignoreCase = true)
+                val isDashManifest = mediaUrl.contains(".mpd", ignoreCase = true) || fileName.endsWith(".mpd", ignoreCase = true)
+                val isManifest = isHlsManifest || isDashManifest
+
+                // 1. Unconditionally reject HTML pages and JSON error responses even for manifest URLs
+                if (mimeType != null && (
+                        mimeType.startsWith("text/html") ||
+                        mimeType.startsWith("application/json") ||
+                        (mimeType.startsWith("text/plain") && !isHlsManifest && !mediaUrl.contains("playlist", ignoreCase = true))
+                    )
                 ) {
                     tempFile.delete()
+                    metaFile.delete()
                     Log.w(TAG, "Download rejected for $mediaUrl: server returned Content-Type $mimeType")
                     return@withContext DownloadResult(
                         file = null,
@@ -339,20 +451,80 @@ object OkHttpDownloader {
                         statusCode = code,
                         bytesDownloaded = 0L,
                         totalBytes = -1L,
-                        errorMessage = "Server returned $mimeType webpage instead of media content"
+                        errorMessage = "Server returned $mimeType webpage or error response instead of media content"
                     )
                 }
 
-                val contentLength = body.contentLength()
-                val totalBytes = if (isPartial && contentLength > 0L) {
-                    existingBytes + contentLength
-                } else if (contentLength > 0L) {
-                    contentLength
-                } else {
-                    -1L
+                // 2. Accept genuine HLS/DASH manifest MIME types, rejecting arbitrary documents
+                if (isManifest && mimeType != null) {
+                    val allowedHlsTypes = setOf(
+                        "application/vnd.apple.mpegurl",
+                        "application/x-mpegurl",
+                        "audio/mpegurl",
+                        "application/octet-stream",
+                        "text/plain"
+                    )
+                    val allowedDashTypes = setOf(
+                        "application/dash+xml",
+                        "video/vnd.mpeg.dash.mpd",
+                        "application/xml",
+                        "text/xml",
+                        "application/octet-stream"
+                    )
+                    val isValidManifestMime = if (isHlsManifest) {
+                        allowedHlsTypes.contains(mimeType) || mimeType.contains("mpegurl")
+                    } else {
+                        allowedDashTypes.contains(mimeType) || mimeType.contains("dash")
+                    }
+                    if (!isValidManifestMime) {
+                        tempFile.delete()
+                        metaFile.delete()
+                        return@withContext DownloadResult(
+                            file = null,
+                            isSuccessful = false,
+                            statusCode = code,
+                            bytesDownloaded = 0L,
+                            totalBytes = -1L,
+                            errorMessage = "Invalid MIME type for streaming manifest: $mimeType"
+                        )
+                    }
                 }
 
-                val append = isPartial && existingBytes > 0L
+                val contentRange = resp.header("Content-Range")
+                val append = if (isPartial && existingBytes > 0L) {
+                    true
+                } else {
+                    // Server returned HTTP 200 (ignored Range request) or restarted cleanly:
+                    if (existingBytes > 0L) {
+                        tempFile.delete()
+                        existingBytes = 0L
+                    }
+                    false
+                }
+
+                // Store or update ETag / Last-Modified metadata for next resume attempt
+                val currentEtag = resp.header("ETag")
+                val currentLastModified = resp.header("Last-Modified")
+                if (!currentEtag.isNullOrBlank() || !currentLastModified.isNullOrBlank()) {
+                    runCatching {
+                        metaFile.writeText("etag=${currentEtag.orEmpty()}\nlast_modified=${currentLastModified.orEmpty()}")
+                    }
+                }
+
+                val contentLength = body.contentLength()
+                val totalBytes = if (isPartial) {
+                    val rangeTotal = contentRange?.substringAfterLast('/', "")?.toLongOrNull()
+                    if (rangeTotal != null && rangeTotal > 0L) {
+                        rangeTotal
+                    } else if (contentLength > 0L) {
+                        existingBytes + contentLength
+                    } else {
+                        -1L
+                    }
+                } else {
+                    if (contentLength > 0L) contentLength else -1L
+                }
+
                 var downloaded = if (append) existingBytes else 0L
 
                 body.byteStream().use { input: InputStream ->
@@ -368,93 +540,30 @@ object OkHttpDownloader {
                     }
                 }
 
-                // Verify downloaded file integrity before moving to final destination
-                if (tempFile.exists() && tempFile.length() > 0L) {
-                    // Check if file content begins with HTML tags
-                    val isHtmlFile = runCatching {
-                        FileInputStream(tempFile).use { fis ->
-                            val head = ByteArray(512)
-                            val read = fis.read(head)
-                            if (read > 0) {
-                                val headStr = String(head, 0, read).lowercase(Locale.ROOT)
-                                headStr.contains("<!doctype html") || headStr.contains("<html") || headStr.contains("<head")
-                            } else false
-                        }
-                    }.getOrDefault(false)
-
-                    if (isHtmlFile) {
-                        Log.w(TAG, "Downloaded file for $mediaUrl contains HTML text, deleting: ${tempFile.name}")
-                        tempFile.delete()
-                        return@withContext DownloadResult(
-                            file = null,
-                            isSuccessful = false,
-                            statusCode = code,
-                            bytesDownloaded = 0L,
-                            totalBytes = -1L,
-                            errorMessage = "Downloaded file contains HTML webpage content instead of media"
-                        )
-                    }
-
-                    // For raster images, verify that BitmapFactory can decode bounds
-                    val isRasterImage = !fileName.endsWith(".m3u8", true) && !fileName.endsWith(".mpd", true) &&
-                            !fileName.endsWith(".mp4", true) && !fileName.endsWith(".webm", true) &&
-                            !fileName.endsWith(".mov", true) && !fileName.endsWith(".mkv", true) &&
-                            !fileName.endsWith(".mp3", true) && !fileName.endsWith(".m4a", true) &&
-                            !fileName.endsWith(".wav", true) && !fileName.endsWith(".ogg", true) &&
-                            !fileName.endsWith(".svg", true)
-
-                    if (isRasterImage) {
-                        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeFile(tempFile.absolutePath, opts)
-                        if (opts.outWidth <= 0 || opts.outHeight <= 0) {
-                            Log.w(TAG, "Downloaded image could not be decoded: ${tempFile.name}")
-                            tempFile.delete()
-                            return@withContext DownloadResult(
-                                file = null,
-                                isSuccessful = false,
-                                statusCode = code,
-                                bytesDownloaded = 0L,
-                                totalBytes = -1L,
-                                errorMessage = "Downloaded file is corrupt or invalid image format"
-                            )
-                        }
-                    }
-
-                    val moved = if (tempFile.renameTo(finalFile)) {
-                        true
-                    } else {
-                        tempFile.copyTo(finalFile, overwrite = true)
-                        tempFile.delete()
-                        true
-                    }
-
-                    if (moved && finalFile.exists() && finalFile.length() > 0L) {
-                        MediaScannerConnection.scanFile(
-                            context,
-                            arrayOf(finalFile.absolutePath),
-                            arrayOf(mimeType),
-                            null
-                        )
-                        return@withContext DownloadResult(
-                            file = finalFile,
-                            isSuccessful = true,
-                            statusCode = code,
-                            bytesDownloaded = finalFile.length(),
-                            totalBytes = totalBytes,
-                            mimeType = mimeType,
-                            isResumed = append
-                        )
-                    }
+                // Verify actual downloaded size before committing the file
+                if (totalBytes > 0L && tempFile.length() != totalBytes) {
+                    Log.w(TAG, "Download incomplete: expected $totalBytes bytes, got ${tempFile.length()}")
+                    return@withContext DownloadResult(
+                        file = null,
+                        isSuccessful = false,
+                        statusCode = code,
+                        bytesDownloaded = tempFile.length(),
+                        totalBytes = totalBytes,
+                        errorMessage = "Download interrupted or size mismatch ($downloaded of $totalBytes bytes)"
+                    )
                 }
 
-                tempFile.delete()
-                DownloadResult(
-                    file = null,
-                    isSuccessful = false,
-                    statusCode = code,
-                    bytesDownloaded = 0L,
+                return@withContext validateAndCommitDownloadedFile(
+                    context = context,
+                    mediaUrl = mediaUrl,
+                    fileName = fileName,
+                    tempFile = tempFile,
+                    metaFile = metaFile,
+                    finalFile = finalFile,
+                    code = code,
                     totalBytes = totalBytes,
-                    errorMessage = "Downloaded file was empty or could not be committed"
+                    mimeType = mimeType,
+                    isResumed = append
                 )
             }
         } catch (e: Exception) {
@@ -470,6 +579,171 @@ object OkHttpDownloader {
         }
     }
 
+    private fun validateAndCommitDownloadedFile(
+        context: Context,
+        mediaUrl: String,
+        fileName: String,
+        tempFile: File,
+        metaFile: File,
+        finalFile: File,
+        code: Int,
+        totalBytes: Long,
+        mimeType: String?,
+        isResumed: Boolean
+    ): DownloadResult {
+        if (!tempFile.exists() || tempFile.length() <= 0L) {
+            tempFile.delete()
+            metaFile.delete()
+            return DownloadResult(
+                file = null,
+                isSuccessful = false,
+                statusCode = code,
+                bytesDownloaded = 0L,
+                totalBytes = totalBytes,
+                errorMessage = "Downloaded file was empty or could not be committed"
+            )
+        }
+
+        val isHlsManifest = mediaUrl.contains(".m3u8", ignoreCase = true) || fileName.endsWith(".m3u8", ignoreCase = true)
+        val isDashManifest = mediaUrl.contains(".mpd", ignoreCase = true) || fileName.endsWith(".mpd", ignoreCase = true)
+
+        // Check if file content begins with HTML tags or JSON error object
+        val head = ByteArray(512)
+        val headRead = runCatching {
+            FileInputStream(tempFile).use { fis -> fis.read(head) }
+        }.getOrDefault(-1)
+
+        if (headRead > 0) {
+            val headStr = String(head, 0, headRead, Charsets.UTF_8).lowercase(Locale.ROOT)
+            if (headStr.contains("<!doctype html") || headStr.contains("<html") || headStr.contains("<head")) {
+                Log.w(TAG, "Downloaded file for $mediaUrl contains HTML text, deleting: ${tempFile.name}")
+                tempFile.delete()
+                metaFile.delete()
+                return DownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = code,
+                    bytesDownloaded = 0L,
+                    totalBytes = -1L,
+                    errorMessage = "Downloaded file contains HTML webpage content instead of media"
+                )
+            }
+
+            val trimmedHead = headStr.trimStart()
+            if (trimmedHead.startsWith("{") && (trimmedHead.contains("\"error\"") || trimmedHead.contains("\"message\"") || trimmedHead.contains("\"status\""))) {
+                Log.w(TAG, "Downloaded file for $mediaUrl contains JSON error, deleting: ${tempFile.name}")
+                tempFile.delete()
+                metaFile.delete()
+                return DownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = code,
+                    bytesDownloaded = 0L,
+                    totalBytes = -1L,
+                    errorMessage = "Downloaded file contains JSON error response instead of media"
+                )
+            }
+
+            // Manifest-specific content validation
+            if (isHlsManifest && !headStr.contains("#extm3u") && !headStr.contains("#ext-x-")) {
+                Log.w(TAG, "Downloaded HLS manifest does not contain #EXTM3U: ${tempFile.name}")
+                tempFile.delete()
+                metaFile.delete()
+                return DownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = code,
+                    bytesDownloaded = 0L,
+                    totalBytes = -1L,
+                    errorMessage = "Downloaded file is not a valid HLS manifest (missing #EXTM3U header)"
+                )
+            }
+
+            if (isDashManifest && !headStr.contains("<mpd") && !headStr.contains("urn:mpeg:dash:schema")) {
+                Log.w(TAG, "Downloaded DASH manifest does not contain <MPD: ${tempFile.name}")
+                tempFile.delete()
+                metaFile.delete()
+                return DownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = code,
+                    bytesDownloaded = 0L,
+                    totalBytes = -1L,
+                    errorMessage = "Downloaded file is not a valid DASH manifest (missing <MPD> root tag)"
+                )
+            }
+        }
+
+        // For raster images only: verify BitmapFactory can decode bounds.
+        // Do NOT attempt BitmapFactory decoding on AVI, FLV, 3GP, TS, AAC, FLAC, OPUS, WMA or other non-raster formats.
+        val isRasterImage = when {
+            mimeType != null -> mimeType == "image/jpeg" || mimeType == "image/jpg" ||
+                    mimeType == "image/png" || mimeType == "image/webp" ||
+                    mimeType == "image/gif" || mimeType == "image/bmp" || mimeType == "image/x-ms-bmp"
+            else -> fileName.endsWith(".jpg", true) || fileName.endsWith(".jpeg", true) ||
+                    fileName.endsWith(".png", true) || fileName.endsWith(".webp", true) ||
+                    fileName.endsWith(".gif", true) || fileName.endsWith(".bmp", true)
+        }
+
+        if (isRasterImage) {
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(tempFile.absolutePath, opts)
+            if (opts.outWidth <= 0 || opts.outHeight <= 0) {
+                Log.w(TAG, "Downloaded image could not be decoded: ${tempFile.name}")
+                tempFile.delete()
+                metaFile.delete()
+                return DownloadResult(
+                    file = null,
+                    isSuccessful = false,
+                    statusCode = code,
+                    bytesDownloaded = 0L,
+                    totalBytes = -1L,
+                    errorMessage = "Downloaded file is corrupt or invalid raster image format"
+                )
+            }
+        }
+
+        // Clean up metadata file upon successful completion
+        metaFile.delete()
+
+        val moved = if (tempFile.renameTo(finalFile)) {
+            true
+        } else {
+            tempFile.copyTo(finalFile, overwrite = true)
+            tempFile.delete()
+            true
+        }
+
+        if (moved && finalFile.exists() && finalFile.length() > 0L) {
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(finalFile.absolutePath),
+                arrayOf(mimeType),
+                null
+            )
+            return DownloadResult(
+                file = finalFile,
+                isSuccessful = true,
+                statusCode = code,
+                bytesDownloaded = finalFile.length(),
+                totalBytes = totalBytes,
+                mimeType = mimeType,
+                isResumed = isResumed
+            )
+        }
+
+        tempFile.delete()
+        metaFile.delete()
+        return DownloadResult(
+            file = null,
+            isSuccessful = false,
+            statusCode = code,
+            bytesDownloaded = 0L,
+            totalBytes = totalBytes,
+            errorMessage = "Downloaded file was empty or could not be committed"
+        )
+    }
+
     /**
      * Backward-compatible convenience method returning File?
      */
@@ -478,9 +752,10 @@ object OkHttpDownloader {
         mediaUrl: String,
         fileName: String,
         referer: String? = null,
+        downloadId: String? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): File? {
-        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, onProgress)
+        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, downloadId, onProgress)
         return res.file
     }
 }

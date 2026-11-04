@@ -76,7 +76,8 @@ object DownloadQueueManager {
         val url = sourceUrl ?: referer ?: ""
 
         val workManager = WorkManager.getInstance(context)
-        val requests = items.map { item ->
+        val distinctItems = items.distinctBy { MediaClassifier.canonicalKey(it.url) }
+        val requests = distinctItems.map { item ->
             val inputData = Data.Builder()
                 .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
                 .putString(MediaDownloadWorker.KEY_FILE_NAME, item.title)

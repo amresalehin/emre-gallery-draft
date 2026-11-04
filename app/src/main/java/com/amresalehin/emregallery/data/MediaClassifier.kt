@@ -45,8 +45,96 @@ object MediaClassifier {
     // Query parameters that should be stripped to produce canonical deduplication keys
     private val TRACKING_QUERY_PARAMS = setOf(
         "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-        "fbclid", "gclid", "msclkid", "ref", "source", "_ga", "_gl", "_t", "cachebust"
+        "fbclid", "gclid", "msclkid", "ref", "source", "_ga", "_gl", "_t", "cachebust",
+        "range", "bytestart", "byteend", "bytes", "rn", "sq", "sver", "live", "cpn",
+        "chunk", "seg", "segment", "frag", "part"
     )
+
+    private val STREAMING_SLICE_PARAMS = setOf(
+        "range", "bytestart", "byteend", "bytes", "rn", "sq", "live", "cpn"
+    )
+
+    /**
+     * Cleans streaming slice and sequence query parameters from a media URL.
+     * Prevents downloading only a 1MB partial fragment or single byte-range slice of a video.
+     */
+    fun cleanMediaUrl(url: String): String {
+        return try {
+            val noHash = url.substringBefore("#")
+            val qIdx = noHash.indexOf('?')
+            if (qIdx == -1) return noHash
+            val base = noHash.substring(0, qIdx)
+            val query = noHash.substring(qIdx + 1)
+            val remainingParams = query.split("&").filter { param ->
+                val key = param.substringBefore("=").lowercase(Locale.ROOT)
+                !STREAMING_SLICE_PARAMS.contains(key)
+            }
+            if (remainingParams.isEmpty()) base else "$base?${remainingParams.joinToString("&")}"
+        } catch (_: Exception) {
+            url
+        }
+    }
+
+    /**
+     * Detects if a URL is an unmerged streaming chunk, segment, or initialization fragment.
+     * Standalone downloading of individual video chunks causes broken, partial, and multiplied downloads.
+     */
+    fun isMediaFragment(url: String): Boolean {
+        val lower = url.lowercase(Locale.ROOT)
+        if (lower.startsWith("blob:") || lower.startsWith("data:")) return true
+
+        val clean = lower.substringBefore("?").substringBefore("#")
+
+        // 1. Fragment-only file extensions
+        if (clean.endsWith(".m4s") || clean.endsWith(".m4f") || clean.endsWith(".f4f") || clean.endsWith(".f4m")) {
+            return true
+        }
+
+        // 2. Transport stream chunks (.ts)
+        // Standalone videos on websites are MP4/WebM/MKV/MOV/M3U8. A .ts with numeric/segment numbering is an HLS chunk
+        if (clean.endsWith(".ts")) {
+            val fileName = clean.substringAfterLast('/')
+            val isSegmentTs = fileName.matches(Regex("""(?i)(?:seg|segment|chunk|frag|fragment)?[_\-.]?\d+\.ts""")) ||
+                    fileName.contains("slice") || fileName.contains("stream") ||
+                    clean.contains("/hls/") || clean.contains("/dash/") || clean.contains("/segments/") || clean.contains("/chunks/")
+            if (isSegmentTs) return true
+        }
+
+        // 3. Initialization segments (contain metadata only, no playable frames)
+        if (clean.contains("/init.") || clean.contains("/init-") || clean.contains("_init.") ||
+            clean.endsWith("init.mp4") || clean.endsWith("init.m4s") || clean.contains("init-stream") ||
+            clean.contains("/header.mp4") || clean.contains("/init_")
+        ) {
+            return true
+        }
+
+        // 4. Fragment / segment naming in URL path
+        val segmentPattern = Regex("""[/_.-](?:seg|segment|frag|fragment|chunk)[-_.]?\d+""", RegexOption.IGNORE_CASE)
+        if (segmentPattern.containsMatchIn(clean)) {
+            return true
+        }
+        val numberedFragment = Regex("""\d+-(?:frag|seg|segment)\.(?:mp4|ts|m4s|m4v)""", RegexOption.IGNORE_CASE)
+        if (numberedFragment.containsMatchIn(clean)) {
+            return true
+        }
+
+        // 5. Query parameters indicating chunk indexing
+        val query = lower.substringAfter("?", "")
+        if (query.isNotBlank()) {
+            val params = query.split("&")
+            for (p in params) {
+                val key = p.substringBefore("=")
+                val value = p.substringAfter("=", "")
+                if ((key == "sq" || key == "seg" || key == "segment" || key == "frag" || key == "chunk") &&
+                    value.toIntOrNull() != null
+                ) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
 
     /**
      * Resolves a potentially relative URL against the base URL and standardizes protocol.
@@ -145,19 +233,47 @@ object MediaClassifier {
         ) {
             return false
         }
-        // Reject non-media wiki articles, social post threads, API, and metadata paths
-        if (cleanPath.contains("/wiki/") || cleanPath.contains("/w/index.php") || cleanPath.contains("/w/api.php") ||
-            cleanPath.contains("/geohack") || cleanPath.contains("/wiki/special:") ||
-            cleanPath.contains("centralautologin") || cleanPath.contains("/api.php") ||
-            cleanPath.contains("/comments/") || cleanPath.contains("/status/") ||
-            cleanPath.contains("/gallery/") || cleanPath.contains("/pin/")
-        ) {
+        val candidate = when {
+            lower.startsWith("http://") || lower.startsWith("https://") -> url
+            lower.startsWith("//") -> "https:$url"
+            lower.startsWith("/") -> "https://placeholder.invalid$url"
+            else -> "https://placeholder.invalid/$url"
+        }
+        val uri = runCatching { URI(candidate) }.getOrNull()
+        val host = uri?.host?.lowercase(Locale.ROOT)?.takeIf { it != "placeholder.invalid" } ?: ""
+        val path = uri?.path?.lowercase(Locale.ROOT)?.takeIf { it.isNotBlank() } ?: cleanPath
+
+        // Host/path-aware non-media webpage rejections:
+        if (path.contains("/geohack") || path.contains("centralautologin") || path.contains("/api.php")) {
+            return false
+        }
+        // Reddit thread / comments pages (not media)
+        if ((host.contains("reddit.com") || host.contains("redd.it")) && path.contains("/comments/")) {
+            return false
+        }
+        // Pinterest pin pages (not media)
+        if ((host.contains("pinterest.com") || host.contains("pin.it")) && path.contains("/pin/")) {
+            return false
+        }
+        // Imgur gallery web albums (not direct CDN images)
+        if (host.contains("imgur.com") && !host.startsWith("i.") && path.contains("/gallery/")) {
+            return false
+        }
+        // Twitter/X status pages (not media)
+        if ((host.contains("twitter.com") || host.contains("x.com")) && path.contains("/status/")) {
+            return false
+        }
+        // MediaWiki / Wikipedia article pages (HTML pages)
+        if (path.contains("/wiki/") || path.contains("/w/index.php") || path.contains("/w/api.php") || path.contains("/wiki/special:")) {
             return false
         }
         // Reject MediaWiki namespace links on non-upload domains (e.g. File: or Image:)
-        if ((cleanPath.contains("/file:") || cleanPath.contains("/image:")) &&
-            !lower.contains("upload.wikimedia.org") && !lower.contains("thumb.wikimedia.org")
+        if ((path.contains("/file:") || path.contains("/image:") || cleanPath.contains("file:") || cleanPath.contains("image:")) &&
+            !host.contains("upload.wikimedia.org") && !host.contains("thumb.wikimedia.org")
         ) {
+            return false
+        }
+        if (isMediaFragment(url)) {
             return false
         }
         return true
@@ -173,12 +289,13 @@ object MediaClassifier {
         """^https?://(?:upload|thumb)\.wikimedia\.org/wikipedia/([^/]+)/thumb/([0-9a-fA-F]/[0-9a-fA-F]{2}/([^/]+))/.+"""
     )
     private val MEDIAWIKI_GENERIC_THUMB_REGEX = Regex(
-        """^(https?://[^/]+)/.+?/thumb/([0-9a-fA-F]/[0-9a-fA-F]{2}/([^/]+))/.+"""
+        """^(https?://[^/]+(?:/[^/]+)*?)/thumb/([0-9a-fA-F]/[0-9a-fA-F]{2}/([^/]+))/.+"""
     )
 
     /**
      * Resolves a media URL (such as a Wikimedia or MediaWiki thumbnail) to its original
      * full-resolution file URL, while preserving the sharp thumbnail URL for immediate preview.
+     * Preserves custom upload paths without assuming default /images/.
      */
     fun resolveOriginalMedia(rawUrl: String): ResolvedMediaInfo {
         val trimmed = rawUrl.trim()
@@ -199,14 +316,15 @@ object MediaClassifier {
             )
         }
 
-        // 2. Generic MediaWiki installations (.../images/thumb/...)
-        if (normalized.contains("/images/thumb/")) {
+        // 2. Generic MediaWiki installations (.../thumb/hash/hash2/filename/...)
+        // Preserves custom upload directories without assuming standard /images/
+        if (normalized.contains("/thumb/")) {
             val mwMatch = MEDIAWIKI_GENERIC_THUMB_REGEX.find(normalized)
             if (mwMatch != null) {
-                val origin = mwMatch.groupValues[1]
+                val uploadBase = mwMatch.groupValues[1]
                 val subpath = mwMatch.groupValues[2]
                 val rawFileName = mwMatch.groupValues[3]
-                val originalUrl = "$origin/images/$subpath"
+                val originalUrl = "$uploadBase/$subpath"
                 val cleanTitle = runCatching { java.net.URLDecoder.decode(rawFileName, "UTF-8") }.getOrDefault(rawFileName)
                 return ResolvedMediaInfo(
                     mediaUrl = originalUrl,
@@ -251,7 +369,10 @@ object MediaClassifier {
         val mimeLower = mimeHint?.lowercase(Locale.ROOT) ?: ""
 
         // 1. Streaming media (HLS & DASH)
-        if (lower.contains(".m3u8") || lower.contains("/hls/") || mimeLower.contains("x-mpegurl") || mimeLower.contains("vnd.apple.mpegurl")) {
+        val cleanPath = lower.substringBefore("?").substringBefore("#")
+        val isHlsManifest = cleanPath.endsWith(".m3u8") || lower.contains(".m3u8") ||
+                mimeLower.contains("x-mpegurl") || mimeLower.contains("vnd.apple.mpegurl") || mimeLower.contains("application/mpegurl")
+        if (isHlsManifest) {
             return ClassificationResult(
                 category = MediaCategory.STREAMS,
                 format = "HLS (m3u8)",
@@ -261,7 +382,9 @@ object MediaClassifier {
                 isStream = true
             )
         }
-        if (lower.contains(".mpd") || lower.contains("/dash/") || mimeLower.contains("dash+xml")) {
+        val isDashManifest = cleanPath.endsWith(".mpd") || lower.contains(".mpd") ||
+                mimeLower.contains("dash+xml") || mimeLower.contains("video/vnd.mpeg.dash.mpd")
+        if (isDashManifest) {
             return ClassificationResult(
                 category = MediaCategory.STREAMS,
                 format = "DASH (mpd)",

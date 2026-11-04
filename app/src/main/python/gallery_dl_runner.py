@@ -407,17 +407,36 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None):
 
         resp = requests.get(media_url, headers=headers, stream=True, timeout=35)
         if resp.status_code in [200, 206]:
+            content_type = (resp.headers.get("content-type") or "").lower()
+            if "text/html" in content_type or "application/json" in content_type:
+                return False
+
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            first_chunk = True
             with open(target_path, "wb") as f:
                 for chunk in resp.iter_content(chunk_size=65536):
                     if chunk:
+                        if first_chunk:
+                            first_chunk = False
+                            prefix = chunk[:512].lower()
+                            if b"<!doctype html" in prefix or b"<html" in prefix or b"<head" in prefix:
+                                f.close()
+                                if os.path.exists(target_path):
+                                    os.remove(target_path)
+                                return False
+                            trimmed = prefix.strip()
+                            if trimmed.startswith(b"{") and (b'"error"' in trimmed or b'"message"' in trimmed):
+                                f.close()
+                                if os.path.exists(target_path):
+                                    os.remove(target_path)
+                                return False
                         f.write(chunk)
-            return True
+            return os.path.exists(target_path) and os.path.getsize(target_path) > 0
     except Exception:
         pass
 
-    # Fallback to yt-dlp if direct request failed
-    if YTDLP_AVAILABLE:
+    # Fallback to yt-dlp if direct request failed and target is a media stream or video
+    if YTDLP_AVAILABLE and (is_stream or any(ext in media_url.lower() for ext in [".mp4", ".mkv", ".webm", ".m3u8", ".mpd", "youtube", "tiktok", "vimeo"])):
         try:
             ydl_opts = {
                 "outtmpl": target_path,

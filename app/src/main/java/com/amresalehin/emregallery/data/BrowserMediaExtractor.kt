@@ -66,15 +66,6 @@ class BrowserMediaExtractor(private val context: Context) {
                     userAgentString = OkHttpDownloader.DEFAULT_USER_AGENT
                 }
 
-                wv.webChromeClient = object : WebChromeClient() {
-                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                        if (isCancelled) return
-                        if (newProgress < 100) {
-                            onStatusUpdate("Loading page: $newProgress% (monitoring network requests)...")
-                        }
-                    }
-                }
-
                 val seenKeys = mutableSetOf<String>()
 
                 fun dispatchMediaItem(
@@ -85,24 +76,30 @@ class BrowserMediaExtractor(private val context: Context) {
                     mimeHint: String? = null
                 ) {
                     if (isCancelled) return
-                    val resolved = MediaClassifier.resolveUrl(rawUrl, normalizedUrl) ?: return
+                    val trimmed = rawUrl.trim()
+                    if (trimmed.startsWith("blob:", ignoreCase = true) || trimmed.startsWith("data:", ignoreCase = true)) return
+                    if (MediaClassifier.isMediaFragment(trimmed)) return
+
+                    val resolved = MediaClassifier.resolveUrl(trimmed, normalizedUrl) ?: return
                     if (!MediaClassifier.isValidMedia(resolved)) return
+                    if (MediaClassifier.isMediaFragment(resolved)) return
 
                     val resolvedInfo = MediaClassifier.resolveOriginalMedia(resolved)
-                    val downloadUrl = resolvedInfo.mediaUrl
+                    val cleanedUrl = MediaClassifier.cleanMediaUrl(resolvedInfo.mediaUrl)
+                    if (MediaClassifier.isMediaFragment(cleanedUrl)) return
 
-                    val key = MediaClassifier.canonicalKey(downloadUrl)
+                    val key = MediaClassifier.canonicalKey(cleanedUrl)
                     synchronized(seenKeys) {
                         if (!seenKeys.add(key)) return
                     }
 
-                    val classification = MediaClassifier.classify(downloadUrl, mimeHint)
-                    val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, classification.format, seenKeys.size)
+                    val classification = MediaClassifier.classify(cleanedUrl, mimeHint)
+                    val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, seenKeys.size)
                     val thumb = resolvedInfo.thumbnailUrl ?: poster ?: if (classification.category == MediaCategory.IMAGES) resolved else poster
 
                     val item = ScrapedMediaItem(
                         id = "browser_${seenKeys.size}_${System.currentTimeMillis()}",
-                        url = downloadUrl,
+                        url = cleanedUrl,
                         title = title,
                         isVideo = classification.isVideo,
                         isAudio = classification.isAudio,
@@ -115,6 +112,24 @@ class BrowserMediaExtractor(private val context: Context) {
                         resolutionHint = resolution
                     )
                     onMediaDiscovered(item)
+                }
+
+                wv.addJavascriptInterface(
+                    EmreMediaBridge { rawUrl ->
+                        mainHandler.post {
+                            dispatchMediaItem(rawUrl, ExtractionSource.DOM_SCRAPE)
+                        }
+                    },
+                    "EmreBridge"
+                )
+
+                wv.webChromeClient = object : WebChromeClient() {
+                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                        if (isCancelled) return
+                        if (newProgress < 100) {
+                            onStatusUpdate("Loading page: $newProgress% (monitoring network requests)...")
+                        }
+                    }
                 }
 
                 wv.webViewClient = object : WebViewClient() {
@@ -135,34 +150,38 @@ class BrowserMediaExtractor(private val context: Context) {
                                 reqLower.contains(".json") || reqLower.contains("/wiki/") || reqLower.contains("/geohack") ||
                                 reqLower.contains("centralautologin")
 
-                        val isStream = !isNonMediaPage && (reqLower.contains(".m3u8") || reqLower.contains(".mpd") ||
-                                reqLower.contains("/hls/") || reqLower.contains("/dash/") ||
+                        if (isNonMediaPage || MediaClassifier.isMediaFragment(reqUrl)) return null
+
+                        val isStream = reqLower.contains(".m3u8") || reqLower.contains(".mpd") ||
                                 reqLower.contains("chunklist") || acceptHeader.contains("mpegurl") ||
-                                acceptHeader.contains("dash+xml"))
+                                acceptHeader.contains("dash+xml")
 
-                        val isVideo = !isNonMediaPage && (isStream || reqLower.contains(".mp4") || reqLower.contains(".webm") ||
+                        val isVideo = isStream || reqLower.contains(".mp4") || reqLower.contains(".webm") ||
                                 reqLower.contains(".mov") || reqLower.contains(".mkv") ||
-                                acceptHeader.contains("video/"))
+                                acceptHeader.contains("video/")
 
-                        val isAudio = !isNonMediaPage && (reqLower.contains(".mp3") || reqLower.contains(".m4a") ||
+                        val isAudio = reqLower.contains(".mp3") || reqLower.contains(".m4a") ||
                                 reqLower.contains(".aac") || reqLower.contains(".wav") ||
                                 reqLower.contains(".ogg") || reqLower.contains(".flac") ||
-                                reqLower.contains(".opus") || acceptHeader.contains("audio/"))
+                                reqLower.contains(".opus") || acceptHeader.contains("audio/")
 
                         val hasImageExt = reqLower.contains(".jpg") || reqLower.contains(".jpeg") ||
                                 reqLower.contains(".png") || reqLower.contains(".webp") ||
                                 reqLower.contains(".gif") || reqLower.contains(".avif") ||
                                 reqLower.contains(".svg") || reqLower.contains(".bmp")
 
-                        val isImage = !isNonMediaPage && (hasImageExt || (acceptHeader.startsWith("image/") && !acceptHeader.contains("text/html")))
+                        val isImage = hasImageExt || (acceptHeader.startsWith("image/") && !acceptHeader.contains("text/html"))
 
                         if (isVideo || isAudio || isImage) {
-                            mainHandler.post {
-                                dispatchMediaItem(
-                                    rawUrl = reqUrl,
-                                    source = ExtractionSource.NETWORK_INTERCEPT,
-                                    mimeHint = acceptHeader.ifBlank { null }
-                                )
+                            val cleanReqUrl = if (isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
+                            if (!MediaClassifier.isMediaFragment(cleanReqUrl)) {
+                                mainHandler.post {
+                                    dispatchMediaItem(
+                                        rawUrl = cleanReqUrl,
+                                        source = ExtractionSource.NETWORK_INTERCEPT,
+                                        mimeHint = acceptHeader.ifBlank { null }
+                                    )
+                                }
                             }
                         }
 
@@ -203,7 +222,7 @@ class BrowserMediaExtractor(private val context: Context) {
                             // 2. Perform adaptive scrolling sequence to uncover lazy media
                             if (!isCancelled) {
                                 onStatusUpdate("Auto-scrolling page to trigger lazy-loaded media...")
-                                executeAdaptiveScrollSequence(wv, step = 1, maxSteps = 4, lastScrollHeight = 0) {
+                                executeAdaptiveScrollSequence(wv) {
                                     // Final scan after scrolling
                                     if (!isCancelled) {
                                         executeJsDomScan(wv, normalizedUrl) { postScrollEntries ->
@@ -238,6 +257,15 @@ class BrowserMediaExtractor(private val context: Context) {
         }
     }
 
+    class EmreMediaBridge(private val onMediaFound: (String) -> Unit) {
+        @android.webkit.JavascriptInterface
+        fun reportMedia(url: String?) {
+            if (!url.isNullOrBlank()) {
+                onMediaFound(url)
+            }
+        }
+    }
+
     private data class JsMediaEntry(
         val url: String,
         val source: ExtractionSource,
@@ -250,27 +278,98 @@ class BrowserMediaExtractor(private val context: Context) {
             (function() {
                 if (window.__emreObserverInstalled) return;
                 window.__emreObserverInstalled = true;
-                var observer = new MutationObserver(function(mutations) {
-                    for (var m = 0; m < mutations.length; m++) {
-                        var mutation = mutations[m];
-                        for (var i = 0; i < mutation.addedNodes.length; i++) {
-                            var node = mutation.addedNodes[i];
-                            if (node.nodeType === 1) {
-                                if (node.tagName === 'IMG' && node.src) {
-                                    console.log('EMRE_MUTATION:' + node.src);
-                                }
-                                if (node.tagName === 'VIDEO' && node.src) {
-                                    console.log('EMRE_MUTATION:' + node.src);
+
+                function report(u) {
+                    if (!u || u.indexOf('data:') === 0) return;
+                    try {
+                        var abs = new URL(u, document.baseURI || window.location.href).href;
+                        if (window.EmreBridge && window.EmreBridge.reportMedia) {
+                            window.EmreBridge.reportMedia(abs);
+                        }
+                    } catch(e) {}
+                }
+
+                function checkNode(node) {
+                    if (!node || node.nodeType !== 1) return;
+                    var tag = node.tagName ? node.tagName.toUpperCase() : '';
+                    if (tag === 'IMG') {
+                        report(node.src);
+                        report(node.getAttribute('data-src'));
+                        report(node.getAttribute('data-original'));
+                        report(node.getAttribute('data-lazy-src'));
+                        var srcset = node.getAttribute('srcset') || node.getAttribute('data-srcset');
+                        if (srcset) {
+                            var parts = srcset.split(',');
+                            for (var i = 0; i < parts.length; i++) {
+                                var bit = parts[i].trim().split(/\s+/)[0];
+                                if (bit) report(bit);
+                            }
+                        }
+                    } else if (tag === 'VIDEO') {
+                        var chosenV = null;
+                        if (node.src && node.src.indexOf('blob:') !== 0 && node.src.indexOf('data:') !== 0) {
+                            chosenV = node.src;
+                        } else if (node.querySelectorAll) {
+                            var vSources = node.querySelectorAll('source');
+                            for (var vs = 0; vs < vSources.length; vs++) {
+                                var vsSrc = vSources[vs].src;
+                                if (vsSrc && vsSrc.indexOf('blob:') !== 0 && vsSrc.indexOf('data:') !== 0) {
+                                    chosenV = vsSrc;
+                                    break;
                                 }
                             }
                         }
+                        if (chosenV) report(chosenV);
+                        report(node.getAttribute('poster'));
+                    } else if (tag === 'AUDIO') {
+                        var chosenA = null;
+                        if (node.src && node.src.indexOf('blob:') !== 0 && node.src.indexOf('data:') !== 0) {
+                            chosenA = node.src;
+                        } else if (node.querySelectorAll) {
+                            var aSources = node.querySelectorAll('source');
+                            for (var as = 0; as < aSources.length; as++) {
+                                var asSrc = aSources[as].src;
+                                if (asSrc && asSrc.indexOf('blob:') !== 0 && asSrc.indexOf('data:') !== 0) {
+                                    chosenA = asSrc;
+                                    break;
+                                }
+                            }
+                        }
+                        if (chosenA) report(chosenA);
+                    } else if (tag === 'SOURCE') {
+                        var parentTag = node.parentNode ? (node.parentNode.tagName || '').toUpperCase() : '';
+                        if (parentTag !== 'VIDEO' && parentTag !== 'AUDIO') {
+                            report(node.src);
+                            report(node.getAttribute('srcset'));
+                        }
+                    }
+
+                    if (node.querySelectorAll) {
+                        var children = node.querySelectorAll('img, video, audio, source');
+                        for (var c = 0; c < children.length; c++) {
+                            checkNode(children[c]);
+                        }
+                    }
+                }
+
+                var observer = new MutationObserver(function(mutations) {
+                    for (var m = 0; m < mutations.length; m++) {
+                        var mut = mutations[m];
+                        if (mut.type === 'childList') {
+                            for (var i = 0; i < mut.addedNodes.length; i++) {
+                                checkNode(mut.addedNodes[i]);
+                            }
+                        } else if (mut.type === 'attributes') {
+                            checkNode(mut.target);
+                        }
                     }
                 });
+
                 observer.observe(document.body || document.documentElement, {
                     childList: true,
                     subtree: true,
                     attributes: true,
-                    attributeFilter: ['src', 'data-src', 'srcset']
+                    attributeFilter: ['src', 'data-src', 'data-original', 'data-lazy-src', 'srcset', 'data-srcset', 'poster']
                 });
             })();
         """.trimIndent()
@@ -344,31 +443,53 @@ class BrowserMediaExtractor(private val context: Context) {
                     }
                 }
 
-                // 2. Videos and Video sources
+                // 2. Videos and Video sources (deduplicated per video element, ignoring blobs)
                 var vids = document.querySelectorAll('video');
                 for (var j = 0; j < vids.length; j++) {
                     var v = vids[j];
-                    var vSrc = resolveAbs(v.src);
                     var vPoster = resolveAbs(v.poster);
-                    if (vSrc) list.push({u: vSrc, s: 'DOM', p: vPoster, r: 'video'});
-                    if (vPoster) list.push({u: vPoster, s: 'DOM', r: 'poster'});
-                    var sources = v.querySelectorAll('source');
-                    for (var s = 0; s < sources.length; s++) {
-                        var sSrc = resolveAbs(sources[s].src);
-                        if (sSrc) list.push({u: sSrc, s: 'DOM', p: vPoster, r: 'video-source'});
+                    var chosenUrl = null;
+                    if (v.src && !v.src.startsWith('blob:') && !v.src.startsWith('data:')) {
+                        chosenUrl = resolveAbs(v.src);
+                    }
+                    if (!chosenUrl) {
+                        var sources = v.querySelectorAll('source');
+                        for (var s = 0; s < sources.length; s++) {
+                            var sRaw = sources[s].src;
+                            if (sRaw && !sRaw.startsWith('blob:') && !sRaw.startsWith('data:')) {
+                                chosenUrl = resolveAbs(sRaw);
+                                break;
+                            }
+                        }
+                    }
+                    if (chosenUrl) {
+                        list.push({u: chosenUrl, s: 'DOM', p: vPoster, r: 'video'});
+                    }
+                    if (vPoster && !chosenUrl) {
+                        list.push({u: vPoster, s: 'DOM', r: 'poster'});
                     }
                 }
 
-                // 3. Audio and Audio sources
+                // 3. Audio and Audio sources (deduplicated per audio element, ignoring blobs)
                 var auds = document.querySelectorAll('audio');
                 for (var a = 0; a < auds.length; a++) {
                     var au = auds[a];
-                    var aSrc = resolveAbs(au.src);
-                    if (aSrc) list.push({u: aSrc, s: 'DOM', r: 'audio'});
-                    var asources = au.querySelectorAll('source');
-                    for (var k = 0; k < asources.length; k++) {
-                        var asSrc = resolveAbs(asources[k].src);
-                        if (asSrc) list.push({u: asSrc, s: 'DOM', r: 'audio-source'});
+                    var chosenAudio = null;
+                    if (au.src && !au.src.startsWith('blob:') && !au.src.startsWith('data:')) {
+                        chosenAudio = resolveAbs(au.src);
+                    }
+                    if (!chosenAudio) {
+                        var asources = au.querySelectorAll('source');
+                        for (var k = 0; k < asources.length; k++) {
+                            var asRaw = asources[k].src;
+                            if (asRaw && !asRaw.startsWith('blob:') && !asRaw.startsWith('data:')) {
+                                chosenAudio = resolveAbs(asRaw);
+                                break;
+                            }
+                        }
+                    }
+                    if (chosenAudio) {
+                        list.push({u: chosenAudio, s: 'DOM', r: 'audio'});
                     }
                 }
 
@@ -462,35 +583,75 @@ class BrowserMediaExtractor(private val context: Context) {
 
     private fun executeAdaptiveScrollSequence(
         wv: WebView,
-        step: Int,
-        maxSteps: Int,
-        lastScrollHeight: Int,
+        step: Int = 1,
+        maxSteps: Int = 12,
+        stagnantCount: Int = 0,
+        lastScrollY: Int = -1,
         onDone: () -> Unit
     ) {
-        if (isCancelled || step > maxSteps) {
+        if (isCancelled || step > maxSteps || stagnantCount >= 2) {
             onDone()
             return
         }
 
-        // Measure page height and scroll adaptively
-        val measureScript = """
+        val scrollScript = """
             (function() {
-                var sh = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
-                window.scrollBy({ top: window.innerHeight * 0.9, behavior: 'smooth' });
+                var doc = document.documentElement || document.body;
+                var scrollY = Math.round(window.pageYOffset || doc.scrollTop || 0);
+                var innerHeight = window.innerHeight || 0;
+                var scrollHeight = doc.scrollHeight || 0;
+                var remaining = scrollHeight - (scrollY + innerHeight);
+
+                var scrollDelta = Math.max(innerHeight * 0.85, 300);
+                window.scrollBy({ top: scrollDelta, behavior: 'smooth' });
                 window.dispatchEvent(new Event('scroll'));
-                return sh;
+
+                return JSON.stringify({
+                    scrollY: scrollY,
+                    scrollHeight: scrollHeight,
+                    remaining: remaining
+                });
             })();
         """.trimIndent()
 
-        wv.evaluateJavascript(measureScript) { heightStr ->
-            val curHeight = heightStr?.trim('"')?.toIntOrNull() ?: 0
-            mainHandler.postDelayed({
-                if (!isCancelled) {
-                    executeAdaptiveScrollSequence(wv, step + 1, maxSteps, curHeight, onDone)
-                } else {
-                    onDone()
-                }
-            }, 500)
+        wv.evaluateJavascript(scrollScript) { resultJson ->
+            if (isCancelled) {
+                onDone()
+                return@evaluateJavascript
+            }
+
+            var currentScrollY = lastScrollY
+            var remaining = 1000
+            runCatching {
+                val unescaped = if (resultJson != null && resultJson.startsWith("\"") && resultJson.endsWith("\"")) {
+                    org.json.JSONTokener(resultJson).nextValue().toString()
+                } else resultJson ?: "{}"
+                val obj = org.json.JSONObject(unescaped)
+                currentScrollY = obj.optInt("scrollY", lastScrollY)
+                remaining = obj.optInt("remaining", 1000)
+            }
+
+            val isStagnant = lastScrollY != -1 && Math.abs(currentScrollY - lastScrollY) < 10
+            val newStagnantCount = if (isStagnant) stagnantCount + 1 else 0
+
+            if (remaining <= 5 || newStagnantCount >= 2) {
+                onDone()
+            } else {
+                mainHandler.postDelayed({
+                    if (!isCancelled) {
+                        executeAdaptiveScrollSequence(
+                            wv = wv,
+                            step = step + 1,
+                            maxSteps = maxSteps,
+                            stagnantCount = newStagnantCount,
+                            lastScrollY = currentScrollY,
+                            onDone = onDone
+                        )
+                    } else {
+                        onDone()
+                    }
+                }, 500)
+            }
         }
     }
 

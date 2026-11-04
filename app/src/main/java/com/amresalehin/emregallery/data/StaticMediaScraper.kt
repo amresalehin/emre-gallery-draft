@@ -176,26 +176,49 @@ class StaticMediaScraper {
             }
         }
 
-        // 2. Video elements & posters & source children
+        // 2. Video elements & posters (deduplicated per video element)
         for (video in doc.select("video")) {
-            val src = video.attr("src").ifBlank { video.attr("data-src") }
             val poster = video.attr("poster").ifBlank { null }
             val vw = video.attr("width").toIntOrNull()
             val vh = video.attr("height").toIntOrNull()
             val vRes = if (vw != null && vh != null) "${vw}x${vh}" else null
-            if (src.isNotBlank()) {
-                addCandidate(src, ExtractionSource.DOM_SCRAPE, resolution = vRes, posterUrl = poster)
+
+            val rawSrc = video.attr("src").ifBlank { video.attr("data-src") }
+            var chosenUrl: String? = rawSrc.takeIf { it.isNotBlank() && !it.startsWith("blob:", true) && !it.startsWith("data:", true) }
+            if (chosenUrl == null) {
+                val sources = video.select("source")
+                for (source in sources) {
+                    val sSrc = source.attr("src").ifBlank { source.attr("data-src") }
+                    if (sSrc.isNotBlank() && !sSrc.startsWith("blob:", true) && !sSrc.startsWith("data:", true)) {
+                        chosenUrl = sSrc
+                        break
+                    }
+                }
             }
-            if (!poster.isNullOrBlank()) {
+            if (!chosenUrl.isNullOrBlank()) {
+                addCandidate(chosenUrl, ExtractionSource.DOM_SCRAPE, resolution = vRes, posterUrl = poster)
+            }
+            if (!poster.isNullOrBlank() && chosenUrl == null) {
                 addCandidate(poster, ExtractionSource.DOM_SCRAPE, resolution = "Poster")
             }
         }
 
-        // 3. Audio elements & source elements
-        for (source in doc.select("source, audio")) {
-            val src = source.attr("src").ifBlank { source.attr("data-src") }
-            if (src.isNotBlank()) {
-                addCandidate(src, ExtractionSource.DOM_SCRAPE)
+        // 3. Audio elements & audio sources
+        for (audio in doc.select("audio")) {
+            val rawSrc = audio.attr("src").ifBlank { audio.attr("data-src") }
+            var chosenAudio: String? = rawSrc.takeIf { it.isNotBlank() && !it.startsWith("blob:", true) && !it.startsWith("data:", true) }
+            if (chosenAudio == null) {
+                val sources = audio.select("source")
+                for (source in sources) {
+                    val sSrc = source.attr("src").ifBlank { source.attr("data-src") }
+                    if (sSrc.isNotBlank() && !sSrc.startsWith("blob:", true) && !sSrc.startsWith("data:", true)) {
+                        chosenAudio = sSrc
+                        break
+                    }
+                }
+            }
+            if (!chosenAudio.isNullOrBlank()) {
+                addCandidate(chosenAudio, ExtractionSource.DOM_SCRAPE)
             }
         }
 
@@ -280,17 +303,20 @@ class StaticMediaScraper {
 
         // 8. Direct anchor links to media files
         for (link in doc.select("a[href]")) {
-            val href = link.attr("href")
-            if (href.isNotBlank() && MediaClassifier.isValidMedia(href)) {
-                val lower = href.lowercase()
-                if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") ||
-                    lower.endsWith(".webp") || lower.endsWith(".gif") || lower.endsWith(".mp4") ||
-                    lower.endsWith(".webm") || lower.endsWith(".mkv") || lower.endsWith(".mp3")
+            val href = link.attr("href").trim()
+            if (href.isBlank()) continue
+            val resolvedHref = MediaClassifier.resolveUrl(href, baseUrl) ?: continue
+            if (MediaClassifier.isValidMedia(resolvedHref)) {
+                val lower = resolvedHref.lowercase()
+                val cleanPath = lower.substringBefore("?").substringBefore("#")
+                if (cleanPath.endsWith(".jpg") || cleanPath.endsWith(".jpeg") || cleanPath.endsWith(".png") ||
+                    cleanPath.endsWith(".webp") || cleanPath.endsWith(".gif") || cleanPath.endsWith(".mp4") ||
+                    cleanPath.endsWith(".webm") || cleanPath.endsWith(".mkv") || cleanPath.endsWith(".mp3")
                 ) {
                     val childImg = link.selectFirst("img")
                     val childThumb = childImg?.attr("src")?.ifBlank { childImg.attr("data-src") }
                     val poster = if (!childThumb.isNullOrBlank()) MediaClassifier.resolveUrl(childThumb, baseUrl) else null
-                    addCandidate(href, ExtractionSource.DOM_SCRAPE, resolution = "Full Link", posterUrl = poster)
+                    addCandidate(resolvedHref, ExtractionSource.DOM_SCRAPE, resolution = "Full Link", posterUrl = poster)
                 }
             }
         }

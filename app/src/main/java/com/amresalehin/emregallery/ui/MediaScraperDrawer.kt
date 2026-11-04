@@ -1439,10 +1439,17 @@ fun passesDimensionFilter(
     targetMinHeight: Int,
     dynamicDimensions: Map<String, Pair<Int, Int>>
 ): Boolean {
+    // 1. Any Dimensions setting (default 0, 0) matches everything
     if (targetMinWidth <= 0 && targetMinHeight <= 0) return true
-    if (item.category == MediaCategory.AUDIO) return false
 
-    // Reject decorative small UI elements, buttons, icons, or donate badges
+    // 2. Audio, Video, and Stream files have no image-based spatial filtering requirements; exclude them from dimension filtering
+    if (item.category == MediaCategory.AUDIO || item.category == MediaCategory.VIDEOS ||
+        item.category == MediaCategory.STREAMS || item.isVideo || item.isAudio || item.isStream
+    ) {
+        return true
+    }
+
+    // 3. Reject decorative small UI elements, buttons, icons, or donate badges
     val lowerUrl = item.url.lowercase(Locale.ROOT)
     val lowerTitle = item.title.lowercase(Locale.ROOT)
     val isTinyUiMedia = lowerUrl.contains("donate") || lowerUrl.contains("/icon") ||
@@ -1456,29 +1463,20 @@ fun passesDimensionFilter(
 
     val (w, h) = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item)
 
-    // Strict rejection if known dimension is less than threshold
-    if (w != null && targetMinWidth > 0 && w < targetMinWidth) {
-        return false
-    }
-    if (h != null && targetMinHeight > 0 && h < targetMinHeight) {
-        return false
-    }
+    // Treat unknown dimensions as pending or excluded in strict mode
+    if (targetMinWidth > 0 && w == null) return false
+    if (targetMinHeight > 0 && h == null) return false
 
-    // Pass if at least one dimension meets or exceeds threshold
-    if (w != null && targetMinWidth > 0 && w >= targetMinWidth) {
-        return true
-    }
-    if (h != null && targetMinHeight > 0 && h >= targetMinHeight) {
-        return true
-    }
+    // When strict filtering is active, require every enabled dimension constraint to be satisfied
+    if (targetMinWidth > 0 && (w == null || w < targetMinWidth)) return false
+    if (targetMinHeight > 0 && (h == null || h < targetMinHeight)) return false
 
-    // For images where dimension is not yet probed/known, allow only if not an icon/favicon format
-    return w == null && h == null && !lowerUrl.endsWith(".ico") && !lowerUrl.endsWith(".svg")
+    return true
 }
 
 /**
  * Lightweight background prober for media items with undetermined dimensions.
- * Uses OkHttp with HTTP Range 0-8191 to read image headers without downloading the full image.
+ * Uses OkHttp with HTTP Range 0-8191 and enforces a hard limit of 8192 bytes read from stream.
  */
 object ImageDimensionProber {
     private val cache = ConcurrentHashMap<String, Pair<Int, Int>>()
@@ -1502,10 +1500,18 @@ object ImageDimensionProber {
 
             OkHttpDownloader.client.newCall(reqBuilder.build()).execute().use { resp ->
                 if (resp.isSuccessful) {
-                    val bytes = resp.body?.bytes()
-                    if (bytes != null && bytes.isNotEmpty()) {
+                    val stream = resp.body?.byteStream() ?: return@withContext null
+                    val maxProbeBytes = 8192
+                    val buffer = ByteArray(maxProbeBytes)
+                    var totalRead = 0
+                    while (totalRead < maxProbeBytes) {
+                        val read = stream.read(buffer, totalRead, maxProbeBytes - totalRead)
+                        if (read == -1) break
+                        totalRead += read
+                    }
+                    if (totalRead > 0) {
                         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                        BitmapFactory.decodeByteArray(buffer, 0, totalRead, opts)
                         if (opts.outWidth > 0 && opts.outHeight > 0) {
                             val dims = Pair(opts.outWidth, opts.outHeight)
                             cache[cleanUrl] = dims
