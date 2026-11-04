@@ -78,24 +78,30 @@ class MediaDownloadWorker(
                     }
                 )
 
-                if (result.isSuccessful && result.file != null && result.file.exists() && result.file.length() > 0L) {
+                val directDownloadSucceeded =
+                    result.isSuccessful && result.file != null && result.file.exists() && result.file.length() > 0L
+
+                if (directDownloadSucceeded) {
+                    // A valid direct download is final. Never start a second extractor download
+                    // after success; doing so previously downloaded every item twice.
                     downloadedFile = result.file
                     errorDiagnostic = result.errorMessage
-                    val isInvalidContent = result.errorMessage?.let { msg ->
-                        msg.contains("webpage", ignoreCase = true) ||
-                        msg.contains("HTML", ignoreCase = true) ||
-                        msg.contains("JSON error", ignoreCase = true) ||
-                        msg.contains("corrupt or invalid raster", ignoreCase = true)
-                    } ?: false
-
-                    // 3. Fallback to Python runner only if failure was due to network/engine and NOT an invalid non-media response
-                    if (!isInvalidContent && GalleryDlEngine.isAvailable()) {
-                        setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Attempting engine fallback for $title..."))
+                } else {
+                    errorDiagnostic = result.errorMessage ?: "Direct media download failed."
+                    val shouldFallback = shouldUseGalleryDlFallback(
+                        directDownloadSucceeded = false,
+                        hasUsableFile = false,
+                        galleryEngineAvailable = GalleryDlEngine.isAvailable(),
+                        errorMessage = errorDiagnostic
+                    )
+                    if (shouldFallback) {
+                        setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Retrying with platform extractor for $title..."))
                         downloadedFile = GalleryDlEngine.downloadMedia(
                             context = applicationContext,
                             mediaUrl = mediaUrl,
                             fileName = fileName,
-                            referer = referer
+                            referer = referer,
+                            downloadId = itemId
                         )
                     }
                 }
@@ -151,6 +157,28 @@ class MediaDownloadWorker(
     }
 
     companion object {
+        /**
+         * The platform extractor is a fallback, never a second pass after a valid direct download.
+         * Invalid HTML/JSON/error payloads are not retried through another downloader.
+         */
+        internal fun shouldUseGalleryDlFallback(
+            directDownloadSucceeded: Boolean,
+            hasUsableFile: Boolean,
+            galleryEngineAvailable: Boolean,
+            errorMessage: String?
+        ): Boolean {
+            if (directDownloadSucceeded && hasUsableFile) return false
+            if (!galleryEngineAvailable) return false
+
+            val message = errorMessage.orEmpty()
+            return !(
+                message.contains("webpage", ignoreCase = true) ||
+                    message.contains("HTML", ignoreCase = true) ||
+                    message.contains("JSON error", ignoreCase = true) ||
+                    message.contains("corrupt or invalid raster", ignoreCase = true)
+                )
+        }
+
         const val TAG = "MediaDownloadWorker"
         const val WORK_TAG_DOWNLOAD = "media_download"
 
