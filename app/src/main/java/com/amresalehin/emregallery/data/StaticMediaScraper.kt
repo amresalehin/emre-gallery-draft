@@ -304,22 +304,35 @@ class StaticMediaScraper {
         for (img in doc.select("img")) {
             if (ContentAwareMediaFilter.isUiChromeElement(img)) continue
 
-            val src = img.attr("src").ifBlank {
-                img.attr("data-src").ifBlank {
-                    img.attr("data-original").ifBlank {
-                        img.attr("data-lazy-src").ifBlank {
-                            img.attr("data-full-url")
-                        }
-                    }
+            // Prioritize genuine lazy-load attributes over placeholder SVG/blank data URIs
+            val lazyAttributes = listOf(
+                "data-src", "data-original", "data-lazy-src", "data-lazy",
+                "data-full-url", "data-high-res-src", "data-hires", "data-large-file",
+                "data-orig-file", "data-url", "data-actualsrc", "data-fallback-src",
+                "data-main-thumb", "data-thumb", "data-poster"
+            )
+            var chosenSrc: String? = null
+            for (attr in lazyAttributes) {
+                val v = img.attr(attr).trim()
+                if (v.isNotBlank() && !v.startsWith("data:", true) && !v.startsWith("about:", true)) {
+                    chosenSrc = v
+                    break
                 }
             }
+            if (chosenSrc == null) {
+                val rawSrc = img.attr("src").trim()
+                if (rawSrc.isNotBlank() && !rawSrc.startsWith("data:", true) && !rawSrc.startsWith("about:", true)) {
+                    chosenSrc = rawSrc
+                }
+            }
+
             val w = img.attr("width").toIntOrNull() ?: img.attr("data-width").toIntOrNull()
             val h = img.attr("height").toIntOrNull() ?: img.attr("data-height").toIntOrNull()
             val alt = img.attr("alt").ifBlank { img.attr("title") }.takeIf { it.isNotBlank() }
             val resHint = if (w != null && h != null) "${w}x${h}" else if (w != null) "${w}w" else null
-            if (src.isNotBlank()) {
+            if (!chosenSrc.isNullOrBlank()) {
                 addCandidate(
-                    rawUrl = src,
+                    rawUrl = chosenSrc,
                     source = ExtractionSource.DOM_SCRAPE,
                     resolution = resHint,
                     domSelector = "img",
@@ -327,6 +340,36 @@ class StaticMediaScraper {
                     declaredHeight = h,
                     itemTitleHint = alt
                 )
+            }
+        }
+
+        // 4b. Video containers, cards, and articles with data-trailer / data-main-thumb / data-video attributes
+        val containerSelectors = listOf(
+            "[data-trailer]", "[data-main-thumb]", "[data-video]", "[data-mp4]", "[data-poster]"
+        )
+        for (sel in containerSelectors) {
+            for (el in doc.select(sel)) {
+                if (el.tagName().equals("video", true) || el.tagName().equals("img", true)) continue
+                val trailer = el.attr("data-trailer").ifBlank { el.attr("data-video").ifBlank { el.attr("data-mp4") } }
+                val thumb = el.attr("data-main-thumb").ifBlank { el.attr("data-thumb").ifBlank { el.attr("data-poster") } }
+                val title = el.attr("title").ifBlank { el.selectFirst("a[title]")?.attr("title") ?: el.selectFirst(".title, h2, h3")?.text() }
+                if (trailer.isNotBlank() && !trailer.startsWith("data:", true)) {
+                    addCandidate(
+                        rawUrl = trailer,
+                        source = ExtractionSource.DOM_SCRAPE,
+                        posterUrl = thumb.takeIf { it.isNotBlank() && !it.startsWith("data:", true) },
+                        domSelector = "$sel (container)",
+                        itemTitleHint = title
+                    )
+                }
+                if (thumb.isNotBlank() && !thumb.startsWith("data:", true)) {
+                    addCandidate(
+                        rawUrl = thumb,
+                        source = ExtractionSource.DOM_SCRAPE,
+                        domSelector = "$sel[thumb]",
+                        itemTitleHint = title
+                    )
+                }
             }
         }
 

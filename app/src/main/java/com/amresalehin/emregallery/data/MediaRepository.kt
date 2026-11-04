@@ -77,6 +77,10 @@ class MediaRepository(private val resolver: ContentResolver) {
                 val duration = if (durationCol >= 0 && !c.isNull(durationCol)) c.getLong(durationCol) else 0L
                 val isTrashed = if (trashedCol >= 0 && !c.isNull(trashedCol)) c.getInt(trashedCol) != 0 else false
 
+                if (!isSupportedMedia(name, mimeType, video)) {
+                    continue
+                }
+
                 rows.add(
                     MediaItem(
                         id = id,
@@ -94,6 +98,47 @@ class MediaRepository(private val resolver: ContentResolver) {
                         isTrashed = isTrashed
                     )
                 )
+            }
+        }
+    }
+
+    companion object {
+        private val NON_MEDIA_EXTENSIONS = setOf(
+            "xml", "txt", "json", "html", "htm", "css", "js", "bin", "pdf",
+            "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z", "tar", "gz",
+            "apk", "dat", "db", "log", "sqlite", "properties", "yaml", "yml", "ini", "cfg",
+            "sh", "py", "java", "kt", "class", "dex", "tmp", "temp", "bak", "nomedia",
+            "srt", "vtt", "sub", "lrc", "meta", "downloading", "part", "crdownload"
+        )
+
+        private val VALID_IMAGE_EXTENSIONS = setOf(
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif",
+            "dng", "cr2", "nef", "arw", "raw", "ico", "svg"
+        )
+
+        private val VALID_VIDEO_EXTENSIONS = setOf(
+            "mp4", "mkv", "webm", "avi", "mov", "3gp", "flv", "m4v", "ts", "wmv", "mpg", "mpeg"
+        )
+
+        fun isSupportedMedia(name: String, mimeType: String?, isVideo: Boolean): Boolean {
+            val cleanName = name.trim().lowercase(java.util.Locale.ROOT)
+            val ext = cleanName.substringAfterLast('.', "")
+            if (ext in NON_MEDIA_EXTENSIONS) return false
+
+            val mime = mimeType?.trim()?.lowercase(java.util.Locale.ROOT)
+            if (mime != null) {
+                if (mime == "text/xml" || mime == "application/xml" ||
+                    (mime.contains("xml") && !mime.contains("svg")) ||
+                    mime == "text/plain" || mime == "application/json" || mime == "text/html" ||
+                    mime == "application/zip" || mime == "application/pdf" || mime.startsWith("text/")) {
+                    return false
+                }
+            }
+
+            return if (isVideo) {
+                ext in VALID_VIDEO_EXTENSIONS || (mime != null && mime.startsWith("video/"))
+            } else {
+                ext in VALID_IMAGE_EXTENSIONS || (mime != null && mime.startsWith("image/"))
             }
         }
     }

@@ -61,6 +61,8 @@ object MediaClassifier {
     fun isSubstantialDataUri(url: String): Boolean {
         val trimmed = url.trim()
         if (!trimmed.startsWith("data:image/", ignoreCase = true)) return false
+        // Exclude SVG/XML data URIs which are placeholders/spacers
+        if (trimmed.contains("svg+xml", ignoreCase = true) || trimmed.contains("<svg", ignoreCase = true) || trimmed.contains("PHN2Zy", ignoreCase = true)) return false
         // Exclude tiny spacers, 1x1 pixel tracking GIFs (< 2048 characters base64)
         if (trimmed.length < 2048) return false
         // Known 1x1 transparent GIF signature

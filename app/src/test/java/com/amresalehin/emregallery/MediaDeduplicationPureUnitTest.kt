@@ -204,4 +204,62 @@ class MediaDeduplicationPureUnitTest {
         // Should have exactly 1 item (replaced/deduplicated), not 2 copies
         assertEquals(1, updated.size)
     }
+
+    @Test
+    fun testMediaRepositoryRejectsXmlAndNonMediaFiles() {
+        val nonMediaSamples = listOf(
+            Pair("AndroidManifest.xml", "text/xml"),
+            Pair("strings.xml", "application/xml"),
+            Pair("document.pdf", "application/pdf"),
+            Pair("archive.zip", "application/zip"),
+            Pair("notes.txt", "text/plain"),
+            Pair("payload.json", "application/json"),
+            Pair("app.apk", "application/vnd.android.package-archive"),
+            Pair("script.js", "text/javascript"),
+            Pair("style.css", "text/css"),
+            Pair(".nomedia", null)
+        )
+
+        for ((name, mime) in nonMediaSamples) {
+            org.junit.Assert.assertFalse(
+                "Expected $name ($mime) to be rejected by isSupportedMedia",
+                com.amresalehin.emregallery.data.MediaRepository.isSupportedMedia(name, mime, isVideo = false)
+            )
+            org.junit.Assert.assertFalse(
+                "Expected $name ($mime) to be rejected as video by isSupportedMedia",
+                com.amresalehin.emregallery.data.MediaRepository.isSupportedMedia(name, mime, isVideo = true)
+            )
+        }
+
+        val validMediaSamples = listOf(
+            Pair("photo.jpg", "image/jpeg"),
+            Pair("picture.png", "image/png"),
+            Pair("graphic.webp", "image/webp"),
+            Pair("camera.heic", "image/heif"),
+            Pair("video.mp4", "video/mp4"),
+            Pair("clip.webm", "video/webm")
+        )
+
+        for ((name, mime) in validMediaSamples) {
+            val isVid = name.endsWith(".mp4") || name.endsWith(".webm")
+            org.junit.Assert.assertTrue(
+                "Expected $name ($mime) to be accepted by isSupportedMedia",
+                com.amresalehin.emregallery.data.MediaRepository.isSupportedMedia(name, mime, isVideo = isVid)
+            )
+        }
+    }
+
+    @Test
+    fun testMediaClassifierRejectsSvgXmlDataUriPlaceholders() {
+        // LiteSpeed / WordPress placeholder transparent rectangle SVG
+        val svgXmlDataUri = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMTY4IiB2aWV3Qm94PSIwIDAgMzAwIDE2OCI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgc3R5bGU9ImZpbGw6I2NmZDRkYjtmaWxsLW9wYWNpdHk6IDAuMTsiLz48L3N2Zz4="
+        org.junit.Assert.assertFalse(
+            "Expected SVG XML placeholder data URI to be rejected",
+            MediaClassifier.isSubstantialDataUri(svgXmlDataUri)
+        )
+        org.junit.Assert.assertFalse(
+            "Expected SVG XML placeholder data URI to be invalid media",
+            MediaClassifier.isValidMedia(svgXmlDataUri)
+        )
+    }
 }

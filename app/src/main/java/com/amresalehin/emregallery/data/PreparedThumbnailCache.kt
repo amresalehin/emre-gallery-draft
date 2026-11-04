@@ -83,6 +83,9 @@ object PreparedThumbnailCache {
 
             val bitmap = loadMediaStoreThumbnail(appContext, uri, targetWidth, targetHeight)
                 ?: return@withLock null
+            if (bitmap.width <= 0 || bitmap.height <= 0) {
+                return@withLock null
+            }
             writePreparedIfSafe(appContext, file, bitmap)
             ThumbnailResult(bitmap)
         }

@@ -1745,17 +1745,30 @@ fun RealDeckMediaCard(
                 val imageRequest = remember(imageSource) {
                     val rawStr = imageSource.toString()
                     val resolvedUrl = if (rawStr.startsWith("//")) "https:$rawStr" else rawStr
-                    ImageRequest.Builder(context)
+                    val refererHeader = item.sourceUrl.takeIf { it.isNotBlank() }
+                        ?: runCatching {
+                            val u = java.net.URI(resolvedUrl)
+                            "${u.scheme ?: "https"}://${u.host}/"
+                        }.getOrNull()
+                    val builder = ImageRequest.Builder(context)
                         .data(if (imageSource is File) imageSource else resolvedUrl)
                         .crossfade(true)
                         .setHeader("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
                         .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-                        .apply {
-                            if (resolvedUrl.contains("wikimedia.org") || resolvedUrl.contains("wikipedia.org")) {
-                                setHeader("Referer", "https://en.wikipedia.org/")
-                            }
-                        }
-                        .build()
+                        .setHeader("Sec-Fetch-Dest", "image")
+                        .setHeader("Sec-Fetch-Mode", "no-cors")
+
+                    if (!refererHeader.isNullOrBlank()) {
+                        builder.setHeader("Referer", refererHeader)
+                    }
+
+                    val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(resolvedUrl)
+                        .ifBlank { refererHeader?.let { OkHttpDownloader.sharedCookieJar.getCookieString(it) } }
+                    if (!cookies.isNullOrBlank()) {
+                        builder.setHeader("Cookie", cookies)
+                    }
+
+                    builder.build()
                 }
 
                 AsyncImage(

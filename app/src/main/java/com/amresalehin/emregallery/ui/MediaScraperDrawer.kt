@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.*
 import kotlinx.coroutines.Dispatchers
@@ -1428,28 +1429,121 @@ fun RealScrapedCard(
                         )
                     }
                 } else {
-                    val resolvedUrl = remember(previewUrl) {
-                        if (previewUrl.startsWith("//")) "https:$previewUrl" else previewUrl
+                    val pageReferer = item.downloadHeaders["Referer"]
+                        ?: item.provenance.pageUrl.takeIf { !it.isNullOrBlank() }
+                        ?: item.metadata["source_url"]?.takeIf { it.isNotBlank() }
+
+                    val resolvedUrl = remember(previewUrl, pageReferer) {
+                        when {
+                            previewUrl.startsWith("//") -> "https:$previewUrl"
+                            previewUrl.startsWith("/") && !pageReferer.isNullOrBlank() -> MediaClassifier.resolveUrl(previewUrl, pageReferer) ?: previewUrl
+                            !previewUrl.startsWith("http://") && !previewUrl.startsWith("https://") && !previewUrl.startsWith("data:") && !pageReferer.isNullOrBlank() -> {
+                                MediaClassifier.resolveUrl(previewUrl, pageReferer) ?: "https://$previewUrl"
+                            }
+                            else -> previewUrl
+                        }
+                    }
+                    val refererHeader = remember(item, pageReferer, resolvedUrl) {
+                        pageReferer ?: when {
+                            resolvedUrl.contains("wikimedia.org") || resolvedUrl.contains("wikipedia.org") -> "https://en.wikipedia.org/"
+                            resolvedUrl.contains("pinimg.com") || resolvedUrl.contains("pinterest.com") -> "https://www.pinterest.com/"
+                            else -> runCatching {
+                                val u = java.net.URI(resolvedUrl)
+                                "${u.scheme ?: "https"}://${u.host}/"
+                            }.getOrNull()
+                        }
                     }
                     val context = LocalContext.current
-                    val imageRequest = remember(resolvedUrl) {
-                        ImageRequest.Builder(context)
+                    val imageRequest = remember(resolvedUrl, refererHeader) {
+                        val builder = ImageRequest.Builder(context)
                             .data(resolvedUrl)
                             .crossfade(true)
                             .setHeader("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
                             .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-                            .apply {
-                                if (resolvedUrl.contains("wikimedia.org") || resolvedUrl.contains("wikipedia.org")) {
-                                    setHeader("Referer", "https://en.wikipedia.org/")
-                                }
+                            .setHeader("Sec-Fetch-Dest", "image")
+                            .setHeader("Sec-Fetch-Mode", "no-cors")
+
+                        if (!refererHeader.isNullOrBlank()) {
+                            builder.setHeader("Referer", refererHeader)
+                        }
+
+                        item.downloadHeaders.forEach { (k, v) ->
+                            if (k != "User-Agent" && k != "Accept") {
+                                builder.setHeader(k, v)
                             }
-                            .build()
+                        }
+
+                        val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(resolvedUrl)
+                            .ifBlank {
+                                val ref = refererHeader
+                                if (!ref.isNullOrBlank()) OkHttpDownloader.sharedCookieJar.getCookieString(ref) else ""
+                            }
+                        if (cookies.isNotBlank()) {
+                            builder.setHeader("Cookie", cookies)
+                        }
+
+                        builder.build()
                     }
-                    AsyncImage(
+                    SubcomposeAsyncImage(
                         model = imageRequest,
                         contentDescription = item.title,
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Crop,
+                        loading = {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                )
+                            }
+                        },
+                        error = {
+                            val altUrl = if (resolvedUrl != item.url && item.url.isNotBlank()) item.url else null
+                            if (altUrl != null) {
+                                val altResolved = when {
+                                    altUrl.startsWith("//") -> "https:$altUrl"
+                                    altUrl.startsWith("/") && !pageReferer.isNullOrBlank() -> MediaClassifier.resolveUrl(altUrl, pageReferer) ?: altUrl
+                                    else -> altUrl
+                                }
+                                val altRequest = remember(altResolved, refererHeader) {
+                                    val b = ImageRequest.Builder(context)
+                                        .data(altResolved)
+                                        .crossfade(true)
+                                        .setHeader("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
+                                        .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                                        .setHeader("Sec-Fetch-Dest", "image")
+                                        .setHeader("Sec-Fetch-Mode", "no-cors")
+                                    if (!refererHeader.isNullOrBlank()) {
+                                        b.setHeader("Referer", refererHeader)
+                                    }
+                                    b.build()
+                                }
+                                AsyncImage(
+                                    model = altRequest,
+                                    contentDescription = item.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFF262A34)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (item.isVideo) Icons.Default.Videocam else Icons.Default.BrokenImage,
+                                        contentDescription = null,
+                                        tint = Color.White.copy(alpha = 0.35f),
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                            }
+                        }
                     )
                 }
 
