@@ -1409,34 +1409,47 @@ fun RealScrapedCard(
                     .height(mosaicHeight)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             ) {
-                val previewUrl = item.thumbnailUrl ?: item.url
-                if (item.category == MediaCategory.AUDIO && item.thumbnailUrl == null) {
+                // Only image URLs may be used as Coil previews. A raw MP4/M3U8 URL is
+                // downloadable media, not a poster image.
+                val previewUrl = item.thumbnailUrl?.takeIf { it.isNotBlank() }
+                    ?: item.url.takeIf { item.category == MediaCategory.IMAGES }
+                if (previewUrl == null) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0xFF263238)),
+                            .background(
+                                if (item.category == MediaCategory.AUDIO) Color(0xFF263238)
+                                else MaterialTheme.colorScheme.surfaceContainerHighest
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Audiotrack,
-                            contentDescription = null,
-                            tint = Color(0xFF80DEEA),
-                            modifier = Modifier.size(36.dp)
-                        )
+                        if (item.category == MediaCategory.AUDIO) {
+                            Icon(
+                                imageVector = Icons.Default.Audiotrack,
+                                contentDescription = null,
+                                tint = Color(0xFF80DEEA),
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
                     }
                 } else {
                     val resolvedUrl = remember(previewUrl) {
                         if (previewUrl.startsWith("//")) "https:$previewUrl" else previewUrl
                     }
                     val context = LocalContext.current
-                    val imageRequest = remember(resolvedUrl) {
+                    val imageRequest = remember(resolvedUrl, item.downloadHeaders) {
                         ImageRequest.Builder(context)
                             .data(resolvedUrl)
                             .crossfade(true)
                             .setHeader("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
                             .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
                             .apply {
-                                if (resolvedUrl.contains("wikimedia.org") || resolvedUrl.contains("wikipedia.org")) {
+                                item.downloadHeaders.forEach { (name, value) ->
+                                    if (name.isNotBlank() && value.isNotBlank()) setHeader(name, value)
+                                }
+                                if (item.downloadHeaders["Referer"].isNullOrBlank() &&
+                                    (resolvedUrl.contains("wikimedia.org") || resolvedUrl.contains("wikipedia.org"))
+                                ) {
                                     setHeader("Referer", "https://en.wikipedia.org/")
                                 }
                             }
