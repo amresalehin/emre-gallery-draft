@@ -296,7 +296,8 @@ object GalleryDlEngine {
         context: Context,
         mediaUrl: String,
         fileName: String,
-        referer: String? = null
+        referer: String? = null,
+        downloadId: String? = null
     ): File? = withContext(Dispatchers.IO) {
         try {
             val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -314,7 +315,14 @@ object GalleryDlEngine {
             }
 
             val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
-            val targetFile = File(dir, "${System.currentTimeMillis()}_$sanitizedName")
+            val stableId = downloadId?.takeIf { it.isNotBlank() }
+                ?.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            // A WorkManager retry must overwrite the same output rather than creating another
+            // timestamped file for the same logical media item.
+            val targetFile = File(
+                dir,
+                if (stableId != null) "${stableId}_$sanitizedName" else "${System.currentTimeMillis()}_$sanitizedName"
+            )
 
             // Try Python download if available
             if (isAvailable()) {
@@ -344,7 +352,8 @@ object GalleryDlEngine {
                 context = context,
                 mediaUrl = mediaUrl,
                 fileName = fileName,
-                referer = referer
+                referer = referer,
+                downloadId = downloadId
             )
         } catch (e: Exception) {
             Log.e(TAG, "downloadMedia failed", e)
