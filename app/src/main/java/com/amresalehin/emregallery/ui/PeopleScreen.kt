@@ -743,8 +743,9 @@ fun PeopleScreen(
     }
 
     // Rename Person Dialog
-    if (renamePersonId != null) {
-        val targetId = renamePersonId!!
+    val currentRenamePersonId = renamePersonId
+    if (currentRenamePersonId != null) {
+        val targetId = currentRenamePersonId
         AlertDialog(
             onDismissRequest = { renamePersonId = null },
             title = { Text(if (renameValue.isBlank()) "Name this person" else "Rename person") },
@@ -782,8 +783,9 @@ fun PeopleScreen(
     }
 
     // Merge People Dialog
-    if (personToMerge != null) {
-        val sourcePerson = personToMerge!!
+    val currentPersonToMerge = personToMerge
+    if (currentPersonToMerge != null) {
+        val sourcePerson = currentPersonToMerge
         val mergeCandidates = visiblePeople.filter { it.id != sourcePerson.id }
 
         AlertDialog(
@@ -854,9 +856,11 @@ fun PeopleScreen(
     }
 
     // Single Photo Action Dialog (Set Cover / Remove Face)
-    if (selectedMediaForAction != null && selectedPersonId != null) {
-        val activeMedia = selectedMediaForAction!!
-        val activePersonId = selectedPersonId!!
+    val currentSelectedMediaForAction = selectedMediaForAction
+    val currentSelectedPersonId = selectedPersonId
+    if (currentSelectedMediaForAction != null && currentSelectedPersonId != null) {
+        val activeMedia = currentSelectedMediaForAction
+        val activePersonId = currentSelectedPersonId
 
         AlertDialog(
             onDismissRequest = { selectedMediaForAction = null },
@@ -936,9 +940,10 @@ private fun PersonAvatar(
         }
     }
 
-    if (faceBitmap != null) {
+    val currentFaceBitmap = faceBitmap
+    if (currentFaceBitmap != null) {
         androidx.compose.foundation.Image(
-            bitmap = faceBitmap!!.asImageBitmap(),
+            bitmap = currentFaceBitmap.asImageBitmap(),
             contentDescription = if (person.isNamed) person.displayName else "Person",
             modifier = modifier
                 .size(size)

@@ -193,7 +193,7 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
 
             // Seed working clusters from user-named / explicitly locked persons
             val lockedByPerson = lockedObs.groupBy { obs ->
-                explicitlyAssignedFaceToPerson[obs.faceId] ?: obs.personId!!
+                explicitlyAssignedFaceToPerson[obs.faceId] ?: obs.personId ?: "unknown_${obs.faceId}"
             }
 
             for ((pId, faces) in lockedByPerson) {
@@ -250,8 +250,8 @@ object EnteFaceClusteringStrategy : FaceClusteringStrategy {
                 val isMatch = bestCluster != null && bestDistance <= effectiveThresh
                 val isAmbiguous = isMatch && ((secondBestDistance - bestDistance) < AMBIGUITY_MARGIN)
 
-                if (isMatch && !isAmbiguous) {
-                    val cluster = bestCluster!!
+                if (bestCluster != null && isMatch && !isAmbiguous) {
+                    val cluster = bestCluster
                     cluster.faces.add(face)
                     // Update cluster centroid and representative if new face has higher quality
                     cluster.centroid = computeMeanNormalized(cluster.faces.map { it.embedding }, normEmb.size)

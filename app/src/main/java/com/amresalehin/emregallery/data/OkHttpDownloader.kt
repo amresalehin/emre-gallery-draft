@@ -333,10 +333,12 @@ object OkHttpDownloader {
         // Enable resumable downloads via HTTP Range header if partial data exists
         if (existingBytes > 0L) {
             reqBuilder.header("Range", "bytes=$existingBytes-")
-            if (!savedEtag.isNullOrBlank()) {
-                reqBuilder.header("If-Range", savedEtag!!)
-            } else if (!savedLastModified.isNullOrBlank()) {
-                reqBuilder.header("If-Range", savedLastModified!!)
+            val etag = savedEtag
+            val lastMod = savedLastModified
+            if (!etag.isNullOrBlank()) {
+                reqBuilder.header("If-Range", etag)
+            } else if (!lastMod.isNullOrBlank()) {
+                reqBuilder.header("If-Range", lastMod)
             }
         }
 

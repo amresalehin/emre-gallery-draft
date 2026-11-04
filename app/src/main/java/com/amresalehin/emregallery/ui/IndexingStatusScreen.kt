@@ -320,8 +320,9 @@ fun IndexingStatusScreen(
         )
     }
 
-    if (showComparisonDialog && comparisonResult != null) {
-        val comp = comparisonResult!!
+    val currentComparisonResult = comparisonResult
+    if (showComparisonDialog && currentComparisonResult != null) {
+        val comp = currentComparisonResult
         AlertDialog(
             onDismissRequest = { showComparisonDialog = false },
             title = {

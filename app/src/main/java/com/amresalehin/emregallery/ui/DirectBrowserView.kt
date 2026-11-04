@@ -85,6 +85,18 @@ fun DirectBrowserView(
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            webViewInstance?.let { wv ->
+                wv.stopLoading()
+                wv.webViewClient = WebViewClient()
+                wv.webChromeClient = WebChromeClient()
+                wv.destroy()
+                webViewInstance = null
+            }
+        }
+    }
+
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val historyManager = remember { BrowserHistoryManager(context) }
@@ -662,6 +674,15 @@ fun DirectBrowserView(
                     },
                     update = { wv ->
                         webViewInstance = wv
+                    },
+                    onRelease = { wv ->
+                        wv.stopLoading()
+                        wv.webViewClient = WebViewClient()
+                        wv.webChromeClient = WebChromeClient()
+                        wv.destroy()
+                        if (webViewInstance === wv) {
+                            webViewInstance = null
+                        }
                     },
                     modifier = Modifier
                         .fillMaxSize()

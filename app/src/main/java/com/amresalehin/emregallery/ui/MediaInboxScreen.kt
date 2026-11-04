@@ -1732,9 +1732,8 @@ fun RealDeckMediaCard(
                 val localFile = remember(item.localUri) {
                     if (item.localUri.isNotBlank()) File(item.localUri.removePrefix("file://")) else null
                 }
-                val fileExists = localFile?.exists() == true && (localFile.length() > 0L)
-                val imageSource: Any = if (fileExists) {
-                    localFile!!
+                val imageSource: Any = if (localFile != null && localFile.exists() && localFile.length() > 0L) {
+                    localFile
                 } else if (item.sourceUrl.isNotBlank()) {
                     item.sourceUrl
                 } else {

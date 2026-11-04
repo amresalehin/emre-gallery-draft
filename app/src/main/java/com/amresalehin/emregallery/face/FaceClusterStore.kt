@@ -544,9 +544,10 @@ class FaceClusterStore(context: Context) :
             if (priorClusterId != null) {
                 assignedClusterId = priorClusterId
                 assignedPersonId = priorPersonId ?: priorClusterId
-            } else if (isConfidentMatch && !isAmbiguous) {
-                assignedClusterId = bestClusterId!!
-                assignedPersonId = bestPersonId ?: bestClusterId!!
+            } else if (isConfidentMatch && !isAmbiguous && bestClusterId != null) {
+                val clusterId = bestClusterId
+                assignedClusterId = clusterId
+                assignedPersonId = bestPersonId ?: clusterId
             } else {
                 val newId = UUID.randomUUID().toString()
                 assignedClusterId = newId
@@ -997,9 +998,11 @@ class FaceClusterStore(context: Context) :
             db.update("faces", faceVals, "media_uri=? AND face_index=? AND engine_id=?", arrayOf(mediaUri, faceIndex.toString(), engineId))
 
             if (oldPersonId != null) {
-                recordFeedback(db, "REMOVE_FACE_FROM_PERSON", faceId, oldPersonId!!, engineId = engineId)
+                recordFeedback(db, "REMOVE_FACE_FROM_PERSON", faceId, oldPersonId, engineId = engineId)
             }
-            recomputeCentroid(db, oldClusterId!!, engineId, modelVersion)
+            if (oldClusterId != null) {
+                recomputeCentroid(db, oldClusterId, engineId, modelVersion)
+            }
 
             db.setTransactionSuccessful()
             return true
@@ -1563,16 +1566,18 @@ class FaceClusterStore(context: Context) :
                 }
             }
 
-            if (faceId == null || suggestedPersonId == null) return false
+            val fId = faceId
+            val pId = suggestedPersonId
+            if (fId == null || pId == null) return false
 
-            val parts = faceId!!.split("#")
+            val parts = fId.split("#")
             // parts: engineId#mediaUri#faceIndex or mediaUri#faceIndex
             val uri = if (parts.size >= 3) parts[1] else parts[0]
             val index = if (parts.size >= 3) parts[2].toIntOrNull() ?: 0 else parts.getOrNull(1)?.toIntOrNull() ?: 0
 
-            val vals = ContentValues().apply { put("person_id", suggestedPersonId) }
+            val vals = ContentValues().apply { put("person_id", pId) }
             db.update("faces", vals, "media_uri=? AND face_index=? AND engine_id=?", arrayOf(uri, index.toString(), engineId))
-            recordFeedback(db, "ASSIGN_FACE_TO_PERSON", faceId!!, suggestedPersonId!!, engineId = engineId)
+            recordFeedback(db, "ASSIGN_FACE_TO_PERSON", fId, pId, engineId = engineId)
 
             val statusVal = ContentValues().apply { put("status", "accepted") }
             db.update("review_suggestions", statusVal, "id=?", arrayOf(suggestionId))
@@ -1605,8 +1610,10 @@ class FaceClusterStore(context: Context) :
                 }
             }
 
-            if (faceId != null && suggestedPersonId != null) {
-                recordFeedback(db, "REJECTED_MATCH", faceId!!, suggestedPersonId!!, engineId = engineId)
+            val fId = faceId
+            val pId = suggestedPersonId
+            if (fId != null && pId != null) {
+                recordFeedback(db, "REJECTED_MATCH", fId, pId, engineId = engineId)
             }
 
             val statusVal = ContentValues().apply { put("status", "rejected") }

@@ -783,6 +783,7 @@ class BrowserMediaExtractor(private val context: Context) {
         mainHandler.removeCallbacksAndMessages(null)
         try {
             webView?.stopLoading()
+            webView?.removeJavascriptInterface("EmreBridge")
             webView?.webViewClient = WebViewClient()
             webView?.webChromeClient = WebChromeClient()
             webView?.destroy()

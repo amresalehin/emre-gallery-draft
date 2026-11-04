@@ -240,7 +240,7 @@ class DualMediaExtractor(private val context: Context) {
     private val _state = MutableStateFlow(ExtractionState())
     val state: StateFlow<ExtractionState> = _state.asStateFlow()
 
-    fun extract(targetUrl: String, scope: CoroutineScope) {
+    fun extract(targetUrl: String, scope: CoroutineScope, directOnly: Boolean = false) {
         cancel()
 
         val trimmed = targetUrl.trim()
@@ -420,15 +420,16 @@ class DualMediaExtractor(private val context: Context) {
                         updateItems(
                             newList = directRes.items,
                             title = directRes.pageTitle ?: domain,
-                            msg = "Discovered direct media file",
-                            phase = ExtractionPhase.COMPLETED
+                            msg = "Discovered direct media file"
                         )
-                        _state.value = _state.value.copy(
-                            isRunning = false,
-                            phase = ExtractionPhase.COMPLETED,
-                            statusMessage = "Discovered direct media file"
-                        )
-                        return@launch
+                        if (directOnly) {
+                            _state.value = _state.value.copy(
+                                isRunning = false,
+                                phase = ExtractionPhase.COMPLETED,
+                                statusMessage = "Discovered direct media file"
+                            )
+                            return@launch
+                        }
                     }
                 }
 

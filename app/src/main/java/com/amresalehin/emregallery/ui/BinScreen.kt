@@ -296,8 +296,9 @@ fun BinScreen(
     }
 
     // Confirmation dialog: Delete single item permanently
-    if (itemToPermanentlyDelete != null) {
-        val target = itemToPermanentlyDelete!!
+    val currentItemToDelete = itemToPermanentlyDelete
+    if (currentItemToDelete != null) {
+        val target = currentItemToDelete
         AlertDialog(
             onDismissRequest = { itemToPermanentlyDelete = null },
             icon = { Icon(Icons.Default.DeleteForever, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) },

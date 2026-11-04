@@ -683,8 +683,9 @@ fun ViewerDetailsDrawer(
     }
 
     // Rename / Manage Person Dialog
-    if (renamingFace != null) {
-        val face = renamingFace!!
+    val currentRenamingFace = renamingFace
+    if (currentRenamingFace != null) {
+        val face = currentRenamingFace
         val personId = face.personId.orEmpty()
         var nameInput by remember(face) {
             val initial = if (face.displayName.isBlank() || face.displayName.equals("Unknown", ignoreCase = true)) "" else face.displayName

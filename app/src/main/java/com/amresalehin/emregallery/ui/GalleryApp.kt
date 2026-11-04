@@ -1320,8 +1320,9 @@ fun GalleryApp() {
         }
 
         // Top-layer Media Viewer with continuous thumbnail-to-fullscreen & return shared animation
-        if (destination == Destination.VIEWER && selectedMedia != null) {
-            val currentItem = selectedMedia!!
+        val activeViewerMedia = selectedMedia
+        if (destination == Destination.VIEWER && activeViewerMedia != null) {
+            val currentItem = activeViewerMedia
             val isItemBinned = currentItem.isTrashed || currentItem.uri in inBin
             val itemsForViewer = remember(viewerMediaList, currentItem) {
                 if (viewerMediaList.any { it.uri == currentItem.uri }) viewerMediaList else listOf(currentItem)
@@ -1680,18 +1681,20 @@ fun GalleryApp() {
         )
     }
 
-    if (showAddToAlbumSheet && mediaForAddToAlbum != null) {
+    val activeMediaForAlbum = mediaForAddToAlbum
+    if (showAddToAlbumSheet && activeMediaForAlbum != null) {
         AddToAlbumBottomSheet(
-            item = mediaForAddToAlbum!!,
+            item = activeMediaForAlbum,
             customAlbums = customAlbums,
             onDismiss = { showAddToAlbumSheet = false },
             onToggleAlbum = { album ->
                 scope.launch {
-                    if (mediaForAddToAlbum!!.uri in album.mediaUris) {
-                        prefs.removeMediaFromCustomAlbum(album.id, mediaForAddToAlbum!!.uri)
+                    val mediaItem = mediaForAddToAlbum ?: activeMediaForAlbum
+                    if (mediaItem.uri in album.mediaUris) {
+                        prefs.removeMediaFromCustomAlbum(album.id, mediaItem.uri)
                         snackbarHostState.showSnackbar("Removed from ${album.name}", duration = SnackbarDuration.Short)
                     } else {
-                        prefs.addMediaToCustomAlbum(album.id, mediaForAddToAlbum!!.uri)
+                        prefs.addMediaToCustomAlbum(album.id, mediaItem.uri)
                         snackbarHostState.showSnackbar("Moved to ${album.name}", duration = SnackbarDuration.Short)
                     }
                 }
@@ -1704,13 +1707,14 @@ fun GalleryApp() {
         )
     }
 
-    if (showAddPhotosPickerForAlbum != null) {
+    val activeAlbumForPicker = showAddPhotosPickerForAlbum
+    if (activeAlbumForPicker != null) {
         AddPhotosToAlbumDialog(
-            album = showAddPhotosPickerForAlbum!!,
+            album = activeAlbumForPicker,
             allMedia = media.filter { it.uri !in hidden && it.uri !in inBin },
             onDismiss = { showAddPhotosPickerForAlbum = null },
             onAddSelected = { uris ->
-                val target = showAddPhotosPickerForAlbum!!
+                val target = showAddPhotosPickerForAlbum ?: activeAlbumForPicker
                 scope.launch {
                     uris.forEach { uri -> prefs.addMediaToCustomAlbum(target.id, uri) }
                 }

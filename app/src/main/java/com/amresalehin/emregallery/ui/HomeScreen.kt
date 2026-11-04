@@ -170,7 +170,7 @@ fun HomeScreen(
                 }
                 if (visibleIndices.isEmpty()) return Velocity.Zero
 
-                val anchor = if (forward) visibleIndices.maxOrNull()!! else visibleIndices.minOrNull()!!
+                val anchor = (if (forward) visibleIndices.maxOrNull() else visibleIndices.minOrNull()) ?: return Velocity.Zero
                 val averageRowHeight = visibleRowInfos.map { it.size.toFloat() }
                     .average().toFloat().coerceAtLeast(1f)
                 // Estimate travel from velocity, then cap work to a bounded window. The fling itself

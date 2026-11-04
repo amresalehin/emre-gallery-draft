@@ -1,0 +1,8 @@
+{
+  "name": "Emre Gallery",
+  "description": "Smart, privacy-focused offline gallery with facial recognition, OCR indexing, photo map, and media downloader.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

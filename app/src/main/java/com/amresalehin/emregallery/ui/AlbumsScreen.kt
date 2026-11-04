@@ -114,7 +114,8 @@ fun AlbumsScreen(
     var albumToRename by remember { mutableStateOf<CustomAlbum?>(null) }
     var renameText by remember { mutableStateOf("") }
 
-    if (albumToRename != null) {
+    val activeAlbumToRename = albumToRename
+    if (activeAlbumToRename != null) {
         AlertDialog(
             onDismissRequest = { albumToRename = null },
             title = { Text("Rename album") },
@@ -131,8 +132,9 @@ fun AlbumsScreen(
             confirmButton = {
                 Button(
                     onClick = {
+                        val album = albumToRename ?: activeAlbumToRename
                         if (renameText.isNotBlank()) {
-                            onRenameAlbum(albumToRename!!.id, renameText.trim())
+                            onRenameAlbum(album.id, renameText.trim())
                         }
                         albumToRename = null
                     },

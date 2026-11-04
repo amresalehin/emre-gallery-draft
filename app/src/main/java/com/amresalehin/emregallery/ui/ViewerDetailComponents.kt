@@ -1219,9 +1219,10 @@ fun FaceCropThumbnail(
         }
     }
 
-    if (faceCrop != null) {
+    val currentFaceCrop = faceCrop
+    if (currentFaceCrop != null) {
         Image(
-            bitmap = faceCrop!!.asImageBitmap(),
+            bitmap = currentFaceCrop.asImageBitmap(),
             contentDescription = contentDescription,
             modifier = modifier,
             contentScale = ContentScale.Crop

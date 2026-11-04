@@ -1023,11 +1023,14 @@ object MediaClassifier {
                 val itemKey = deduplicationKey(item.url)
                 if (itemKey in videoThumbKeys) {
                     val matchingVideoIdx = finalResult.indexOfFirst { v ->
+                        val vUrlYt = extractYouTubeVideoId(v.url)?.lowercase(Locale.ROOT)
+                        val vThumbYt = v.thumbnailUrl?.let { extractYouTubeVideoId(it)?.lowercase(Locale.ROOT) }
+                        val vPageYt = extractYouTubeVideoId(v.provenance.pageUrl)?.lowercase(Locale.ROOT)
                         v.isVideo && (
                             (v.thumbnailUrl != null && deduplicationKey(v.thumbnailUrl) == itemKey) ||
-                            (extractYouTubeVideoId(v.url) != null && "ytthumb:${extractYouTubeVideoId(v.url)!!.lowercase(Locale.ROOT)}" == itemKey) ||
-                            (v.thumbnailUrl != null && extractYouTubeVideoId(v.thumbnailUrl) != null && "ytthumb:${extractYouTubeVideoId(v.thumbnailUrl)!!.lowercase(Locale.ROOT)}" == itemKey) ||
-                            (extractYouTubeVideoId(v.provenance.pageUrl) != null && "ytthumb:${extractYouTubeVideoId(v.provenance.pageUrl)!!.lowercase(Locale.ROOT)}" == itemKey)
+                            (vUrlYt != null && "ytthumb:$vUrlYt" == itemKey) ||
+                            (vThumbYt != null && "ytthumb:$vThumbYt" == itemKey) ||
+                            (vPageYt != null && "ytthumb:$vPageYt" == itemKey)
                         )
                     }
                     if (matchingVideoIdx != -1) {
