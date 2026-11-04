@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import coil.request.videoFrameMillis
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
@@ -679,33 +680,20 @@ fun TrueMediaMosaicThumbnail(
                 }
             }
             items.size == 1 -> {
-                AsyncImage(
-                    model = items[0].localUri,
-                    contentDescription = items[0].title,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
+                InboxMosaicMediaThumbnail(items[0], Modifier.fillMaxSize())
             }
             items.size == 2 -> {
                 Row(
                     modifier = Modifier.fillMaxSize(),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    AsyncImage(
-                        model = items[0].localUri,
-                        contentDescription = items[0].title,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        contentScale = ContentScale.Crop
+                    InboxMosaicMediaThumbnail(
+                        items[0],
+                        Modifier.weight(1f).fillMaxHeight()
                     )
-                    AsyncImage(
-                        model = items[1].localUri,
-                        contentDescription = items[1].title,
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        contentScale = ContentScale.Crop
+                    InboxMosaicMediaThumbnail(
+                        items[1],
+                        Modifier.weight(1f).fillMaxHeight()
                     )
                 }
             }
@@ -714,35 +702,21 @@ fun TrueMediaMosaicThumbnail(
                     modifier = Modifier.fillMaxSize(),
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    AsyncImage(
-                        model = items[0].localUri,
-                        contentDescription = items[0].title,
-                        modifier = Modifier
-                            .weight(0.58f)
-                            .fillMaxHeight(),
-                        contentScale = ContentScale.Crop
+                    InboxMosaicMediaThumbnail(
+                        items[0],
+                        Modifier.weight(0.58f).fillMaxHeight()
                     )
                     Column(
-                        modifier = Modifier
-                            .weight(0.42f)
-                            .fillMaxHeight(),
+                        modifier = Modifier.weight(0.42f).fillMaxHeight(),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        AsyncImage(
-                            model = items[1].localUri,
-                            contentDescription = items[1].title,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                            contentScale = ContentScale.Crop
+                        InboxMosaicMediaThumbnail(
+                            items[1],
+                            Modifier.weight(1f).fillMaxWidth()
                         )
-                        AsyncImage(
-                            model = items[2].localUri,
-                            contentDescription = items[2].title,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                            contentScale = ContentScale.Crop
+                        InboxMosaicMediaThumbnail(
+                            items[2],
+                            Modifier.weight(1f).fillMaxWidth()
                         )
                     }
                 }
@@ -753,53 +727,30 @@ fun TrueMediaMosaicThumbnail(
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        AsyncImage(
-                            model = items[0].localUri,
-                            contentDescription = items[0].title,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            contentScale = ContentScale.Crop
+                        InboxMosaicMediaThumbnail(
+                            items[0],
+                            Modifier.weight(1f).fillMaxHeight()
                         )
-                        AsyncImage(
-                            model = items[1].localUri,
-                            contentDescription = items[1].title,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            contentScale = ContentScale.Crop
+                        InboxMosaicMediaThumbnail(
+                            items[1],
+                            Modifier.weight(1f).fillMaxHeight()
                         )
                     }
                     Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
-                        AsyncImage(
-                            model = items[2].localUri,
-                            contentDescription = items[2].title,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight(),
-                            contentScale = ContentScale.Crop
+                        InboxMosaicMediaThumbnail(
+                            items[2],
+                            Modifier.weight(1f).fillMaxHeight()
                         )
                         Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
+                            modifier = Modifier.weight(1f).fillMaxHeight()
                         ) {
-                            AsyncImage(
-                                model = items[3].localUri,
-                                contentDescription = items[3].title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
+                            InboxMosaicMediaThumbnail(items[3], Modifier.fillMaxSize())
                             if (items.size > 4) {
                                 Box(
                                     modifier = Modifier
@@ -822,6 +773,47 @@ fun TrueMediaMosaicThumbnail(
             }
         }
     }
+}
+
+/**
+ * Builds a real File-backed request for downloaded media. Passing an absolute path as a
+ * String can be interpreted as a URI instead of a filesystem file, preventing Coil's
+ * VideoFrameDecoder from reading the video and rendering a poster frame.
+ */
+@Composable
+private fun InboxMosaicMediaThumbnail(
+    item: MediaInboxItem,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val localFile = remember(item.localUri) {
+        runCatching {
+            val parsed = Uri.parse(item.localUri)
+            when (parsed.scheme?.lowercase()) {
+                "file" -> File(parsed.path.orEmpty())
+                null, "" -> File(item.localUri)
+                else -> null
+            }
+        }.getOrNull()?.takeIf { it.isFile && it.length() > 0L }
+    }
+
+    val request = remember(item.localUri, item.isVideo, localFile) {
+        ImageRequest.Builder(context)
+            .data(localFile ?: Uri.parse(item.localUri))
+            .crossfade(false)
+            .apply {
+                // Avoid the commonly black opening frame on downloaded videos.
+                if (item.isVideo) videoFrameMillis(750L)
+            }
+            .build()
+    }
+
+    AsyncImage(
+        model = request,
+        contentDescription = item.title,
+        modifier = modifier,
+        contentScale = ContentScale.Crop
+    )
 }
 
 /**
@@ -1747,6 +1739,9 @@ fun RealDeckMediaCard(
                     ImageRequest.Builder(context)
                         .data(if (imageSource is File) imageSource else resolvedUrl)
                         .crossfade(true)
+                        .apply {
+                            if (item.isVideo && imageSource is File) videoFrameMillis(750L)
+                        }
                         .setHeader("User-Agent", OkHttpDownloader.DEFAULT_USER_AGENT)
                         .setHeader("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
                         .apply {
