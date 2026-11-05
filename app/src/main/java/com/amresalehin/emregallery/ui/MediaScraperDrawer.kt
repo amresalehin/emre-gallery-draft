@@ -60,6 +60,8 @@ fun MediaScraperDrawer(
     onClose: () -> Unit,
     onDownloadComplete: () -> Unit,
     onOpenBrowser: ((String) -> Unit)? = null,
+    heightFraction: Float = 0.88f,
+    showSearchBar: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -214,21 +216,17 @@ fun MediaScraperDrawer(
         if (trimmed.isBlank()) return
         keyboardController?.hide()
         focusManager.clearFocus()
-        val normalized = if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
-            "https://$trimmed"
-        } else {
-            trimmed
-        }
-        if (MediaClassifier.isValidWebUrl(normalized)) {
+        val sanitized = MediaClassifier.sanitizeUrl(trimmed)
+        if (MediaClassifier.isValidWebUrl(sanitized)) {
             hasSubmittedQuery = true
-            lastSubmittedUrl = normalized
-            urlInput = normalized
+            lastSubmittedUrl = sanitized
+            urlInput = sanitized
             selectedItemIds = emptySet()
             dynamicDimensions.clear()
             scope.launch {
-                historyManager.recordVisit(normalized)
+                historyManager.recordVisit(sanitized)
             }
-            dualExtractor.extract(normalized, scope)
+            dualExtractor.extract(sanitized, scope)
         }
     }
 
@@ -248,7 +246,7 @@ fun MediaScraperDrawer(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .fillMaxHeight(0.88f)
+                .fillMaxHeight(heightFraction)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -274,29 +272,115 @@ fun MediaScraperDrawer(
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                     )
-                    IconButton(
-                        onClick = onClose,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 12.dp)
-                            .size(32.dp)
-                            .testTag("scraper_drawer_close_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close drawer",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    if (showSearchBar) {
+                        IconButton(
+                            onClick = onClose,
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .padding(end = 12.dp)
+                                .size(32.dp)
+                                .testTag("scraper_drawer_close_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close drawer",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
 
-                // 2. Search / URL input bar inside the drawer
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
+                if (!showSearchBar) {
+                    // Header for Share Sheet Drawer: Domain/Title, Scanning/Items status, Refresh button, Close button (No Search Bar)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            val displayTitle = extractorState.pageTitle.ifBlank {
+                                extractorState.domain.ifBlank {
+                                    MediaClassifier.cleanDomainFromUrl(urlInput).ifBlank { "Discovered Media" }
+                                }
+                            }
+                            Text(
+                                text = displayTitle,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            val statusText = when {
+                                extractorState.isRunning -> "Scanning media from link..."
+                                filteredScrapedItems.isNotEmpty() -> "${filteredScrapedItems.size} items discovered"
+                                else -> "No media discovered"
+                            }
+                            Text(
+                                text = statusText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (extractorState.isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            // Refresh button
+                            IconButton(
+                                onClick = {
+                                    if (urlInput.isNotBlank()) {
+                                        submitSearch(urlInput)
+                                    }
+                                },
+                                enabled = !extractorState.isRunning,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("scraper_drawer_refresh_button")
+                            ) {
+                                if (extractorState.isRunning) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Refresh",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            // Close button
+                            IconButton(
+                                onClick = onClose,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("scraper_drawer_close_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close drawer",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // 2. Search / URL input bar inside the drawer
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
                     Surface(
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -541,6 +625,7 @@ fun MediaScraperDrawer(
                         }
                     }
                 }
+            }
 
                 // 3. Pinned Filter Row: Category Chips (scrollable) + Pinned Select All + Pinned Sort
                 Row(
@@ -1160,7 +1245,7 @@ fun MediaScraperDrawer(
                                 ThreeColumnSkeletonGrid()
                             }
                         }
-                    } else {
+                    } else if (showSearchBar) {
                         // Empty State: Show Previous 5 Searches
                         val displaySites = if (recentSites.isNotEmpty()) {
                             recentSites.take(5)
@@ -1264,6 +1349,53 @@ fun MediaScraperDrawer(
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
+                                }
+                            }
+                        }
+                    } else {
+                        // Empty State for Share Sheet (No search bar)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 24.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PermMedia,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Text(
+                                    text = "No downloadable media discovered",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Tap below to rescan the link",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Button(
+                                    onClick = { if (urlInput.isNotBlank()) submitSearch(urlInput) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        contentColor = MaterialTheme.colorScheme.primary
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Rescan Link")
                                 }
                             }
                         }

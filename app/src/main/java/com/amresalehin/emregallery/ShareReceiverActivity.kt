@@ -190,6 +190,8 @@ private fun ShareReceiverScreen(
                     onDownloadComplete()
                 },
                 onOpenBrowser = null,
+                heightFraction = 0.50f,
+                showSearchBar = false,
                 modifier = Modifier.fillMaxSize()
             )
         }

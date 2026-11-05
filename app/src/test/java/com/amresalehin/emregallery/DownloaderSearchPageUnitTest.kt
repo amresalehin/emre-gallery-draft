@@ -345,6 +345,54 @@ class DownloaderSearchPageUnitTest {
         assertEquals(null, MediaClassifier.extractFirstUrl(""))
         assertEquals(null, MediaClassifier.extractFirstUrl(null))
     }
+
+    @Test
+    fun testSanitizeUrl() {
+        // Strip tracking parameters while retaining essential parameters like YouTube video ID
+        val youtubeWithTracking = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&si=abcdef123&feature=shared&utm_source=share"
+        assertEquals(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            MediaClassifier.sanitizeUrl(youtubeWithTracking)
+        )
+
+        // Strip Instagram tracking parameters
+        val instagramWithTracking = "https://www.instagram.com/reel/C123456/?igshid=MzRlODBiNWFlZA==&utm_source=ig_web_copy_link"
+        assertEquals(
+            "https://www.instagram.com/reel/C123456/",
+            MediaClassifier.sanitizeUrl(instagramWithTracking)
+        )
+
+        // Strip Facebook click tracking
+        val articleWithFbclid = "https://example.com/article?id=42&fbclid=IwAR123456"
+        assertEquals(
+            "https://example.com/article?id=42",
+            MediaClassifier.sanitizeUrl(articleWithFbclid)
+        )
+
+        // Unwrap Google outbound redirect
+        val googleRedirect = "https://www.google.com/url?q=https://example.com/target-page&sa=D&sntz=1"
+        assertEquals(
+            "https://example.com/target-page",
+            MediaClassifier.sanitizeUrl(googleRedirect)
+        )
+
+        // Strip surrounding quotes and whitespace
+        val quotedUrl = "   \"https://x.com/user/status/123456?s=20&utm_source=share\"   "
+        assertEquals(
+            "https://x.com/user/status/123456?s=20",
+            MediaClassifier.sanitizeUrl(quotedUrl)
+        )
+
+        // Clean domain helper
+        assertEquals(
+            "instagram.com",
+            MediaClassifier.cleanDomainFromUrl("https://www.instagram.com/p/123")
+        )
+        assertEquals(
+            "youtu.be",
+            MediaClassifier.cleanDomainFromUrl("https://youtu.be/dQw4w9WgXcQ")
+        )
+    }
 }
 
 

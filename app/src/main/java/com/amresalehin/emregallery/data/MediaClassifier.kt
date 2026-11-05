@@ -286,26 +286,111 @@ object MediaClassifier {
 
     private val HTTP_URL_REGEX = "(https?://[^\\s<>\"'\\[\\]{}|\\\\^`]+)".toRegex(RegexOption.IGNORE_CASE)
 
+    private val TRACKING_PARAMS_TO_REMOVE = setOf(
+        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "utm_reader", "utm_name",
+        "fbclid", "gclid", "gbraid", "wbraid", "msclkid", "twclid", "dclid",
+        "igshid", "si", "feature", "ref", "ref_src", "ref_url", "source", "share_id",
+        "_ga", "_gl", "_hsenc", "_hsmi", "mc_cid", "mc_eid",
+        "is_from_webapp", "sender_device", "sender_web_id",
+        "ved", "usg", "context"
+    )
+
     /**
-     * Extracts the first valid web URL from arbitrary shared text, captions, or messages.
-     * Trims surrounding punctuation often attached in shared messages.
+     * Extracts a clean display domain from a web URL.
+     */
+    fun cleanDomainFromUrl(url: String?): String {
+        if (url.isNullOrBlank()) return ""
+        return try {
+            val normalized = if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+                "https://$url"
+            } else {
+                url
+            }
+            val uri = URI(normalized)
+            uri.host?.removePrefix("www.") ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    /**
+     * Thoroughly sanitizes a web URL before fetching:
+     * 1. Strips wrapping quotes, whitespace, and punctuation.
+     * 2. Unwraps known redirect wrappers (Google / Facebook / Reddit outbound links).
+     * 3. Strips tracking, analytics, and social share parameters (utm_*, igshid, si, fbclid, etc.).
+     * 4. Ensures a valid https:// scheme.
+     */
+    fun sanitizeUrl(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        var cleaned = raw.trim().trim('"', '\'', '<', '>', '(', ')', '[', ']', ';')
+        if (cleaned.isBlank()) return ""
+
+        if (!cleaned.startsWith("http://", ignoreCase = true) && !cleaned.startsWith("https://", ignoreCase = true)) {
+            cleaned = "https://$cleaned"
+        }
+
+        return try {
+            val uri = URI(cleaned)
+            val host = uri.host?.lowercase(Locale.ROOT) ?: return cleaned
+
+            // 1. Unwrap Google / Facebook redirect links if present
+            if ((host.contains("google.") && uri.path == "/url") ||
+                (host.contains("facebook.com") && uri.path?.endsWith("/l.php") == true)
+            ) {
+                val queryParams = uri.rawQuery?.split("&")?.associate {
+                    val key = it.substringBefore("=").lowercase(Locale.ROOT)
+                    val value = it.substringAfter("=", "")
+                    key to java.net.URLDecoder.decode(value, "UTF-8")
+                } ?: emptyMap()
+
+                val target = queryParams["q"] ?: queryParams["url"] ?: queryParams["u"]
+                if (!target.isNullOrBlank() && isValidWebUrl(target)) {
+                    return sanitizeUrl(target)
+                }
+            }
+
+            // 2. Clean query parameters (strip tracking parameters, retain functional ones like v=, id=, p=, etc.)
+            val rawQuery = uri.rawQuery
+            val filteredQuery = if (!rawQuery.isNullOrBlank()) {
+                val remainingParams = rawQuery.split("&").filter { param ->
+                    val key = param.substringBefore("=").lowercase(Locale.ROOT)
+                    !TRACKING_PARAMS_TO_REMOVE.contains(key) && !key.startsWith("utm_")
+                }
+                if (remainingParams.isNotEmpty()) remainingParams.joinToString("&") else null
+            } else null
+
+            // 3. Reconstruct clean URI without tracking parameters or tracking fragments
+            val cleanUri = URI(
+                uri.scheme ?: "https",
+                uri.authority,
+                uri.path,
+                filteredQuery,
+                null
+            )
+            cleanUri.toString()
+        } catch (_: Exception) {
+            cleaned
+        }
+    }
+
+    /**
+     * Extracts the first valid web URL from arbitrary shared text, captions, or messages,
+     * and sanitizes it by removing tracking parameters.
      */
     fun extractFirstUrl(text: String?): String? {
         if (text.isNullOrBlank()) return null
         val match = HTTP_URL_REGEX.find(text)
         if (match != null) {
             val candidate = match.value.trimEnd('.', ',', ')', ']', ';', '>', '"', '\'', ':', '!')
-            if (isValidWebUrl(candidate)) {
-                return candidate
+            val sanitized = sanitizeUrl(candidate)
+            if (isValidWebUrl(sanitized)) {
+                return sanitized
             }
         }
         val trimmed = text.trim()
-        if (isValidWebUrl(trimmed)) {
-            return if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
-                "https://$trimmed"
-            } else {
-                trimmed
-            }
+        val sanitizedTrimmed = sanitizeUrl(trimmed)
+        if (isValidWebUrl(sanitizedTrimmed)) {
+            return sanitizedTrimmed
         }
         return null
     }
