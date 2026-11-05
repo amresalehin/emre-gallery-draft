@@ -39,6 +39,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -555,14 +556,25 @@ fun SavedPreviewSection(
 ) {
     val isDark = isSystemInDarkTheme()
     val listState = rememberLazyListState()
+    val containerShape = RoundedCornerShape(24.dp)
 
     Surface(
-        shape = RoundedCornerShape(32.dp),
-        color = if (isDark) MaterialTheme.colorScheme.surfaceContainerLow else MaterialTheme.colorScheme.surface,
+        shape = containerShape,
+        color = if (isDark) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
-        shadowElevation = if (isDark) 0.dp else 4.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.25f else 0.45f)),
-        modifier = modifier.testTag("downloader_saved_preview_section")
+        shadowElevation = 6.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.65f else 0.75f)
+        ),
+        modifier = modifier
+            .shadow(
+                elevation = 6.dp,
+                shape = containerShape,
+                ambientColor = if (isDark) Color.Black.copy(alpha = 0.5f) else Color.Black.copy(alpha = 0.12f),
+                spotColor = if (isDark) Color.Black.copy(alpha = 0.65f) else Color.Black.copy(alpha = 0.18f)
+            )
+            .testTag("downloader_saved_preview_section")
     ) {
         Column(
             modifier = Modifier
@@ -623,8 +635,9 @@ fun SavedPreviewSection(
                 }
             }
 
-            if (stacks.isNotEmpty()) {
-                // Horizontal list of stacked preview cards
+            val displayStacks = remember(stacks) { stacks.take(5) }
+            if (displayStacks.isNotEmpty()) {
+                // Horizontal list of stacked preview cards (bounded to max 5 items to avoid unlimited horizontal scrolling)
                 LazyRow(
                     state = listState,
                     modifier = Modifier
@@ -633,7 +646,7 @@ fun SavedPreviewSection(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     contentPadding = PaddingValues(horizontal = 2.dp, vertical = 6.dp)
                 ) {
-                    itemsIndexed(stacks, key = { _, item -> item.id }) { index, stack ->
+                    itemsIndexed(displayStacks, key = { _, item -> item.id }) { index, stack ->
                         SavedStackPreviewCard(
                             stack = stack,
                             accentIndex = index,
@@ -641,79 +654,62 @@ fun SavedPreviewSection(
                         )
                     }
                 }
-
-                // Page indicator dots below cards
-                val totalDots = minOf(stacks.size, 5).coerceAtLeast(1)
-                val currentDot = (listState.firstVisibleItemIndex).coerceIn(0, totalDots - 1)
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp)
-                        .testTag("saved_preview_dots_indicator"),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    repeat(totalDots) { dotIndex ->
-                        val isSelected = dotIndex == currentDot
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = 4.dp)
-                                .size(if (isSelected) 8.dp else 7.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (isSelected) MaterialTheme.colorScheme.onSurface
-                                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
-                                )
-                        )
-                    }
-                }
             } else {
-                // Empty state when user hasn't downloaded any media yet
-                Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                // Clean empty state with no text or explanation matching image_6118052c.png
+                val placeholderColor = if (isDark) {
+                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f)
+                } else {
+                    Color(0xFFE8E8EE)
+                }
+                val placeholderSubColor = if (isDark) {
+                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f)
+                } else {
+                    Color(0xFFEEEEF4)
+                }
+
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp)
+                        .padding(top = 4.dp, bottom = 8.dp)
+                        .clickable(onClick = onViewSavedLibrary)
+                        .testTag("saved_empty_state_container"),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 26.dp, horizontal = 18.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            modifier = Modifier.size(54.dp)
+                    repeat(2) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudDownload,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp)
+                            // Rounded thumbnail placeholder
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 86.dp, height = 52.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(placeholderColor)
+                            )
+
+                            // Title & subtitle line placeholders
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.72f)
+                                        .height(11.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(placeholderColor)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.44f)
+                                        .height(9.dp)
+                                        .clip(RoundedCornerShape(5.dp))
+                                        .background(placeholderSubColor)
                                 )
                             }
                         }
-
-                        Text(
-                            text = "No saved collections yet",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-
-                        Text(
-                            text = "Paste a link above to fetch and save high-resolution media. Your downloaded collections will appear here.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 12.dp)
-                        )
                     }
                 }
             }

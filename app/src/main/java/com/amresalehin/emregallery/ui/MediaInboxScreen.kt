@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -7,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -20,6 +22,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
@@ -520,25 +525,26 @@ fun MediaInboxScreen(
                     } else {
                         // SAVED LIBRARY VIEW
                         if (filteredStacks.isNotEmpty() || isDownloading) {
-                            LazyVerticalStaggeredGrid(
-                                columns = StaggeredGridCells.Fixed(2),
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 16.dp)
+                                    .padding(start = 12.dp, end = 20.dp)
                                     .testTag("inbox_media_grid"),
-                                contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalItemSpacing = 14.dp
+                                contentPadding = PaddingValues(top = 10.dp, bottom = 96.dp),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
                                 if (isDownloading) {
                                     item(key = "downloading_skeleton_card_item") {
                                         DownloadingSkeletonCard()
                                     }
                                 }
-                                items(filteredStacks, key = { it.id }) { stack ->
+                                itemsIndexed(filteredStacks, key = { _, stack -> stack.id }) { index, stack ->
                                     val isSelected = stack.id in selectedStackIds
                                     ImageStackCard(
                                         stack = stack,
+                                        accentIndex = index,
                                         isSelected = isSelected,
                                         isSelectionMode = isSelectionMode,
                                         onClick = {
@@ -573,53 +579,12 @@ fun MediaInboxScreen(
                                 }
                             }
                         } else {
+                            // In empty state keep completely blank as requested
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 24.dp)
-                                    .testTag("inbox_empty_state"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        modifier = Modifier.size(64.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = Icons.Default.FolderOpen,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(32.dp)
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = "No saved downloads yet",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Paste any video, image, or audio URL in Search & Fetch to download media.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = TextAlign.Center
-                                    )
-                                    Spacer(Modifier.height(4.dp))
-                                    Button(
-                                        onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE }
-                                    ) {
-                                        Icon(Icons.Default.Search, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Search & Fetch Media")
-                                    }
-                                }
-                            }
+                                    .testTag("inbox_empty_state")
+                            )
                         }
                     }
                 }
@@ -1019,12 +984,55 @@ fun TrueMediaMosaicThumbnail(
 }
 
 /**
- * Image Stack Card displaying real downloaded media in True Mosaic format
+ * Stack layer color palettes (matching image_9a85efa6.png):
+ * Each collection gets a distinct soft accent color (purple, warm amber, mint/green, rose/pink, cyan, etc.)
+ */
+private val StackLayerPalettesLight = listOf(
+    // 1. Purple / Lavender (as in Taj Mahal card)
+    listOf(Color(0xFFEDE9FE), Color(0xFFDDD6FE)),
+    // 2. Warm Amber / Peach (as in Ancient India card)
+    listOf(Color(0xFFFEF3C7), Color(0xFFFFD1D8)),
+    // 3. Mint / Emerald (as in Mughal Art card)
+    listOf(Color(0xFFD1FAE5), Color(0xFFA7F3D0)),
+    // 4. Rose / Pink (as in Indian Architecture card)
+    listOf(Color(0xFFFCE7F3), Color(0xFFFBCFE8)),
+    // 5. Cyan / Sky Blue
+    listOf(Color(0xFFCFFAFE), Color(0xFFA5F3FC)),
+    // 6. Soft Indigo / Periwinkle
+    listOf(Color(0xFFE0E7FF), Color(0xFFC7D2FE))
+)
+
+private val StackLayerPalettesDark = listOf(
+    // 1. Purple / Lavender
+    listOf(Color(0xFF312E81).copy(alpha = 0.65f), Color(0xFF3730A3).copy(alpha = 0.45f)),
+    // 2. Warm Amber / Peach
+    listOf(Color(0xFF78350F).copy(alpha = 0.65f), Color(0xFF92400E).copy(alpha = 0.45f)),
+    // 3. Mint / Emerald
+    listOf(Color(0xFF064E3B).copy(alpha = 0.65f), Color(0xFF065F46).copy(alpha = 0.5f)),
+    // 4. Rose / Pink
+    listOf(Color(0xFF831843).copy(alpha = 0.65f), Color(0xFF9D174D).copy(alpha = 0.45f)),
+    // 5. Cyan / Sky Blue
+    listOf(Color(0xFF164E63).copy(alpha = 0.65f), Color(0xFF155E75).copy(alpha = 0.45f)),
+    // 6. Soft Indigo
+    listOf(Color(0xFF1E1B4B).copy(alpha = 0.65f), Color(0xFF312E81).copy(alpha = 0.45f))
+)
+
+/**
+ * Image Stack Card displaying real downloaded media matching image_9a85efa6.png:
+ * 1. Single hero thumbnail: One large cover image instead of 2x2 collage
+ * 2. Portrait-like card composition: Cover occupies upper section
+ * 3. Stacked card effect: Two offset layers behind card to create physical media-stack appearance
+ * 4. Colored stack layers: Distinct soft accent colors
+ * 5. Source favicon: Website favicon displayed beside collection title
+ * 6. Information section: Title and date/item count beneath cover
+ * 7. Clean cover: No playback overlays, no +13 badge, no media-count badge
+ * 8. Theme-aware card background and text
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ImageStackCard(
     stack: MediaInboxStack,
+    accentIndex: Int = 0,
     isSelected: Boolean = false,
     isSelectionMode: Boolean = false,
     onClick: () -> Unit,
@@ -1032,123 +1040,111 @@ fun ImageStackCard(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val dateStr = remember(stack.timestampMillis) {
-        SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(stack.timestampMillis))
+    val context = LocalContext.current
+    val isDark = isSystemInDarkTheme()
+    val layerColors = remember(accentIndex, isDark) {
+        val list = if (isDark) StackLayerPalettesDark else StackLayerPalettesLight
+        list[accentIndex % list.size]
     }
-    val hasVideo = remember(stack.items) { stack.items.any { it.isVideo || it.isStream } }
 
-    val cardThumbnailHeight = remember(stack.items) {
-        when {
-            stack.items.size == 1 && (stack.items[0].isVideo || stack.items[0].isStream) -> 145.dp
-            stack.items.size == 1 -> 175.dp
-            stack.items.size == 2 -> 160.dp
-            stack.items.size == 3 -> 180.dp
-            else -> 190.dp
-        }
+    val dateStr = remember(stack.timestampMillis) {
+        SimpleDateFormat("MMM dd, yyyy", Locale.US).format(Date(stack.timestampMillis))
     }
+
+    // Real single hero cover image from stack items (prefer image, fallback to first item)
+    val coverItem = remember(stack.items) {
+        stack.items.firstOrNull { !it.isVideo && it.localUri.isNotBlank() }
+            ?: stack.items.firstOrNull { it.localUri.isNotBlank() }
+            ?: stack.items.firstOrNull()
+    }
+    val coverImageModel = remember(coverItem) {
+        coverItem?.localUri?.takeIf { it.isNotBlank() }
+            ?: coverItem?.sourceUrl?.takeIf { it.isNotBlank() }
+    }
+
+    val cardShape = RoundedCornerShape(22.dp)
 
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .padding(end = 8.dp, bottom = 8.dp)
             .testTag("inbox_image_stack_${stack.id}")
     ) {
-        // Stack visual effect: Subtle layered card underneath to look like an image stack
-        Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+        // Layer 2 (Backmost stacked card - offset 8dp bottom-right)
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 5.dp, start = 4.dp, end = 4.dp)
-                .height(cardThumbnailHeight + 60.dp)
-        ) {}
+                .matchParentSize()
+                .offset(x = 8.dp, y = 8.dp)
+                .background(layerColors[1], shape = cardShape)
+                .border(1.dp, layerColors[1].copy(alpha = 0.85f), shape = cardShape)
+        )
 
-        ElevatedCard(
+        // Layer 1 (Middle stacked card - offset 4dp bottom-right)
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .offset(x = 4.dp, y = 4.dp)
+                .background(layerColors[0], shape = cardShape)
+                .border(1.dp, layerColors[0].copy(alpha = 0.9f), shape = cardShape)
+        )
+
+        // Front Main Card
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
                 .then(
                     if (isSelected) {
-                        Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(18.dp))
+                        Modifier.border(2.5.dp, MaterialTheme.colorScheme.primary, shape = cardShape)
                     } else Modifier
                 )
                 .combinedClickable(
                     onClick = onClick,
                     onLongClick = onLongClick
                 ),
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.elevatedCardColors(
-                containerColor = if (isSelected) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHigh
-                }
-            ),
-            elevation = CardDefaults.elevatedCardElevation(
-                defaultElevation = if (isSelected) 6.dp else 3.dp
+            shape = cardShape,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 2.dp,
+            shadowElevation = if (isDark) 1.dp else 3.dp,
+            border = BorderStroke(
+                1.dp,
+                if (isSelected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.35f else 0.45f)
             )
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // Media thumbnail container with True Mosaic
+                // 1. Single Hero Thumbnail (Portrait composition, clean with no badges or overlays)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(cardThumbnailHeight)
+                        .height(165.dp)
+                        .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 16.dp, bottomEnd = 16.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 ) {
-                    TrueMediaMosaicThumbnail(
-                        items = stack.items,
-                        modifier = Modifier.fillMaxSize()
-                    )
-
-                    // Video Play Icon overlay if stack has video
-                    if (hasVideo) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.6f),
-                            modifier = Modifier
-                                .align(Alignment.Center)
-                                .size(34.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = "Video",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // Stack Count Badge in top right corner
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color.Black.copy(alpha = 0.72f),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    if (coverImageModel != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(coverImageModel)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = stack.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (hasVideo) Icons.Default.VideoLibrary else Icons.Default.PhotoLibrary,
+                                imageVector = Icons.Default.Image,
                                 contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                text = "${stack.items.size}",
-                                color = Color.White,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.size(42.dp)
                             )
                         }
                     }
 
-                    // Selection Indicator in top left corner
+                    // Selection indicator checkmark when in selection mode
                     if (isSelectionMode) {
                         Surface(
                             shape = CircleShape,
@@ -1160,7 +1156,7 @@ fun ImageStackCard(
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .padding(8.dp)
-                                .size(28.dp)
+                                .size(26.dp)
                                 .testTag("stack_selection_check_${stack.id}")
                         ) {
                             Box(contentAlignment = Alignment.Center) {
@@ -1169,51 +1165,95 @@ fun ImageStackCard(
                                         imageVector = Icons.Default.Check,
                                         contentDescription = "Selected",
                                         tint = MaterialTheme.colorScheme.onPrimary,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
                         }
                     }
-
-                    // Source domain tag in bottom left
-                    if (stack.sourceDomain.isNotBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color.Black.copy(alpha = 0.65f),
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .padding(8.dp)
-                        ) {
-                            Text(
-                                text = stack.sourceDomain,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
                 }
 
-                // Info text lines
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Text(
-                        text = stack.title.ifBlank { stack.sourceDomain.ifBlank { "Media Stack" } },
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(Modifier.height(2.dp))
+                // 2. Information Section beneath the cover image
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    // Title row with source favicon
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        // Website favicon avatar
+                        val cleanDomain = remember(stack.sourceDomain, stack.sourceUrl) {
+                            val raw = stack.sourceDomain.ifBlank {
+                                try {
+                                    Uri.parse(stack.sourceUrl).host.orEmpty()
+                                } catch (_: Exception) { "" }
+                            }
+                            raw.removePrefix("www.").lowercase().trim()
+                        }
+                        val faviconUrl = remember(cleanDomain) {
+                            if (cleanDomain.isNotBlank()) "https://www.google.com/s2/favicons?domain=$cleanDomain&sz=64" else null
+                        }
+
+                        var faviconFailed by remember(faviconUrl) { mutableStateOf(false) }
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f),
+                            modifier = Modifier.size(17.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (!faviconFailed && faviconUrl != null) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context)
+                                            .data(faviconUrl)
+                                            .crossfade(true)
+                                            .listener(onError = { _, _ -> faviconFailed = true })
+                                            .build(),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                } else {
+                                    val initial = cleanDomain.firstOrNull()?.uppercaseChar()?.toString()
+                                        ?: stack.title.firstOrNull()?.uppercaseChar()?.toString()
+                                        ?: "W"
+                                    Text(
+                                        text = initial,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        // Collection Title
+                        Text(
+                            text = stack.title.ifBlank { stack.sourceDomain.ifBlank { "Saved Collection" } },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    // Formatted Date and item count
                     Text(
                         text = "$dateStr • ${stack.items.size} ${if (stack.items.size == 1) "item" else "items"}",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontSize = 11.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 2.dp)
                     )
                 }
             }

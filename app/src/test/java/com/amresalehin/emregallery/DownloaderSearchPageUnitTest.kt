@@ -297,10 +297,10 @@ class DownloaderSearchPageUnitTest {
         assertEquals(1, accentIndex2)
         assertEquals(2, accentIndex3)
 
-        // Indicator dots count calculation
-        val stacksList = listOf(stack1)
-        val totalDots = minOf(stacksList.size, 5).coerceAtLeast(1)
-        assertEquals(1, totalDots)
+        // Display stacks limited to 5 to prevent unlimited horizontal scrolling
+        val stacksList = List(12) { stack1 }
+        val displayStacks = stacksList.take(5)
+        assertEquals(5, displayStacks.size)
     }
 }
 

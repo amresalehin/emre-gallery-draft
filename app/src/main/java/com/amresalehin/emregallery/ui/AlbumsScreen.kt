@@ -83,6 +83,8 @@ fun AlbumsScreen(
     val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
     var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
+    val inboxRepo = remember(context) { com.amresalehin.emregallery.data.MediaInboxRepository.getInstance(context) }
+    val savedStacks by inboxRepo.stacks.collectAsState()
     var detectedPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
     var engineMenuExpanded by remember { mutableStateOf(false) }
 
@@ -615,6 +617,18 @@ fun AlbumsScreen(
                     }
                 }
             }
+        }
+
+        // Saved Container (Matching Downloader Main Page)
+        item {
+            SavedPreviewSection(
+                stacks = savedStacks,
+                onViewSavedLibrary = { onFilter("Saved") },
+                onSelectStack = { _ -> onFilter("Saved") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("albums_saved_preview_section")
+            )
         }
 
         // 3. Maps Card (strictly black-grey-white)
