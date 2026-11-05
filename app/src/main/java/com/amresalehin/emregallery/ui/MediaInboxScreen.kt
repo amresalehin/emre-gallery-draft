@@ -27,7 +27,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -46,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,6 +77,12 @@ import java.util.*
 import kotlin.math.abs
 import kotlin.math.sqrt
 
+enum class DownloaderViewMode {
+    SEARCH_PAGE,
+    DOWNLOADER_PAGE,
+    SAVED_LIBRARY
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MediaInboxScreen(
@@ -92,6 +105,9 @@ fun MediaInboxScreen(
     }
 
     var searchQuery by remember { mutableStateOf("") }
+    var isSearchFocused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var selectedStackForDetail by remember { mutableStateOf<MediaInboxStack?>(null) }
     var showFilterSheet by remember { mutableStateOf(false) }
     var showScraperDrawer by remember { mutableStateOf(false) }
@@ -105,15 +121,27 @@ fun MediaInboxScreen(
     val isSelectionMode = selectedStackIds.isNotEmpty()
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
+    var currentViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
+    var activeFetchUrl by remember { mutableStateOf("") }
+
     BackHandler(enabled = !showFullScreenBrowser) {
         if (isSelectionMode) {
             selectedStackIds = emptySet()
-        } else if (showScraperDrawer) {
-            showScraperDrawer = false
+        } else if (isSearchFocused || searchQuery.isNotEmpty()) {
+            searchQuery = ""
+            isSearchFocused = false
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        } else if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE) {
+            currentViewMode = DownloaderViewMode.SEARCH_PAGE
         } else if (selectedStackForDetail != null) {
             selectedStackForDetail = null
         } else if (showFilterSheet) {
             showFilterSheet = false
+        } else if (showScraperDrawer) {
+            showScraperDrawer = false
+        } else if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
+            currentViewMode = DownloaderViewMode.SEARCH_PAGE
         } else {
             onBack()
         }
@@ -142,299 +170,529 @@ fun MediaInboxScreen(
             .fillMaxSize()
             .testTag("media_inbox_screen")
     ) {
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            containerColor = MaterialTheme.colorScheme.background,
-        floatingActionButton = {
-            if (!isSelectionMode) {
-                // Floating Action Button (+) matching Screenshot 1
-                FloatingActionButton(
-                    onClick = { showScraperDrawer = true },
-                    shape = RoundedCornerShape(18.dp),
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-                    modifier = Modifier
-                        .padding(bottom = 16.dp, end = 8.dp)
-                        .size(56.dp)
-                        .testTag("media_inbox_fab_add")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Open Media Downloader",
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            if (filteredStacks.isNotEmpty() || isDownloading) {
-                LazyVerticalStaggeredGrid(
-                    columns = StaggeredGridCells.Fixed(2),
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp)
-                        .testTag("inbox_media_grid"),
-                    contentPadding = PaddingValues(top = 80.dp, bottom = 96.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalItemSpacing = 14.dp
-                ) {
-                    // Show skeleton of a single card when a media is downloading
-                    if (isDownloading) {
-                        item(key = "downloading_skeleton_card_item") {
-                            DownloadingSkeletonCard()
-                        }
+        if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE && activeFetchUrl.isNotBlank()) {
+            DownloaderResultsPage(
+                targetUrl = activeFetchUrl,
+                onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                onOpenBrowser = { url ->
+                    browserInitialUrl = url
+                    showFullScreenBrowser = true
+                },
+                onDownloadComplete = { count ->
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Downloaded $count media item(s) to Saved Library!")
                     }
-                    items(filteredStacks, key = { it.id }) { stack ->
-                        val isSelected = stack.id in selectedStackIds
-                        ImageStackCard(
-                            stack = stack,
-                            isSelected = isSelected,
-                            isSelectionMode = isSelectionMode,
-                            onClick = {
+                },
+                onViewSavedLibrary = {
+                    currentViewMode = DownloaderViewMode.SAVED_LIBRARY
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Scaffold(
+                modifier = Modifier.fillMaxSize(),
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+                containerColor = MaterialTheme.colorScheme.background,
+                topBar = {
+                    Surface(
+                        color = MaterialTheme.colorScheme.background,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                    ) {
+                        if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
                                 if (isSelectionMode) {
-                                    selectedStackIds = if (isSelected) {
-                                        selectedStackIds - stack.id
-                                    } else {
-                                        selectedStackIds + stack.id
+                                    // Selection mode toolbar
+                                    Surface(
+                                        shape = RoundedCornerShape(26.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        tonalElevation = 6.dp,
+                                        shadowElevation = 8.dp,
+                                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(52.dp)
+                                            .testTag("inbox_selection_toolbar")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            IconButton(
+                                                onClick = { selectedStackIds = emptySet() },
+                                                modifier = Modifier.size(38.dp).testTag("selection_close_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Exit selection",
+                                                    tint = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+
+                                            Spacer(Modifier.width(4.dp))
+
+                                            Text(
+                                                text = "${selectedStackIds.size} selected",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.weight(1f).testTag("selection_count_text")
+                                            )
+
+                                            val allSelected = filteredStacks.isNotEmpty() && filteredStacks.all { it.id in selectedStackIds }
+                                            IconButton(
+                                                onClick = {
+                                                    selectedStackIds = if (allSelected) {
+                                                        emptySet()
+                                                    } else {
+                                                        filteredStacks.map { it.id }.toSet()
+                                                    }
+                                                },
+                                                modifier = Modifier.size(38.dp).testTag("selection_select_all_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (allSelected) Icons.Default.Deselect else Icons.Default.SelectAll,
+                                                    contentDescription = if (allSelected) "Deselect all" else "Select all",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+
+                                            IconButton(
+                                                onClick = { showDeleteConfirmationDialog = true },
+                                                modifier = Modifier.size(38.dp).testTag("selection_delete_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "Delete selected stacks",
+                                                    tint = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                        }
                                     }
                                 } else {
-                                    selectedStackForDetail = stack
-                                }
-                            },
-                            onLongClick = {
-                                if (!isSelectionMode) {
-                                    selectedStackIds = setOf(stack.id)
-                                } else {
-                                    selectedStackIds = if (isSelected) {
-                                        selectedStackIds - stack.id
-                                    } else {
-                                        selectedStackIds + stack.id
+                                    // One Unified Search Bar
+                                    Surface(
+                                        shape = RoundedCornerShape(26.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(52.dp)
+                                            .testTag("inbox_search_pill")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            // Back Button inside search bar
+                                            IconButton(
+                                                onClick = {
+                                                    if (isSearchFocused || searchQuery.isNotEmpty()) {
+                                                        searchQuery = ""
+                                                        isSearchFocused = false
+                                                        focusManager.clearFocus()
+                                                        keyboardController?.hide()
+                                                    } else {
+                                                        currentViewMode = DownloaderViewMode.SEARCH_PAGE
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .testTag("downloader_main_back_btn")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                                    contentDescription = "Back",
+                                                    tint = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+
+                                            // Switcher Pill: download icon only and folder icon only (Hidden when search field receives focus)
+                                            if (!isSearchFocused) {
+                                                Spacer(Modifier.width(2.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(16.dp),
+                                                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                                                    modifier = Modifier.height(34.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(2.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        // Fetch icon only
+                                                        Surface(
+                                                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                                                            shape = RoundedCornerShape(14.dp),
+                                                            color = if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                                                            modifier = Modifier
+                                                                .size(width = 34.dp, height = 30.dp)
+                                                                .testTag("tab_search_fetch")
+                                                        ) {
+                                                            Box(contentAlignment = Alignment.Center) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.ArrowDownward,
+                                                                    contentDescription = "Fetch",
+                                                                    tint = if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                            }
+                                                        }
+
+                                                        // Saved icon only
+                                                        Surface(
+                                                            onClick = { currentViewMode = DownloaderViewMode.SAVED_LIBRARY },
+                                                            shape = RoundedCornerShape(14.dp),
+                                                            color = if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                                                            modifier = Modifier
+                                                                .size(width = 34.dp, height = 30.dp)
+                                                                .testTag("tab_saved_library")
+                                                        ) {
+                                                            Box(contentAlignment = Alignment.Center) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.Folder,
+                                                                    contentDescription = "Saved",
+                                                                    tint = if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Spacer(Modifier.width(8.dp))
+
+                                                // Divider between switcher and search text
+                                                Box(
+                                                    modifier = Modifier
+                                                        .width(1.dp)
+                                                        .height(18.dp)
+                                                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                                )
+
+                                                Spacer(Modifier.width(8.dp))
+                                            }
+
+                                            // Search text field (No search icon, expands to fill available space)
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .padding(horizontal = 4.dp),
+                                                contentAlignment = Alignment.CenterStart
+                                            ) {
+                                                if (searchQuery.isEmpty()) {
+                                                    Text(
+                                                        text = "Find in Saved Library...",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                BasicTextField(
+                                                    value = searchQuery,
+                                                    onValueChange = { searchQuery = it },
+                                                    singleLine = true,
+                                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    ),
+                                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                                    keyboardActions = KeyboardActions(onSearch = {
+                                                        keyboardController?.hide()
+                                                    }),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .onFocusChanged { focusState ->
+                                                            isSearchFocused = focusState.isFocused
+                                                        }
+                                                        .testTag("find_in_inbox_input")
+                                                )
+                                            }
+
+                                            // Clear (×) button on right side of search field
+                                            if (isSearchFocused || searchQuery.isNotEmpty()) {
+                                                IconButton(
+                                                    onClick = {
+                                                        searchQuery = ""
+                                                        // Only clears query without exiting search mode or dismissing keyboard
+                                                    },
+                                                    modifier = Modifier
+                                                        .size(34.dp)
+                                                        .testTag("inbox_search_clear_btn")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Clear search",
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            // Filter / settings button (Tune) - hidden when isSearchFocused
+                                            if (!isSearchFocused && searchQuery.isEmpty()) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .width(1.dp)
+                                                        .height(18.dp)
+                                                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                                )
+
+                                                IconButton(
+                                                    onClick = { showFilterSheet = true },
+                                                    modifier = Modifier
+                                                        .size(38.dp)
+                                                        .testTag("inbox_tune_button")
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Tune,
+                                                        contentDescription = "Sort and filter inbox",
+                                                        tint = MaterialTheme.colorScheme.onSurface,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                            },
-                            onDelete = {
-                                inboxRepo.deleteStack(stack.id)
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("Stack removed from Inbox")
                                 }
                             }
-                        )
+                        } else {
+                            // SEARCH_PAGE header
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = onBack,
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .testTag("downloader_main_back_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+                                Spacer(Modifier.width(8.dp))
+
+                                // Switcher Capsule
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(2.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Fetch Pill (Active)
+                                        Surface(
+                                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier
+                                                .size(width = 34.dp, height = 30.dp)
+                                                .testTag("tab_search_fetch")
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDownward,
+                                                    contentDescription = "Fetch",
+                                                    tint = MaterialTheme.colorScheme.surface,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+
+                                        // Saved Pill (Inactive)
+                                        Surface(
+                                            onClick = { currentViewMode = DownloaderViewMode.SAVED_LIBRARY },
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = Color.Transparent,
+                                            modifier = Modifier
+                                                .size(width = 34.dp, height = 30.dp)
+                                                .testTag("tab_saved_library")
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Folder,
+                                                    contentDescription = "Saved",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                floatingActionButton = {
+                    if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY && !isSelectionMode) {
+                        FloatingActionButton(
+                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                            shape = RoundedCornerShape(20.dp),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurface,
+                            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+                            modifier = Modifier
+                                .padding(bottom = 16.dp, end = 8.dp)
+                                .size(56.dp)
+                                .testTag("media_inbox_fab_add")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "New Media Download",
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
                     }
                 }
-            } else {
-                // Completely empty in empty state: no skeleton too
+            ) { innerPadding ->
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .testTag("inbox_empty_state")
-                )
-            }
-
-            // Top Bar: Selection Toolbar when selecting, otherwise Find in Inbox Search Bar
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                if (isSelectionMode) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        tonalElevation = 6.dp,
-                        shadowElevation = 8.dp,
-                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .testTag("inbox_selection_toolbar")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(start = 6.dp, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Close/Cancel button
-                            IconButton(
-                                onClick = { selectedStackIds = emptySet() },
+                        .padding(innerPadding)
+                ) {
+                    if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) {
+                        DownloaderSearchMainPage(
+                            onFetchUrl = { targetUrl ->
+                                activeFetchUrl = targetUrl
+                                currentViewMode = DownloaderViewMode.DOWNLOADER_PAGE
+                            },
+                            onOpenBrowser = { targetUrl ->
+                                browserInitialUrl = targetUrl
+                                showFullScreenBrowser = true
+                            },
+                            onViewSavedLibrary = {
+                                currentViewMode = DownloaderViewMode.SAVED_LIBRARY
+                            },
+                            activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED } + if (inMemoryDownloading) 1 else 0,
+                            savedStacksCount = stacks.size,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        // SAVED LIBRARY VIEW
+                        if (filteredStacks.isNotEmpty() || isDownloading) {
+                            LazyVerticalStaggeredGrid(
+                                columns = StaggeredGridCells.Fixed(2),
                                 modifier = Modifier
-                                    .size(42.dp)
-                                    .testTag("selection_close_button")
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp)
+                                    .testTag("inbox_media_grid"),
+                                contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalItemSpacing = 14.dp
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Exit selection",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            Spacer(Modifier.width(4.dp))
-
-                            // Selected count text
-                            Text(
-                                text = "${selectedStackIds.size} selected",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("selection_count_text")
-                            )
-
-                            // Select all toggle
-                            val allSelected = filteredStacks.isNotEmpty() && filteredStacks.all { it.id in selectedStackIds }
-                            IconButton(
-                                onClick = {
-                                    selectedStackIds = if (allSelected) {
-                                        emptySet()
-                                    } else {
-                                        filteredStacks.map { it.id }.toSet()
+                                if (isDownloading) {
+                                    item(key = "downloading_skeleton_card_item") {
+                                        DownloadingSkeletonCard()
                                     }
-                                },
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .testTag("selection_select_all_button")
-                            ) {
-                                Icon(
-                                    imageVector = if (allSelected) Icons.Default.Deselect else Icons.Default.SelectAll,
-                                    contentDescription = if (allSelected) "Deselect all" else "Select all",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                }
+                                items(filteredStacks, key = { it.id }) { stack ->
+                                    val isSelected = stack.id in selectedStackIds
+                                    ImageStackCard(
+                                        stack = stack,
+                                        isSelected = isSelected,
+                                        isSelectionMode = isSelectionMode,
+                                        onClick = {
+                                            if (isSelectionMode) {
+                                                selectedStackIds = if (isSelected) {
+                                                    selectedStackIds - stack.id
+                                                } else {
+                                                    selectedStackIds + stack.id
+                                                }
+                                            } else {
+                                                selectedStackForDetail = stack
+                                            }
+                                        },
+                                        onLongClick = {
+                                            if (!isSelectionMode) {
+                                                selectedStackIds = setOf(stack.id)
+                                            } else {
+                                                selectedStackIds = if (isSelected) {
+                                                    selectedStackIds - stack.id
+                                                } else {
+                                                    selectedStackIds + stack.id
+                                                }
+                                            }
+                                        },
+                                        onDelete = {
+                                            inboxRepo.deleteStack(stack.id)
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar("Stack removed from Inbox")
+                                            }
+                                        }
+                                    )
+                                }
                             }
-
-                            // Delete button (in select tool bar keep delete button)
-                            IconButton(
-                                onClick = { showDeleteConfirmationDialog = true },
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .testTag("selection_delete_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Delete selected stacks",
-                                    tint = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        tonalElevation = 4.dp,
-                        shadowElevation = 8.dp,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .testTag("inbox_search_pill")
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(start = 6.dp, end = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Back navigation button
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier.size(42.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            // Search icon
-                            Icon(
-                                imageVector = Icons.Default.Search,
-                                contentDescription = "Search",
-                                modifier = Modifier.size(22.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            Spacer(Modifier.width(10.dp))
-
-                            // Text input field with "Find in Inbox" placeholder
+                        } else {
                             Box(
-                                modifier = Modifier.weight(1f),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                if (searchQuery.isEmpty()) {
-                                    Text(
-                                        text = "Find in Inbox",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
-                                    )
-                                }
-                                BasicTextField(
-                                    value = searchQuery,
-                                    onValueChange = { searchQuery = it },
-                                    singleLine = true,
-                                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .testTag("find_in_inbox_input")
-                                )
-                            }
-
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(
-                                    onClick = { searchQuery = "" },
-                                    modifier = Modifier.size(36.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Clear search",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-
-                            // Browser button moved inside the search bar
-                            IconButton(
-                                onClick = { showFullScreenBrowser = true },
                                 modifier = Modifier
-                                    .size(42.dp)
-                                    .testTag("inbox_browser_button")
+                                    .fillMaxSize()
+                                    .padding(horizontal = 24.dp)
+                                    .testTag("inbox_empty_state"),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Language,
-                                    contentDescription = "Open In-App Browser",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            // Tune / Filter icon on the right (as seen in Screenshot 1)
-                            IconButton(
-                                onClick = { showFilterSheet = true },
-                                modifier = Modifier.size(42.dp).testTag("inbox_tune_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Tune,
-                                    contentDescription = "Sort and filter inbox",
-                                    tint = MaterialTheme.colorScheme.onSurface
-                                )
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        modifier = Modifier.size(64.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.FolderOpen,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "No saved downloads yet",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Paste any video, image, or audio URL in Search & Fetch to download media.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Button(
+                                        onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE }
+                                    ) {
+                                        Icon(Icons.Default.Search, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Search & Fetch Media")
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
 
     // Delete Confirmation Dialog for selected stacks
     if (showDeleteConfirmationDialog) {

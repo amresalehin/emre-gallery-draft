@@ -25,14 +25,8 @@ class BrowserHistoryManager(private val context: Context) {
 
     private val historyKey = stringPreferencesKey("browser_sites_history_v1")
 
-    // Default top 5 visited / recommended sites for first launch
-    val defaultTopSites = listOf(
-        BrowserSite("https://www.google.com", "Google", "google.com", visitCount = 10),
-        BrowserSite("https://en.wikipedia.org", "Wikipedia", "wikipedia.org", visitCount = 8),
-        BrowserSite("https://unsplash.com", "Unsplash", "unsplash.com", visitCount = 6),
-        BrowserSite("https://pexels.com", "Pexels", "pexels.com", visitCount = 4),
-        BrowserSite("https://archive.org", "Archive", "archive.org", visitCount = 2)
-    )
+    // No hardcoded sites; history relies strictly on user visits
+    val defaultTopSites: List<BrowserSite> = emptyList()
 
     val allSites: Flow<List<BrowserSite>> = context.galleryDataStore.data.map { prefs ->
         val raw = prefs[historyKey]
@@ -135,6 +129,12 @@ class BrowserHistoryManager(private val context: Context) {
                 jsonArray.put(obj)
             }
             prefs[historyKey] = jsonArray.toString()
+        }
+    }
+
+    suspend fun clearHistory() {
+        context.galleryDataStore.edit { prefs ->
+            prefs.remove(historyKey)
         }
     }
 }
