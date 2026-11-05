@@ -53,9 +53,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -943,13 +945,28 @@ fun DownloaderResultsPage(
             .removePrefix("http://")
             .removePrefix("www.")
     }
-    var urlInput by remember(cleanDisplayUrl) { mutableStateOf(cleanDisplayUrl) }
+    var urlTextFieldValue by remember(cleanDisplayUrl) {
+        mutableStateOf(
+            TextFieldValue(
+                text = cleanDisplayUrl,
+                selection = TextRange(cleanDisplayUrl.length)
+            )
+        )
+    }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    // Download & Checkbox dynamic states
+    var isDownloaded by remember { mutableStateOf(false) }
+    var downloadedItemIds by remember { mutableStateOf(setOf<String>()) }
+
     LaunchedEffect(isEditingUrl) {
         if (isEditingUrl) {
+            urlTextFieldValue = TextFieldValue(
+                text = cleanDisplayUrl,
+                selection = TextRange(cleanDisplayUrl.length)
+            )
             focusRequester.requestFocus()
             keyboardController?.show()
         }
@@ -968,6 +985,8 @@ fun DownloaderResultsPage(
     LaunchedEffect(activeUrl) {
         if (activeUrl.isNotBlank()) {
             selectedItemIds = emptySet()
+            downloadedItemIds = emptySet()
+            isDownloaded = false
             dynamicDimensions.clear()
             dualExtractor.extract(activeUrl, scope)
         }
@@ -1062,7 +1081,7 @@ fun DownloaderResultsPage(
     BackHandler {
         if (isEditingUrl) {
             isEditingUrl = false
-            urlInput = cleanDisplayUrl
+            urlTextFieldValue = TextFieldValue(cleanDisplayUrl, selection = TextRange(cleanDisplayUrl.length))
             focusManager.clearFocus()
             keyboardController?.hide()
         } else if (showDimensionFilter) {
@@ -1111,7 +1130,7 @@ fun DownloaderResultsPage(
                             onClick = {
                                 if (isEditingUrl) {
                                     isEditingUrl = false
-                                    urlInput = cleanDisplayUrl
+                                    urlTextFieldValue = TextFieldValue(cleanDisplayUrl, selection = TextRange(cleanDisplayUrl.length))
                                     focusManager.clearFocus()
                                     keyboardController?.hide()
                                 } else {
@@ -1127,7 +1146,7 @@ fun DownloaderResultsPage(
                             )
                         }
 
-                        // Web Address Area: Tappable to edit, displays consistent clean URL matching inbox search page
+                        // Web Address Area: Tappable to edit, sets cursor to the end of typed text
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -1136,6 +1155,10 @@ fun DownloaderResultsPage(
                                     indication = null
                                 ) {
                                     if (!isEditingUrl) {
+                                        urlTextFieldValue = TextFieldValue(
+                                            text = cleanDisplayUrl,
+                                            selection = TextRange(cleanDisplayUrl.length)
+                                        )
                                         isEditingUrl = true
                                     }
                                 }
@@ -1155,8 +1178,8 @@ fun DownloaderResultsPage(
                                 )
                             } else {
                                 BasicTextField(
-                                    value = urlInput,
-                                    onValueChange = { urlInput = it },
+                                    value = urlTextFieldValue,
+                                    onValueChange = { urlTextFieldValue = it },
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(
                                         keyboardType = KeyboardType.Uri,
@@ -1164,11 +1187,13 @@ fun DownloaderResultsPage(
                                     ),
                                     keyboardActions = KeyboardActions(
                                         onGo = {
-                                            val trimmed = urlInput.trim()
+                                            val trimmed = urlTextFieldValue.text.trim()
                                             if (trimmed.isNotBlank()) {
                                                 val sanitized = MediaClassifier.sanitizeUrl(trimmed)
                                                 activeUrl = sanitized
                                                 selectedItemIds = emptySet()
+                                                downloadedItemIds = emptySet()
+                                                isDownloaded = false
                                                 dynamicDimensions.clear()
                                                 dualExtractor.extract(sanitized, scope)
                                             }
@@ -1195,11 +1220,11 @@ fun DownloaderResultsPage(
                         if (isEditingUrl) {
                             IconButton(
                                 onClick = {
-                                    if (urlInput.isNotEmpty()) {
-                                        urlInput = ""
+                                    if (urlTextFieldValue.text.isNotEmpty()) {
+                                        urlTextFieldValue = TextFieldValue("", selection = TextRange(0))
                                     } else {
                                         isEditingUrl = false
-                                        urlInput = cleanDisplayUrl
+                                        urlTextFieldValue = TextFieldValue(cleanDisplayUrl, selection = TextRange(cleanDisplayUrl.length))
                                         focusManager.clearFocus()
                                         keyboardController?.hide()
                                     }
@@ -1396,6 +1421,7 @@ fun DownloaderResultsPage(
                         modifier = Modifier
                             .size(34.dp)
                             .clickable {
+                                isDownloaded = false
                                 val ids = filteredItems.map { it.id }.toSet()
                                 selectedItemIds = if (isAllSelected) selectedItemIds - ids else selectedItemIds + ids
                             }
@@ -1517,8 +1543,10 @@ fun DownloaderResultsPage(
                             DownloaderMediaCard(
                                 item = item,
                                 isSelected = item.id in selectedItemIds,
+                                isDownloaded = item.id in downloadedItemIds,
                                 dynamicDimensions = dynamicDimensions,
                                 onToggle = {
+                                    isDownloaded = false
                                     selectedItemIds = if (item.id in selectedItemIds) {
                                         selectedItemIds - item.id
                                     } else {
@@ -1583,10 +1611,10 @@ fun DownloaderResultsPage(
                     }
                 }
 
-                // 6. Centered Floating Download Action Pill
+                // 6. Centered Floating Download Action Pill (Turns ticked on download)
                 Surface(
                     shape = RoundedCornerShape(24.dp),
-                    color = Color(0xFF212529),
+                    color = if (isDownloaded) Color(0xFF1B5E20) else Color(0xFF212529),
                     shadowElevation = 8.dp,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1615,8 +1643,10 @@ fun DownloaderResultsPage(
 
                                 downloadProgress = 1.0f
                                 downloadStatusText = "Queued ${deduplicated.size} item(s)"
-                                delay(400)
+                                delay(300)
+                                downloadedItemIds = downloadedItemIds + deduplicated.map { it.id }.toSet()
                                 isDownloading = false
+                                isDownloaded = true
                                 onDownloadComplete(deduplicated.size)
                             }
                         }
@@ -1632,6 +1662,13 @@ fun DownloaderResultsPage(
                                 modifier = Modifier.size(18.dp),
                                 strokeWidth = 2.dp,
                                 color = Color.White
+                            )
+                        } else if (isDownloaded) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Downloaded",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
                             )
                         } else {
                             Icon(
@@ -1665,7 +1702,8 @@ fun DownloaderMediaCard(
     isSelected: Boolean,
     dynamicDimensions: Map<String, Pair<Int, Int>>,
     onToggle: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isDownloaded: Boolean = false
 ) {
     val parsedDim = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item).let { (w, h) ->
         if (w != null && h != null) (w to h) else null
@@ -1734,14 +1772,21 @@ fun DownloaderMediaCard(
                     )
                 }
 
-                // Top-Right Checkbox
+                // Top-Right Checkbox: Turns ticked on download with green accent or dark on selection
+                val isTicked = isSelected || isDownloaded
                 Box(
                     modifier = Modifier
                         .padding(end = 6.dp, top = 6.dp)
                         .align(Alignment.TopEnd)
                         .size(20.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(if (isSelected) Color(0xFF212529) else Color.Black.copy(alpha = 0.25f))
+                        .background(
+                            when {
+                                isDownloaded -> Color(0xFF2E7D32)
+                                isSelected -> Color(0xFF212529)
+                                else -> Color.Black.copy(alpha = 0.25f)
+                            }
+                        )
                         .border(
                             width = 1.5.dp,
                             color = Color.White,
@@ -1749,10 +1794,10 @@ fun DownloaderMediaCard(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isSelected) {
+                    if (isTicked) {
                         Icon(
                             imageVector = Icons.Default.Check,
-                            contentDescription = "Selected",
+                            contentDescription = if (isDownloaded) "Downloaded" else "Selected",
                             tint = Color.White,
                             modifier = Modifier.size(13.dp)
                         )
