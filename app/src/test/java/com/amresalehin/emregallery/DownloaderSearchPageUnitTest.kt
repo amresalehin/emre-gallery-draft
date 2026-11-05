@@ -1,5 +1,8 @@
 package com.amresalehin.emregallery
 
+import com.amresalehin.emregallery.data.DownloadActivityItem
+import com.amresalehin.emregallery.data.DownloadActivityManager
+import com.amresalehin.emregallery.data.DownloadActivityStatus
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.ui.DetectedPlatform
 import com.amresalehin.emregallery.ui.DownloaderViewMode
@@ -17,7 +20,8 @@ class DownloaderSearchPageUnitTest {
         assertTrue(modes.contains("SEARCH_PAGE"))
         assertTrue(modes.contains("DOWNLOADER_PAGE"))
         assertTrue(modes.contains("SAVED_LIBRARY"))
-        assertEquals(3, modes.size)
+        assertTrue(modes.contains("ACTIVITY_PAGE"))
+        assertEquals(4, modes.size)
     }
 
     @Test
@@ -393,7 +397,89 @@ class DownloaderSearchPageUnitTest {
             MediaClassifier.cleanDomainFromUrl("https://youtu.be/dQw4w9WgXcQ")
         )
     }
+
+    @Test
+    fun testDownloadActivityItemModelAndFiltering() {
+        val downloadingItem = DownloadActivityItem(
+            id = "act_1",
+            title = "Best Dolby Vision 4K HDR Video",
+            mediaUrl = "https://example.com/video1.mp4",
+            isVideo = true,
+            format = "4K",
+            status = DownloadActivityStatus.DOWNLOADING,
+            progress = 0.40f,
+            bytesRead = 487_830_000L,
+            totalBytes = 1_200_000_000L,
+            speedBytesPerSec = 8_900_000L,
+            durationHint = "30:06"
+        )
+
+        val failedItem = DownloadActivityItem(
+            id = "act_2",
+            title = "Nature in 4K.mp4",
+            mediaUrl = "https://example.com/video2.mp4",
+            isVideo = true,
+            format = "4K",
+            status = DownloadActivityStatus.FAILED,
+            errorMessage = "Network error",
+            durationHint = "04:21"
+        )
+
+        val finishedItem = DownloadActivityItem(
+            id = "act_3",
+            title = "Scenic Sunset in 4K.mp4",
+            mediaUrl = "https://example.com/video3.mp4",
+            localUri = "content://media/external/video/3",
+            isVideo = true,
+            format = "4K",
+            status = DownloadActivityStatus.FINISHED,
+            progress = 1.0f,
+            totalBytes = 1_370_000_000L,
+            durationHint = "12:18"
+        )
+
+        val activities = listOf(downloadingItem, failedItem, finishedItem)
+
+        // Status flags check
+        assertTrue(downloadingItem.isDownloading)
+        assertFalse(downloadingItem.isFailed)
+        assertFalse(downloadingItem.isFinished)
+
+        assertTrue(failedItem.isFailed)
+        assertFalse(failedItem.isDownloading)
+        assertFalse(failedItem.isFinished)
+
+        assertTrue(finishedItem.isFinished)
+        assertFalse(finishedItem.isDownloading)
+        assertFalse(finishedItem.isFailed)
+
+        // Filter pills check
+        val downloadingOnly = activities.filter { it.isDownloading || it.isPaused }
+        assertEquals(1, downloadingOnly.size)
+        assertEquals("act_1", downloadingOnly[0].id)
+
+        val failedOnly = activities.filter { it.isFailed }
+        assertEquals(1, failedOnly.size)
+        assertEquals("act_2", failedOnly[0].id)
+
+        val finishedOnly = activities.filter { it.isFinished }
+        assertEquals(1, finishedOnly.size)
+        assertEquals("act_3", finishedOnly[0].id)
+
+        // Byte formatting check
+        val onePointTwoGb = (1.20 * 1024 * 1024 * 1024).toLong()
+        assertEquals("1.20GB", DownloadActivityManager.formatBytes(onePointTwoGb))
+        val fourEightSevenMb = (487.83 * 1024 * 1024).toLong()
+        assertEquals("487.83MB", DownloadActivityManager.formatBytes(fourEightSevenMb))
+        assertEquals("500.0KB", DownloadActivityManager.formatBytes(500 * 1024L))
+
+        // Speed formatting check
+        val eightPointNineSpeed = (8.90 * 1024 * 1024).toLong()
+        assertEquals("8.90MB/s", DownloadActivityManager.formatSpeed(eightPointNineSpeed))
+        assertEquals("0.00MB/s", DownloadActivityManager.formatSpeed(0L))
+    }
 }
+
 
 
 

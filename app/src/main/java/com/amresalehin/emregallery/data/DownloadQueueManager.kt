@@ -82,6 +82,18 @@ object DownloadQueueManager {
             ExistingWorkPolicy.KEEP,
             request
         )
+        DownloadActivityManager.initialize(context)
+        DownloadActivityManager.recordQueued(
+            id = item.id,
+            title = item.title,
+            mediaUrl = item.url,
+            thumbnailUrl = item.thumbnailUrl ?: item.url,
+            isVideo = item.isVideo,
+            isAudio = item.isAudio,
+            isStream = item.isStream,
+            format = item.format,
+            workId = request.id.toString()
+        )
         markDownloadStarted(1)
         return request.id
     }
@@ -137,6 +149,9 @@ object DownloadQueueManager {
             )
             request.id
         }
+
+        DownloadActivityManager.initialize(context)
+        DownloadActivityManager.recordBatchQueued(distinctItems, requests)
 
         return requests
     }

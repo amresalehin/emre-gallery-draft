@@ -134,6 +134,7 @@ fun DownloaderSearchMainPage(
     onFetchUrl: (String) -> Unit,
     onOpenBrowser: (String) -> Unit,
     onViewSavedLibrary: () -> Unit,
+    onOpenActivity: () -> Unit = {},
     onBack: () -> Unit = {},
     savedStacks: List<MediaInboxStack> = emptyList(),
     onSelectStack: (MediaInboxStack) -> Unit = {},
@@ -152,6 +153,12 @@ fun DownloaderSearchMainPage(
     val repoStacks by inboxRepo.stacks.collectAsState()
     val effectiveStacks = remember(savedStacks, repoStacks) {
         if (savedStacks.isNotEmpty()) savedStacks else repoStacks
+    }
+
+    val activities by DownloadActivityManager.activities.collectAsState()
+    LaunchedEffect(Unit) {
+        DownloadActivityManager.initialize(context)
+        DownloadActivityManager.syncWithInboxRepository()
     }
 
     var urlInput by remember { mutableStateOf("") }
@@ -535,7 +542,14 @@ fun DownloaderSearchMainPage(
                 }
             }
         }
-        // 3. Saved Preview Section matching image_1d9653bc.png layout with real data
+        // 3. Activity Card matching image_4fd87912.png
+        ActivityPreviewCard(
+            activities = activities,
+            onOpenActivity = onOpenActivity,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // 4. Saved Preview Section matching image_1d9653bc.png layout with real data
         SavedPreviewSection(
             stacks = effectiveStacks,
             onViewSavedLibrary = onViewSavedLibrary,

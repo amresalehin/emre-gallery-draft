@@ -85,7 +85,8 @@ import kotlin.math.sqrt
 enum class DownloaderViewMode {
     SEARCH_PAGE,
     DOWNLOADER_PAGE,
-    SAVED_LIBRARY
+    SAVED_LIBRARY,
+    ACTIVITY_PAGE
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,6 +139,8 @@ fun MediaInboxScreen(
             focusManager.clearFocus()
             keyboardController?.hide()
         } else if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE) {
+            currentViewMode = DownloaderViewMode.SEARCH_PAGE
+        } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
             currentViewMode = DownloaderViewMode.SEARCH_PAGE
         } else if (selectedStackForDetail != null) {
             selectedStackForDetail = null
@@ -195,13 +198,13 @@ fun MediaInboxScreen(
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 containerColor = MaterialTheme.colorScheme.background,
                 topBar = {
-                    Surface(
-                        color = MaterialTheme.colorScheme.background,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                    ) {
-                        if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
+                    if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.background,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                        ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -509,6 +512,9 @@ fun MediaInboxScreen(
                             onViewSavedLibrary = {
                                 currentViewMode = DownloaderViewMode.SAVED_LIBRARY
                             },
+                            onOpenActivity = {
+                                currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
+                            },
                             onBack = onBack,
                             savedStacks = stacks,
                             onSelectStack = { stack ->
@@ -516,6 +522,17 @@ fun MediaInboxScreen(
                             },
                             activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED } + if (inMemoryDownloading) 1 else 0,
                             savedStacksCount = stacks.size,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
+                        DownloaderActivityPage(
+                            onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                            onAddNewDownload = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                            onOpenMedia = { item ->
+                                item.localUri?.let { uriStr ->
+                                    onOpenMediaItem?.invoke(uriStr)
+                                }
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {

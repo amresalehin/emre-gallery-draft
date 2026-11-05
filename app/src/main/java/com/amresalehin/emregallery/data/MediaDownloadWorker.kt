@@ -107,6 +107,7 @@ class MediaDownloadWorker(
             // 2. Standard or fallback download via OkHttp with HTTP Range resumability
             if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
                 var lastProgressUpdate = 0L
+                var lastBytes = 0L
                 val result = OkHttpDownloader.downloadMediaFileDetailed(
                     context = applicationContext,
                     mediaUrl = mediaUrl,
@@ -116,8 +117,13 @@ class MediaDownloadWorker(
                     onProgress = { bytesRead, totalBytes ->
                         val now = System.currentTimeMillis()
                         if (now - lastProgressUpdate > 300) {
+                            val dt = (now - lastProgressUpdate) / 1000.0
+                            val db = bytesRead - lastBytes
+                            val speed = if (dt > 0) (db / dt).toLong() else 0L
+                            lastBytes = bytesRead
                             lastProgressUpdate = now
                             val pct = if (totalBytes > 0) (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0.5f
+                            DownloadActivityManager.updateProgress(itemId, pct, bytesRead, totalBytes, speed)
                             setProgressAsync(
                                 workDataOf(
                                     KEY_PROGRESS to pct,
@@ -178,6 +184,12 @@ class MediaDownloadWorker(
                     sourceUrl = sourceUrl
                 )
 
+                DownloadActivityManager.markFinished(
+                    itemId = itemId,
+                    localUri = downloadedFile.absolutePath,
+                    sizeBytes = downloadedFile.length()
+                )
+
                 Result.success(
                     workDataOf(
                         KEY_LOCAL_URI to downloadedFile.absolutePath,
@@ -187,6 +199,7 @@ class MediaDownloadWorker(
                 )
             } else {
                 val finalError = errorDiagnostic ?: "Download failed for $mediaUrl"
+                DownloadActivityManager.markFailed(itemId, finalError)
                 if (runAttemptCount < 2) {
                     Result.retry()
                 } else {
@@ -195,10 +208,12 @@ class MediaDownloadWorker(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in MediaDownloadWorker for $mediaUrl", e)
+            val err = e.message ?: "Unknown error"
+            DownloadActivityManager.markFailed(itemId, err)
             if (runAttemptCount < 2) {
                 Result.retry()
             } else {
-                Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Unknown error")))
+                Result.failure(workDataOf(KEY_ERROR to err))
             }
         } finally {
             DownloadQueueManager.markDownloadCompleted()
