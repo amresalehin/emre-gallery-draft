@@ -465,79 +465,6 @@ fun MediaInboxScreen(
                                     }
                                 }
                             }
-                        } else {
-                            // SEARCH_PAGE header
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                IconButton(
-                                    onClick = onBack,
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .testTag("downloader_main_back_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "Back",
-                                        tint = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-
-                                Spacer(Modifier.width(8.dp))
-
-                                // Switcher Capsule
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
-                                    modifier = Modifier.height(34.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(2.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        // Fetch Pill (Active)
-                                        Surface(
-                                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                                            shape = RoundedCornerShape(14.dp),
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier
-                                                .size(width = 34.dp, height = 30.dp)
-                                                .testTag("tab_search_fetch")
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = Icons.Default.ArrowDownward,
-                                                    contentDescription = "Fetch",
-                                                    tint = MaterialTheme.colorScheme.surface,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-
-                                        // Saved Pill (Inactive)
-                                        Surface(
-                                            onClick = { currentViewMode = DownloaderViewMode.SAVED_LIBRARY },
-                                            shape = RoundedCornerShape(14.dp),
-                                            color = Color.Transparent,
-                                            modifier = Modifier
-                                                .size(width = 34.dp, height = 30.dp)
-                                                .testTag("tab_saved_library")
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Folder,
-                                                    contentDescription = "Saved",
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 },
@@ -580,6 +507,11 @@ fun MediaInboxScreen(
                             },
                             onViewSavedLibrary = {
                                 currentViewMode = DownloaderViewMode.SAVED_LIBRARY
+                            },
+                            onBack = onBack,
+                            savedStacks = stacks,
+                            onSelectStack = { stack ->
+                                selectedStackForDetail = stack
                             },
                             activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED } + if (inMemoryDownloading) 1 else 0,
                             savedStacksCount = stacks.size,

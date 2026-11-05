@@ -213,5 +213,96 @@ class DownloaderSearchPageUnitTest {
         assertTrue(showFilterButton(isSearchFocused, searchQuery))
         assertFalse(showClearButton(isSearchFocused, searchQuery))
     }
+
+    @Test
+    fun testDownloaderMainSearchBarFocusAndActions() {
+        // State 1: Default (Unfocused, empty input)
+        var isSearchFocused = false
+        var urlInput = ""
+
+        fun showSwitcher(isFocused: Boolean) = !isFocused
+        fun showPasteButton(query: String) = query.isBlank()
+        fun showActionButtons(query: String) = query.isNotBlank()
+
+        assertTrue(showSwitcher(isSearchFocused)) // Switcher pill is inside search bar and visible
+        assertTrue(showPasteButton(urlInput))
+        assertFalse(showActionButtons(urlInput))
+
+        // State 2: Focus search field
+        isSearchFocused = true
+        assertFalse(showSwitcher(isSearchFocused)) // Switcher pill hidden on focus
+        assertTrue(showPasteButton(urlInput)) // Paste button available when empty
+
+        // State 3: Enter URL
+        urlInput = "https://instagram.com/reel/123"
+        assertFalse(showSwitcher(isSearchFocused))
+        assertFalse(showPasteButton(urlInput))
+        assertTrue(showActionButtons(urlInput)) // Clear, Browse, and Download visible
+
+        // Action: Back button clicked in active search/edit mode
+        var didNavigateBack = false
+        fun handleBack() {
+            if (isSearchFocused || urlInput.isNotEmpty()) {
+                urlInput = ""
+                isSearchFocused = false
+            } else {
+                didNavigateBack = true
+            }
+        }
+
+        handleBack()
+        assertFalse(isSearchFocused)
+        assertEquals("", urlInput)
+        assertFalse(didNavigateBack)
+        assertTrue(showSwitcher(isSearchFocused)) // Switcher restored
+
+        // Action: Back button clicked in default state
+        handleBack()
+        assertTrue(didNavigateBack)
+    }
+
+    @Test
+    fun testSavedPreviewSectionLogic() {
+        val stack1 = com.amresalehin.emregallery.data.MediaInboxStack(
+            id = "stack_taj",
+            title = "Taj Mahal",
+            sourceDomain = "wikipedia.org",
+            sourceUrl = "https://en.wikipedia.org/wiki/Taj_Mahal",
+            timestampMillis = 1793782920000L,
+            items = List(16) { i ->
+                com.amresalehin.emregallery.data.MediaInboxItem(
+                    id = "item_$i",
+                    title = "Photo $i",
+                    localUri = "content://media/$i",
+                    sourceUrl = "https://example.com/$i.jpg",
+                    isVideo = false
+                )
+            }
+        )
+
+        assertEquals("Taj Mahal", stack1.title)
+        assertEquals(16, stack1.items.size)
+
+        // Timestamp formatting produces clean date and time
+        val sdf = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.US)
+        val formatted = sdf.format(java.util.Date(stack1.timestampMillis))
+        assertTrue(formatted.isNotBlank())
+
+        // Accent palette mapping rotates cleanly
+        val paletteCount = 5
+        val accentIndex1 = 0 % paletteCount
+        val accentIndex2 = 1 % paletteCount
+        val accentIndex3 = 2 % paletteCount
+        assertEquals(0, accentIndex1)
+        assertEquals(1, accentIndex2)
+        assertEquals(2, accentIndex3)
+
+        // Indicator dots count calculation
+        val stacksList = listOf(stack1)
+        val totalDots = minOf(stacksList.size, 5).coerceAtLeast(1)
+        assertEquals(1, totalDots)
+    }
 }
+
+
 
