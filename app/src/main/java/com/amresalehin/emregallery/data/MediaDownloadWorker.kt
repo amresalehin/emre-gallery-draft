@@ -105,6 +105,7 @@ class MediaDownloadWorker(
             }
 
             // 2. Standard or fallback download via OkHttp with HTTP Range resumability
+            var okHttpResult: OkHttpDownloader.DownloadResult? = null
             if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
                 var lastProgressUpdate = 0L
                 var lastBytes = 0L
@@ -135,11 +136,13 @@ class MediaDownloadWorker(
                         }
                     }
                 )
+                okHttpResult = result
 
                 if (result.isSuccessful && result.file != null && result.file.exists() && result.file.length() > 0L) {
                     downloadedFile = result.file
                 } else {
                     errorDiagnostic = result.errorMessage
+                    val isRateLimited = result.statusCode == 429
                     val isInvalidContent = result.errorMessage?.let { msg ->
                         msg.contains("webpage", ignoreCase = true) ||
                         msg.contains("HTML", ignoreCase = true) ||
@@ -147,8 +150,8 @@ class MediaDownloadWorker(
                         msg.contains("corrupt or invalid raster", ignoreCase = true)
                     } ?: false
 
-                    // 3. Fallback to Python runner only if OkHttp download failed and NOT an invalid non-media response
-                    if (!isInvalidContent && GalleryDlEngine.isAvailable()) {
+                    // 3. Fallback to Python runner only if OkHttp download failed and NOT 429 rate limit and NOT an invalid non-media response
+                    if (!isRateLimited && !isInvalidContent && GalleryDlEngine.isAvailable()) {
                         setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Attempting engine fallback for $title..."))
                         downloadedFile = GalleryDlEngine.downloadMedia(
                             context = applicationContext,
@@ -199,24 +202,31 @@ class MediaDownloadWorker(
                 )
             } else {
                 val finalError = errorDiagnostic ?: "Download failed for $mediaUrl"
-                DownloadActivityManager.markFailed(itemId, finalError)
-                if (runAttemptCount < 2) {
-                    Result.retry()
-                } else {
-                    Result.failure(workDataOf(KEY_ERROR to finalError))
-                }
+                val statusCode = okHttpResult?.statusCode ?: -1
+                val retryAfter = okHttpResult?.retryAfterSeconds
+
+                DownloadActivityManager.handleDownloadFailure(
+                    context = applicationContext,
+                    itemId = itemId,
+                    statusCode = statusCode,
+                    errorMessage = finalError,
+                    retryAfterSeconds = retryAfter
+                )
+                Result.failure(workDataOf(KEY_ERROR to finalError))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in MediaDownloadWorker for $mediaUrl", e)
             val err = e.message ?: "Unknown error"
-            DownloadActivityManager.markFailed(itemId, err)
-            if (runAttemptCount < 2) {
-                Result.retry()
-            } else {
-                Result.failure(workDataOf(KEY_ERROR to err))
-            }
+            DownloadActivityManager.handleDownloadFailure(
+                context = applicationContext,
+                itemId = itemId,
+                statusCode = -1,
+                errorMessage = err,
+                retryAfterSeconds = null
+            )
+            Result.failure(workDataOf(KEY_ERROR to err))
         } finally {
-            DownloadQueueManager.markDownloadCompleted()
+            DownloadQueueManager.markDownloadCompleted(itemId)
         }
     }
 

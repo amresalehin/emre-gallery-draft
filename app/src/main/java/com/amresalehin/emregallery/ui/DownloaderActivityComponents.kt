@@ -40,6 +40,40 @@ import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.DownloadActivityItem
 import com.amresalehin.emregallery.data.DownloadActivityManager
 import com.amresalehin.emregallery.data.DownloadActivityStatus
+import kotlinx.coroutines.delay
+
+/**
+ * Returns a display-friendly format badge text (e.g. JPG, PNG, MP4, WEBP).
+ * Strictly prevents false "4K" labels from appearing on thumbnails.
+ */
+fun getDisplayFormatBadge(item: DownloadActivityItem): String {
+    val raw = item.format.trim().uppercase()
+    // Strictly prevent false 4K on non-video items
+    if (!item.isVideo && (raw == "4K" || raw.contains("4K"))) {
+        // Fall through to determine genuine format from URL/title
+    } else if (raw.isNotEmpty() && !raw.contains("4K") && raw != "UNKNOWN") {
+        return if (raw == "JPEG") "JPG" else raw.take(4)
+    } else if (item.isVideo && (raw.contains("4K") || item.title.contains("4K", ignoreCase = true))) {
+        return "4K"
+    }
+
+    val lowerUrl = item.mediaUrl.lowercase()
+    val lowerTitle = item.title.lowercase()
+    return when {
+        lowerUrl.contains(".jpg") || lowerUrl.contains(".jpeg") || lowerTitle.endsWith(".jpg") || lowerTitle.endsWith(".jpeg") -> "JPG"
+        lowerUrl.contains(".png") || lowerTitle.endsWith(".png") -> "PNG"
+        lowerUrl.contains(".webp") || lowerTitle.endsWith(".webp") -> "WEBP"
+        lowerUrl.contains(".gif") || lowerTitle.endsWith(".gif") -> "GIF"
+        lowerUrl.contains(".svg") || lowerTitle.endsWith(".svg") -> "SVG"
+        lowerUrl.contains(".mp4") || lowerTitle.endsWith(".mp4") -> "MP4"
+        lowerUrl.contains(".webm") || lowerTitle.endsWith(".webm") -> "WEBM"
+        lowerUrl.contains(".m3u8") -> "HLS"
+        lowerUrl.contains(".mp3") || lowerTitle.endsWith(".mp3") -> "MP3"
+        item.isVideo -> "MP4"
+        item.isAudio -> "MP3"
+        else -> "JPG"
+    }
+}
 
 /**
  * Custom heartbeat/pulse icon matching image_4fd87912.png
@@ -85,12 +119,13 @@ fun ActivityPreviewCard(
     val isDark = isSystemInDarkTheme()
     val containerShape = RoundedCornerShape(26.dp)
 
-    val downloading = remember(activities) { activities.filter { it.isDownloading || it.isPaused } }
-    val failed = remember(activities) { activities.filter { it.isFailed } }
+    val downloading = remember(activities) { activities.filter { it.isDownloading || it.isPaused || it.isRetrying } }
+    val failed = remember(activities) { activities.filter { it.isFailed || it.isRetrying } }
     val finished = remember(activities) { activities.filter { it.isFinished } }
 
-    val failedCount = failed.size
-    val downloadingCount = downloading.size
+    val failedCount = activities.count { it.isFailed }
+    val retryingCount = activities.count { it.isRetrying }
+    val downloadingCount = activities.count { it.isDownloading || it.isPaused }
 
     Surface(
         onClick = onOpenActivity,
@@ -271,22 +306,25 @@ private fun ActivityThumbnailBox(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Top-left format tag (e.g. 4K, MP4, JPEG)
-        Surface(
-            shape = RoundedCornerShape(4.dp),
-            color = Color.Black.copy(alpha = 0.75f),
-            modifier = Modifier
-                .padding(top = 4.dp, start = 4.dp)
-                .align(Alignment.TopStart)
-        ) {
-            Text(
-                text = item.format.uppercase().take(4),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                fontSize = 8.5.sp,
-                color = Color.White,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-            )
+        // Top-left format tag (e.g. JPG, PNG, MP4)
+        val formatBadge = getDisplayFormatBadge(item)
+        if (formatBadge.isNotBlank()) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.75f),
+                modifier = Modifier
+                    .padding(top = 4.dp, start = 4.dp)
+                    .align(Alignment.TopStart)
+            ) {
+                Text(
+                    text = formatBadge,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 8.5.sp,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                )
+            }
         }
 
         when {
@@ -325,6 +363,27 @@ private fun ActivityThumbnailBox(
                             .fillMaxWidth(fraction = item.progress.coerceIn(0.08f, 1f))
                             .background(Color.White)
                     )
+                }
+            }
+            item.isRetrying -> {
+                // Bottom-right circular amber retry badge
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFFFFB74D),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .padding(bottom = 4.dp, end = 4.dp)
+                        .size(18.dp)
+                        .align(Alignment.BottomEnd)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Retrying",
+                            tint = Color.Black,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
                 }
             }
             item.isFailed -> {
@@ -402,11 +461,21 @@ fun DownloaderActivityPage(
     var selectedFilter by remember { mutableStateOf("All") }
     var showControlsSheet by remember { mutableStateOf(false) }
 
-    val downloadingItems = remember(activities) { activities.filter { it.isDownloading || it.isPaused } }
-    val failedItems = remember(activities) { activities.filter { it.isFailed } }
+    var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(activities) {
+        if (activities.any { it.isRetrying }) {
+            while (true) {
+                delay(500L)
+                currentTimeMillis = System.currentTimeMillis()
+            }
+        }
+    }
+
+    val downloadingItems = remember(activities) { activities.filter { it.isDownloading || it.isPaused || it.isRetrying } }
+    val failedItems = remember(activities) { activities.filter { it.isFailed || it.isRetrying } }
     val finishedItems = remember(activities) { activities.filter { it.isFinished } }
 
-    val filteredList = remember(activities, selectedFilter) {
+    val filteredList = remember(activities, selectedFilter, downloadingItems, failedItems, finishedItems) {
         when (selectedFilter) {
             "Downloading" -> downloadingItems
             "Failed" -> failedItems
@@ -547,6 +616,7 @@ fun DownloaderActivityPage(
                             items(downloadingItems, key = { "active_${it.id}" }) { item ->
                                 ActiveDownloadRow(
                                     item = item,
+                                    currentTimeMillis = currentTimeMillis,
                                     onPauseResume = {
                                         if (item.isPaused) {
                                             DownloadActivityManager.resumeDownload(context, item.id)
@@ -565,6 +635,7 @@ fun DownloaderActivityPage(
                             items(failedItems, key = { "failed_${it.id}" }) { item ->
                                 FailedDownloadRow(
                                     item = item,
+                                    currentTimeMillis = currentTimeMillis,
                                     onRetry = {
                                         DownloadActivityManager.retryDownload(context, item.id)
                                     },
@@ -715,7 +786,8 @@ fun DownloaderActivityPage(
 private fun ActiveDownloadRow(
     item: DownloadActivityItem,
     onPauseResume: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currentTimeMillis: Long = System.currentTimeMillis()
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -736,22 +808,25 @@ private fun ActiveDownloadRow(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // 4K / Format badge top-left
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.8f),
-                modifier = Modifier
-                    .padding(4.dp)
-                    .align(Alignment.TopStart)
-            ) {
-                Text(
-                    text = "4K",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                )
+            // Dynamic format badge top-left (no false 4K)
+            val formatBadge = getDisplayFormatBadge(item)
+            if (formatBadge.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.8f),
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Text(
+                        text = formatBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
             }
 
             // Play overlay if video
@@ -775,7 +850,7 @@ private fun ActiveDownloadRow(
             }
         }
 
-        // Title, byte progress & speed, and linear progress bar
+        // Title, byte progress & speed / retry status, and linear progress bar
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -789,27 +864,38 @@ private fun ActiveDownloadRow(
                 overflow = TextOverflow.Ellipsis
             )
 
-            val speedText = DownloadActivityManager.formatSpeed(item.speedBytesPerSec)
-            val bytesText = if (item.totalBytes > 0) {
-                "${DownloadActivityManager.formatBytes(item.bytesRead)} / ${DownloadActivityManager.formatBytes(item.totalBytes)}"
+            if (item.isRetrying && item.nextRetryTimestampMillis != null) {
+                val remainingSec = ((item.nextRetryTimestampMillis - currentTimeMillis + 999L) / 1000L).coerceAtLeast(1L)
+                Text(
+                    text = "Retrying in ${remainingSec}s",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFFFB74D),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.sp
+                )
             } else {
-                "${DownloadActivityManager.formatBytes(item.bytesRead)} downloaded"
+                val speedText = DownloadActivityManager.formatSpeed(item.speedBytesPerSec)
+                val bytesText = if (item.totalBytes > 0) {
+                    "${DownloadActivityManager.formatBytes(item.bytesRead)} / ${DownloadActivityManager.formatBytes(item.totalBytes)}"
+                } else {
+                    "${DownloadActivityManager.formatBytes(item.bytesRead)} downloaded"
+                }
+
+                Text(
+                    text = "$bytesText • $speedText",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp
+                )
             }
 
-            Text(
-                text = "$bytesText • $speedText",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 11.sp
-            )
-
             LinearProgressIndicator(
-                progress = { item.progress.coerceIn(0.05f, 1f) },
+                progress = { if (item.isRetrying) 0.05f else item.progress.coerceIn(0.05f, 1f) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp)),
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (item.isRetrying) Color(0xFFFFB74D) else MaterialTheme.colorScheme.onSurface,
                 trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
             )
         }
@@ -842,14 +928,15 @@ private fun FailedDownloadRow(
     item: DownloadActivityItem,
     onRetry: () -> Unit,
     onDelete: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currentTimeMillis: Long = System.currentTimeMillis()
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Thumbnail with format tag
+        // Thumbnail with dynamic format tag (NO false 4K)
         Box(
             modifier = Modifier
                 .size(width = 96.dp, height = 62.dp)
@@ -863,25 +950,28 @@ private fun FailedDownloadRow(
                 modifier = Modifier.fillMaxSize()
             )
 
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.8f),
-                modifier = Modifier
-                    .padding(4.dp)
-                    .align(Alignment.TopStart)
-            ) {
-                Text(
-                    text = "4K",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                )
+            val formatBadge = getDisplayFormatBadge(item)
+            if (formatBadge.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.8f),
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Text(
+                        text = formatBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
             }
         }
 
-        // Title and error message
+        // Title and status/error message
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -895,26 +985,50 @@ private fun FailedDownloadRow(
                 overflow = TextOverflow.Ellipsis
             )
 
-            val errorMsg = item.errorMessage ?: "Network error"
-            Text(
-                text = "Failed • $errorMsg",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 11.5.sp
-            )
+            if (item.isRetrying && item.nextRetryTimestampMillis != null) {
+                val remainingSec = ((item.nextRetryTimestampMillis - currentTimeMillis + 999L) / 1000L).coerceAtLeast(1L)
+                Text(
+                    text = "Retrying in ${remainingSec}s",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFFFB74D),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else {
+                val errorMsg = item.errorMessage ?: "Network error"
+                Text(
+                    text = "Failed • $errorMsg",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 11.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         // Retry Button
         IconButton(
             onClick = onRetry,
+            enabled = !item.isRetrying,
             modifier = Modifier.size(36.dp)
         ) {
-            Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = "Retry download",
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(20.dp)
-            )
+            if (item.isRetrying) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = Color(0xFFFFB74D)
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Retry download",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
 
         // Delete Button
@@ -963,21 +1077,24 @@ private fun FinishedDownloadRow(
                 modifier = Modifier.fillMaxSize()
             )
 
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.8f),
-                modifier = Modifier
-                    .padding(4.dp)
-                    .align(Alignment.TopStart)
-            ) {
-                Text(
-                    text = item.format.uppercase().take(4).ifBlank { "4K" },
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                )
+            val formatBadge = getDisplayFormatBadge(item)
+            if (formatBadge.isNotBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.8f),
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .align(Alignment.TopStart)
+                ) {
+                    Text(
+                        text = formatBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
             }
         }
 

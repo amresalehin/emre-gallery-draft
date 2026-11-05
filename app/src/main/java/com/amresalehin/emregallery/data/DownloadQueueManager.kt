@@ -25,13 +25,18 @@ object DownloadQueueManager {
     val inMemoryDownloading: kotlinx.coroutines.flow.StateFlow<Boolean> = _inMemoryDownloading
 
     private val activeDownloadCount = java.util.concurrent.atomic.AtomicInteger(0)
+    private val activeItemIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    fun markDownloadStarted(count: Int = 1) {
+    fun isDownloading(itemId: String): Boolean = activeItemIds.contains(itemId)
+
+    fun markDownloadStarted(count: Int = 1, itemId: String? = null) {
+        if (itemId != null) activeItemIds.add(itemId)
         activeDownloadCount.addAndGet(count)
         _inMemoryDownloading.value = true
     }
 
-    fun markDownloadCompleted() {
+    fun markDownloadCompleted(itemId: String? = null) {
+        if (itemId != null) activeItemIds.remove(itemId)
         val remaining = activeDownloadCount.decrementAndGet()
         if (remaining <= 0) {
             activeDownloadCount.set(0)
@@ -46,7 +51,8 @@ object DownloadQueueManager {
         stackId: String? = null,
         stackTitle: String? = null,
         sourceDomain: String? = null,
-        sourceUrl: String? = null
+        sourceUrl: String? = null,
+        isRetry: Boolean = false
     ): UUID {
         val sId = stackId ?: "stack_${System.currentTimeMillis()}"
         val sTitle = stackTitle ?: sourceDomain ?: "Discovered Media"
@@ -79,7 +85,7 @@ object DownloadQueueManager {
         val uniqueWorkName = "download_${MediaClassifier.deduplicationKey(item.url).hashCode()}_${item.id}"
         WorkManager.getInstance(context).enqueueUniqueWork(
             uniqueWorkName,
-            ExistingWorkPolicy.KEEP,
+            if (isRetry) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
             request
         )
         DownloadActivityManager.initialize(context)
@@ -92,9 +98,10 @@ object DownloadQueueManager {
             isAudio = item.isAudio,
             isStream = item.isStream,
             format = item.format,
-            workId = request.id.toString()
+            workId = request.id.toString(),
+            isRetry = isRetry
         )
-        markDownloadStarted(1)
+        markDownloadStarted(count = 1, itemId = item.id)
         return request.id
     }
 

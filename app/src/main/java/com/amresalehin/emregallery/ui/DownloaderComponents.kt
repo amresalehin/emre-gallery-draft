@@ -1733,12 +1733,17 @@ fun DownloaderMediaCard(
         item.isStream -> "Streams"
         else -> "Images"
     }
-    val formatText = item.format.uppercase().ifBlank {
+    val formatText = if (!item.isVideo && item.format.contains("4K", ignoreCase = true)) {
+        "JPG"
+    } else {
+        val raw = item.format.uppercase().trim()
         when {
+            raw == "JPEG" -> "JPG"
+            raw.isNotBlank() -> raw
             item.isVideo -> "MP4"
             item.isAudio -> "MP3"
             item.isStream -> "M3U8"
-            else -> "JPEG"
+            else -> "JPG"
         }
     }
 

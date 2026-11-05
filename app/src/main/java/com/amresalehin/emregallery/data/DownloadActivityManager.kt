@@ -3,18 +3,26 @@ package com.amresalehin.emregallery.data
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 enum class DownloadActivityStatus {
     DOWNLOADING,
+    RETRYING,
     PAUSED,
     FAILED,
     FINISHED
@@ -38,12 +46,17 @@ data class DownloadActivityItem(
     val speedBytesPerSec: Long = 0L,
     val errorMessage: String? = null,
     val timestampMillis: Long = System.currentTimeMillis(),
-    val durationHint: String? = null
+    val durationHint: String? = null,
+    val retryCount: Int = 0,
+    val maxRetries: Int = 5,
+    val nextRetryTimestampMillis: Long? = null,
+    val retryDelaySeconds: Long? = null
 ) {
     val isFailed: Boolean get() = status == DownloadActivityStatus.FAILED
     val isDownloading: Boolean get() = status == DownloadActivityStatus.DOWNLOADING
     val isFinished: Boolean get() = status == DownloadActivityStatus.FINISHED
     val isPaused: Boolean get() = status == DownloadActivityStatus.PAUSED
+    val isRetrying: Boolean get() = status == DownloadActivityStatus.RETRYING
 }
 
 object DownloadActivityManager {
@@ -56,11 +69,41 @@ object DownloadActivityManager {
 
     private var appContext: Context? = null
 
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val activeRetryJobs = ConcurrentHashMap<String, Job>()
+
     fun initialize(context: Context) {
         if (appContext == null) {
             appContext = context.applicationContext
             loadPersistedActivities()
+            // Sanitize any stale false 4K labels from persisted items
+            val cleaned = _activities.value.map { item ->
+                if (!item.isVideo && item.format.contains("4K", ignoreCase = true)) {
+                    val clean = if (item.mediaUrl.lowercase().contains(".png") || item.title.lowercase().endsWith(".png")) "PNG" else "JPG"
+                    item.copy(format = clean)
+                } else {
+                    item
+                }
+            }
+            _activities.value = cleaned
+            persistActivities()
             syncWithInboxRepository()
+            resumePersistedRetries(context.applicationContext)
+        }
+    }
+
+    private fun resumePersistedRetries(context: Context) {
+        val now = System.currentTimeMillis()
+        val retryingItems = _activities.value.filter { it.status == DownloadActivityStatus.RETRYING }
+        for (item in retryingItems) {
+            val nextTime = item.nextRetryTimestampMillis
+            if (nextTime != null) {
+                val remainingMillis = nextTime - now
+                val remainingSec = if (remainingMillis > 0) (remainingMillis + 999L) / 1000L else 0L
+                scheduleRetryExecution(context, item.id, remainingSec)
+            } else {
+                scheduleRetryExecution(context, item.id, 0L)
+            }
         }
     }
 
@@ -72,7 +115,7 @@ object DownloadActivityManager {
         val prefs = getPrefs() ?: return
         try {
             val jsonArray = JSONArray()
-            // Only persist active, paused, or failed items (finished are in repository)
+            // Only persist active, paused, retrying, or failed items (finished are in repository)
             val toSave = _activities.value.filter { it.status != DownloadActivityStatus.FINISHED }.take(50)
             for (item in toSave) {
                 val obj = JSONObject().apply {
@@ -94,6 +137,10 @@ object DownloadActivityManager {
                     put("errorMessage", item.errorMessage ?: "")
                     put("timestampMillis", item.timestampMillis)
                     put("durationHint", item.durationHint ?: "")
+                    put("retryCount", item.retryCount)
+                    put("maxRetries", item.maxRetries)
+                    put("nextRetryTimestampMillis", item.nextRetryTimestampMillis ?: -1L)
+                    put("retryDelaySeconds", item.retryDelaySeconds ?: -1L)
                 }
                 jsonArray.put(obj)
             }
@@ -113,6 +160,21 @@ object DownloadActivityManager {
                 val obj = jsonArray.getJSONObject(i)
                 val statusStr = obj.optString("status", DownloadActivityStatus.FAILED.name)
                 val status = runCatching { DownloadActivityStatus.valueOf(statusStr) }.getOrDefault(DownloadActivityStatus.FAILED)
+                val isVid = obj.optBoolean("isVideo", false)
+                val isAud = obj.optBoolean("isAudio", false)
+                val rawFmt = obj.optString("format", "").trim()
+                val cleanFormat = if (!isVid && rawFmt.contains("4K", ignoreCase = true)) {
+                    if (isAud) "MP3" else "JPG"
+                } else if (rawFmt.isNotBlank()) {
+                    rawFmt
+                } else {
+                    when {
+                        isVid -> "MP4"
+                        isAud -> "MP3"
+                        else -> "JPG"
+                    }
+                }
+
                 list.add(
                     DownloadActivityItem(
                         id = obj.getString("id"),
@@ -121,10 +183,10 @@ object DownloadActivityManager {
                         mediaUrl = obj.getString("mediaUrl"),
                         thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() },
                         localUri = obj.optString("localUri").takeIf { it.isNotBlank() },
-                        isVideo = obj.optBoolean("isVideo", false),
-                        isAudio = obj.optBoolean("isAudio", false),
+                        isVideo = isVid,
+                        isAudio = isAud,
                         isStream = obj.optBoolean("isStream", false),
-                        format = obj.optString("format", "MP4"),
+                        format = cleanFormat,
                         status = status,
                         progress = obj.optDouble("progress", 0.0).toFloat(),
                         bytesRead = obj.optLong("bytesRead", 0L),
@@ -132,7 +194,11 @@ object DownloadActivityManager {
                         speedBytesPerSec = obj.optLong("speedBytesPerSec", 0L),
                         errorMessage = obj.optString("errorMessage").takeIf { it.isNotBlank() },
                         timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis()),
-                        durationHint = obj.optString("durationHint").takeIf { it.isNotBlank() }
+                        durationHint = obj.optString("durationHint").takeIf { it.isNotBlank() },
+                        retryCount = obj.optInt("retryCount", 0),
+                        maxRetries = obj.optInt("maxRetries", 5),
+                        nextRetryTimestampMillis = obj.optLong("nextRetryTimestampMillis", -1L).takeIf { it > 0L },
+                        retryDelaySeconds = obj.optLong("retryDelaySeconds", -1L).takeIf { it > 0L }
                     )
                 )
             }
@@ -179,14 +245,15 @@ object DownloadActivityManager {
         val activeIds = activeOrFailed.map { it.id }.toSet()
         val uniqueFinished = finishedItems.filter { it.id !in activeIds }
 
-        // Combined ordered: downloading first, failed second, then finished newest first
+        // Combined ordered: downloading first, retrying second, paused third, failed fourth, then finished newest first
         _activities.value = (activeOrFailed + uniqueFinished).sortedWith(
             compareBy<DownloadActivityItem> {
                 when (it.status) {
                     DownloadActivityStatus.DOWNLOADING -> 0
-                    DownloadActivityStatus.PAUSED -> 1
-                    DownloadActivityStatus.FAILED -> 2
-                    DownloadActivityStatus.FINISHED -> 3
+                    DownloadActivityStatus.RETRYING -> 1
+                    DownloadActivityStatus.PAUSED -> 2
+                    DownloadActivityStatus.FAILED -> 3
+                    DownloadActivityStatus.FINISHED -> 4
                 }
             }.thenByDescending { it.timestampMillis }
         )
@@ -201,9 +268,11 @@ object DownloadActivityManager {
         isAudio: Boolean = false,
         isStream: Boolean = false,
         format: String = "MP4",
-        workId: String? = null
+        workId: String? = null,
+        isRetry: Boolean = false
     ) {
         val current = _activities.value.toMutableList()
+        val existing = current.firstOrNull { it.id == id }
         current.removeAll { it.id == id }
         current.add(
             0,
@@ -218,7 +287,11 @@ object DownloadActivityManager {
                 isStream = isStream,
                 format = format.ifBlank { if (isVideo) "MP4" else "JPEG" },
                 status = DownloadActivityStatus.DOWNLOADING,
-                progress = 0.05f,
+                progress = existing?.progress ?: 0.05f,
+                bytesRead = existing?.bytesRead ?: 0L,
+                totalBytes = existing?.totalBytes ?: 0L,
+                retryCount = if (isRetry) (existing?.retryCount ?: 0) else 0,
+                maxRetries = existing?.maxRetries ?: 5,
                 timestampMillis = System.currentTimeMillis()
             )
         )
@@ -301,6 +374,162 @@ object DownloadActivityManager {
         syncWithInboxRepository()
     }
 
+    /**
+     * Determines whether an error is a transient failure eligible for automatic retry.
+     * Handles HTTP 429 (Too Many Requests), HTTP 5xx server errors, and network/socket timeouts.
+     */
+    fun isTemporaryFailure(statusCode: Int, errorMessage: String?): Boolean {
+        if (statusCode == 429) return true
+        if (statusCode in listOf(500, 502, 503, 504)) return true
+        if (statusCode == -1) {
+            val msg = errorMessage?.lowercase(Locale.ROOT).orEmpty()
+            if (msg.contains("timeout") ||
+                msg.contains("reset") ||
+                msg.contains("connection") ||
+                msg.contains("failed to connect") ||
+                msg.contains("network") ||
+                msg.contains("socket") ||
+                msg.contains("broken pipe") ||
+                msg.contains("429")
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Calculates retry delay respecting server Retry-After header if present;
+     * otherwise applies exponential backoff with jitter on the schedule:
+     * Attempt 1: 2s
+     * Attempt 2: 4s
+     * Attempt 3: 8s
+     * Attempt 4: 16s
+     * Attempt 5: 32s
+     * Jitter adds random duration (up to 50% of base), preventing server thundering-herd.
+     */
+    fun calculateRetryDelaySeconds(attempt: Int, retryAfterSeconds: Long?): Long {
+        if (retryAfterSeconds != null && retryAfterSeconds > 0L) {
+            return retryAfterSeconds.coerceIn(1L, 300L)
+        }
+        val baseDelays = listOf(2L, 4L, 8L, 16L, 32L)
+        val index = (attempt - 1).coerceIn(0, baseDelays.size - 1)
+        val base = baseDelays[index]
+        val maxJitter = (base * 0.5).toLong().coerceAtLeast(1L)
+        val jitter = (0..maxJitter).random()
+        return base + jitter
+    }
+
+    /**
+     * Handles download failure. Returns true if an automatic retry has been scheduled.
+     * Stops automatic retries once max retries (5) are exhausted and permits manual retry.
+     */
+    fun handleDownloadFailure(
+        context: Context,
+        itemId: String,
+        statusCode: Int,
+        errorMessage: String?,
+        retryAfterSeconds: Long?
+    ): Boolean {
+        val current = _activities.value.toMutableList()
+        val index = current.indexOfFirst { it.id == itemId }
+        if (index < 0) return false
+
+        val item = current[index]
+        val isTransient = isTemporaryFailure(statusCode, errorMessage)
+        val nextAttempt = item.retryCount + 1
+
+        if (isTransient && nextAttempt <= item.maxRetries) {
+            val delaySec = calculateRetryDelaySeconds(nextAttempt, retryAfterSeconds)
+            val nextRetryEpoch = System.currentTimeMillis() + (delaySec * 1000L)
+            current[index] = item.copy(
+                status = DownloadActivityStatus.RETRYING,
+                retryCount = nextAttempt,
+                maxRetries = 5,
+                nextRetryTimestampMillis = nextRetryEpoch,
+                retryDelaySeconds = delaySec,
+                errorMessage = errorMessage ?: "Temporary failure (HTTP $statusCode)"
+            )
+            _activities.value = current
+            persistActivities()
+            scheduleRetryExecution(context, itemId, delaySec)
+            return true
+        } else {
+            // Retries exhausted or non-transient error: stop automatic attempts, allow manual retry
+            activeRetryJobs[itemId]?.cancel()
+            activeRetryJobs.remove(itemId)
+            current[index] = item.copy(
+                status = DownloadActivityStatus.FAILED,
+                nextRetryTimestampMillis = null,
+                retryDelaySeconds = null,
+                errorMessage = errorMessage ?: "Download failed"
+            )
+            _activities.value = current
+            persistActivities()
+            return false
+        }
+    }
+
+    /**
+     * Schedules retry execution with deduplication, preventing duplicate retry jobs.
+     */
+    fun scheduleRetryExecution(context: Context, itemId: String, delaySeconds: Long) {
+        // Prevent duplicate retry requests
+        activeRetryJobs[itemId]?.cancel()
+
+        val job = scope.launch {
+            if (delaySeconds > 0L) {
+                delay(delaySeconds * 1000L)
+            }
+            val current = _activities.value.firstOrNull { it.id == itemId }
+            if (current != null && current.status == DownloadActivityStatus.RETRYING) {
+                executeScheduledRetry(context, current)
+            }
+            activeRetryJobs.remove(itemId)
+        }
+        activeRetryJobs[itemId] = job
+    }
+
+    private fun executeScheduledRetry(context: Context, item: DownloadActivityItem) {
+        val current = _activities.value.toMutableList()
+        val index = current.indexOfFirst { it.id == item.id }
+        if (index < 0) return
+
+        val existing = current[index]
+        if (existing.status == DownloadActivityStatus.DOWNLOADING) return
+
+        current[index] = existing.copy(
+            status = DownloadActivityStatus.DOWNLOADING,
+            nextRetryTimestampMillis = null,
+            retryDelaySeconds = null
+        )
+        _activities.value = current
+        persistActivities()
+
+        val scraped = ScrapedMediaItem(
+            id = item.id,
+            url = item.mediaUrl,
+            title = item.title,
+            thumbnailUrl = item.thumbnailUrl,
+            isVideo = item.isVideo,
+            isAudio = item.isAudio,
+            isStream = item.isStream,
+            format = item.format
+        )
+        val workId = DownloadQueueManager.enqueueDownload(
+            context = context,
+            item = scraped,
+            isRetry = true
+        )
+        val reloaded = _activities.value.toMutableList()
+        val idx = reloaded.indexOfFirst { it.id == item.id }
+        if (idx >= 0) {
+            reloaded[idx] = reloaded[idx].copy(workId = workId.toString())
+            _activities.value = reloaded
+            persistActivities()
+        }
+    }
+
     fun markFailed(
         itemId: String,
         errorMessage: String
@@ -319,6 +548,8 @@ object DownloadActivityManager {
     }
 
     fun pauseDownload(context: Context, itemId: String) {
+        activeRetryJobs[itemId]?.cancel()
+        activeRetryJobs.remove(itemId)
         val current = _activities.value.toMutableList()
         val index = current.indexOfFirst { it.id == itemId }
         if (index >= 0) {
@@ -328,7 +559,11 @@ object DownloadActivityManager {
                     DownloadQueueManager.cancelDownload(context, UUID.fromString(wId))
                 }
             }
-            current[index] = existing.copy(status = DownloadActivityStatus.PAUSED)
+            current[index] = existing.copy(
+                status = DownloadActivityStatus.PAUSED,
+                nextRetryTimestampMillis = null,
+                retryDelaySeconds = null
+            )
             _activities.value = current
             persistActivities()
         }
@@ -343,6 +578,10 @@ object DownloadActivityManager {
         val index = current.indexOfFirst { it.id == itemId }
         if (index >= 0) {
             val item = current[index]
+            // Cancel any pending automatic retry to prevent duplicate requests
+            activeRetryJobs[itemId]?.cancel()
+            activeRetryJobs.remove(itemId)
+
             val scraped = ScrapedMediaItem(
                 id = item.id,
                 url = item.mediaUrl,
@@ -355,13 +594,17 @@ object DownloadActivityManager {
             )
             val newWorkId = DownloadQueueManager.enqueueDownload(
                 context = context,
-                item = scraped
+                item = scraped,
+                isRetry = true
             )
             current[index] = item.copy(
                 status = DownloadActivityStatus.DOWNLOADING,
                 workId = newWorkId.toString(),
-                progress = 0.05f,
+                progress = if (item.bytesRead > 0 && item.totalBytes > 0) item.bytesRead.toFloat() / item.totalBytes.toFloat() else 0.05f,
                 errorMessage = null,
+                retryCount = 0, // Reset attempt count on manual retry
+                nextRetryTimestampMillis = null,
+                retryDelaySeconds = null,
                 timestampMillis = System.currentTimeMillis()
             )
             _activities.value = current
@@ -377,6 +620,8 @@ object DownloadActivityManager {
     }
 
     fun deleteActivity(itemId: String) {
+        activeRetryJobs[itemId]?.cancel()
+        activeRetryJobs.remove(itemId)
         val current = _activities.value.toMutableList()
         current.removeAll { it.id == itemId }
         _activities.value = current
@@ -384,11 +629,23 @@ object DownloadActivityManager {
     }
 
     fun cancelAllActive(context: Context) {
+        for ((_, job) in activeRetryJobs) {
+            job.cancel()
+        }
+        activeRetryJobs.clear()
         DownloadQueueManager.cancelAll(context)
         val current = _activities.value.toMutableList()
         for (i in current.indices) {
-            if (current[i].status == DownloadActivityStatus.DOWNLOADING || current[i].status == DownloadActivityStatus.PAUSED) {
-                current[i] = current[i].copy(status = DownloadActivityStatus.FAILED, errorMessage = "Cancelled by user")
+            if (current[i].status == DownloadActivityStatus.DOWNLOADING ||
+                current[i].status == DownloadActivityStatus.RETRYING ||
+                current[i].status == DownloadActivityStatus.PAUSED
+            ) {
+                current[i] = current[i].copy(
+                    status = DownloadActivityStatus.FAILED,
+                    errorMessage = "Cancelled by user",
+                    nextRetryTimestampMillis = null,
+                    retryDelaySeconds = null
+                )
             }
         }
         _activities.value = current

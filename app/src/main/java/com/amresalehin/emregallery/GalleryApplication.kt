@@ -65,6 +65,9 @@ class GalleryApplication : Application() {
 
         // Initialize Chaquopy Python SDK and gallery-dl media engine
         com.amresalehin.emregallery.data.GalleryDlEngine.init(this)
+
+        // Initialize DownloadActivityManager to restore persisted downloads and resume retry schedules
+        com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this)
     }
 
     /**

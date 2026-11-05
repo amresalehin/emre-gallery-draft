@@ -478,6 +478,101 @@ class DownloaderSearchPageUnitTest {
         assertEquals("8.90MB/s", DownloadActivityManager.formatSpeed(eightPointNineSpeed))
         assertEquals("0.00MB/s", DownloadActivityManager.formatSpeed(0L))
     }
+
+    @Test
+    fun testFalse4KBadgeIsStrictlyRejectedForImages() {
+        val tajMahalImage = DownloadActivityItem(
+            id = "img_taj",
+            title = "Taj_Mahal_9794.jpg",
+            mediaUrl = "https://commons.wikimedia.org/wiki/Special:FilePath/Taj_Mahal_9794.jpg",
+            isVideo = false,
+            format = "4K", // Previous bug had false 4K
+            status = DownloadActivityStatus.FAILED
+        )
+        val badge = com.amresalehin.emregallery.ui.getDisplayFormatBadge(tajMahalImage)
+        // Must NEVER be 4K
+        assertFalse("Thumbnail format badge must not be 4K for images", badge.equals("4K", ignoreCase = true))
+        assertEquals("JPG", badge)
+
+        val sambourneImage = DownloadActivityItem(
+            id = "img_sam",
+            title = "Sambourneagra1860s.jpg",
+            mediaUrl = "https://upload.wikimedia.org/wikipedia/commons/1/12/Sambourneagra1860s.jpg",
+            isVideo = false,
+            format = "4K",
+            status = DownloadActivityStatus.FAILED
+        )
+        assertEquals("JPG", com.amresalehin.emregallery.ui.getDisplayFormatBadge(sambourneImage))
+
+        val pngImage = DownloadActivityItem(
+            id = "img_png",
+            title = "Diagram.png",
+            mediaUrl = "https://example.com/diagram.png",
+            isVideo = false,
+            format = "PNG",
+            status = DownloadActivityStatus.FAILED
+        )
+        assertEquals("PNG", com.amresalehin.emregallery.ui.getDisplayFormatBadge(pngImage))
+
+        // Legitimate 4K video SHOULD keep 4K
+        val real4kVideo = DownloadActivityItem(
+            id = "vid_4k",
+            title = "Nature 4K Documentary",
+            mediaUrl = "https://example.com/nature.mp4",
+            isVideo = true,
+            format = "4K",
+            status = DownloadActivityStatus.DOWNLOADING
+        )
+        assertEquals("4K", com.amresalehin.emregallery.ui.getDisplayFormatBadge(real4kVideo))
+    }
+
+    @Test
+    fun testTemporaryFailureDetection() {
+        // HTTP 429 Too Many Requests must always be classified as temporary failure
+        assertTrue(DownloadActivityManager.isTemporaryFailure(429, "Server returned HTTP status 429"))
+        // Server 5xx errors
+        assertTrue(DownloadActivityManager.isTemporaryFailure(500, "Internal Server Error"))
+        assertTrue(DownloadActivityManager.isTemporaryFailure(502, "Bad Gateway"))
+        assertTrue(DownloadActivityManager.isTemporaryFailure(503, "Service Unavailable"))
+        assertTrue(DownloadActivityManager.isTemporaryFailure(504, "Gateway Timeout"))
+        // Connection timeouts and network drops
+        assertTrue(DownloadActivityManager.isTemporaryFailure(-1, "SocketTimeoutException: timeout"))
+        assertTrue(DownloadActivityManager.isTemporaryFailure(-1, "ConnectException: Failed to connect to host"))
+        assertTrue(DownloadActivityManager.isTemporaryFailure(-1, "Connection reset by peer"))
+
+        // Permanent failures must NOT be classified as temporary
+        assertFalse(DownloadActivityManager.isTemporaryFailure(404, "Not Found"))
+        assertFalse(DownloadActivityManager.isTemporaryFailure(401, "Unauthorized"))
+        assertFalse(DownloadActivityManager.isTemporaryFailure(403, "Forbidden"))
+    }
+
+    @Test
+    fun testExponentialBackoffWithJitterAndRetryAfter() {
+        // Respects Retry-After header when provided by server
+        val delayFromHeader = DownloadActivityManager.calculateRetryDelaySeconds(attempt = 1, retryAfterSeconds = 25L)
+        assertEquals(25L, delayFromHeader)
+
+        // Exponential backoff schedule without header: 2, 4, 8, 16, 32s (+ up to 50% jitter)
+        // Attempt 1 base 2s (jitter 0-1) => 2..3s
+        val delay1 = DownloadActivityManager.calculateRetryDelaySeconds(attempt = 1, retryAfterSeconds = null)
+        assertTrue("Attempt 1 delay should be in [2, 3]", delay1 in 2L..3L)
+
+        // Attempt 2 base 4s (jitter 0-2) => 4..6s
+        val delay2 = DownloadActivityManager.calculateRetryDelaySeconds(attempt = 2, retryAfterSeconds = null)
+        assertTrue("Attempt 2 delay should be in [4, 6]", delay2 in 4L..6L)
+
+        // Attempt 3 base 8s (jitter 0-4) => 8..12s
+        val delay3 = DownloadActivityManager.calculateRetryDelaySeconds(attempt = 3, retryAfterSeconds = null)
+        assertTrue("Attempt 3 delay should be in [8, 12]", delay3 in 8L..12L)
+
+        // Attempt 4 base 16s (jitter 0-8) => 16..24s
+        val delay4 = DownloadActivityManager.calculateRetryDelaySeconds(attempt = 4, retryAfterSeconds = null)
+        assertTrue("Attempt 4 delay should be in [16, 24]", delay4 in 16L..24L)
+
+        // Attempt 5 base 32s (jitter 0-16) => 32..48s
+        val delay5 = DownloadActivityManager.calculateRetryDelaySeconds(attempt = 5, retryAfterSeconds = null)
+        assertTrue("Attempt 5 delay should be in [32, 48]", delay5 in 32L..48L)
+    }
 }
 
 
