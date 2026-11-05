@@ -33,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -40,6 +41,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -931,6 +934,27 @@ fun DownloaderResultsPage(
     var sortDropdownExpanded by remember { mutableStateOf(false) }
     var sortOption by remember { mutableStateOf("Default") }
 
+    // Active URL & Editing State
+    var activeUrl by remember(targetUrl) { mutableStateOf(targetUrl) }
+    var isEditingUrl by remember { mutableStateOf(false) }
+    val cleanDisplayUrl = remember(activeUrl) {
+        activeUrl.trim()
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .removePrefix("www.")
+    }
+    var urlInput by remember(cleanDisplayUrl) { mutableStateOf(cleanDisplayUrl) }
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(isEditingUrl) {
+        if (isEditingUrl) {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
+
     // Dimension & SVG Filters
     var showDimensionFilter by remember { mutableStateOf(false) }
     var minWidthFilter by remember { mutableFloatStateOf(0f) }
@@ -941,11 +965,11 @@ fun DownloaderResultsPage(
     val dynamicDimensions = remember { mutableStateMapOf<String, Pair<Int, Int>>() }
 
     // Trigger extraction on mount or URL change
-    LaunchedEffect(targetUrl) {
-        if (targetUrl.isNotBlank()) {
+    LaunchedEffect(activeUrl) {
+        if (activeUrl.isNotBlank()) {
             selectedItemIds = emptySet()
             dynamicDimensions.clear()
-            dualExtractor.extract(targetUrl, scope)
+            dualExtractor.extract(activeUrl, scope)
         }
     }
 
@@ -969,7 +993,7 @@ fun DownloaderResultsPage(
         }
         for (item in itemsToProbe.take(50)) {
             launch {
-                val probed = ImageDimensionProber.probe(item.url, referer = targetUrl)
+                val probed = ImageDimensionProber.probe(item.url, referer = activeUrl)
                 if (probed != null) {
                     dynamicDimensions[item.id] = probed
                 }
@@ -1036,16 +1060,17 @@ fun DownloaderResultsPage(
     val filterOptions = listOf("Images", "Videos", "Audio", "Streams")
 
     BackHandler {
-        if (showDimensionFilter) {
+        if (isEditingUrl) {
+            isEditingUrl = false
+            urlInput = cleanDisplayUrl
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        } else if (showDimensionFilter) {
             showDimensionFilter = false
         } else {
             onBack()
         }
     }
-
-    val siteDomain = extractorState.domain.ifBlank {
-        runCatching { Uri.parse(targetUrl).host?.removePrefix("www.") }.getOrNull()
-    }?.ifBlank { "pexels.com" } ?: "pexels.com"
 
     val categories = listOf(
         Triple("Images", Icons.Default.Image, imageCount),
@@ -1059,7 +1084,7 @@ fun DownloaderResultsPage(
         modifier = modifier.fillMaxSize().testTag("downloader_results_page")
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 1. Top Browser Bar: Single rounded horizontal bar with navigation and domain
+            // 1. Top Browser Bar: Single rounded horizontal bar with navigation and address
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1068,7 +1093,7 @@ fun DownloaderResultsPage(
             ) {
                 Surface(
                     shape = RoundedCornerShape(26.dp),
-                    color = Color(0xFFF1F3F5),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
@@ -1083,89 +1108,166 @@ fun DownloaderResultsPage(
                     ) {
                         // Back Button
                         IconButton(
-                            onClick = onBack,
+                            onClick = {
+                                if (isEditingUrl) {
+                                    isEditingUrl = false
+                                    urlInput = cleanDisplayUrl
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                } else {
+                                    onBack()
+                                }
+                            },
                             modifier = Modifier.size(40.dp).testTag("downloader_results_back_btn")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Back",
-                                tint = Color(0xFF212529)
+                                tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
-                        // Website Domain in center
-                        Text(
-                            text = siteDomain,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Normal,
-                            fontSize = 16.sp,
-                            color = Color(0xFF212529),
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(start = 6.dp),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        // Dynamic Status Indicator (Circle spinner while loading, subtle hollow circle when done)
+                        // Web Address Area: Tappable to edit, displays consistent clean URL matching inbox search page
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
-                                .padding(end = 2.dp),
-                            contentAlignment = Alignment.Center
+                                .weight(1f)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    if (!isEditingUrl) {
+                                        isEditingUrl = true
+                                    }
+                                }
+                                .padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.CenterStart
                         ) {
-                            if (extractorState.isRunning) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Color(0xFF6C757D)
+                            if (!isEditingUrl) {
+                                Text(
+                                    text = cleanDisplayUrl.ifBlank { "Paste link or enter URL..." },
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Normal,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.fillMaxWidth().testTag("downloader_results_address_display"),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             } else {
-                                Box(
+                                BasicTextField(
+                                    value = urlInput,
+                                    onValueChange = { urlInput = it },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Uri,
+                                        imeAction = ImeAction.Go
+                                    ),
+                                    keyboardActions = KeyboardActions(
+                                        onGo = {
+                                            val trimmed = urlInput.trim()
+                                            if (trimmed.isNotBlank()) {
+                                                val sanitized = MediaClassifier.sanitizeUrl(trimmed)
+                                                activeUrl = sanitized
+                                                selectedItemIds = emptySet()
+                                                dynamicDimensions.clear()
+                                                dualExtractor.extract(sanitized, scope)
+                                            }
+                                            isEditingUrl = false
+                                            focusManager.clearFocus()
+                                            keyboardController?.hide()
+                                        }
+                                    ),
+                                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontSize = 15.sp
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                     modifier = Modifier
-                                        .size(18.dp)
-                                        .border(1.8.dp, Color(0xFFADB5BD), CircleShape)
+                                        .fillMaxWidth()
+                                        .focusRequester(focusRequester)
+                                        .testTag("downloader_results_url_input")
                                 )
                             }
                         }
 
-                        // Refresh Button
-                        IconButton(
-                            onClick = {
-                                selectedItemIds = emptySet()
-                                dynamicDimensions.clear()
-                                dualExtractor.extract(targetUrl, scope)
-                            },
-                            modifier = Modifier.size(38.dp).testTag("downloader_refresh_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh",
-                                tint = Color(0xFF212529),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // External Browser Button
-                        IconButton(
-                            onClick = {
-                                if (onOpenBrowser != null) {
-                                    onOpenBrowser(targetUrl)
-                                } else {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        // Trailing Controls:
+                        // If tapped/editing: hides progress/reload and redirect buttons, shows cross (clear)
+                        if (isEditingUrl) {
+                            IconButton(
+                                onClick = {
+                                    if (urlInput.isNotEmpty()) {
+                                        urlInput = ""
+                                    } else {
+                                        isEditingUrl = false
+                                        urlInput = cleanDisplayUrl
+                                        focusManager.clearFocus()
+                                        keyboardController?.hide()
                                     }
-                                    runCatching { context.startActivity(intent) }
+                                },
+                                modifier = Modifier.size(38.dp).testTag("downloader_clear_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        } else {
+                            // When not editing: Progress indicator morphs into Reload button once scraping finishes
+                            if (extractorState.isRunning) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .padding(end = 2.dp)
+                                        .testTag("downloader_progress_indicator"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                 }
-                            },
-                            modifier = Modifier.size(38.dp).testTag("downloader_browser_btn")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.OpenInNew,
-                                contentDescription = "Open in browser",
-                                tint = Color(0xFF212529),
-                                modifier = Modifier.size(20.dp)
-                            )
+                            } else {
+                                IconButton(
+                                    onClick = {
+                                        selectedItemIds = emptySet()
+                                        dynamicDimensions.clear()
+                                        dualExtractor.extract(activeUrl, scope)
+                                    },
+                                    modifier = Modifier.size(38.dp).testTag("downloader_refresh_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Reload",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            // External Browser Redirect Button
+                            IconButton(
+                                onClick = {
+                                    if (onOpenBrowser != null) {
+                                        onOpenBrowser(activeUrl)
+                                    } else {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(activeUrl)).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        runCatching { context.startActivity(intent) }
+                                    }
+                                },
+                                modifier = Modifier.size(38.dp).testTag("downloader_browser_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = "Open in browser",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1468,7 +1570,7 @@ fun DownloaderResultsPage(
                             Button(
                                 onClick = {
                                     if (onOpenBrowser != null) {
-                                        onOpenBrowser(targetUrl)
+                                        onOpenBrowser(activeUrl)
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF212529))
@@ -1504,11 +1606,11 @@ fun DownloaderResultsPage(
                                 DownloadQueueManager.enqueueBatch(
                                     context = context,
                                     items = deduplicated,
-                                    referer = targetUrl,
+                                    referer = activeUrl,
                                     stackId = stackId,
                                     stackTitle = stackTitle,
                                     sourceDomain = extractorState.domain,
-                                    sourceUrl = targetUrl
+                                    sourceUrl = activeUrl
                                 )
 
                                 downloadProgress = 1.0f
