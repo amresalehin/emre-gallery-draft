@@ -21,6 +21,24 @@ object DownloadQueueManager {
         .setRequiredNetworkType(NetworkType.CONNECTED)
         .build()
 
+    private val _inMemoryDownloading = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val inMemoryDownloading: kotlinx.coroutines.flow.StateFlow<Boolean> = _inMemoryDownloading
+
+    private val activeDownloadCount = java.util.concurrent.atomic.AtomicInteger(0)
+
+    fun markDownloadStarted(count: Int = 1) {
+        activeDownloadCount.addAndGet(count)
+        _inMemoryDownloading.value = true
+    }
+
+    fun markDownloadCompleted() {
+        val remaining = activeDownloadCount.decrementAndGet()
+        if (remaining <= 0) {
+            activeDownloadCount.set(0)
+            _inMemoryDownloading.value = false
+        }
+    }
+
     fun enqueueDownload(
         context: Context,
         item: ScrapedMediaItem,
@@ -64,6 +82,7 @@ object DownloadQueueManager {
             ExistingWorkPolicy.KEEP,
             request
         )
+        markDownloadStarted(1)
         return request.id
     }
 
@@ -83,6 +102,9 @@ object DownloadQueueManager {
 
         val workManager = WorkManager.getInstance(context)
         val distinctItems = MediaClassifier.deduplicateScrapedItems(items)
+        if (distinctItems.isNotEmpty()) {
+            markDownloadStarted(distinctItems.size)
+        }
         val requests = distinctItems.map { item ->
             val inputData = Data.Builder()
                 .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
@@ -125,10 +147,17 @@ object DownloadQueueManager {
     }
 
     fun cancelDownload(context: Context, workId: UUID) {
-        WorkManager.getInstance(context).cancelWorkById(workId)
+        runCatching {
+            WorkManager.getInstance(context).cancelWorkById(workId)
+        }
+        markDownloadCompleted()
     }
 
     fun cancelAll(context: Context) {
-        WorkManager.getInstance(context).cancelAllWorkByTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
+        runCatching {
+            WorkManager.getInstance(context).cancelAllWorkByTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
+        }
+        activeDownloadCount.set(0)
+        _inMemoryDownloading.value = false
     }
 }

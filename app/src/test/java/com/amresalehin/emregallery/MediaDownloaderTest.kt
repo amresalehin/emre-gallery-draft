@@ -1476,6 +1476,37 @@ class MediaDownloaderTest {
         // Thumbnail should be present
         assertNotNull(winner.thumbnailUrl)
     }
+
+    @Test
+    fun downloadQueueManagerActiveDownloadState() {
+        val manager = com.amresalehin.emregallery.data.DownloadQueueManager
+        // Ensure starting state
+        manager.cancelAll(ApplicationProvider.getApplicationContext())
+        assertFalse(manager.inMemoryDownloading.value)
+
+        // Mark 2 downloads started
+        manager.markDownloadStarted(2)
+        assertTrue(manager.inMemoryDownloading.value)
+
+        // 1 completes
+        manager.markDownloadCompleted()
+        assertTrue(manager.inMemoryDownloading.value)
+
+        // 2nd completes
+        manager.markDownloadCompleted()
+        assertFalse(manager.inMemoryDownloading.value)
+    }
+
+    @Test
+    fun downloadQueueManagerCancelAllResetsState() {
+        val manager = com.amresalehin.emregallery.data.DownloadQueueManager
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        manager.markDownloadStarted(5)
+        assertTrue(manager.inMemoryDownloading.value)
+
+        manager.cancelAll(ctx)
+        assertFalse(manager.inMemoryDownloading.value)
+    }
 }
 
 

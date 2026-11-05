@@ -50,8 +50,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.work.WorkInfo
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.amresalehin.emregallery.data.DownloadQueueManager
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
@@ -79,6 +81,15 @@ fun MediaInboxScreen(
     val context = LocalContext.current
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
     val stacks by inboxRepo.stacks.collectAsState()
+    val workInfos by remember(context) {
+        DownloadQueueManager.getActiveDownloadsFlow(context)
+    }.collectAsState(initial = emptyList())
+    val inMemoryDownloading by DownloadQueueManager.inMemoryDownloading.collectAsState()
+    val isDownloading = remember(workInfos, inMemoryDownloading) {
+        inMemoryDownloading || workInfos.any {
+            it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED
+        }
+    }
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedStackForDetail by remember { mutableStateOf<MediaInboxStack?>(null) }
@@ -137,46 +148,23 @@ fun MediaInboxScreen(
             containerColor = MaterialTheme.colorScheme.background,
         floatingActionButton = {
             if (!isSelectionMode) {
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(bottom = 16.dp, end = 8.dp)
+                // Floating Action Button (+) matching Screenshot 1
+                FloatingActionButton(
+                    onClick = { showScraperDrawer = true },
+                    shape = RoundedCornerShape(18.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+                    modifier = Modifier
+                        .padding(bottom = 16.dp, end = 8.dp)
+                        .size(56.dp)
+                        .testTag("media_inbox_fab_add")
                 ) {
-                    // Browser Button above the plus button
-                    FloatingActionButton(
-                        onClick = { showFullScreenBrowser = true },
-                        shape = RoundedCornerShape(16.dp),
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-                        modifier = Modifier
-                            .size(48.dp)
-                            .testTag("media_inbox_fab_browser")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = "Open In-App Browser",
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-
-                    // Floating Action Button (+) matching Screenshot 1
-                    FloatingActionButton(
-                        onClick = { showScraperDrawer = true },
-                        shape = RoundedCornerShape(18.dp),
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
-                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-                        modifier = Modifier
-                            .size(56.dp)
-                            .testTag("media_inbox_fab_add")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Open Media Downloader",
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Open Media Downloader",
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
             }
         }
@@ -186,16 +174,23 @@ fun MediaInboxScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (filteredStacks.isNotEmpty()) {
+            if (filteredStacks.isNotEmpty() || isDownloading) {
                 LazyVerticalStaggeredGrid(
                     columns = StaggeredGridCells.Fixed(2),
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 16.dp)
+                        .testTag("inbox_media_grid"),
                     contentPadding = PaddingValues(top = 80.dp, bottom = 96.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalItemSpacing = 14.dp
                 ) {
+                    // Show skeleton of a single card when a media is downloading
+                    if (isDownloading) {
+                        item(key = "downloading_skeleton_card_item") {
+                            DownloadingSkeletonCard()
+                        }
+                    }
                     items(filteredStacks, key = { it.id }) { stack ->
                         val isSelected = stack.id in selectedStackIds
                         ImageStackCard(
@@ -234,17 +229,12 @@ fun MediaInboxScreen(
                     }
                 }
             } else {
-                LazyColumn(
+                // Completely empty in empty state: no skeleton too
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(top = 80.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    item {
-                        SkeletonWireframeGrid()
-                    }
-                }
+                        .testTag("inbox_empty_state")
+                )
             }
 
             // Top Bar: Selection Toolbar when selecting, otherwise Find in Inbox Search Bar
@@ -412,6 +402,20 @@ fun MediaInboxScreen(
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
+                            }
+
+                            // Browser button moved inside the search bar
+                            IconButton(
+                                onClick = { showFullScreenBrowser = true },
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .testTag("inbox_browser_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Language,
+                                    contentDescription = "Open In-App Browser",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
                             }
 
                             // Tune / Filter icon on the right (as seen in Screenshot 1)
@@ -1844,6 +1848,79 @@ fun DetailTagChip(label: String) {
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
             maxLines = 1
         )
+    }
+}
+
+/**
+ * Single skeleton card displayed when media is actively downloading.
+ */
+@Composable
+fun DownloadingSkeletonCard(
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "download_skeleton_shimmer")
+    val alphaAnim by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 850, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "download_skeleton_alpha"
+    )
+
+    ElevatedCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("downloading_skeleton_card"),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Upper thumbnail skeleton block with animated shimmer
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(175.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = alphaAnim)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CloudDownload,
+                    contentDescription = "Downloading media",
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = alphaAnim * 0.7f),
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+
+            // Lower info skeleton bars
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Top longer horizontal bar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(10.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = alphaAnim * 0.5f))
+                )
+                // Bottom shorter horizontal bar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.5f)
+                        .height(8.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = alphaAnim * 0.35f))
+                )
+            }
+        }
     }
 }
 

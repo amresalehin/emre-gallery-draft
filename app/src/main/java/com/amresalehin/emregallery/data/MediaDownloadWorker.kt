@@ -148,6 +148,8 @@ class MediaDownloadWorker(
             } else {
                 Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Unknown error")))
             }
+        } finally {
+            DownloadQueueManager.markDownloadCompleted()
         }
     }
 
