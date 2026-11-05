@@ -754,7 +754,7 @@ fun AlbumsScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // 2-column tiles: Locked folder & Archive
+            // 2-column tiles: Locked folder & Inbox
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -769,12 +769,12 @@ fun AlbumsScreen(
                     modifier = Modifier.weight(1f)
                 )
                 CollectionTile(
-                    title = "Archive",
-                    count = "$archiveCount items",
-                    icon = Icons.Default.Archive,
+                    title = "Inbox",
+                    count = if (savedStacks.isNotEmpty()) "${savedStacks.size} ${if (savedStacks.size == 1) "item" else "items"}" else "Downloader",
+                    icon = Icons.Default.Inbox,
                     iconTint = MaterialTheme.colorScheme.onSurface,
                     iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Archive") },
+                    onClick = { onFilter("Inbox") },
                     modifier = Modifier.weight(1f)
                 )
             }
