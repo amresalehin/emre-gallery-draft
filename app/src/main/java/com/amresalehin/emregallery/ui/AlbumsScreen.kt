@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -180,6 +181,61 @@ fun AlbumsScreen(
             bottom = bottomContentPadding
         )
     ) {
+        // 0. The tiles - Collections (Favourites, Bin, Locked folder, Inbox) moved to top
+        item {
+            // Top primary pills: Favourites & Bin
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CollectionPill(
+                    title = "Favourites",
+                    count = "$favouritesCount items",
+                    icon = Icons.Default.Favorite,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onFilter("Favourites") },
+                    modifier = Modifier.weight(1f)
+                )
+                CollectionPill(
+                    title = "Bin",
+                    count = "$binCount items",
+                    icon = Icons.Default.Delete,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onFilter("Bin") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // 2-column tiles: Locked folder & Inbox
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CollectionTile(
+                    title = "Locked folder",
+                    count = if (hiddenCount > 0) "$hiddenCount items" else "Private",
+                    icon = Icons.Default.Lock,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onFilter("Hidden") },
+                    modifier = Modifier.weight(1f)
+                )
+                CollectionTile(
+                    title = "Inbox",
+                    count = if (savedStacks.isNotEmpty()) "${savedStacks.size} ${if (savedStacks.size == 1) "item" else "items"}" else "Downloader",
+                    icon = Icons.Default.Inbox,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onFilter("Inbox") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
         // 1. People card: single row, very large clickable faces, model dropdown pill, and 'See all >'
         item {
             Surface(
@@ -724,61 +780,6 @@ fun AlbumsScreen(
                 }
             }
         }
-
-        // 4. The tiles - Collections
-        item {
-            // Top primary pills: Favourites & Bin
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CollectionPill(
-                    title = "Favourites",
-                    count = "$favouritesCount items",
-                    icon = Icons.Default.Favorite,
-                    iconTint = MaterialTheme.colorScheme.onSurface,
-                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Favourites") },
-                    modifier = Modifier.weight(1f)
-                )
-                CollectionPill(
-                    title = "Bin",
-                    count = "$binCount items",
-                    icon = Icons.Default.Delete,
-                    iconTint = MaterialTheme.colorScheme.onSurface,
-                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Bin") },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // 2-column tiles: Locked folder & Inbox
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CollectionTile(
-                    title = "Locked folder",
-                    count = if (hiddenCount > 0) "$hiddenCount items" else "Private",
-                    icon = Icons.Default.Lock,
-                    iconTint = MaterialTheme.colorScheme.onSurface,
-                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Hidden") },
-                    modifier = Modifier.weight(1f)
-                )
-                CollectionTile(
-                    title = "Inbox",
-                    count = if (savedStacks.isNotEmpty()) "${savedStacks.size} ${if (savedStacks.size == 1) "item" else "items"}" else "Downloader",
-                    icon = Icons.Default.Inbox,
-                    iconTint = MaterialTheme.colorScheme.onSurface,
-                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Inbox") },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
     }
     }
 }
@@ -1183,6 +1184,12 @@ private fun CollageCell(
 private fun AlbumsEmptyState(
     onCreateClick: () -> Unit
 ) {
+    val isDark = isSystemInDarkTheme()
+    val cardBg = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface
+    val cardBorder = MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.4f else 0.55f)
+    val textBarPrimary = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDark) 0.32f else 0.22f)
+    val textBarSecondary = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDark) 0.20f else 0.12f)
+
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp),
@@ -1191,8 +1198,8 @@ private fun AlbumsEmptyState(
         items(4) {
             Surface(
                 shape = RoundedCornerShape(18.dp),
-                color = Color(0xFF1E2026),
-                border = BorderStroke(1.dp, Color(0xFF2C2E38)),
+                color = cardBg,
+                border = BorderStroke(1.dp, cardBorder),
                 modifier = Modifier
                     .width(160.dp)
                     .height(220.dp)
@@ -1243,14 +1250,14 @@ private fun AlbumsEmptyState(
                                 .fillMaxWidth(0.68f)
                                 .height(10.dp)
                                 .clip(RoundedCornerShape(5.dp))
-                                .background(Color(0xFF2C2F3D))
+                                .background(textBarPrimary)
                         )
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth(0.42f)
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF242735))
+                                .background(textBarSecondary)
                         )
                     }
                 }
@@ -1261,6 +1268,12 @@ private fun AlbumsEmptyState(
 
 @Composable
 private fun FoldersEmptyState() {
+    val isDark = isSystemInDarkTheme()
+    val cardBg = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface
+    val cardBorder = MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.4f else 0.55f)
+    val textBarPrimary = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDark) 0.32f else 0.22f)
+    val textBarSecondary = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDark) 0.20f else 0.12f)
+
     LazyRow(
         modifier = Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp),
@@ -1269,8 +1282,8 @@ private fun FoldersEmptyState() {
         items(4) {
             Surface(
                 shape = FolderTabShape(),
-                color = Color(0xFF1E2026),
-                border = BorderStroke(1.dp, Color(0xFF2C2E38)),
+                color = cardBg,
+                border = BorderStroke(1.dp, cardBorder),
                 modifier = Modifier
                     .width(160.dp)
                     .height(220.dp)
@@ -1318,14 +1331,14 @@ private fun FoldersEmptyState() {
                                 .fillMaxWidth(0.68f)
                                 .height(10.dp)
                                 .clip(RoundedCornerShape(5.dp))
-                                .background(Color(0xFF2C2F3D))
+                                .background(textBarPrimary)
                         )
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth(0.42f)
                                 .height(8.dp)
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF242735))
+                                .background(textBarSecondary)
                         )
                     }
                 }
@@ -1336,16 +1349,20 @@ private fun FoldersEmptyState() {
 
 @Composable
 private fun PlaceholderGridCell(modifier: Modifier = Modifier) {
+    val isDark = isSystemInDarkTheme()
+    val cellBg = if (isDark) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainer
+    val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDark) 0.38f else 0.32f)
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF252733)),
+            .background(cellBg),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = Icons.Default.Image,
             contentDescription = null,
-            tint = Color(0xFF434657),
+            tint = iconTint,
             modifier = Modifier.size(20.dp)
         )
     }
