@@ -50,7 +50,11 @@ data class DownloadActivityItem(
     val retryCount: Int = 0,
     val maxRetries: Int = 5,
     val nextRetryTimestampMillis: Long? = null,
-    val retryDelaySeconds: Long? = null
+    val retryDelaySeconds: Long? = null,
+    val stackId: String? = null,
+    val stackTitle: String? = null,
+    val sourceDomain: String? = null,
+    val sourceUrl: String? = null
 ) {
     val isFailed: Boolean get() = status == DownloadActivityStatus.FAILED
     val isDownloading: Boolean get() = status == DownloadActivityStatus.DOWNLOADING
@@ -76,14 +80,27 @@ object DownloadActivityManager {
         if (appContext == null) {
             appContext = context.applicationContext
             loadPersistedActivities()
-            // Sanitize any stale false 4K labels from persisted items
+            // 1. Sanitize any stale false 4K labels from persisted items
+            // 2. Ensure any items marked failed prematurely from temporary 429 errors resume as RETRYING under downloading filter
             val cleaned = _activities.value.map { item ->
+                var updated = item
                 if (!item.isVideo && item.format.contains("4K", ignoreCase = true)) {
                     val clean = if (item.mediaUrl.lowercase().contains(".png") || item.title.lowercase().endsWith(".png")) "PNG" else "JPG"
-                    item.copy(format = clean)
-                } else {
-                    item
+                    updated = updated.copy(format = clean)
                 }
+                if (updated.status == DownloadActivityStatus.FAILED && isTemporaryFailure(-1, updated.errorMessage) && updated.retryCount < updated.maxRetries) {
+                    val nextAttempt = updated.retryCount + 1
+                    val delaySec = calculateRetryDelaySeconds(nextAttempt, null)
+                    updated = updated.copy(
+                        status = DownloadActivityStatus.RETRYING,
+                        retryCount = nextAttempt,
+                        maxRetries = 5,
+                        nextRetryTimestampMillis = System.currentTimeMillis() + (delaySec * 1000L),
+                        retryDelaySeconds = delaySec,
+                        errorMessage = null
+                    )
+                }
+                updated
             }
             _activities.value = cleaned
             persistActivities()
@@ -141,6 +158,10 @@ object DownloadActivityManager {
                     put("maxRetries", item.maxRetries)
                     put("nextRetryTimestampMillis", item.nextRetryTimestampMillis ?: -1L)
                     put("retryDelaySeconds", item.retryDelaySeconds ?: -1L)
+                    put("stackId", item.stackId ?: "")
+                    put("stackTitle", item.stackTitle ?: "")
+                    put("sourceDomain", item.sourceDomain ?: "")
+                    put("sourceUrl", item.sourceUrl ?: "")
                 }
                 jsonArray.put(obj)
             }
@@ -198,7 +219,11 @@ object DownloadActivityManager {
                         retryCount = obj.optInt("retryCount", 0),
                         maxRetries = obj.optInt("maxRetries", 5),
                         nextRetryTimestampMillis = obj.optLong("nextRetryTimestampMillis", -1L).takeIf { it > 0L },
-                        retryDelaySeconds = obj.optLong("retryDelaySeconds", -1L).takeIf { it > 0L }
+                        retryDelaySeconds = obj.optLong("retryDelaySeconds", -1L).takeIf { it > 0L },
+                        stackId = obj.optString("stackId").takeIf { it.isNotBlank() },
+                        stackTitle = obj.optString("stackTitle").takeIf { it.isNotBlank() },
+                        sourceDomain = obj.optString("sourceDomain").takeIf { it.isNotBlank() },
+                        sourceUrl = obj.optString("sourceUrl").takeIf { it.isNotBlank() }
                     )
                 )
             }
@@ -267,9 +292,13 @@ object DownloadActivityManager {
         isVideo: Boolean = false,
         isAudio: Boolean = false,
         isStream: Boolean = false,
-        format: String = "MP4",
+        format: String = "JPG",
         workId: String? = null,
-        isRetry: Boolean = false
+        isRetry: Boolean = false,
+        stackId: String? = null,
+        stackTitle: String? = null,
+        sourceDomain: String? = null,
+        sourceUrl: String? = null
     ) {
         val current = _activities.value.toMutableList()
         val existing = current.firstOrNull { it.id == id }
@@ -285,14 +314,18 @@ object DownloadActivityManager {
                 isVideo = isVideo,
                 isAudio = isAudio,
                 isStream = isStream,
-                format = format.ifBlank { if (isVideo) "MP4" else "JPEG" },
+                format = format.ifBlank { if (isVideo) "MP4" else "JPG" },
                 status = DownloadActivityStatus.DOWNLOADING,
                 progress = existing?.progress ?: 0.05f,
                 bytesRead = existing?.bytesRead ?: 0L,
                 totalBytes = existing?.totalBytes ?: 0L,
                 retryCount = if (isRetry) (existing?.retryCount ?: 0) else 0,
                 maxRetries = existing?.maxRetries ?: 5,
-                timestampMillis = System.currentTimeMillis()
+                timestampMillis = System.currentTimeMillis(),
+                stackId = stackId ?: existing?.stackId,
+                stackTitle = stackTitle ?: existing?.stackTitle,
+                sourceDomain = sourceDomain ?: existing?.sourceDomain,
+                sourceUrl = sourceUrl ?: existing?.sourceUrl
             )
         )
         _activities.value = current
@@ -301,7 +334,11 @@ object DownloadActivityManager {
 
     fun recordBatchQueued(
         items: List<ScrapedMediaItem>,
-        workIds: List<UUID>? = null
+        workIds: List<UUID>? = null,
+        stackId: String? = null,
+        stackTitle: String? = null,
+        sourceDomain: String? = null,
+        sourceUrl: String? = null
     ) {
         val current = _activities.value.toMutableList()
         val newItems = items.mapIndexed { index, item ->
@@ -315,10 +352,14 @@ object DownloadActivityManager {
                 isVideo = item.isVideo,
                 isAudio = item.isAudio,
                 isStream = item.isStream,
-                format = item.format.ifBlank { if (item.isVideo) "MP4" else "JPEG" },
+                format = item.format.ifBlank { if (item.isVideo) "MP4" else "JPG" },
                 status = DownloadActivityStatus.DOWNLOADING,
                 progress = 0.05f,
-                timestampMillis = System.currentTimeMillis()
+                timestampMillis = System.currentTimeMillis(),
+                stackId = stackId,
+                stackTitle = stackTitle,
+                sourceDomain = sourceDomain,
+                sourceUrl = sourceUrl
             )
         }
         val newIds = newItems.map { it.id }.toSet()
@@ -448,7 +489,7 @@ object DownloadActivityManager {
                 maxRetries = 5,
                 nextRetryTimestampMillis = nextRetryEpoch,
                 retryDelaySeconds = delaySec,
-                errorMessage = errorMessage ?: "Temporary failure (HTTP $statusCode)"
+                errorMessage = null // Never mark as failed until all 5 automatic retries conclude
             )
             _activities.value = current
             persistActivities()
@@ -519,6 +560,11 @@ object DownloadActivityManager {
         val workId = DownloadQueueManager.enqueueDownload(
             context = context,
             item = scraped,
+            referer = item.sourceUrl,
+            stackId = item.stackId,
+            stackTitle = item.stackTitle,
+            sourceDomain = item.sourceDomain,
+            sourceUrl = item.sourceUrl,
             isRetry = true
         )
         val reloaded = _activities.value.toMutableList()
@@ -595,6 +641,11 @@ object DownloadActivityManager {
             val newWorkId = DownloadQueueManager.enqueueDownload(
                 context = context,
                 item = scraped,
+                referer = item.sourceUrl,
+                stackId = item.stackId,
+                stackTitle = item.stackTitle,
+                sourceDomain = item.sourceDomain,
+                sourceUrl = item.sourceUrl,
                 isRetry = true
             )
             current[index] = item.copy(

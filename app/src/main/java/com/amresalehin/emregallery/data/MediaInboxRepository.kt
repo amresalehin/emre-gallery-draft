@@ -94,10 +94,45 @@ class MediaInboxRepository(private val context: Context) {
                     )
                 )
             }
-            _stacks.value = list
+            val consolidated = consolidateStacks(list)
+            _stacks.value = consolidated
+            if (consolidated.size != list.size) {
+                persist()
+            }
         } catch (e: Exception) {
             _stacks.value = emptyList()
         }
+    }
+
+    private fun consolidateStacks(rawList: List<MediaInboxStack>): List<MediaInboxStack> {
+        if (rawList.size <= 1) return rawList
+        val merged = mutableListOf<MediaInboxStack>()
+        for (stack in rawList) {
+            val existingIndex = merged.indexOfFirst { existing ->
+                when {
+                    existing.id == stack.id -> true
+                    existing.sourceUrl.isNotBlank() && stack.sourceUrl.isNotBlank() && existing.sourceUrl == stack.sourceUrl -> true
+                    existing.title.isNotBlank() && stack.title.isNotBlank() &&
+                        existing.title.equals(stack.title, ignoreCase = true) &&
+                        existing.title != "Discovered Media" && existing.title != "Media Download" -> true
+                    else -> false
+                }
+            }
+            if (existingIndex >= 0) {
+                val existing = merged[existingIndex]
+                val existingKeys = existing.items.map { it.id to it.localUri }.toSet()
+                val newItems = stack.items.filter { (it.id to it.localUri) !in existingKeys }
+                merged[existingIndex] = existing.copy(
+                    items = existing.items + newItems,
+                    timestampMillis = maxOf(existing.timestampMillis, stack.timestampMillis),
+                    sourceUrl = if (existing.sourceUrl.isNotBlank()) existing.sourceUrl else stack.sourceUrl,
+                    sourceDomain = if (existing.sourceDomain.isNotBlank()) existing.sourceDomain else stack.sourceDomain
+                )
+            } else {
+                merged.add(stack)
+            }
+        }
+        return merged
     }
 
     private fun persist() {
@@ -140,7 +175,7 @@ class MediaInboxRepository(private val context: Context) {
 
     fun addStack(stack: MediaInboxStack) {
         val updated = listOf(stack) + _stacks.value.filter { it.id != stack.id }
-        _stacks.value = updated
+        _stacks.value = consolidateStacks(updated)
         persist()
     }
 
@@ -153,24 +188,41 @@ class MediaInboxRepository(private val context: Context) {
         sourceUrl: String
     ) {
         val current = _stacks.value.toMutableList()
-        val existingIndex = current.indexOfFirst { it.id == stackId }
+        // 1. Try to find existing stack by stackId
+        var existingIndex = current.indexOfFirst { it.id == stackId }
+        // 2. If not found by stackId, match by sourceUrl if non-blank
+        if (existingIndex < 0 && sourceUrl.isNotBlank()) {
+            existingIndex = current.indexOfFirst { it.sourceUrl == sourceUrl }
+        }
+        // 3. If still not found, match by stackTitle if non-generic
+        if (existingIndex < 0 && stackTitle.isNotBlank() && stackTitle != "Discovered Media" && stackTitle != "Media Download") {
+            existingIndex = current.indexOfFirst {
+                it.title.equals(stackTitle, ignoreCase = true) &&
+                    (sourceDomain.isBlank() || it.sourceDomain.isBlank() || it.sourceDomain.equals(sourceDomain, ignoreCase = true))
+            }
+        }
+
         if (existingIndex >= 0) {
             val existing = current[existingIndex]
             val updatedItems = existing.items.filter {
                 it.id != item.id && it.sourceUrl != item.sourceUrl && it.localUri != item.localUri
             } + item
-            current[existingIndex] = existing.copy(items = updatedItems)
+            current[existingIndex] = existing.copy(
+                items = updatedItems,
+                timestampMillis = System.currentTimeMillis()
+            )
         } else {
             val newStack = MediaInboxStack(
-                id = stackId,
+                id = stackId.ifBlank { "stack_${System.currentTimeMillis()}" },
                 title = stackTitle.ifBlank { sourceDomain.ifBlank { "Discovered Media" } },
                 sourceDomain = sourceDomain,
                 sourceUrl = sourceUrl,
-                items = listOf(item)
+                items = listOf(item),
+                timestampMillis = System.currentTimeMillis()
             )
             current.add(0, newStack)
         }
-        _stacks.value = current
+        _stacks.value = consolidateStacks(current)
         persist()
     }
 

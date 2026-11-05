@@ -99,7 +99,11 @@ object DownloadQueueManager {
             isStream = item.isStream,
             format = item.format,
             workId = request.id.toString(),
-            isRetry = isRetry
+            isRetry = isRetry,
+            stackId = sId,
+            stackTitle = sTitle,
+            sourceDomain = domain,
+            sourceUrl = url
         )
         markDownloadStarted(count = 1, itemId = item.id)
         return request.id
@@ -158,7 +162,14 @@ object DownloadQueueManager {
         }
 
         DownloadActivityManager.initialize(context)
-        DownloadActivityManager.recordBatchQueued(distinctItems, requests)
+        DownloadActivityManager.recordBatchQueued(
+            items = distinctItems,
+            workIds = requests,
+            stackId = sId,
+            stackTitle = sTitle,
+            sourceDomain = domain,
+            sourceUrl = url
+        )
 
         return requests
     }

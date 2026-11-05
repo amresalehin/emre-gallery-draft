@@ -573,6 +573,65 @@ class DownloaderSearchPageUnitTest {
         val delay5 = DownloadActivityManager.calculateRetryDelaySeconds(attempt = 5, retryAfterSeconds = null)
         assertTrue("Attempt 5 delay should be in [32, 48]", delay5 in 32L..48L)
     }
+
+    @Test
+    fun testRetryingItemsStayInDownloadingFilterUntil5RetriesExhausted() {
+        val retryingItem = DownloadActivityItem(
+            id = "retry_item_1",
+            title = "Taj_Mahal_Photo.jpg",
+            mediaUrl = "https://example.com/taj.jpg",
+            status = DownloadActivityStatus.RETRYING,
+            retryCount = 2,
+            maxRetries = 5,
+            nextRetryTimestampMillis = System.currentTimeMillis() + 8000L,
+            retryDelaySeconds = 8L
+        )
+
+        val failedItem = DownloadActivityItem(
+            id = "failed_item_1",
+            title = "Unreachable.jpg",
+            mediaUrl = "https://example.com/unreachable.jpg",
+            status = DownloadActivityStatus.FAILED,
+            retryCount = 5,
+            maxRetries = 5,
+            errorMessage = "Server returned HTTP status 429"
+        )
+
+        val activities = listOf(retryingItem, failedItem)
+
+        // Retrying item must NOT be classified as failed
+        assertFalse("Retrying item must not have isFailed = true", retryingItem.isFailed)
+        assertTrue("Retrying item must have isRetrying = true", retryingItem.isRetrying)
+
+        // Filter lists test: Downloading filter includes RETRYING
+        val downloadingFilter = activities.filter { it.isDownloading || it.isPaused || it.isRetrying }
+        assertEquals(1, downloadingFilter.size)
+        assertEquals("retry_item_1", downloadingFilter[0].id)
+
+        // Failed filter MUST ONLY include truly failed items (exhausted retries), NOT retrying items
+        val failedFilter = activities.filter { it.isFailed }
+        assertEquals(1, failedFilter.size)
+        assertEquals("failed_item_1", failedFilter[0].id)
+    }
+
+    @Test
+    fun testStackAndCollectionPreservationFields() {
+        val originalItem = DownloadActivityItem(
+            id = "batch_item_1",
+            title = "Taj_Mahal_Gate.jpg",
+            mediaUrl = "https://example.com/gate.jpg",
+            status = DownloadActivityStatus.RETRYING,
+            stackId = "stack_taj_mahal",
+            stackTitle = "Taj Mahal - Wikipedia",
+            sourceDomain = "wikipedia.org",
+            sourceUrl = "https://en.wikipedia.org/wiki/Taj_Mahal"
+        )
+
+        assertEquals("stack_taj_mahal", originalItem.stackId)
+        assertEquals("Taj Mahal - Wikipedia", originalItem.stackTitle)
+        assertEquals("wikipedia.org", originalItem.sourceDomain)
+        assertEquals("https://en.wikipedia.org/wiki/Taj_Mahal", originalItem.sourceUrl)
+    }
 }
 
 

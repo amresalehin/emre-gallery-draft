@@ -120,12 +120,12 @@ fun ActivityPreviewCard(
     val containerShape = RoundedCornerShape(26.dp)
 
     val downloading = remember(activities) { activities.filter { it.isDownloading || it.isPaused || it.isRetrying } }
-    val failed = remember(activities) { activities.filter { it.isFailed || it.isRetrying } }
+    val failed = remember(activities) { activities.filter { it.isFailed } }
     val finished = remember(activities) { activities.filter { it.isFinished } }
 
     val failedCount = activities.count { it.isFailed }
     val retryingCount = activities.count { it.isRetrying }
-    val downloadingCount = activities.count { it.isDownloading || it.isPaused }
+    val downloadingCount = activities.count { it.isDownloading || it.isPaused || it.isRetrying }
 
     Surface(
         onClick = onOpenActivity,
@@ -472,7 +472,7 @@ fun DownloaderActivityPage(
     }
 
     val downloadingItems = remember(activities) { activities.filter { it.isDownloading || it.isPaused || it.isRetrying } }
-    val failedItems = remember(activities) { activities.filter { it.isFailed || it.isRetrying } }
+    val failedItems = remember(activities) { activities.filter { it.isFailed } }
     val finishedItems = remember(activities) { activities.filter { it.isFinished } }
 
     val filteredList = remember(activities, selectedFilter, downloadingItems, failedItems, finishedItems) {
@@ -864,10 +864,13 @@ private fun ActiveDownloadRow(
                 overflow = TextOverflow.Ellipsis
             )
 
-            if (item.isRetrying && item.nextRetryTimestampMillis != null) {
-                val remainingSec = ((item.nextRetryTimestampMillis - currentTimeMillis + 999L) / 1000L).coerceAtLeast(1L)
+            if (item.isRetrying) {
+                val remainingSec = if (item.nextRetryTimestampMillis != null) {
+                    ((item.nextRetryTimestampMillis - currentTimeMillis + 999L) / 1000L).coerceAtLeast(0L)
+                } else 0L
+                val retryLabel = if (remainingSec > 0) "Retrying in ${remainingSec}s" else "Retrying now..."
                 Text(
-                    text = "Retrying in ${remainingSec}s",
+                    text = retryLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = Color(0xFFFFB74D),
                     fontWeight = FontWeight.Medium,
