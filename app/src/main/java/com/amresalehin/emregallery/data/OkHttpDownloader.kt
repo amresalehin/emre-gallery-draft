@@ -180,8 +180,31 @@ object OkHttpDownloader {
         val totalBytes: Long,
         val mimeType: String? = null,
         val isResumed: Boolean = false,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val retryAfterSeconds: Long? = null
     )
+
+    /**
+     * Parses the HTTP 'Retry-After' header (RFC 7231/9110) as seconds or HTTP-date.
+     */
+    fun parseRetryAfterHeader(header: String?): Long? {
+        if (header.isNullOrBlank()) return null
+        val trimmed = header.trim()
+        val seconds = trimmed.toLongOrNull()
+        if (seconds != null) {
+            return seconds.coerceIn(1L, 300L)
+        }
+        return try {
+            val format = java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", java.util.Locale.US)
+            val date = format.parse(trimmed)
+            if (date != null) {
+                val diffSec = (date.time - System.currentTimeMillis()) / 1000L
+                if (diffSec > 0) diffSec.coerceIn(1L, 300L) else null
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /**
      * Executes an HTTP GET request with OkHttp, following redirects and utilizing shared session cookies.
@@ -424,13 +447,16 @@ object OkHttpDownloader {
                 if (!isSuccess) {
                     val err = "Server returned HTTP status $code"
                     Log.w(TAG, "Download failed HTTP $code for $mediaUrl")
+                    val retryAfterHeader = resp.header("Retry-After")
+                    val retryAfterSec = parseRetryAfterHeader(retryAfterHeader)
                     return@withContext DownloadResult(
                         file = null,
                         isSuccessful = false,
                         statusCode = code,
                         bytesDownloaded = existingBytes,
                         totalBytes = -1L,
-                        errorMessage = err
+                        errorMessage = err,
+                        retryAfterSeconds = retryAfterSec
                     )
                 }
 
