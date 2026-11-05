@@ -183,11 +183,7 @@ fun MediaInboxScreen(
                     browserInitialUrl = url
                     showFullScreenBrowser = true
                 },
-                onDownloadComplete = { count ->
-                    scope.launch {
-                        snackbarHostState.showSnackbar("Downloaded $count media item(s) to Saved Library!")
-                    }
-                },
+                onDownloadComplete = { /* Silent foreground download with no toast */ },
                 onViewSavedLibrary = {
                     currentViewMode = DownloaderViewMode.SAVED_LIBRARY
                 },

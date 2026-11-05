@@ -1,8 +1,14 @@
 package com.amresalehin.emregallery.data
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
@@ -11,13 +17,53 @@ import java.io.File
 
 /**
  * Persistent background downloader worker powered by Android Jetpack WorkManager.
- * Ensures media and streaming downloads survive process death, app navigation, and network changes.
+ * Runs as a foreground service with a silent notification to ensure uninterrupted downloading.
  * Incorporates byte-level progress reporting, HTTP Range resumable downloading, and stream remuxing.
  */
 class MediaDownloadWorker(
     appContext: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
+
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val title = inputData.getString(KEY_TITLE) ?: inputData.getString(KEY_FILE_NAME) ?: "Media"
+        return createSilentForegroundInfo(title)
+    }
+
+    private fun createSilentForegroundInfo(title: String): ForegroundInfo {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (notificationManager.getNotificationChannel(SILENT_CHANNEL_ID) == null) {
+                val channel = NotificationChannel(
+                    SILENT_CHANNEL_ID,
+                    "Media Downloads",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Silent background media downloads"
+                    setSound(null, null)
+                    enableVibration(false)
+                    setShowBadge(false)
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+        }
+
+        val notification = NotificationCompat.Builder(applicationContext, SILENT_CHANNEL_ID)
+            .setContentTitle("Downloading media")
+            .setContentText(title)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .build()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(NOTIFICATION_ID, notification)
+        }
+    }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val mediaUrl = inputData.getString(KEY_MEDIA_URL) ?: return@withContext Result.failure()
@@ -33,6 +79,12 @@ class MediaDownloadWorker(
         val stackTitle = inputData.getString(KEY_STACK_TITLE) ?: "Discovered Media"
         val sourceDomain = inputData.getString(KEY_SOURCE_DOMAIN) ?: ""
         val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: mediaUrl
+
+        try {
+            setForeground(getForegroundInfo())
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not set silent foreground service notification: ${e.message}")
+        }
 
         setProgress(workDataOf(KEY_PROGRESS to 0.05f, KEY_STATUS to "Initializing download for $title..."))
 
@@ -178,5 +230,8 @@ class MediaDownloadWorker(
         const val KEY_LOCAL_URI = "local_uri"
         const val KEY_SIZE_BYTES = "size_bytes"
         const val KEY_ERROR = "error"
+
+        const val SILENT_CHANNEL_ID = "media_download_silent_channel"
+        const val NOTIFICATION_ID = 4001
     }
 }

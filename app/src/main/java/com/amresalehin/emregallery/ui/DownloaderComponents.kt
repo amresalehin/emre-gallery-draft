@@ -1611,10 +1611,10 @@ fun DownloaderResultsPage(
                     }
                 }
 
-                // 6. Centered Floating Download Action Pill (Turns ticked on download)
+                // 6. Centered Floating Download Action Pill (Turns ticked on download, app default black and white)
                 Surface(
                     shape = RoundedCornerShape(24.dp),
-                    color = if (isDownloaded) Color(0xFF1B5E20) else Color(0xFF212529),
+                    color = Color(0xFF212529),
                     shadowElevation = 8.dp,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1772,7 +1772,7 @@ fun DownloaderMediaCard(
                     )
                 }
 
-                // Top-Right Checkbox: Turns ticked on download with green accent or dark on selection
+                // Top-Right Checkbox: Turns ticked on download with default black and white
                 val isTicked = isSelected || isDownloaded
                 Box(
                     modifier = Modifier
@@ -1780,13 +1780,7 @@ fun DownloaderMediaCard(
                         .align(Alignment.TopEnd)
                         .size(20.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(
-                            when {
-                                isDownloaded -> Color(0xFF2E7D32)
-                                isSelected -> Color(0xFF212529)
-                                else -> Color.Black.copy(alpha = 0.25f)
-                            }
-                        )
+                        .background(if (isTicked) Color(0xFF212529) else Color.Black.copy(alpha = 0.25f))
                         .border(
                             width = 1.5.dp,
                             color = Color.White,
