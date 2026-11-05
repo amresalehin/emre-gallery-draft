@@ -56,6 +56,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 @Composable
 fun MediaScraperDrawer(
+    initialUrl: String? = null,
     onClose: () -> Unit,
     onDownloadComplete: () -> Unit,
     onOpenBrowser: ((String) -> Unit)? = null,
@@ -79,7 +80,7 @@ fun MediaScraperDrawer(
 
     val extractorState by dualExtractor.state.collectAsState()
 
-    var urlInput by remember { mutableStateOf("") }
+    var urlInput by remember { mutableStateOf(initialUrl ?: "") }
     var selectedFilter by remember { mutableStateOf<String?>(null) }
     var selectedItemIds by remember { mutableStateOf(setOf<String>()) }
     var isDownloading by remember { mutableStateOf(false) }
@@ -107,7 +108,7 @@ fun MediaScraperDrawer(
     }
 
     // Auto-select newly discovered items if user hasn't explicitly deselected all
-    LaunchedEffect(allScrapedItems.size) {
+    LaunchedEffect(allScrapedItems.size, extractorState.isRunning) {
         if (allScrapedItems.isNotEmpty() && selectedItemIds.isEmpty() && !extractorState.isRunning) {
             selectedItemIds = allScrapedItems.map { it.id }.toSet()
         }
@@ -231,6 +232,12 @@ fun MediaScraperDrawer(
         }
     }
 
+    LaunchedEffect(initialUrl) {
+        if (!initialUrl.isNullOrBlank() && !hasSubmittedQuery) {
+            submitSearch(initialUrl)
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -253,7 +260,7 @@ fun MediaScraperDrawer(
             shadowElevation = 24.dp
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // 1. Drag handle pill matching Material 3 bottom sheet styling
+                // 1. Drag handle pill matching Material 3 bottom sheet styling with close button
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -267,6 +274,21 @@ fun MediaScraperDrawer(
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                     )
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 12.dp)
+                            .size(32.dp)
+                            .testTag("scraper_drawer_close_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close drawer",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
 
                 // 2. Search / URL input bar inside the drawer

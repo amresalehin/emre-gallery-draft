@@ -75,6 +75,7 @@ private val Dark = darkColorScheme(
 @Composable
 fun EmreGalleryTheme(
     theme: String = "system",
+    surfaceColor: Color? = null,
     content: @Composable () -> Unit
 ) {
     val darkTheme = when (theme) {
@@ -89,7 +90,7 @@ fun EmreGalleryTheme(
         CompositionLocalProvider(LocalRippleConfiguration provides null) {
             Surface(
                 modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.background,
+                color = surfaceColor ?: MaterialTheme.colorScheme.background,
                 contentColor = MaterialTheme.colorScheme.onBackground,
                 content = content
             )

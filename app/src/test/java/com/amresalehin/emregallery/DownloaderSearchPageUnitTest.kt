@@ -302,6 +302,49 @@ class DownloaderSearchPageUnitTest {
         val displayStacks = stacksList.take(5)
         assertEquals(5, displayStacks.size)
     }
+
+    @Test
+    fun testExtractFirstUrlFromSharedContent() {
+        // Direct URL
+        assertEquals(
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            MediaClassifier.extractFirstUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        )
+
+        // URL embedded in shared text with surrounding words
+        assertEquals(
+            "https://twitter.com/user/status/1234567890",
+            MediaClassifier.extractFirstUrl("Check out this tweet: https://twitter.com/user/status/1234567890 right now!")
+        )
+
+        // URL with trailing period from sentence
+        assertEquals(
+            "https://instagram.com/reel/C123456/",
+            MediaClassifier.extractFirstUrl("Look at this reel https://instagram.com/reel/C123456/.")
+        )
+
+        // Multi-line shared text from share sheet
+        val multiLineShare = """
+            Awesome tutorial on Jetpack Compose!
+            https://medium.com/@dev/compose-guide-2026
+            Shared from Chrome
+        """.trimIndent()
+        assertEquals(
+            "https://medium.com/@dev/compose-guide-2026",
+            MediaClassifier.extractFirstUrl(multiLineShare)
+        )
+
+        // Plain domain without protocol
+        assertEquals(
+            "https://wikipedia.org/wiki/Taj_Mahal",
+            MediaClassifier.extractFirstUrl("wikipedia.org/wiki/Taj_Mahal")
+        )
+
+        // Non-URL text returns null
+        assertEquals(null, MediaClassifier.extractFirstUrl("Hello there how are you"))
+        assertEquals(null, MediaClassifier.extractFirstUrl(""))
+        assertEquals(null, MediaClassifier.extractFirstUrl(null))
+    }
 }
 
 

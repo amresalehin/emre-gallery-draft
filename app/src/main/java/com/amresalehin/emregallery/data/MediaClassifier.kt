@@ -284,6 +284,32 @@ object MediaClassifier {
         }
     }
 
+    private val HTTP_URL_REGEX = "(https?://[^\\s<>\"'\\[\\]{}|\\\\^`]+)".toRegex(RegexOption.IGNORE_CASE)
+
+    /**
+     * Extracts the first valid web URL from arbitrary shared text, captions, or messages.
+     * Trims surrounding punctuation often attached in shared messages.
+     */
+    fun extractFirstUrl(text: String?): String? {
+        if (text.isNullOrBlank()) return null
+        val match = HTTP_URL_REGEX.find(text)
+        if (match != null) {
+            val candidate = match.value.trimEnd('.', ',', ')', ']', ';', '>', '"', '\'', ':', '!')
+            if (isValidWebUrl(candidate)) {
+                return candidate
+            }
+        }
+        val trimmed = text.trim()
+        if (isValidWebUrl(trimmed)) {
+            return if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
+                "https://$trimmed"
+            } else {
+                trimmed
+            }
+        }
+        return null
+    }
+
     val KNOWN_MEDIA_EXTENSIONS = setOf(
         "jpg", "jpeg", "png", "webp", "gif", "svg", "avif", "bmp", "heic", "heif", "ico",
         "mp4", "webm", "mov", "mkv", "avi", "flv", "3gp", "m4v", "ts", "m3u8", "mpd",
