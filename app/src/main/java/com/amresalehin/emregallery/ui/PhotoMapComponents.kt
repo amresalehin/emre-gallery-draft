@@ -315,6 +315,7 @@ fun PhotoMapViewContainer(
     val heatmapPoints = remember(locatedMedia) { locatedMedia.map { it.second } }
     val heatmapOverlay = remember { PhotoHeatmapOverlay() }
     val selectedMarker = remember { mutableStateOf<Marker?>(null) }
+    val mapInstance = remember { mutableStateOf<MapView?>(null) }
 
     Card(
         modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).testTag("photo_map_card"),
@@ -347,30 +348,27 @@ fun PhotoMapViewContainer(
                         setVerticalMapRepetitionEnabled(false)
                         setHorizontalMapRepetitionEnabled(false)
                         setScrollableAreaLimitDouble(BoundingBox(85.0511, 180.0, -85.0511, -180.0))
-                        val initialFitZoom = calculateWorldFitZoom(this)
-                        minZoomLevel = initialFitZoom
-                        controller.setZoom(initialFitZoom)
-                        controller.setCenter(WORLD_VIEW_CENTER)
+                        minZoomLevel = MIN_MAP_ZOOM
+                        maxZoomLevel = MAX_MAP_ZOOM
+                        controller.setZoom(savedCamera?.zoom ?: DEFAULT_WORLD_ZOOM)
+                        controller.setCenter(savedCamera?.let { GeoPoint(it.latitude, it.longitude) } ?: WORLD_VIEW_CENTER)
 
                         // Initialize the camera once after measurement. Indexing never reframes it.
                         addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
                             val newW = right - left
                             val newH = bottom - top
                             if (newW > 0 && newH > 0 && !cameraInitialized) {
-                                val fitZoom = calculateWorldFitZoom(this)
-                                minZoomLevel = if (savedCamera != null) {
-                                    minOf(fitZoom, savedCamera.zoom)
-                                } else {
-                                    fitZoom
-                                }
+                                minZoomLevel = MIN_MAP_ZOOM
+                                maxZoomLevel = MAX_MAP_ZOOM
                                 if (savedCamera != null) {
                                     controller.setCenter(GeoPoint(savedCamera.latitude, savedCamera.longitude))
-                                    controller.setZoom(savedCamera.zoom)
+                                    controller.setZoom(savedCamera.zoom.coerceIn(MIN_MAP_ZOOM, MAX_MAP_ZOOM))
                                 } else {
                                     controller.setCenter(WORLD_VIEW_CENTER)
-                                    controller.setZoom(fitZoom)
+                                    controller.setZoom(DEFAULT_WORLD_ZOOM)
                                 }
                                 cameraInitialized = true
+                                mapInstance.value = this
                                 latestOnMapReady.value(this)
                                 latestOnBoundsChanged.value(calculateMapBounds(this, ctx))
                                 invalidate()
@@ -402,6 +400,7 @@ fun PhotoMapViewContainer(
                     }
                 },
                 update = { map ->
+                    mapInstance.value = map
                     // Heatmap stays visible at all times.
                     heatmapOverlay.updatePoints(heatmapPoints)
                     if (!map.overlays.contains(heatmapOverlay)) {
@@ -427,6 +426,49 @@ fun PhotoMapViewContainer(
                     map.invalidate()
                 }
             )
+
+            // Simple, intuitive Zoom In (+) / Zoom Out (−) floating controls
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                shadowElevation = 4.dp,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 12.dp, end = 12.dp)
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(2.dp)
+                ) {
+                    IconButton(
+                        onClick = { mapInstance.value?.controller?.zoomIn() },
+                        modifier = Modifier.size(38.dp).testTag("map_zoom_in_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Zoom in",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.width(22.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                    )
+                    IconButton(
+                        onClick = { mapInstance.value?.controller?.zoomOut() },
+                        modifier = Modifier.size(38.dp).testTag("map_zoom_out_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Remove,
+                            contentDescription = "Zoom out",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
 
             Surface(
                 shape = RoundedCornerShape(6.dp),

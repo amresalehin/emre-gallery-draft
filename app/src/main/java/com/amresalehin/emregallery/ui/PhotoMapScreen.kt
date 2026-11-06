@@ -25,6 +25,11 @@ const val WORLD_VIEW_LAT_SOUTH = -85.0511
 const val WORLD_VIEW_LON_WEST = -180.0
 const val WORLD_VIEW_LON_EAST = 180.0
 
+const val MIN_MAP_ZOOM = 2.0
+const val MAX_MAP_ZOOM = 19.0
+const val DEFAULT_WORLD_ZOOM = 2.5
+const val SINGLE_PHOTO_ZOOM = 15.0
+
 /** Center of the full-world view used when there is no saved camera. */
 val WORLD_VIEW_CENTER = GeoPoint(0.0, 0.0)
 val WORLD_VIEW_BOUNDS = BoundingBox(
@@ -85,33 +90,22 @@ internal fun persistPhotoMapCamera(context: Context, map: MapView) {
 }
 
 /**
- * Calculates the lowest zoom at which the complete Mercator world (256 * 2^z square)
- * is fully visible inside the map viewport. The smaller viewport dimension is the
- * limiting constraint; using the larger one would crop the world on the other axis.
+ * Returns the default world overview zoom level.
  */
-fun calculateWorldFitZoom(map: MapView): Double {
-    if (map.width <= 0 || map.height <= 0) return 0.0
-    val limitingDimension = minOf(map.width, map.height).toDouble()
-    return (kotlin.math.ln(limitingDimension / 256.0) / kotlin.math.ln(2.0))
-        .coerceAtLeast(0.0)
-}
+fun calculateWorldFitZoom(map: MapView): Double = DEFAULT_WORLD_ZOOM
 
 /**
  * Frames the entire world, centered, so any geotagged media is visible at a glance.
  */
 fun showWorldView(map: MapView, animated: Boolean = false) {
-    if (map.width <= 0 || map.height <= 0) {
-        map.post { showWorldView(map, animated) }
-        return
-    }
-    val targetZoom = calculateWorldFitZoom(map)
-    map.minZoomLevel = targetZoom
+    map.minZoomLevel = MIN_MAP_ZOOM
+    map.maxZoomLevel = MAX_MAP_ZOOM
     if (animated) {
         map.controller.animateTo(WORLD_VIEW_CENTER)
-        map.controller.setZoom(targetZoom)
+        map.controller.setZoom(DEFAULT_WORLD_ZOOM)
     } else {
         map.controller.setCenter(WORLD_VIEW_CENTER)
-        map.controller.setZoom(targetZoom)
+        map.controller.setZoom(DEFAULT_WORLD_ZOOM)
     }
     map.invalidate()
 }
@@ -121,8 +115,10 @@ fun focusSinglePhoto(map: MapView, point: GeoPoint, animated: Boolean = true) {
         map.post { focusSinglePhoto(map, point, animated) }
         return
     }
+    map.minZoomLevel = MIN_MAP_ZOOM
+    map.maxZoomLevel = MAX_MAP_ZOOM
     if (animated) map.controller.animateTo(point) else map.controller.setCenter(point)
-    map.controller.setZoom(15.0)
+    map.controller.setZoom(SINGLE_PHOTO_ZOOM)
     map.invalidate()
 }
 
@@ -159,7 +155,7 @@ fun computeMediaBoundingBox(points: List<GeoPoint>): BoundingBox? {
 }
 
 /**
- * Fits the given bounding box on the map with standard edge padding.
+ * Fits the given bounding box on the map with standard edge padding and predictable zoom limits.
  */
 fun fitBounds(
     map: MapView,
@@ -175,16 +171,15 @@ fun fitBounds(
     val standardPaddingPx = (paddingDp * density).toInt()
     val maxPaddingX = (map.width * 0.2f).toInt()
     val maxPaddingY = (map.height * 0.2f).toInt()
-    val paddingPx = minOf(standardPaddingPx, maxPaddingX, maxPaddingY).coerceAtLeast(0)
+    val paddingPx = minOf(standardPaddingPx, maxPaddingX, maxPaddingY).coerceAtLeast(16)
 
     runCatching {
+        map.minZoomLevel = MIN_MAP_ZOOM
+        map.maxZoomLevel = MAX_MAP_ZOOM
         map.zoomToBoundingBox(bounds, animated, paddingPx)
-        if (map.zoomLevelDouble > 15.0) {
-            map.controller.setZoom(15.0)
-        }
-        val minZoom = calculateWorldFitZoom(map)
-        if (map.zoomLevelDouble < minZoom) {
-            map.controller.setZoom(minZoom)
+        val clampedZoom = map.zoomLevelDouble.coerceIn(MIN_MAP_ZOOM, SINGLE_PHOTO_ZOOM)
+        if (map.zoomLevelDouble != clampedZoom) {
+            map.controller.setZoom(clampedZoom)
         }
         map.invalidate()
     }
