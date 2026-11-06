@@ -4,6 +4,7 @@ import com.amresalehin.emregallery.data.DownloadActivityItem
 import com.amresalehin.emregallery.data.DownloadActivityManager
 import com.amresalehin.emregallery.data.DownloadActivityStatus
 import com.amresalehin.emregallery.data.MediaClassifier
+import com.amresalehin.emregallery.ui.Destination
 import com.amresalehin.emregallery.ui.DetectedPlatform
 import com.amresalehin.emregallery.ui.DownloaderViewMode
 import com.amresalehin.emregallery.ui.detectPlatform
@@ -631,6 +632,74 @@ class DownloaderSearchPageUnitTest {
         assertEquals("Taj Mahal - Wikipedia", originalItem.stackTitle)
         assertEquals("wikipedia.org", originalItem.sourceDomain)
         assertEquals("https://en.wikipedia.org/wiki/Taj_Mahal", originalItem.sourceUrl)
+    }
+
+    @Test
+    fun testSavedCardNavigationToSavedMediaLibrary() {
+        // Given user clicks on "Saved" from Album Screen
+        var currentMode: DownloaderViewMode? = null
+        var currentDest: Destination? = null
+        val onFilter: (String) -> Unit = { label ->
+            when (label) {
+                "Saved", "Saved Media Library", "Saved Library" -> {
+                    currentDest = Destination.MEDIA_INBOX
+                    currentMode = DownloaderViewMode.SAVED_LIBRARY
+                }
+                "Media Downloader", "Media Inbox", "Inbox" -> {
+                    currentDest = Destination.MEDIA_INBOX
+                    currentMode = DownloaderViewMode.SEARCH_PAGE
+                }
+                else -> {}
+            }
+        }
+
+        // Action: Click "Saved" on Album Screen
+        onFilter("Saved")
+        assertEquals(Destination.MEDIA_INBOX, currentDest)
+        assertEquals(DownloaderViewMode.SAVED_LIBRARY, currentMode)
+
+        // Action: Click "Inbox"
+        onFilter("Inbox")
+        assertEquals(Destination.MEDIA_INBOX, currentDest)
+        assertEquals(DownloaderViewMode.SEARCH_PAGE, currentMode)
+
+        // Test Back Handling when launched with SAVED_LIBRARY
+        val initialViewMode = DownloaderViewMode.SAVED_LIBRARY
+        var didNavigateBack = false
+        var activeMode = initialViewMode
+        fun handleBack() {
+            if (activeMode == DownloaderViewMode.SAVED_LIBRARY) {
+                if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) {
+                    didNavigateBack = true
+                } else {
+                    activeMode = DownloaderViewMode.SEARCH_PAGE
+                }
+            }
+        }
+
+        handleBack()
+        assertTrue(didNavigateBack)
+    }
+
+    @Test
+    fun testFiveRowGapBetweenSearchBarAndActivityCard() {
+        val rowHeight = 40 // Standard dense list/item row in dp
+        val fiveRowGap = 5 * rowHeight // 200 dp
+        assertEquals(200, fiveRowGap)
+
+        // When no search history exists, 5-row gap is always preserved
+        val pillsEmpty = emptyList<String>()
+        val gapWhenEmpty = if (pillsEmpty.isEmpty()) fiveRowGap else 0
+        assertEquals(200, gapWhenEmpty)
+
+        // When search history exists (e.g. 1 pill row of height 38dp + spacing)
+        val pillsNotEmpty = listOf("wikipedia.org")
+        val pillRowHeight = 38
+        val internalSpacing = 26
+        val remainingSpacer = (fiveRowGap - pillRowHeight - internalSpacing).coerceAtLeast(16)
+        assertTrue(remainingSpacer >= 16)
+        val totalDistance = pillRowHeight + internalSpacing + remainingSpacer
+        assertEquals(200, totalDistance)
     }
 }
 

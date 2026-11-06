@@ -226,7 +226,7 @@ fun DownloaderSearchMainPage(
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(scrollState)
-            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
             .testTag("downloader_search_main_page"),
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -467,80 +467,96 @@ fun DownloaderSearchMainPage(
             }
         }
 
-        // 2. Recent links horizontal pill row with site favicons
+        // 2. Search History / Recent links or 5-row gap
+        // There should be a 5 row gap always present between search bar and activity card in Main Downloader Inbox Screen, even when no search history is there.
+        val fiveRowGap = 200.dp
         if (pills.isNotEmpty()) {
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("downloader_recent_pills_row"),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(pills, key = { it.domain + it.url }) { pill ->
-                    Surface(
-                        onClick = {
-                            urlInput = pill.url
-                            submitSearch(pill.url)
-                        },
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                        modifier = Modifier
-                            .height(38.dp)
-                            .testTag("recent_pill_${pill.name}")
-                    ) {
-                        Row(
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("downloader_recent_pills_row"),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(pills, key = { it.domain + it.url }) { pill ->
+                        Surface(
+                            onClick = {
+                                urlInput = pill.url
+                                submitSearch(pill.url)
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
                             modifier = Modifier
-                                .padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                .height(38.dp)
+                                .testTag("recent_pill_${pill.name}")
                         ) {
-                            // Circular site favicon avatar
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                modifier = Modifier.size(26.dp)
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    var iconFailed by remember(pill.faviconUrl) { mutableStateOf(false) }
-                                    if (!iconFailed) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(LocalContext.current)
-                                                .data(pill.faviconUrl)
-                                                .crossfade(true)
-                                                .listener(
-                                                    onError = { _, _ -> iconFailed = true }
-                                                )
-                                                .build(),
-                                            contentDescription = pill.name,
-                                            modifier = Modifier
-                                                .size(18.dp)
-                                                .clip(CircleShape),
-                                            contentScale = ContentScale.Fit
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Default.Language,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(15.dp)
-                                        )
+                                // Circular site favicon avatar
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        var iconFailed by remember(pill.faviconUrl) { mutableStateOf(false) }
+                                        if (!iconFailed) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(pill.faviconUrl)
+                                                    .crossfade(true)
+                                                    .listener(
+                                                        onError = { _, _ -> iconFailed = true }
+                                                    )
+                                                    .build(),
+                                                contentDescription = pill.name,
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clip(CircleShape),
+                                                contentScale = ContentScale.Fit
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.Language,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(15.dp)
+                                            )
+                                        }
                                     }
                                 }
-                            }
 
-                            // Website name
-                            Text(
-                                text = pill.name,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                fontSize = 13.sp
-                            )
+                                // Website name
+                                Text(
+                                    text = pill.name,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height((fiveRowGap - 38.dp - 26.dp).coerceAtLeast(16.dp)))
             }
+        } else {
+            // Generous 5-row gap always present when no search history is there
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(fiveRowGap - 16.dp)
+                    .testTag("downloader_search_history_five_row_gap")
+            )
         }
         // 3. Activity Card matching image_4fd87912.png
         ActivityPreviewCard(
@@ -1170,7 +1186,7 @@ fun DownloaderResultsPage(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Surface(
                     shape = RoundedCornerShape(26.dp),

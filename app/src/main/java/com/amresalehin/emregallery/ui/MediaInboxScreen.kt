@@ -93,6 +93,8 @@ enum class DownloaderViewMode {
 @Composable
 fun MediaInboxScreen(
     onBack: () -> Unit,
+    initialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+    initialStackForDetail: MediaInboxStack? = null,
     onOpenMediaItem: ((String) -> Unit)? = null,
     onOpenMediaWithList: ((String, List<String>) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -113,7 +115,7 @@ fun MediaInboxScreen(
     var isSearchFocused by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    var selectedStackForDetail by remember { mutableStateOf<MediaInboxStack?>(null) }
+    var selectedStackForDetail by remember(initialStackForDetail) { mutableStateOf(initialStackForDetail) }
     var showFilterSheet by remember { mutableStateOf(false) }
     var showFullScreenBrowser by remember { mutableStateOf(false) }
     var browserInitialUrl by remember { mutableStateOf("") }
@@ -125,7 +127,7 @@ fun MediaInboxScreen(
     val isSelectionMode = selectedStackIds.isNotEmpty()
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
-    var currentViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
+    var currentViewMode by remember(initialViewMode) { mutableStateOf(initialViewMode) }
     var activeFetchUrl by remember { mutableStateOf("") }
 
     BackHandler(enabled = !showFullScreenBrowser) {
@@ -136,16 +138,20 @@ fun MediaInboxScreen(
             isSearchFocused = false
             focusManager.clearFocus()
             keyboardController?.hide()
-        } else if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE) {
-            currentViewMode = DownloaderViewMode.SEARCH_PAGE
-        } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
-            currentViewMode = DownloaderViewMode.SEARCH_PAGE
         } else if (selectedStackForDetail != null) {
             selectedStackForDetail = null
+        } else if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE) {
+            currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
+        } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
+            currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
         } else if (showFilterSheet) {
             showFilterSheet = false
         } else if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
-            currentViewMode = DownloaderViewMode.SEARCH_PAGE
+            if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) {
+                onBack()
+            } else {
+                currentViewMode = DownloaderViewMode.SEARCH_PAGE
+            }
         } else {
             onBack()
         }
@@ -193,6 +199,7 @@ fun MediaInboxScreen(
                 modifier = Modifier.fillMaxSize(),
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 containerColor = MaterialTheme.colorScheme.background,
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 topBar = {
                     if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
                         Surface(
@@ -204,7 +211,7 @@ fun MediaInboxScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 6.dp)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
                             ) {
                                 if (isSelectionMode) {
                                     // Selection mode toolbar
@@ -302,7 +309,11 @@ fun MediaInboxScreen(
                                                         focusManager.clearFocus()
                                                         keyboardController?.hide()
                                                     } else {
-                                                        currentViewMode = DownloaderViewMode.SEARCH_PAGE
+                                                        if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) {
+                                                            onBack()
+                                                        } else {
+                                                            currentViewMode = DownloaderViewMode.SEARCH_PAGE
+                                                        }
                                                     }
                                                 },
                                                 modifier = Modifier

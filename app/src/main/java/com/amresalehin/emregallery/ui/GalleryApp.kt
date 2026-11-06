@@ -66,7 +66,9 @@ data class NavBackStackEntry(
     val currentStoryIndex: Int = 0,
     val mapFocusItem: MediaItem? = null,
     val albumFilter: String? = null,
-    val albumFilterReturnDestination: Destination = Destination.ALBUMS
+    val albumFilterReturnDestination: Destination = Destination.ALBUMS,
+    val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+    val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
 )
 
 val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
@@ -131,6 +133,8 @@ fun GalleryApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
+    var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
+    var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -474,7 +478,9 @@ fun GalleryApp() {
         newViewerMediaList: List<MediaItem> = viewerMediaList,
         newViewerStoryTitle: String? = if (dest == Destination.VIEWER) viewerStoryTitle else null,
         newViewerStories: List<StoryGroup> = if (dest == Destination.VIEWER) viewerStories else emptyList(),
-        newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0
+        newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0,
+        newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+        newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -492,7 +498,9 @@ fun GalleryApp() {
                     currentStoryIndex = currentStoryIndex,
                     mapFocusItem = mapFocusItem,
                     albumFilter = albumFilter,
-                    albumFilterReturnDestination = albumFilterReturnDestination
+                    albumFilterReturnDestination = albumFilterReturnDestination,
+                    inboxInitialViewMode = inboxInitialViewMode,
+                    inboxInitialStack = inboxInitialStack
                 )
             )
             previousDestination = destination
@@ -504,6 +512,8 @@ fun GalleryApp() {
         viewerStoryTitle = newViewerStoryTitle
         viewerStories = newViewerStories
         currentStoryIndex = newCurrentStoryIndex
+        inboxInitialViewMode = newInboxInitialViewMode
+        inboxInitialStack = newInboxInitialStack
     }
 
     fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
@@ -580,6 +590,8 @@ fun GalleryApp() {
                 mapFocusItem = entry.mapFocusItem
                 albumFilter = entry.albumFilter
                 albumFilterReturnDestination = entry.albumFilterReturnDestination
+                inboxInitialViewMode = entry.inboxInitialViewMode
+                inboxInitialStack = entry.inboxInitialStack
                 previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
             }
             albumFilter != null -> {
@@ -607,10 +619,13 @@ fun GalleryApp() {
                 Destination.LIBRARY_OVERVIEW,
                 Destination.INDEXING_STATUS,
                 Destination.OCR_SETTINGS,
-                Destination.ABOUT,
-                Destination.MEDIA_INBOX
+                Destination.ABOUT
             ) -> {
                 destination = Destination.SETTINGS
+                viewerStoryTitle = null
+            }
+            destination == Destination.MEDIA_INBOX -> {
+                destination = if (previousDestination == Destination.ALBUMS) Destination.ALBUMS else Destination.SETTINGS
                 viewerStoryTitle = null
             }
             destination == Destination.VIEWER -> {
@@ -896,11 +911,28 @@ fun GalleryApp() {
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
-                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(Destination.MEDIA_INBOX) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
                             navigateTo(Destination.PEOPLE)
+                        },
+                        onOpenSavedLibrary = {
+                            albumFilter = null
+                            navigateTo(
+                                dest = Destination.MEDIA_INBOX,
+                                rememberPrevious = true,
+                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY
+                            )
+                        },
+                        onOpenSavedStack = { stack ->
+                            albumFilter = null
+                            navigateTo(
+                                dest = Destination.MEDIA_INBOX,
+                                rememberPrevious = true,
+                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY,
+                                newInboxInitialStack = stack
+                            )
                         },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -1217,6 +1249,8 @@ fun GalleryApp() {
                         onBack = { performBackNavigation() }
                     )
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
+                        initialViewMode = inboxInitialViewMode,
+                        initialStackForDetail = inboxInitialStack,
                         onBack = { performBackNavigation() },
                         onOpenMediaItem = { uri ->
                             val match = media.firstOrNull { it.uri == uri || (it.name.isNotBlank() && uri.contains(it.name)) }
