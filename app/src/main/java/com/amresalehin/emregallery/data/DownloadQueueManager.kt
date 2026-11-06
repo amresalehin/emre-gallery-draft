@@ -173,7 +173,7 @@ object DownloadQueueManager {
         val url = sourceUrl ?: referer ?: ""
 
         val workManager = WorkManager.getInstance(context)
-        val distinctItems = MediaClassifier.deduplicateScrapedItems(items)
+        val distinctItems = MediaCandidatePipeline.merge(emptyList(), items)
 
         val workIds = distinctItems.map { item ->
             val headersJson = serializeHeaders(item.downloadHeaders)

@@ -1071,7 +1071,7 @@ fun DownloaderResultsPage(
 
     val sessionItems by DownloaderSession.discoveredItems.collectAsState()
     val allScrapedItems = remember(extractorState.items, sessionItems) {
-        MediaClassifier.deduplicateScrapedItems(extractorState.items + sessionItems)
+        MediaCandidatePipeline.merge(emptyList(), extractorState.items + sessionItems)
     }
 
     // Auto-select newly discovered items
@@ -1775,7 +1775,7 @@ fun DownloaderResultsPage(
                             downloadStatusText = "Preparing download batch..."
                             scope.launch {
                                 val selectedItems = filteredItems.filter { it.id in selectedItemIds }
-                                val deduplicated = MediaClassifier.deduplicateScrapedItems(selectedItems)
+                                val deduplicated = MediaCandidatePipeline.merge(emptyList(), selectedItems)
                                 val stackId = "stack_${System.currentTimeMillis()}"
                                 val stackTitle = extractorState.pageTitle.ifBlank { extractorState.domain.ifBlank { "Media Download" } }
 

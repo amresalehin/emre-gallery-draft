@@ -147,9 +147,12 @@ object GalleryDlEngine {
 
         if (!isAvailable()) {
             // Heuristic check if Python isn't active
-            val lower = url.lowercase()
+            val host = MediaProviderRouting.hostOf(url) ?: return GalleryDlSupportInfo(false, "", "", "", "")
             for (site in defaultPopularSites()) {
-                if (site.domains.any { lower.contains(it) }) {
+                if (site.domains.any { domain ->
+                        val normalizedDomain = domain.lowercase().removePrefix("www.")
+                        host == normalizedDomain || host.endsWith(".$normalizedDomain")
+                    }) {
                     return GalleryDlSupportInfo(
                         isSupported = true,
                         category = site.name.lowercase(),

@@ -68,6 +68,7 @@ import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.DownloadQueueManager
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
+import com.amresalehin.emregallery.data.MediaCandidatePipeline
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
@@ -2298,7 +2299,7 @@ fun FullScreenBrowserView(
                 },
                 onBatchExtracted = { batch, title, domain ->
                     title?.let { if (it.isNotBlank()) pageTitle = it }
-                    discoveredItems = MediaClassifier.deduplicateScrapedItems(discoveredItems + batch)
+                    discoveredItems = MediaCandidatePipeline.merge(emptyList(), discoveredItems + batch)
                 },
                 onSwitchToMediaTab = {
                     showDiscoveredMediaSheet = true
