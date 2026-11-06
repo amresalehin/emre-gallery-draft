@@ -176,6 +176,7 @@ fun DownloaderSearchMainPage(
             trimmed
         }
         scope.launch {
+            historyManager.recordSearchQuery(trimmed)
             historyManager.recordVisit(normalized)
         }
         onFetchUrl(normalized)
@@ -199,16 +200,23 @@ fun DownloaderSearchMainPage(
             "https://www.google.com/search?q=" + java.net.URLEncoder.encode(trimmed, "UTF-8")
         }
         scope.launch {
+            historyManager.recordSearchQuery(trimmed)
             historyManager.recordVisit(destinationUrl)
         }
         onOpenBrowser(destinationUrl)
     }
 
-    // Dynamic pills derived solely from user visit/saved history - no hardcoded sites
-    val pills = remember(allHistorySites) {
+    val recentSearches by historyManager.recentSearchQueries.collectAsState(initial = emptyList())
+
+    // 5 most searched/visited site favicons
+    val topFiveSites = remember(allHistorySites) {
         val seenDomains = mutableSetOf<String>()
         val result = mutableListOf<DownloaderPill>()
-        for (site in allHistorySites) {
+        val sorted = allHistorySites.sortedWith(
+            compareByDescending<BrowserSite> { it.visitCount }
+                .thenByDescending { it.lastVisitedMillis }
+        )
+        for (site in sorted) {
             val domain = site.domain.removePrefix("www.").lowercase().trim()
             if (domain.isNotBlank() && seenDomains.add(domain)) {
                 val displayName = site.title.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("http") }
@@ -222,7 +230,30 @@ fun DownloaderSearchMainPage(
                 )
             }
         }
-        result.take(12)
+        result.take(5)
+    }
+
+    // Recent 3 searches
+    val recentThreeSearches = remember(recentSearches, allHistorySites) {
+        val list = mutableListOf<String>()
+        for (q in recentSearches) {
+            val trimmed = q.trim()
+            if (trimmed.isNotBlank() && list.none { it.equals(trimmed, ignoreCase = true) }) {
+                list.add(trimmed)
+            }
+        }
+        // If recentSearches has fewer than 3, backfill from visited site titles/urls
+        if (list.size < 3) {
+            for (site in allHistorySites) {
+                val candidate = site.title.takeIf { it.isNotBlank() && it != "about:blank" && !it.startsWith("http") }
+                    ?: site.domain.removePrefix("www.")
+                if (candidate.isNotBlank() && list.none { it.equals(candidate, ignoreCase = true) }) {
+                    list.add(candidate)
+                    if (list.size == 3) break
+                }
+            }
+        }
+        list.take(3)
     }
 
     Column(
@@ -467,97 +498,162 @@ fun DownloaderSearchMainPage(
             }
         }
 
-        // 2. Search History / Recent links or 5-row gap
-        // There should be a 5 row gap always present between search bar and activity card in Main Downloader Inbox Screen, even when no search history is there.
-        val fiveRowGap = 200.dp
-        if (pills.isNotEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("downloader_recent_pills_row"),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    items(pills, key = { it.domain + it.url }) { pill ->
-                        Surface(
-                            onClick = {
-                                urlInput = pill.url
-                                submitSearch(pill.url)
-                            },
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+        // 2. Recent 3 searches: one in a row. If empty show divider lines.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            for (i in 0 until 3) {
+                val query = recentThreeSearches.getOrNull(i)
+                if (query != null) {
+                    Surface(
+                        onClick = {
+                            urlInput = query
+                            submitSearch(query)
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .testTag("recent_search_row_$i")
+                    ) {
+                        Row(
                             modifier = Modifier
-                                .height(38.dp)
-                                .testTag("recent_pill_${pill.name}")
+                                .fillMaxSize()
+                                .padding(horizontal = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                // Circular site favicon avatar
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    modifier = Modifier.size(26.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        var iconFailed by remember(pill.faviconUrl) { mutableStateOf(false) }
-                                        if (!iconFailed) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(pill.faviconUrl)
-                                                    .crossfade(true)
-                                                    .listener(
-                                                        onError = { _, _ -> iconFailed = true }
-                                                    )
-                                                    .build(),
-                                                contentDescription = pill.name,
-                                                modifier = Modifier
-                                                    .size(18.dp)
-                                                    .clip(CircleShape),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.Default.Language,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Website name
-                                Text(
-                                    text = pill.name,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 13.sp
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = query,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Normal,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = Icons.Default.NorthWest,
+                                contentDescription = "Select query",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
+                } else {
+                    // Empty state: clean subtle divider lines
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .testTag("recent_search_empty_divider_$i"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        HorizontalDivider(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            thickness = 1.dp
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height((fiveRowGap - 38.dp - 26.dp).coerceAtLeast(16.dp)))
             }
-        } else {
-            // Generous 5-row gap always present when no search history is there
-            Spacer(
+        }
+
+        // 3. One row with 5 most searched site favicons
+        if (topFiveSites.isNotEmpty()) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(fiveRowGap - 16.dp)
-                    .testTag("downloader_search_history_five_row_gap")
-            )
+                    .padding(vertical = 4.dp)
+                    .testTag("top_favicons_row"),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                topFiveSites.forEach { site ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .clickable {
+                                urlInput = site.url
+                                submitSearch(site.url)
+                            }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                            .testTag("top_favicon_${site.name}")
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                var iconFailed by remember(site.faviconUrl) { mutableStateOf(false) }
+                                if (!iconFailed) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(site.faviconUrl)
+                                            .crossfade(true)
+                                            .listener(
+                                                onError = { _, _ -> iconFailed = true }
+                                            )
+                                            .build(),
+                                        contentDescription = site.name,
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(CircleShape),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Language,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            text = site.name,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        } else {
+            // Subtle horizontal placeholder divider when no sites have been searched yet
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                    thickness = 1.dp
+                )
+            }
         }
+
+        Spacer(Modifier.height(8.dp))
         // 3. Activity Card matching image_4fd87912.png
         ActivityPreviewCard(
             activities = activities,

@@ -24,9 +24,55 @@ data class BrowserSite(
 class BrowserHistoryManager(private val context: Context) {
 
     private val historyKey = stringPreferencesKey("browser_sites_history_v1")
+    private val searchQueriesKey = stringPreferencesKey("browser_downloader_recent_searches_v1")
 
     // No hardcoded sites; history relies strictly on user visits
     val defaultTopSites: List<BrowserSite> = emptyList()
+
+    val recentSearchQueries: Flow<List<String>> = context.galleryDataStore.data.map { prefs ->
+        val raw = prefs[searchQueriesKey]
+        if (raw.isNullOrBlank()) {
+            emptyList()
+        } else {
+            try {
+                val array = JSONArray(raw)
+                val list = mutableListOf<String>()
+                for (i in 0 until array.length()) {
+                    val q = array.getString(i).trim()
+                    if (q.isNotEmpty()) list.add(q)
+                }
+                list
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+    }.distinctUntilChanged()
+
+    suspend fun recordSearchQuery(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        context.galleryDataStore.edit { prefs ->
+            val raw = prefs[searchQueriesKey]
+            val list = mutableListOf<String>()
+            if (!raw.isNullOrBlank()) {
+                try {
+                    val array = JSONArray(raw)
+                    for (i in 0 until array.length()) {
+                        val item = array.getString(i).trim()
+                        if (item.isNotEmpty() && !item.equals(trimmed, ignoreCase = true)) {
+                            list.add(item)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            list.add(0, trimmed)
+            val jsonArray = JSONArray()
+            for (q in list.take(15)) {
+                jsonArray.put(q)
+            }
+            prefs[searchQueriesKey] = jsonArray.toString()
+        }
+    }
 
     val allSites: Flow<List<BrowserSite>> = context.galleryDataStore.data.map { prefs ->
         val raw = prefs[historyKey]
