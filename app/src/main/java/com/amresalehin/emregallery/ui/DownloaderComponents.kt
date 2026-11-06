@@ -181,11 +181,16 @@ fun DownloaderSearchMainPage(
         onFetchUrl(normalized)
     }
 
+    var showSupportedSitesSheet by remember { mutableStateOf(false) }
+
     fun openInBrowser(queryOrUrl: String) {
         val trimmed = queryOrUrl.trim()
-        if (trimmed.isBlank()) return
         keyboardController?.hide()
         focusManager.clearFocus()
+        if (trimmed.isBlank()) {
+            onOpenBrowser("")
+            return
+        }
         val destinationUrl = if (trimmed.contains(".") && !trimmed.contains(" ") &&
             (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true) ||
                     trimmed.matches(Regex("^[a-zA-Z0-9-]+\\.[a-zA-Z]{2,}(/.*)?$")))) {
@@ -385,7 +390,8 @@ fun DownloaderSearchMainPage(
 
                 Spacer(Modifier.width(6.dp))
 
-                // Dynamic Action Controls: Paste icon when empty; Download + Browse + Clear when query present
+                // Action Controls: Always show Browser button (whether empty or query present, and whether focused or not).
+                // Paste button removed.
                 AnimatedContent(
                     targetState = urlInput.isNotBlank(),
                     transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(150)) },
@@ -442,22 +448,16 @@ fun DownloaderSearchMainPage(
                             }
                         }
                     } else {
-                        // Paste button when empty
+                        // Always show browser button even when search bar is empty and not focused
                         IconButton(
-                            onClick = {
-                                val clipText = clipboardManager.getText()?.text?.trim().orEmpty()
-                                if (clipText.isNotBlank()) {
-                                    urlInput = clipText
-                                    submitSearch(clipText)
-                                }
-                            },
+                            onClick = { openInBrowser("") },
                             modifier = Modifier
                                 .size(36.dp)
-                                .testTag("downloader_paste_btn")
+                                .testTag("downloader_action_browse_btn")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ContentPaste,
-                                contentDescription = "Paste from clipboard and fetch",
+                                imageVector = Icons.Default.TravelExplore,
+                                contentDescription = "Open browser homepage",
                                 tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -571,6 +571,21 @@ fun DownloaderSearchMainPage(
             onViewSavedLibrary = onViewSavedLibrary,
             onSelectStack = onSelectStack,
             modifier = Modifier.fillMaxWidth()
+        )
+    }
+
+    if (showSupportedSitesSheet) {
+        SupportedSitesBottomSheet(
+            onDismiss = { showSupportedSitesSheet = false },
+            onSelectSite = { site ->
+                showSupportedSitesSheet = false
+                urlInput = site.exampleUrl
+                submitSearch(site.exampleUrl)
+            },
+            onBrowseSite = { site ->
+                showSupportedSitesSheet = false
+                openInBrowser(site.exampleUrl)
+            }
         )
     }
 }
@@ -969,6 +984,7 @@ fun DownloaderResultsPage(
     // Active URL & Editing State
     var activeUrl by remember(targetUrl) { mutableStateOf(targetUrl) }
     var isEditingUrl by remember { mutableStateOf(false) }
+    var hasAutoOpenedBrowser by remember(activeUrl) { mutableStateOf(false) }
     val cleanDisplayUrl = remember(activeUrl) {
         activeUrl.trim()
             .removePrefix("https://")
@@ -1016,12 +1032,14 @@ fun DownloaderResultsPage(
     var minHeightFilter by remember { mutableFloatStateOf(0f) }
     var showSvg by remember { mutableStateOf(false) }
     var minKbInput by remember { mutableStateOf("1") }
+    var showSupportedSitesSheet by remember { mutableStateOf(false) }
 
     val dynamicDimensions = remember { mutableStateMapOf<String, Pair<Int, Int>>() }
 
     // Trigger extraction on mount or URL change
     LaunchedEffect(activeUrl) {
         if (activeUrl.isNotBlank()) {
+            hasAutoOpenedBrowser = false
             selectedItemIds = emptySet()
             downloadedItemIds = emptySet()
             isDownloaded = false
@@ -1035,6 +1053,7 @@ fun DownloaderResultsPage(
         val trimmed = target.trim()
         if (trimmed.isNotBlank()) {
             val sanitized = MediaClassifier.sanitizeUrl(trimmed)
+            hasAutoOpenedBrowser = false
             if (sanitized != activeUrl) {
                 activeUrl = sanitized
             } else {
@@ -1072,6 +1091,22 @@ fun DownloaderResultsPage(
     val sessionItems by DownloaderSession.discoveredItems.collectAsState()
     val allScrapedItems = remember(extractorState.items, sessionItems) {
         MediaNormalizer.deduplicate(extractorState.items + sessionItems)
+    }
+
+    // Automatically open browser if both yt-dlp and gallery-dl fail, UNLESS sign-in is explicitly required
+    // (when sign-in is required, the user is prompted directly on the page to sign in).
+    LaunchedEffect(extractorState.isRunning, extractorState.phase, extractorState.errorMessage, extractorState.requiresSignIn, allScrapedItems.size) {
+        if (!extractorState.isRunning &&
+            !extractorState.requiresSignIn &&
+            (extractorState.phase == DualMediaExtractor.ExtractionPhase.ERROR ||
+             (!extractorState.errorMessage.isNullOrBlank() && allScrapedItems.isEmpty())) &&
+            allScrapedItems.isEmpty() &&
+            activeUrl.isNotBlank() &&
+            !hasAutoOpenedBrowser
+        ) {
+            hasAutoOpenedBrowser = true
+            performOpenInBrowser(activeUrl)
+        }
     }
 
     // Auto-select newly discovered items
@@ -1627,6 +1662,56 @@ fun DownloaderResultsPage(
                 }
             }
 
+            // Sign-in Required Card (Prompted on page when login is required by yt-dlp or gallery-dl)
+            if (extractorState.requiresSignIn) {
+                SignInRequiredCard(
+                    loginUrl = extractorState.signInUrl ?: activeUrl,
+                    domain = extractorState.domain,
+                    onOpenBrowser = { urlToOpen ->
+                        performOpenInBrowser(urlToOpen)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                )
+            }
+
+            // Background Cookies Progress Banner
+            if (extractorState.isObtainingCookiesInBackground) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Bypassing bot protection in background...",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                text = "Obtaining session cookies to retry yt-dlp / gallery-dl extraction",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+                }
+            }
+
             // 3. Media Grid Area with Floating Centered Download Pill
             Box(
                 modifier = Modifier
@@ -1743,17 +1828,30 @@ fun DownloaderResultsPage(
                                 )
                             }
                             Spacer(Modifier.height(4.dp))
-                            Button(
-                                onClick = {
-                                    if (onOpenBrowser != null) {
-                                        onOpenBrowser(activeUrl)
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF212529))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.TravelExplore, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text(if (isChallenge) "Verify in Live Browser" else "Open in Live Browser")
+                                Button(
+                                    onClick = {
+                                        if (onOpenBrowser != null) {
+                                            onOpenBrowser(activeUrl)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF212529))
+                                ) {
+                                    Icon(Icons.Default.TravelExplore, contentDescription = null)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(if (isChallenge) "Verify in Live Browser" else "Open in Live Browser")
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showSupportedSitesSheet = true }
+                                ) {
+                                    Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Supported Sites")
+                                }
                             }
                         }
                     }
@@ -1834,6 +1932,20 @@ fun DownloaderResultsPage(
                 }
             }
         }
+    }
+
+    if (showSupportedSitesSheet) {
+        SupportedSitesBottomSheet(
+            onDismiss = { showSupportedSitesSheet = false },
+            onSelectSite = { site ->
+                showSupportedSitesSheet = false
+                performFetch(site.exampleUrl)
+            },
+            onBrowseSite = { site ->
+                showSupportedSitesSheet = false
+                performOpenInBrowser(site.exampleUrl)
+            }
+        )
     }
 }
 
@@ -1991,3 +2103,342 @@ fun DownloaderMediaCard(
         }
     }
 }
+
+/**
+ * Clean on-page card displayed when yt-dlp or gallery-dl requires user authentication.
+ * Conforms to the Emre design language with action buttons to sign in via the in-app browser.
+ */
+@Composable
+fun SignInRequiredCard(
+    loginUrl: String,
+    domain: String,
+    onOpenBrowser: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = modifier.testTag("downloader_sign_in_required_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Sign-in required for ${domain.ifBlank { "this site" }}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "The content is protected behind an account login or age checkpoint.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Text(
+                text = "Sign in using our in-app browser once. Your secure session cookies will be saved so yt-dlp and gallery-dl can download automatically.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = { onOpenBrowser(loginUrl) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.testTag("downloader_sign_in_browser_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Login,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Sign In in Browser", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Interactive bottom sheet displaying the official 2,000+ yt-dlp and gallery-dl supported sites catalog.
+ * Supports instant search, category filtering (All, Video, Social, Images, Music, Art, Manga),
+ * primary engine indicator badges, and direct test/browse actions.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SupportedSitesBottomSheet(
+    onDismiss: () -> Unit,
+    onSelectSite: (com.amresalehin.emregallery.data.SupportedSiteItem) -> Unit,
+    onBrowseSite: (com.amresalehin.emregallery.data.SupportedSiteItem) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("All") }
+
+    val categories = remember {
+        listOf("All", "Video", "Social", "Images", "Music", "Art", "Manga")
+    }
+
+    val sites = remember(searchQuery, selectedCategory) {
+        com.amresalehin.emregallery.data.SupportedSitesRepository.querySupportedSites(
+            query = searchQuery,
+            category = selectedCategory
+        )
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        modifier = Modifier.testTag("downloader_supported_sites_sheet")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.88f)
+                .padding(horizontal = 16.dp)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Official Supported Sites",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "yt-dlp (Primary) & gallery-dl (Secondary) engines",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Search Bar
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search site, domain or engine (e.g. reddit, x, video)...") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("downloader_supported_sites_search_input")
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            // Category Filter Pills
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(categories) { cat ->
+                    val isSelected = selectedCategory == cat
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = { selectedCategory = cat },
+                        label = { Text(cat) },
+                        leadingIcon = if (isSelected) {
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Sites Count Indicator
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${sites.size} platforms available",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Tap to fetch • Globe to browse",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            // Sites List
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .testTag("downloader_supported_sites_list"),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(bottom = 24.dp)
+            ) {
+                items(sites, key = { it.domain + it.name }) { site ->
+                    Surface(
+                        onClick = { onSelectSite(site) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = when (site.category) {
+                                            "Video" -> Icons.Default.PlayArrow
+                                            "Music" -> Icons.Default.MusicNote
+                                            "Images", "Art" -> Icons.Default.Image
+                                            "Social" -> Icons.Default.Share
+                                            else -> Icons.Default.Language
+                                        },
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = site.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = if (site.engine.startsWith("yt-dlp")) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.secondaryContainer
+                                        }
+                                    ) {
+                                        Text(
+                                            text = site.engine,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (site.engine.startsWith("yt-dlp")) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSecondaryContainer
+                                            },
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = site.domain,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 11.sp
+                                )
+                                Text(
+                                    text = site.description,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { onBrowseSite(site) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.TravelExplore,
+                                    contentDescription = "Browse ${site.name}",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

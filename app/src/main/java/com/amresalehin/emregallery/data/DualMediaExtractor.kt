@@ -38,6 +38,7 @@ class DualMediaExtractor(private val context: Context) {
     enum class ExtractionPhase {
         IDLE,
         DIRECT_MEDIA,
+        YT_DLP,
         GALLERY_DL,
         STATIC_SCRAPING,
         BROWSER_INTERCEPTING,
@@ -53,7 +54,10 @@ class DualMediaExtractor(private val context: Context) {
         val pageTitle: String = "",
         val domain: String = "",
         val items: List<ScrapedMediaItem> = emptyList(),
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val requiresSignIn: Boolean = false,
+        val signInUrl: String? = null,
+        val isObtainingCookiesInBackground: Boolean = false
     )
 
     private val coordinator = ExtractionCoordinator(context)

@@ -595,6 +595,88 @@ class MediaDeduplicationPureUnitTest {
             )
         )
     }
+
+    @Test
+    fun testYtDlpIsPrimaryAndGalleryDlIsSecondary() {
+        // ExtractionPhase includes both engines
+        assertEquals("YT_DLP", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.YT_DLP.name)
+        assertEquals("GALLERY_DL", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.GALLERY_DL.name)
+
+        // SupportInfo defaults to yt-dlp primary
+        val infoYt = com.amresalehin.emregallery.data.GalleryDlSupportInfo(
+            isSupported = true,
+            category = "video",
+            subcategory = "stream",
+            extractorName = "Youtube",
+            displayName = "YouTube",
+            extractorEngine = "yt-dlp"
+        )
+        assertEquals("yt-dlp", infoYt.extractorEngine)
+
+        // Gallery-dl fallback
+        val infoGdl = com.amresalehin.emregallery.data.GalleryDlSupportInfo(
+            isSupported = true,
+            category = "reddit",
+            subcategory = "gallery",
+            extractorName = "RedditExtractor",
+            displayName = "Reddit",
+            extractorEngine = "gallery-dl"
+        )
+        assertEquals("gallery-dl", infoGdl.extractorEngine)
+
+        // In absence of Python runtime, popular sites fallback check identifies gallery sites correctly
+        val redditCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkGalleryDlSupport("https://www.reddit.com/r/pics/comments/123/mountains")
+        assertTrue(redditCheck.isSupported)
+        assertEquals("gallery-dl", redditCheck.extractorEngine)
+
+        val imgurCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkGalleryDlSupport("https://imgur.com/a/abcde")
+        assertTrue(imgurCheck.isSupported)
+        assertEquals("gallery-dl", imgurCheck.extractorEngine)
+    }
+
+    @Test
+    fun testBrowserSessionFallbackOnlyForUnsupportedSites() {
+        // Supported site is detected as supported -> routes to engine
+        val supportedCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkGalleryDlSupport("https://reddit.com/r/pics")
+        assertTrue(supportedCheck.isSupported)
+
+        // Unsupported site is not supported by gallery-dl -> triggers browser session fallback
+        val unsupportedCheck = com.amresalehin.emregallery.data.GalleryDlEngine.checkGalleryDlSupport("https://unknown-random-news-blog.org/article")
+        assertFalse(unsupportedCheck.isSupported)
+
+        // Phase enum maintains BROWSER_INTERCEPTING for this fallback
+        assertEquals("BROWSER_INTERCEPTING", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.BROWSER_INTERCEPTING.name)
+    }
+
+    @Test
+    fun testBotDetectionChallengeIdentification() {
+        // Cloudflare / Turnstile challenges correctly identified
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Just a moment...", "https://example.com"))
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Attention Required! | Cloudflare", "https://example.com"))
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Security Check", "https://example.com"))
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Checking your browser before accessing...", "https://example.com"))
+        assertTrue(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Welcome", "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile"))
+
+        // Standard pages are not flagged as challenges
+        assertFalse(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Google Photos", "https://photos.google.com"))
+        assertFalse(com.amresalehin.emregallery.data.BotDetectionMitigator.isBotChallenge("Reddit - Dive into anything", "https://reddit.com/r/pics"))
+    }
+
+    @Test
+    fun testStealthUserAgentAndHeadersFormat() {
+        val ua = com.amresalehin.emregallery.data.BotDetectionMitigator.STEALTH_USER_AGENT
+        assertTrue(ua.contains("Chrome/"))
+        assertTrue(ua.contains("Mobile Safari"))
+        assertTrue(ua.contains("Android"))
+
+        val headers = com.amresalehin.emregallery.data.BotDetectionMitigator.STEALTH_HEADERS
+        assertTrue(headers.containsKey("Sec-Ch-Ua"))
+        assertTrue(headers.containsKey("Sec-Ch-Ua-Mobile"))
+        assertTrue(headers.containsKey("Sec-Ch-Ua-Platform"))
+        assertEquals("?1", headers["Sec-Ch-Ua-Mobile"])
+        assertEquals("\"Android\"", headers["Sec-Ch-Ua-Platform"])
+    }
 }
+
 
 

@@ -11,6 +11,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import com.amresalehin.emregallery.data.BotDetectionMitigator
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -393,6 +396,44 @@ fun DirectBrowserView(
                 )
             }
 
+            // Anti-Bot Verification / Cloudflare Challenge Active Banner
+            val isChallengeActive = remember(pageTitle, currentUrl) {
+                BotDetectionMitigator.isBotChallenge(pageTitle, currentUrl)
+            }
+            AnimatedVisibility(
+                visible = isChallengeActive,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                        .testTag("browser_bot_challenge_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Security Verification: Tap captcha checkbox if prompted to continue.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
             // 2. Interactive WebView and Home Page Container
             Box(
                 modifier = Modifier
@@ -411,13 +452,17 @@ fun DirectBrowserView(
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
+                                databaseEnabled = true
+                                javaScriptCanOpenWindowsAutomatically = true
+                                setSupportMultipleWindows(false)
+                                cacheMode = WebSettings.LOAD_DEFAULT
                                 builtInZoomControls = true
                                 displayZoomControls = false
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
                                 mediaPlaybackRequiresUserGesture = false
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                userAgentString = BotDetectionMitigator.STEALTH_USER_AGENT
                             }
 
                             addJavascriptInterface(
@@ -551,6 +596,7 @@ fun DirectBrowserView(
                                 }
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     isLoading = true
+                                    BotDetectionMitigator.injectStealth(view)
                                     url?.let {
                                         if (it == "about:blank" || it.isBlank()) {
                                             currentUrl = ""
@@ -570,6 +616,8 @@ fun DirectBrowserView(
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     isLoading = false
+                                    BotDetectionMitigator.injectStealth(view)
+                                    BotDetectionMitigator.syncCookiesFromWebView(url)
                                     url?.let {
                                         if (it == "about:blank" || it.isBlank()) {
                                             currentUrl = ""

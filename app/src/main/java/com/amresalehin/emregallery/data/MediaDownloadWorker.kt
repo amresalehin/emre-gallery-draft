@@ -118,19 +118,60 @@ class MediaDownloadWorker(
             var downloadedFile: File? = null
             var errorDiagnostic: String? = null
 
-            val isSocialUrl = listOf("youtube.com", "youtu.be", "googlevideo.com", "tiktok.com", "instagram.com", "vimeo.com", "twitter.com", "x.com")
-                .any { mediaUrl.contains(it, ignoreCase = true) || sourceUrl.contains(it, ignoreCase = true) }
-            val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
-            val isYtDlpTarget = sourceEngine.contains("yt-dlp") || isSocialUrl || isStreamingMedia
+            setProgress(workDataOf(KEY_PROGRESS to 0.15f, KEY_STATUS to "Downloading $title..."))
+            DownloadActivityManager.updateProgress(itemId, 0.15f, 0L, 0L, 0L)
 
-            // 1. For social video and HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp)
-            if (isYtDlpTarget && GalleryDlEngine.isAvailable()) {
-                setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Downloading stream/video: $title..."))
-                val targetUrl = if (sourceUrl.contains("youtube.com", ignoreCase = true) || sourceUrl.contains("youtu.be", ignoreCase = true)) {
-                    sourceUrl
-                } else {
-                    mediaUrl
+            val isDirectHttpAsset = isVideo.not() && isStream.not() && (
+                    mediaUrl.startsWith("http://", ignoreCase = true) ||
+                    mediaUrl.startsWith("https://", ignoreCase = true) ||
+                    mediaUrl.startsWith("data:image/", ignoreCase = true)
+            ) && (
+                sourceEngine.contains("HTML", ignoreCase = true) ||
+                sourceEngine.contains("DOM", ignoreCase = true) ||
+                sourceEngine.contains("Network", ignoreCase = true) ||
+                sourceEngine.contains("Srcset", ignoreCase = true) ||
+                sourceEngine.contains("Direct", ignoreCase = true) ||
+                mediaUrl.contains(".jpg", ignoreCase = true) ||
+                mediaUrl.contains(".png", ignoreCase = true) ||
+                mediaUrl.contains(".webp", ignoreCase = true) ||
+                mediaUrl.contains(".gif", ignoreCase = true) ||
+                mediaUrl.contains(".svg", ignoreCase = true) ||
+                mediaUrl.contains(".mp3", ignoreCase = true) ||
+                mediaUrl.contains(".m4a", ignoreCase = true) ||
+                mediaUrl.contains(".wav", ignoreCase = true) ||
+                mediaUrl.contains(".flac", ignoreCase = true) ||
+                (mediaUrl.contains(".mp4", ignoreCase = true) && !sourceUrl.contains("youtube.com", ignoreCase = true) && !sourceUrl.contains("youtu.be", ignoreCase = true))
+            )
+
+            val targetUrl = if (sourceUrl.contains("youtube.com", ignoreCase = true) || sourceUrl.contains("youtu.be", ignoreCase = true)) {
+                sourceUrl
+            } else {
+                mediaUrl
+            }
+
+            // Strategy 1: Direct HTTP media via OkHttp (fast path, byte-level ranges, resumable)
+            if (isDirectHttpAsset) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.25f, KEY_STATUS to "Downloading via OkHttp: $title..."))
+                val okResult = OkHttpDownloader.downloadMediaFileDetailed(
+                    context = applicationContext,
+                    mediaUrl = mediaUrl,
+                    fileName = fileName,
+                    referer = referer ?: sourceUrl,
+                    downloadId = itemId,
+                    headers = downloadHeaders,
+                    onProgress = { bytesRead, totalBytes ->
+                        val ratio = if (totalBytes > 0L) (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0.1f, 0.95f) else 0.5f
+                        DownloadActivityManager.updateProgress(itemId, ratio, bytesRead, totalBytes, 0L)
+                    }
+                )
+                if (okResult.isSuccessful && okResult.file != null && okResult.file.exists() && okResult.file.length() > 0L) {
+                    downloadedFile = okResult.file
                 }
+            }
+
+            // Strategy 2: Originating extractor (yt-dlp or gallery-dl) when required or as fallback
+            if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && GalleryDlEngine.isAvailable()) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.35f, KEY_STATUS to "Downloading via extractor engine: $title..."))
                 downloadedFile = GalleryDlEngine.downloadMedia(
                     context = applicationContext,
                     mediaUrl = targetUrl,
@@ -139,7 +180,7 @@ class MediaDownloadWorker(
                     headers = downloadHeaders,
                     cookies = cookieString
                 )
-                // If download via sourceUrl didn't yield a file, try direct mediaUrl if different
+                // If targetUrl != mediaUrl and extractor returned null, retry with mediaUrl directly
                 if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && targetUrl != mediaUrl) {
                     downloadedFile = GalleryDlEngine.downloadMedia(
                         context = applicationContext,
@@ -152,65 +193,21 @@ class MediaDownloadWorker(
                 }
             }
 
-            // 2. Standard or fallback download via OkHttp with HTTP Range resumability
-            var okHttpResult: OkHttpDownloader.DownloadResult? = null
-            if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
-                var lastProgressUpdate = System.currentTimeMillis()
-                var lastBytes = 0L
-                val result = OkHttpDownloader.downloadMediaFileDetailed(
+            // Strategy 3: Final fallback to OkHttp for any URL that specialized extractors couldn't capture
+            if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && !isDirectHttpAsset) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.5f, KEY_STATUS to "Trying direct download fallback: $title..."))
+                val fallbackResult = OkHttpDownloader.downloadMediaFileDetailed(
                     context = applicationContext,
                     mediaUrl = mediaUrl,
                     fileName = fileName,
-                    referer = referer,
+                    referer = referer ?: sourceUrl,
                     downloadId = itemId,
-                    headers = downloadHeaders,
-                    onProgress = { bytesRead, totalBytes ->
-                        val now = System.currentTimeMillis()
-                        if (now - lastProgressUpdate > 300) {
-                            val dt = (now - lastProgressUpdate) / 1000.0
-                            val db = bytesRead - lastBytes
-                            val speed = if (dt > 0) (db / dt).toLong() else 0L
-                            lastBytes = bytesRead
-                            lastProgressUpdate = now
-                            val pct = if (totalBytes > 0) (bytesRead.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0.5f
-                            DownloadActivityManager.updateProgress(itemId, pct, bytesRead, totalBytes, speed)
-                            setProgressAsync(
-                                workDataOf(
-                                    KEY_PROGRESS to pct,
-                                    KEY_BYTES_READ to bytesRead,
-                                    KEY_TOTAL_BYTES to totalBytes,
-                                    KEY_STATUS to "Downloading $title (${bytesRead / 1024} KB)"
-                                )
-                            )
-                        }
-                    }
+                    headers = downloadHeaders
                 )
-                okHttpResult = result
-
-                if (result.isSuccessful && result.file != null && result.file.exists() && result.file.length() > 0L) {
-                    downloadedFile = result.file
-                } else {
-                    errorDiagnostic = result.errorMessage
-                    val isRateLimited = result.statusCode == 429
-                    val isInvalidContent = result.errorMessage?.let { msg ->
-                        msg.contains("webpage", ignoreCase = true) ||
-                        msg.contains("HTML", ignoreCase = true) ||
-                        msg.contains("JSON error", ignoreCase = true) ||
-                        msg.contains("corrupt or invalid raster", ignoreCase = true)
-                    } ?: false
-
-                    // 3. Fallback to Python runner only if OkHttp download failed and NOT 429 rate limit and NOT an invalid non-media response
-                    if (!isRateLimited && !isInvalidContent && GalleryDlEngine.isAvailable()) {
-                        setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Attempting engine fallback for $title..."))
-                        downloadedFile = GalleryDlEngine.downloadMedia(
-                            context = applicationContext,
-                            mediaUrl = mediaUrl,
-                            fileName = fileName,
-                            referer = referer,
-                            headers = downloadHeaders,
-                            cookies = cookieString
-                        )
-                    }
+                if (fallbackResult.isSuccessful && fallbackResult.file != null && fallbackResult.file.exists() && fallbackResult.file.length() > 0L) {
+                    downloadedFile = fallbackResult.file
+                } else if (errorDiagnostic == null) {
+                    errorDiagnostic = fallbackResult.errorMessage
                 }
             }
 
@@ -257,10 +254,7 @@ class MediaDownloadWorker(
                     )
                 )
             } else {
-                val finalError = errorDiagnostic ?: "Download failed for $mediaUrl"
-                val statusCode = okHttpResult?.statusCode ?: -1
-                val retryAfter = okHttpResult?.retryAfterSeconds
-
+                val finalError = errorDiagnostic ?: "Download failed via yt-dlp and gallery-dl for $mediaUrl"
                 val currentItem = DownloadActivityManager.activities.value.firstOrNull { it.id == itemId }
                 val isPausedOrCancelled = isStopped ||
                     currentItem?.status == DownloadActivityStatus.PAUSED ||
@@ -270,9 +264,9 @@ class MediaDownloadWorker(
                     DownloadActivityManager.handleDownloadFailure(
                         context = applicationContext,
                         itemId = itemId,
-                        statusCode = statusCode,
+                        statusCode = -1,
                         errorMessage = finalError,
-                        retryAfterSeconds = retryAfter
+                        retryAfterSeconds = null
                     )
                 }
                 Result.failure(workDataOf(KEY_ERROR to finalError))

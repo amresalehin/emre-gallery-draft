@@ -31,7 +31,8 @@ data class GalleryDlSupportInfo(
     val category: String,
     val subcategory: String,
     val extractorName: String,
-    val displayName: String
+    val displayName: String,
+    val extractorEngine: String = "yt-dlp"
 )
 
 data class GalleryDlOptions(
@@ -50,10 +51,8 @@ data class GalleryDlExtractResult(
 )
 
 /**
- * Gallery-dl integration service powered by Chaquopy Python SDK on Android.
- * Enables extracting multi-image galleries, videos, high-resolution original artwork,
- * and direct downloads from 280+ supported websites (Reddit, Imgur, X/Twitter, Pinterest,
- * ArtStation, DeviantArt, Booru boards, Flickr, Tumblr, Wikimedia Commons, etc.).
+ * Gallery-dl and yt-dlp integration service powered by Chaquopy Python SDK on Android.
+ * yt-dlp is the primary engine; gallery-dl serves as secondary for galleries and image hosts.
  */
 object GalleryDlEngine {
     private const val TAG = "GalleryDlEngine"
@@ -66,7 +65,7 @@ object GalleryDlEngine {
                 Python.start(AndroidPlatform(context.applicationContext))
             }
             isInitialized = true
-            Log.d(TAG, "Chaquopy Python SDK and gallery-dl runtime initialized successfully")
+            Log.d(TAG, "Chaquopy Python SDK and yt-dlp/gallery-dl runtime initialized successfully")
         } catch (t: Throwable) {
             Log.w(TAG, "Python runtime initialization deferred or failed: ${t.message}")
         }
@@ -116,7 +115,7 @@ object GalleryDlEngine {
             return GalleryDlStatus(
                 available = false,
                 version = "Unavailable",
-                engineName = "gallery-dl (Chaquopy Python required)",
+                engineName = "yt-dlp (Primary) / gallery-dl (Secondary)",
                 supportedExtractorsCount = 0,
                 popularSites = defaultPopularSites()
             )
@@ -149,7 +148,7 @@ object GalleryDlEngine {
             GalleryDlStatus(
                 available = json.optBoolean("available", true),
                 version = json.optString("version", "1.32.19"),
-                engineName = json.optString("engine", "gallery-dl (Chaquopy)"),
+                engineName = json.optString("engine", "yt-dlp (Primary) / gallery-dl (Secondary)"),
                 supportedExtractorsCount = json.optInt("supported_categories_count", 287),
                 popularSites = if (sitesList.isNotEmpty()) sitesList else defaultPopularSites()
             )
@@ -158,7 +157,7 @@ object GalleryDlEngine {
             GalleryDlStatus(
                 available = true,
                 version = "1.32.19",
-                engineName = "gallery-dl 1.32.19",
+                engineName = "yt-dlp (Primary) / gallery-dl (Secondary)",
                 supportedExtractorsCount = 287,
                 popularSites = defaultPopularSites()
             )
@@ -166,15 +165,14 @@ object GalleryDlEngine {
     }
 
     /**
-     * Checks whether the target URL matches a site-specific gallery-dl extractor.
+     * Checks whether the target URL matches a site-specific yt-dlp or gallery-dl extractor.
      */
     fun checkSupport(url: String): GalleryDlSupportInfo {
         if (url.isBlank()) {
-            return GalleryDlSupportInfo(false, "", "", "", "")
+            return GalleryDlSupportInfo(false, "", "", "", "", "yt-dlp")
         }
 
         if (!isAvailable()) {
-            // Heuristic check if Python isn't active
             val lower = url.lowercase()
             for (site in defaultPopularSites()) {
                 if (site.domains.any { lower.contains(it) }) {
@@ -183,11 +181,12 @@ object GalleryDlEngine {
                         category = site.name.lowercase(),
                         subcategory = "",
                         extractorName = "${site.name}Extractor",
-                        displayName = site.name
+                        displayName = site.name,
+                        extractorEngine = "gallery-dl"
                     )
                 }
             }
-            return GalleryDlSupportInfo(false, "", "", "", "")
+            return GalleryDlSupportInfo(false, "", "", "", "", "yt-dlp")
         }
 
         return try {
@@ -200,11 +199,56 @@ object GalleryDlEngine {
                 category = json.optString("category", ""),
                 subcategory = json.optString("subcategory", ""),
                 extractorName = json.optString("extractor", ""),
-                displayName = json.optString("display_name", json.optString("category", ""))
+                displayName = json.optString("display_name", json.optString("category", "")),
+                extractorEngine = json.optString("engine", "yt-dlp")
             )
         } catch (e: Exception) {
             Log.e(TAG, "checkSupport error", e)
-            GalleryDlSupportInfo(false, "", "", "", "")
+            GalleryDlSupportInfo(false, "", "", "", "", "yt-dlp")
+        }
+    }
+
+    /**
+     * Specifically checks whether gallery-dl supports this URL.
+     */
+    fun checkGalleryDlSupport(url: String): GalleryDlSupportInfo {
+        if (url.isBlank()) {
+            return GalleryDlSupportInfo(false, "", "", "", "", "gallery-dl")
+        }
+
+        if (!isAvailable()) {
+            val lower = url.lowercase()
+            for (site in defaultPopularSites()) {
+                if (site.domains.any { lower.contains(it) }) {
+                    return GalleryDlSupportInfo(
+                        isSupported = true,
+                        category = site.name.lowercase(),
+                        subcategory = "",
+                        extractorName = "${site.name}Extractor",
+                        displayName = site.name,
+                        extractorEngine = "gallery-dl"
+                    )
+                }
+            }
+            return GalleryDlSupportInfo(false, "", "", "", "", "gallery-dl")
+        }
+
+        return try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            val checkJson = runner.callAttr("check_gallery_dl_support", url.trim()).toString()
+            val json = JSONObject(checkJson)
+            GalleryDlSupportInfo(
+                isSupported = json.optBoolean("supported", false),
+                category = json.optString("category", ""),
+                subcategory = json.optString("subcategory", ""),
+                extractorName = json.optString("extractor", ""),
+                displayName = json.optString("display_name", json.optString("category", "")),
+                extractorEngine = "gallery-dl"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "checkGalleryDlSupport error", e)
+            GalleryDlSupportInfo(false, "", "", "", "", "gallery-dl")
         }
     }
 
@@ -228,7 +272,7 @@ object GalleryDlEngine {
             val isStream = obj.optBoolean("isStream", false)
 
             val item = ScrapedMediaItem(
-                id = obj.optString("id", "gdl_${System.currentTimeMillis()}_$i"),
+                id = obj.optString("id", "dl_${System.currentTimeMillis()}_$i"),
                 url = obj.getString("url"),
                 title = obj.optString("title", "media_${i + 1}"),
                 isVideo = isVideo,
@@ -238,11 +282,11 @@ object GalleryDlEngine {
                 format = obj.optString("format", "IMAGE"),
                 mimeType = obj.optString("mimeType", if (isVideo) "video/mp4" else "image/jpeg"),
                 thumbnailUrl = obj.optString("thumbnailUrl").takeIf { !it.isNullOrBlank() },
-                source = obj.optString("source", "gallery-dl"),
+                source = obj.optString("source", "yt-dlp"),
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
                 provenance = MediaProvenance(
-                    extractorEngine = "gallery-dl / yt-dlp",
+                    extractorEngine = obj.optString("source", "yt-dlp / gallery-dl"),
                     pageUrl = pageUrl
                 ),
                 metadata = mapOf("source_url" to pageUrl),
@@ -272,9 +316,13 @@ object GalleryDlEngine {
             val py = Python.getInstance()
             val runner = py.getModule("gallery_dl_runner")
 
+            val effectiveUa = options.userAgent ?: BotDetectionMitigator.STEALTH_USER_AGENT
+            val effectiveCookies = options.cookies
+                ?: runCatching { android.webkit.CookieManager.getInstance().getCookie(url.trim()) }.getOrNull()
+
             val optsJson = JSONObject().apply {
-                options.userAgent?.let { put("user_agent", it) }
-                options.cookies?.let { put("cookies", it) }
+                put("user_agent", effectiveUa)
+                effectiveCookies?.let { put("cookies", it) }
                 put("timeout", options.timeoutSeconds)
             }.toString()
 
@@ -318,7 +366,7 @@ object GalleryDlEngine {
         executePythonExtractor("extract_media", url, options)
 
     /**
-     * Downloads a media file with proper referer header via Python requests or fallback.
+     * Downloads a media file exclusively using yt-dlp (primary) and gallery-dl (secondary fallback).
      */
     suspend fun downloadMedia(
         context: Context,
@@ -346,15 +394,18 @@ object GalleryDlEngine {
             val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
             val targetFile = File(dir, "${System.currentTimeMillis()}_$sanitizedName")
 
-            val userAgent = headers?.get("User-Agent") ?: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+            val userAgent = headers?.get("User-Agent") ?: BotDetectionMitigator.STEALTH_USER_AGENT
             val effectiveCookies = cookies ?: headers?.get("Cookie")
+                ?: runCatching {
+                    val cm = android.webkit.CookieManager.getInstance()
+                    cm.getCookie(mediaUrl) ?: referer?.let { cm.getCookie(it) }
+                }.getOrNull()
             val headersJson = if (!headers.isNullOrEmpty()) {
                 val json = JSONObject()
                 headers.forEach { (k, v) -> json.put(k, v) }
                 json.toString()
             } else ""
 
-            // Try Python download if available
             if (isAvailable()) {
                 val py = Python.getInstance()
                 val runner = py.getModule("gallery_dl_runner")
@@ -379,14 +430,8 @@ object GalleryDlEngine {
                 }
             }
 
-            // Fallback to OkHttp download with shared session cookies and headers
-            OkHttpDownloader.downloadMediaFile(
-                context = context,
-                mediaUrl = mediaUrl,
-                fileName = fileName,
-                referer = referer,
-                headers = headers
-            )
+            // Exclusively handled by yt-dlp & gallery-dl. Return null if both failed.
+            null
         } catch (e: Exception) {
             Log.e(TAG, "downloadMedia failed", e)
             null

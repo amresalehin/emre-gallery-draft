@@ -79,7 +79,8 @@ fun AlbumsScreen(
     onRenameAlbum: (String, String) -> Unit,
     onOpenPerson: ((String) -> Unit)? = null,
     onOpenSavedLibrary: (() -> Unit)? = null,
-    onOpenSavedStack: ((com.amresalehin.emregallery.data.MediaInboxStack) -> Unit)? = null
+    onOpenSavedStack: ((com.amresalehin.emregallery.data.MediaInboxStack) -> Unit)? = null,
+    onOpenBrowser: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
@@ -244,11 +245,38 @@ fun AlbumsScreen(
                 )
                 CollectionTile(
                     title = "Inbox",
-                    count = if (savedStacks.isNotEmpty()) "${savedStacks.size} ${if (savedStacks.size == 1) "item" else "items"}" else "Downloader",
+                    count = "",
                     icon = Icons.Default.Inbox,
                     iconTint = MaterialTheme.colorScheme.onSurface,
                     iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
                     onClick = { onFilter("Inbox") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // 2-column tiles: Browser & Archive
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CollectionTile(
+                    title = "Browser",
+                    count = "",
+                    icon = Icons.Default.TravelExplore,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onOpenBrowser?.invoke() ?: onFilter("Browser") },
+                    modifier = Modifier.weight(1f)
+                )
+                CollectionTile(
+                    title = "Archive",
+                    count = "$archiveCount items",
+                    icon = Icons.Default.Archive,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onFilter("Archive") },
                     modifier = Modifier.weight(1f)
                 )
             }

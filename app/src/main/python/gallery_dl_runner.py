@@ -58,6 +58,89 @@ def is_gallery_dl_available():
     """Returns True if the gallery-dl Python package is imported and operational."""
     return bool(GALLERY_DL_AVAILABLE)
 
+def get_supported_sites(options_json="{}"):
+    """
+    Returns the official list of supported sites/extractors from yt-dlp and gallery-dl.
+    Supports optional search query and category filtering.
+    """
+    try:
+        opts = json.loads(options_json) if options_json else {}
+    except Exception:
+        opts = {}
+
+    clean_q = str(opts.get("query", "")).strip().lower()
+    clean_cat = str(opts.get("category", "")).strip().lower()
+    limit = int(opts.get("limit", 150))
+
+    results = []
+    seen = set()
+
+    # 1. yt-dlp official extractors
+    if YTDLP_AVAILABLE:
+        for ie in _get_ytdlp_extractors():
+            ie_name = getattr(ie, "IE_NAME", "")
+            ie_desc = getattr(ie, "IE_DESC", None) or ie_name
+            if not ie_name or ie_name.lower() in seen or ie_name == "generic":
+                continue
+
+            q_match = not clean_q or clean_q in ie_name.lower() or clean_q in ie_desc.lower()
+            if not q_match:
+                continue
+
+            cat = "Video"
+            name_lower = ie_name.lower()
+            if any(k in name_lower for k in ["audio", "sound", "bandcamp", "mixcloud", "podcast"]):
+                cat = "Audio"
+            elif any(k in name_lower for k in ["reddit", "twitter", "instagram", "tiktok", "facebook", "threads"]):
+                cat = "Social"
+
+            if clean_cat and clean_cat != "all" and clean_cat != cat.lower():
+                continue
+
+            seen.add(ie_name.lower())
+            domain = f"{ie_name.lower()}.com" if "." not in ie_name else ie_name.lower()
+            results.append({
+                "name": str(ie_desc),
+                "extractor": str(ie_name),
+                "engine": "yt-dlp",
+                "category": cat,
+                "domain": domain
+            })
+            if len(results) >= limit:
+                break
+
+    # 2. gallery-dl official extractors
+    if GALLERY_DL_AVAILABLE and len(results) < limit:
+        try:
+            for cat_name in getattr(gdl_extractor, "find_categories", lambda: [])() if hasattr(gdl_extractor, "find_categories") else []:
+                if cat_name.lower() in seen:
+                    continue
+                q_match = not clean_q or clean_q in cat_name.lower()
+                if not q_match:
+                    continue
+
+                cat = "Image"
+                if clean_cat and clean_cat != "all" and clean_cat != cat.lower():
+                    continue
+
+                seen.add(cat_name.lower())
+                results.append({
+                    "name": str(cat_name.capitalize()),
+                    "extractor": str(cat_name),
+                    "engine": "gallery-dl",
+                    "category": cat,
+                    "domain": f"{cat_name.lower()}.com"
+                })
+                if len(results) >= limit:
+                    break
+        except Exception:
+            pass
+
+    return json.dumps({
+        "total": len(results),
+        "results": results
+    })
+
 def _prepare_cookiefile(cookies_str, url=None):
     """
     Converts a cookie string ("key=val; key2=val2") into a temporary Netscape-formatted cookiefile.
@@ -101,53 +184,165 @@ def _prepare_cookiefile(cookies_str, url=None):
     except Exception:
         return None
 
+_ytdlp_extractors_cache = None
+
+def _get_ytdlp_extractors():
+    """Lazily populates and caches registered yt-dlp extractors excluding the generic fallback."""
+    global _ytdlp_extractors_cache
+    if _ytdlp_extractors_cache is None and YTDLP_AVAILABLE:
+        try:
+            _ytdlp_extractors_cache = [
+                ie for ie in yt_dlp.extractor.gen_extractors()
+                if getattr(ie, "IE_NAME", "") != "generic"
+            ]
+        except Exception:
+            _ytdlp_extractors_cache = []
+    return _ytdlp_extractors_cache or []
+
+def find_ytdlp_extractor(url):
+    """
+    Finds a dedicated yt-dlp extractor for the given URL according to official documentation.
+    Iterates registered extractors and invokes extractor.suitable(url).
+    """
+    if not YTDLP_AVAILABLE or not url:
+        return None
+    try:
+        clean = url.strip()
+        for ie in _get_ytdlp_extractors():
+            if ie.suitable(clean):
+                return ie
+    except Exception:
+        pass
+    return None
+
+def is_ytdlp_supported(url):
+    """
+    Determines if yt-dlp officially supports this task (either via dedicated extractor
+    or as a direct video/audio/stream media format).
+    """
+    if not YTDLP_AVAILABLE or not url:
+        return False
+    clean = url.strip()
+    if find_ytdlp_extractor(clean) is not None:
+        return True
+    lower = clean.lower().split("?")[0].split("#")[0]
+    media_exts = (
+        ".mp4", ".mkv", ".webm", ".m3u8", ".mpd", ".mov", ".flv", ".avi",
+        ".ts", ".m4v", ".3gp", ".mp3", ".m4a", ".aac", ".ogg", ".opus",
+        ".wav", ".flac"
+    )
+    return any(lower.endswith(ext) for ext in media_exts)
+
+def find_gallery_dl_extractor(url):
+    """
+    Finds a gallery-dl extractor for the given URL according to official gallery-dl documentation.
+    Uses gallery_dl.extractor.find(url).
+    """
+    if not GALLERY_DL_AVAILABLE or not url:
+        return None
+    try:
+        clean = url.strip()
+        return gdl_extractor.find(clean)
+    except Exception:
+        return None
+
+def is_gallery_dl_supported(url):
+    """
+    Determines if gallery-dl officially supports this task (via extractor or image format).
+    """
+    if not GALLERY_DL_AVAILABLE or not url:
+        return False
+    clean = url.strip()
+    if find_gallery_dl_extractor(clean) is not None:
+        return True
+    lower = clean.lower().split("?")[0].split("#")[0]
+    image_exts = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".avif")
+    return any(lower.endswith(ext) for ext in image_exts)
+
 def check_support(url):
     """
-    Checks if a URL is handled by gallery-dl or yt-dlp extractors.
+    Checks support for a URL following the strict priority:
+    1. Primary: yt-dlp (official extractor inspection).
+    2. Fallback: gallery-dl (if yt-dlp does not support, check gallery-dl extractor).
     """
     if not url:
-        return json.dumps({"supported": False, "category": "", "extractor": ""})
+        return json.dumps({"supported": False, "category": "", "extractor": "", "engine": ""})
 
     clean_url = url.strip()
 
-    # 1. Check gallery-dl
-    if GALLERY_DL_AVAILABLE:
-        try:
-            ext = gdl_extractor.find(clean_url)
-            if ext is not None:
-                cat = getattr(ext, "category", "") or ext.__class__.__name__.lower().replace("extractor", "")
-                subcat = getattr(ext, "subcategory", "") or ""
-                name = ext.__class__.__name__
-                return json.dumps({
-                    "supported": True,
-                    "category": cat,
-                    "subcategory": subcat,
-                    "extractor": name,
-                    "engine": "gallery-dl"
-                })
-        except Exception:
-            pass
+    # 1. Primary: Check yt-dlp
+    if is_ytdlp_supported(clean_url):
+        ie = find_ytdlp_extractor(clean_url)
+        ie_name = getattr(ie, "IE_NAME", "YoutubeDL") if ie else "YoutubeDL_Direct"
+        display_name = getattr(ie, "IE_DESC", ie_name) if ie else "yt-dlp Direct"
+        return json.dumps({
+            "supported": True,
+            "category": "video",
+            "subcategory": "stream",
+            "extractor": ie_name,
+            "display_name": display_name,
+            "engine": "yt-dlp"
+        })
 
-    # 2. Check yt-dlp
-    if YTDLP_AVAILABLE:
-        try:
-            lower = clean_url.lower()
-            video_hosts = [
-                "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
-                "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com/reel"
-            ]
-            if any(vh in lower for vh in video_hosts):
-                return json.dumps({
-                    "supported": True,
-                    "category": "video",
-                    "subcategory": "stream",
-                    "extractor": "YoutubeDL",
-                    "engine": "yt-dlp"
-                })
-        except Exception:
-            pass
+    # 2. Secondary: Check gallery-dl
+    if is_gallery_dl_supported(clean_url):
+        ext = find_gallery_dl_extractor(clean_url)
+        if ext is not None:
+            cat = getattr(ext, "category", "") or ext.__class__.__name__.lower().replace("extractor", "")
+            subcat = getattr(ext, "subcategory", "") or ""
+            name = ext.__class__.__name__
+            return json.dumps({
+                "supported": True,
+                "category": cat,
+                "subcategory": subcat,
+                "extractor": name,
+                "display_name": cat or name,
+                "engine": "gallery-dl"
+            })
+        else:
+            return json.dumps({
+                "supported": True,
+                "category": "images",
+                "subcategory": "direct",
+                "extractor": "GalleryDlDirect",
+                "display_name": "gallery-dl Image",
+                "engine": "gallery-dl"
+            })
 
-    return json.dumps({"supported": False, "category": "", "extractor": ""})
+    return json.dumps({
+        "supported": False,
+        "category": "",
+        "subcategory": "",
+        "extractor": "",
+        "display_name": "",
+        "engine": ""
+    })
+
+def check_gallery_dl_support(url):
+    """Directly checks if gallery-dl supports a URL according to official docs."""
+    clean_url = url.strip() if url else ""
+    if not is_gallery_dl_supported(clean_url):
+        return json.dumps({"supported": False, "category": "", "extractor": "", "engine": "gallery-dl"})
+    ext = find_gallery_dl_extractor(clean_url)
+    if ext is not None:
+        cat = getattr(ext, "category", "") or ext.__class__.__name__.lower().replace("extractor", "")
+        name = ext.__class__.__name__
+        return json.dumps({
+            "supported": True,
+            "category": cat,
+            "subcategory": getattr(ext, "subcategory", ""),
+            "extractor": name,
+            "display_name": cat or name,
+            "engine": "gallery-dl"
+        })
+    return json.dumps({
+        "supported": True,
+        "category": "images",
+        "subcategory": "direct",
+        "extractor": "GalleryDlDirect",
+        "display_name": "gallery-dl Image",
+        "engine": "gallery-dl"
+    })
 
 def extract_gallery_dl(url, options_json="{}"):
     """
@@ -162,7 +357,7 @@ def extract_gallery_dl(url, options_json="{}"):
     except Exception:
         opts = {}
 
-    user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36"
     cookies = opts.get("cookies")
 
     items = []
@@ -307,7 +502,7 @@ def extract_yt_dlp(url, options_json="{}"):
     except Exception:
         opts = {}
 
-    user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36"
     cookies = opts.get("cookies")
 
     items = []
@@ -316,7 +511,19 @@ def extract_yt_dlp(url, options_json="{}"):
 
     try:
         cookie_file = _prepare_cookiefile(cookies, clean_url)
-        http_headers = {"User-Agent": user_agent}
+        http_headers = {
+            "User-Agent": user_agent,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-Ch-Ua-Mobile": "?1",
+            "Sec-Ch-Ua-Platform": '"Android"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1"
+        }
         if cookies:
             http_headers["Cookie"] = cookies
 
@@ -325,12 +532,25 @@ def extract_yt_dlp(url, options_json="{}"):
             "no_warnings": True,
             "skip_download": True,
             "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo+bestaudio/best",
-            "socket_timeout": 30,
+            "socket_timeout": 35,
+            "geo_bypass": True,
+            "nocheckcertificate": True,
+            "retries": 3,
+            "fragment_retries": 3,
             "http_headers": http_headers,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android", "ios", "mweb", "tv_embedded"],
+                    "player_client": ["android", "ios", "mweb", "web"],
                     "player_skip": ["webpage", "configs"]
+                },
+                "instagram": {
+                    "api": ["graphql", "web"]
+                },
+                "tiktok": {
+                    "api": ["app", "web"]
+                },
+                "twitter": {
+                    "api": ["syndication", "graphql"]
                 }
             }
         }
@@ -459,8 +679,9 @@ def extract_yt_dlp(url, options_json="{}"):
 
 def extract_media(url, options_json="{}"):
     """
-    Extracts all media items using gallery-dl AND yt-dlp progressively.
-    Does not allow partial gallery-dl results to prevent yt-dlp from running.
+    Primary: yt-dlp.
+    If yt-dlp supports a task it should be handled exclusively by it.
+    Goes to gallery-dl if yt-dlp is not supported or fails and that is supported by gallery-dl.
     """
     clean_url = url.strip() if url else ""
     if not clean_url:
@@ -470,51 +691,182 @@ def extract_media(url, options_json="{}"):
             "items": []
         })
 
-    all_items = []
-    seen_urls = set()
-    page_title = ""
+    # Step 1: Check if yt-dlp supports this task
+    if is_ytdlp_supported(clean_url):
+        ytdlp_res_str = extract_yt_dlp(clean_url, options_json)
+        try:
+            ytdlp_res = json.loads(ytdlp_res_str)
+            if ytdlp_res.get("success") and len(ytdlp_res.get("items", [])) > 0:
+                # Handled exclusively by yt-dlp!
+                return ytdlp_res_str
+        except Exception:
+            ytdlp_res = {"success": False, "error": "yt-dlp extraction failed"}
 
-    # 1. Run gallery-dl
-    gdl_res_str = extract_gallery_dl(clean_url, options_json)
-    try:
-        gdl_res = json.loads(gdl_res_str)
-        if gdl_res.get("pageTitle"):
-            page_title = gdl_res["pageTitle"]
-        for itm in gdl_res.get("items", []):
-            u = itm.get("url")
-            if u and u not in seen_urls:
-                seen_urls.add(u)
-                all_items.append(itm)
-    except Exception:
-        pass
+        # yt-dlp was supported but failed (e.g. no video, error, or 0 items).
+        # Goes to gallery-dl if supported by gallery-dl
+        if is_gallery_dl_supported(clean_url):
+            gdl_res_str = extract_gallery_dl(clean_url, options_json)
+            try:
+                gdl_res = json.loads(gdl_res_str)
+                if gdl_res.get("success") and len(gdl_res.get("items", [])) > 0:
+                    return gdl_res_str
+            except Exception:
+                pass
+            return gdl_res_str
+        else:
+            return ytdlp_res_str
 
-    # 2. Run yt-dlp (ALWAYS run, even if gallery-dl found items, e.g. embedded video in social post)
-    ytdlp_res_str = extract_yt_dlp(clean_url, options_json)
-    try:
-        ytdlp_res = json.loads(ytdlp_res_str)
-        if not page_title and ytdlp_res.get("pageTitle"):
-            page_title = ytdlp_res["pageTitle"]
-        for itm in ytdlp_res.get("items", []):
-            u = itm.get("url")
-            if u and u not in seen_urls:
-                seen_urls.add(u)
-                all_items.append(itm)
-    except Exception:
-        pass
+    # Step 2: yt-dlp is not supported for this URL.
+    # Check if supported by gallery-dl
+    if is_gallery_dl_supported(clean_url):
+        return extract_gallery_dl(clean_url, options_json)
 
+    # Neither supported
     return json.dumps({
-        "success": len(all_items) > 0,
-        "engine": "hybrid (gallery-dl + yt-dlp)",
-        "pageTitle": str(page_title) if page_title else "",
-        "itemsCount": len(all_items),
-        "items": all_items
+        "success": False,
+        "error": f"URL is not supported by yt-dlp or gallery-dl: {clean_url}",
+        "items": []
     })
+
+def _download_with_ytdlp(url, target_path, referer, user_agent, cookies, extra_headers):
+    """Downloads media exclusively via yt-dlp."""
+    if not YTDLP_AVAILABLE:
+        return False
+    try:
+        http_headers = {
+            "User-Agent": user_agent or "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+            "Sec-Ch-Ua-Mobile": "?1",
+            "Sec-Ch-Ua-Platform": '"Android"',
+        }
+        if referer:
+            http_headers["Referer"] = referer
+        if cookies:
+            http_headers["Cookie"] = cookies
+        if extra_headers:
+            http_headers.update(extra_headers)
+
+        cookie_file = _prepare_cookiefile(cookies, url)
+        ydl_opts = {
+            "outtmpl": target_path,
+            "quiet": True,
+            "no_warnings": True,
+            "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo+bestaudio/best",
+            "socket_timeout": 35,
+            "geo_bypass": True,
+            "nocheckcertificate": True,
+            "retries": 3,
+            "fragment_retries": 3,
+            "http_headers": http_headers,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb", "web"],
+                    "player_skip": ["webpage", "configs"]
+                },
+                "instagram": {
+                    "api": ["graphql", "web"]
+                },
+                "tiktok": {
+                    "api": ["app", "web"]
+                },
+                "twitter": {
+                    "api": ["syndication", "graphql"]
+                }
+            }
+        }
+        if cookie_file:
+            ydl_opts["cookiefile"] = cookie_file
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+            with open(target_path, "rb") as f:
+                head = f.read(512).lower()
+            if b"#extm3u" in head or b"<mpd" in head:
+                os.remove(target_path)
+                return False
+            return True
+    except Exception:
+        pass
+    return False
+
+def _download_with_gallery_dl(url, target_path, referer, user_agent, cookies, extra_headers):
+    """Downloads media via gallery-dl job runner or gallery-dl network session."""
+    if not GALLERY_DL_AVAILABLE:
+        return False
+    try:
+        with _gdl_lock:
+            gdl_config.set(("extractor",), "user-agent", user_agent or "Mozilla/5.0")
+            cookie_file = _prepare_cookiefile(cookies, url)
+            if cookie_file:
+                try:
+                    gdl_config.set(("extractor",), "cookies", cookie_file)
+                except Exception:
+                    pass
+            elif cookies:
+                try:
+                    gdl_config.set(("extractor",), "cookies", cookies)
+                except Exception:
+                    pass
+
+            target_dir = os.path.dirname(target_path)
+            target_filename = os.path.basename(target_path)
+            os.makedirs(target_dir, exist_ok=True)
+
+            ext = gdl_extractor.find(url)
+            if ext:
+                gdl_config.set((), "base-directory", target_dir)
+                gdl_config.set((), "directory", [""])
+                gdl_config.set((), "filename", target_filename)
+                job = gdl_job.DownloadJob(ext)
+                job.run()
+                if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                    return True
+
+            from gallery_dl import net
+            session = net.HttpUserAgent()
+            if user_agent:
+                session.headers["User-Agent"] = user_agent
+            if referer:
+                session.headers["Referer"] = referer
+            if cookies:
+                session.headers["Cookie"] = cookies
+            if extra_headers:
+                session.headers.update(extra_headers)
+
+            resp = session.request("GET", url, stream=True, timeout=35)
+            if resp.status_code in [200, 206]:
+                content_type = (resp.headers.get("content-type") or "").lower()
+                if "text/html" in content_type or "application/json" in content_type:
+                    return False
+                with open(target_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            f.write(chunk)
+                if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
+                    with open(target_path, "rb") as f:
+                        head = f.read(512).lower()
+                    if b"#extm3u" in head or b"<mpd" in head:
+                        os.remove(target_path)
+                        return False
+                    return True
+    except Exception:
+        pass
+    return False
 
 def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None):
     """
-    Downloads media file using yt-dlp (with single pre-muxed format) or requests with cookies/headers.
-    Never commits raw .m3u8 or .mpd playlist text as a finished file.
+    Downloads media file using yt-dlp (primary) and gallery-dl (secondary fallback).
+    Ditches all other engines/workflows.
+    If yt-dlp supports the task, handled exclusively by yt-dlp.
+    Goes to gallery-dl if yt-dlp is not supported or fails and that is supported by gallery-dl.
     """
+    if not media_url:
+        return False
+
     extra_headers = {}
     if headers_json:
         try:
@@ -525,130 +877,22 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
             pass
 
     ua = user_agent or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-    is_stream = (".m3u8" in media_url) or (".mpd" in media_url)
-    is_social_or_video = any(h in media_url.lower() for h in [
-        "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "vimeo.com", "twitter.com", "x.com"
-    ])
 
-    # 1. For streams or social pages, prioritize yt-dlp directly
-    if (is_stream or is_social_or_video) and YTDLP_AVAILABLE:
-        try:
-            http_headers = {"User-Agent": ua}
-            if referer:
-                http_headers["Referer"] = referer
-            if cookies:
-                http_headers["Cookie"] = cookies
-            http_headers.update(extra_headers)
+    # 1. Primary: yt-dlp
+    if is_ytdlp_supported(media_url) or (referer and is_ytdlp_supported(referer)):
+        if _download_with_ytdlp(media_url, target_path, referer, ua, cookies, extra_headers):
+            return True
 
-            cookie_file = _prepare_cookiefile(cookies, media_url)
-            ydl_opts = {
-                "outtmpl": target_path,
-                "quiet": True,
-                "no_warnings": True,
-                "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo+bestaudio/best",
-                "socket_timeout": 30,
-                "http_headers": http_headers,
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["android", "ios", "mweb", "tv_embedded"],
-                        "player_skip": ["webpage", "configs"]
-                    }
-                }
-            }
-            if cookie_file:
-                ydl_opts["cookiefile"] = cookie_file
+    # 2. Secondary fallback: gallery-dl
+    if is_gallery_dl_supported(media_url) or (referer and is_gallery_dl_supported(referer)):
+        if _download_with_gallery_dl(media_url, target_path, referer, ua, cookies, extra_headers):
+            return True
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([media_url])
+    # 3. Fallback: try yt-dlp then gallery-dl if not caught by heuristics
+    if _download_with_ytdlp(media_url, target_path, referer, ua, cookies, extra_headers):
+        return True
 
-            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-                # Ensure yt-dlp didn't just save a playlist text file
-                with open(target_path, "rb") as f:
-                    head = f.read(512).lower()
-                if b"#extm3u" in head or b"<mpd" in head:
-                    os.remove(target_path)
-                    return False
-                return True
-        except Exception:
-            pass
-
-    # 2. Direct HTTP requests download
-    try:
-        import requests
-        headers = {"User-Agent": ua}
-        if referer:
-            headers["Referer"] = referer
-        if cookies:
-            headers["Cookie"] = cookies
-        headers.update(extra_headers)
-
-        resp = requests.get(media_url, headers=headers, stream=True, timeout=35)
-        if resp.status_code in [200, 206]:
-            content_type = (resp.headers.get("content-type") or "").lower()
-            if "text/html" in content_type or "application/json" in content_type:
-                return False
-
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            first_chunk = True
-            with open(target_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=65536):
-                    if chunk:
-                        if first_chunk:
-                            first_chunk = False
-                            prefix = chunk[:1024].lower()
-                            if (b"<!doctype html" in prefix or b"<html" in prefix or b"<head" in prefix or
-                                b"cloudflare" in prefix or b"just a moment..." in prefix or
-                                b"403 forbidden" in prefix or b"404 not found" in prefix or b"access denied" in prefix):
-                                f.close()
-                                if os.path.exists(target_path):
-                                    os.remove(target_path)
-                                return False
-                            trimmed = prefix.strip()
-                            if (trimmed.startswith(b"{") or trimmed.startswith(b"[")) and (
-                                b'"error"' in trimmed or b'"message"' in trimmed or b'"status"' in trimmed or b'"forbidden"' in trimmed
-                            ):
-                                f.close()
-                                if os.path.exists(target_path):
-                                    os.remove(target_path)
-                                return False
-                            # Never save raw playlists (.m3u8 or .mpd)
-                            if b"#extm3u" in prefix or b"<mpd" in prefix:
-                                f.close()
-                                if os.path.exists(target_path):
-                                    os.remove(target_path)
-                                return False
-                        f.write(chunk)
-            return os.path.exists(target_path) and os.path.getsize(target_path) > 0
-    except Exception:
-        pass
-
-    # 3. Fallback to yt-dlp if direct request failed and target is a video/stream
-    if YTDLP_AVAILABLE and (is_stream or any(ext in media_url.lower() for ext in [".mp4", ".mkv", ".webm", ".m3u8", ".mpd", "youtube", "tiktok", "vimeo"])):
-        try:
-            http_headers = {"User-Agent": ua}
-            if referer:
-                http_headers["Referer"] = referer
-            if cookies:
-                http_headers["Cookie"] = cookies
-            http_headers.update(extra_headers)
-
-            ydl_opts = {
-                "outtmpl": target_path,
-                "quiet": True,
-                "no_warnings": True,
-                "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best",
-                "http_headers": http_headers
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([media_url])
-            if os.path.exists(target_path) and os.path.getsize(target_path) > 0:
-                with open(target_path, "rb") as f:
-                    head = f.read(512).lower()
-                if b"#extm3u" in head or b"<mpd" in head:
-                    os.remove(target_path)
-                    return False
-                return True
-        except Exception:
-            pass
+    if _download_with_gallery_dl(media_url, target_path, referer, ua, cookies, extra_headers):
+        return True
 
     return False

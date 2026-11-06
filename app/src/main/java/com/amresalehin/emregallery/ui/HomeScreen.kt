@@ -9,7 +9,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
@@ -73,6 +75,8 @@ fun HomeScreen(
     selectedUris: Set<String> = emptySet(),
     onSelectionChange: (Set<String>) -> Unit = {},
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
+    archiveCount: Int = 0,
+    onOpenArchive: (() -> Unit)? = null,
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -399,14 +403,7 @@ fun HomeScreen(
                     item { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
                 }
                 if (albumTitle == null) {
-                    item { MemoriesStrip(sortedMedia, onOpenMemory) }
-                    item {
-                        HorizontalDivider(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
-                            thickness = 1.dp
-                        )
-                    }
+                    item(key = "memories_strip") { MemoriesStrip(sortedMedia, onOpenMemory) }
                 }
 
                 groupedRows.forEach { (group, rowChunks) ->

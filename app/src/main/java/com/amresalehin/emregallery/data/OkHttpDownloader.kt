@@ -33,8 +33,7 @@ import java.util.concurrent.TimeUnit
 object OkHttpDownloader {
 
     private const val TAG = "OkHttpDownloader"
-    const val DEFAULT_USER_AGENT =
-        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    const val DEFAULT_USER_AGENT = BotDetectionMitigator.STEALTH_USER_AGENT
 
     /**
      * Shared bidirectional CookieJar bridging Android WebView CookieManager and in-memory cache.
@@ -183,6 +182,121 @@ object OkHttpDownloader {
         val errorMessage: String? = null,
         val retryAfterSeconds: Long? = null
     )
+
+    /**
+     * Data class capturing the result of probing a URL for direct media file headers.
+     */
+    data class DirectMediaProbeResult(
+        val isConfirmedDirectMedia: Boolean,
+        val finalUrl: String,
+        val contentType: String?,
+        val contentDisposition: String?,
+        val contentLength: Long?,
+        val statusCode: Int
+    )
+
+    /**
+     * Probes an arbitrary URL using OkHttp (HEAD request with fast Range GET fallback)
+     * to verify if the URL points directly to an image, video, audio or binary stream.
+     */
+    suspend fun probeDirectMedia(
+        url: String,
+        referer: String? = null
+    ): DirectMediaProbeResult = withContext(Dispatchers.IO) {
+        try {
+            val headReq = Request.Builder()
+                .url(url)
+                .head()
+                .apply {
+                    if (!referer.isNullOrBlank()) header("Referer", referer)
+                }
+                .build()
+
+            val headResp = runCatching { client.newCall(headReq).execute() }.getOrNull()
+            if (headResp != null && headResp.isSuccessful) {
+                headResp.use { resp ->
+                    val ct = resp.header("Content-Type")?.lowercase(Locale.ROOT)
+                    val cd = resp.header("Content-Disposition")
+                    val cl = resp.header("Content-Length")?.toLongOrNull()
+                    val finalUrl = resp.request.url.toString()
+                    val isMedia = isMediaContentType(ct) || hasMediaContentDisposition(cd) || isDirectMediaExtension(finalUrl)
+                    if (isMedia) {
+                        return@withContext DirectMediaProbeResult(
+                            isConfirmedDirectMedia = true,
+                            finalUrl = finalUrl,
+                            contentType = ct,
+                            contentDisposition = cd,
+                            contentLength = cl,
+                            statusCode = resp.code
+                        )
+                    }
+                }
+            }
+
+            // Fallback: fast Range GET (0-1024) to probe server if HEAD was rejected or inconclusive
+            val rangeReq = Request.Builder()
+                .url(url)
+                .header("Range", "bytes=0-1024")
+                .apply {
+                    if (!referer.isNullOrBlank()) header("Referer", referer)
+                }
+                .build()
+
+            client.newCall(rangeReq).execute().use { resp ->
+                val ct = resp.header("Content-Type")?.lowercase(Locale.ROOT)
+                val cd = resp.header("Content-Disposition")
+                val cl = resp.header("Content-Length")?.toLongOrNull()
+                val finalUrl = resp.request.url.toString()
+                val isMedia = (resp.code in 200..206) && (isMediaContentType(ct) || hasMediaContentDisposition(cd) || isDirectMediaExtension(finalUrl))
+                DirectMediaProbeResult(
+                    isConfirmedDirectMedia = isMedia,
+                    finalUrl = finalUrl,
+                    contentType = ct,
+                    contentDisposition = cd,
+                    contentLength = cl,
+                    statusCode = resp.code
+                )
+            }
+        } catch (e: Exception) {
+            DirectMediaProbeResult(
+                isConfirmedDirectMedia = false,
+                finalUrl = url,
+                contentType = null,
+                contentDisposition = null,
+                contentLength = null,
+                statusCode = -1
+            )
+        }
+    }
+
+    private fun isMediaContentType(ct: String?): Boolean {
+        if (ct.isNullOrBlank()) return false
+        val clean = ct.substringBefore(";").trim().lowercase(Locale.ROOT)
+        return clean.startsWith("image/") ||
+                clean.startsWith("video/") ||
+                clean.startsWith("audio/") ||
+                clean == "application/x-mpegurl" ||
+                clean == "application/vnd.apple.mpegurl" ||
+                clean == "application/dash+xml"
+    }
+
+    private fun hasMediaContentDisposition(cd: String?): Boolean {
+        if (cd.isNullOrBlank()) return false
+        val lower = cd.lowercase(Locale.ROOT)
+        return lower.contains(".mp4") || lower.contains(".webm") || lower.contains(".mkv") ||
+                lower.contains(".jpg") || lower.contains(".jpeg") || lower.contains(".png") ||
+                lower.contains(".webp") || lower.contains(".gif") || lower.contains(".mp3") ||
+                lower.contains(".m4a") || lower.contains(".flac") || lower.contains(".wav")
+    }
+
+    private fun isDirectMediaExtension(url: String): Boolean {
+        val clean = url.substringBefore("?").substringBefore("#").lowercase(Locale.ROOT)
+        return clean.endsWith(".mp4") || clean.endsWith(".webm") || clean.endsWith(".mkv") ||
+                clean.endsWith(".mov") || clean.endsWith(".jpg") || clean.endsWith(".jpeg") ||
+                clean.endsWith(".png") || clean.endsWith(".webp") || clean.endsWith(".gif") ||
+                clean.endsWith(".m3u8") || clean.endsWith(".mpd") || clean.endsWith(".mp3") ||
+                clean.endsWith(".m4a") || clean.endsWith(".flac") || clean.endsWith(".wav")
+    }
 
     /**
      * Parses the HTTP 'Retry-After' header (RFC 7231/9110) as seconds or HTTP-date.

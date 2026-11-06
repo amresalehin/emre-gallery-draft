@@ -463,7 +463,7 @@ fun CollectionPill(
 @Composable
 fun CollectionTile(
     title: String,
-    count: String,
+    count: String = "",
     icon: ImageVector,
     iconTint: Color = MaterialTheme.colorScheme.onSurface,
     iconBg: Color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -516,13 +516,15 @@ fun CollectionTile(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = count,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (count.isNotBlank()) {
+                    Text(
+                        text = count,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }
