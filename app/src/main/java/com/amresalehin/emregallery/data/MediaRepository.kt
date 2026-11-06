@@ -11,9 +11,11 @@ class MediaRepository(private val resolver: ContentResolver) {
         val rows = ArrayList<MediaItem>()
         queryCollection(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, false, rows)
         queryCollection(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, rows)
-        return rows.sortedWith(compareByDescending<MediaItem> {
+        val result = rows.sortedWith(compareByDescending<MediaItem> {
             if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L
         }.thenBy { it.id })
+        cachedMedia = result
+        return result
     }
 
     private fun queryCollection(collection: Uri, video: Boolean, rows: MutableList<MediaItem>) {
@@ -103,6 +105,9 @@ class MediaRepository(private val resolver: ContentResolver) {
     }
 
     companion object {
+        @Volatile
+        var cachedMedia: List<MediaItem>? = null
+
         private val NON_MEDIA_EXTENSIONS = setOf(
             "xml", "txt", "json", "html", "htm", "css", "js", "bin", "pdf",
             "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "rar", "7z", "tar", "gz",

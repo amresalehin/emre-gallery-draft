@@ -85,9 +85,9 @@ fun GalleryApp() {
     var destination by remember { mutableStateOf(Destination.HOME) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
-    var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var media by remember { mutableStateOf<List<MediaItem>>(MediaRepository.cachedMedia ?: emptyList()) }
     var lockedVaultItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var loading by remember { mutableStateOf(hasMediaPermission(context)) }
+    var loading by remember { mutableStateOf(MediaRepository.cachedMedia == null && hasMediaPermission(context)) }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
     var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var viewerStoryTitle by remember { mutableStateOf<String?>(null) }
@@ -108,7 +108,7 @@ fun GalleryApp() {
     val inBin by prefs.bin.collectAsStateWithLifecycle(initialValue = emptySet())
     val archive by prefs.archive.collectAsStateWithLifecycle(initialValue = emptySet())
     val recentSearches by prefs.recentSearches.collectAsStateWithLifecycle(initialValue = emptyList())
-    val themePref by prefs.theme.collectAsStateWithLifecycle(initialValue = "system")
+    val themePref by prefs.theme.collectAsStateWithLifecycle(initialValue = remember { prefs.getThemeSync() })
     val customAlbums by prefs.customAlbums.collectAsStateWithLifecycle(initialValue = emptyList())
     val sortOrderPref by prefs.sortOrder.collectAsStateWithLifecycle(initialValue = "date_desc")
     val groupByPref by prefs.groupBy.collectAsStateWithLifecycle(initialValue = "day")
@@ -144,11 +144,13 @@ fun GalleryApp() {
         scope.launch {
             if (userInitiated) {
                 isRefreshing = true
-            } else {
+            } else if (media.isEmpty()) {
                 loading = true
             }
             val startTime = System.currentTimeMillis()
-            lockedVaultItems = withContext(Dispatchers.IO) { runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList()) }
+            launch(Dispatchers.IO) {
+                lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
+            }
             if (hasMediaPermission(context)) {
                 val loadedMedia = withContext(Dispatchers.IO) {
                     runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())

@@ -27,7 +27,8 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             val preferences = remember { PreferencesRepository(applicationContext) }
-            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = "system")
+            val initialTheme = remember { preferences.getThemeSync() }
+            val theme by preferences.theme.collectAsStateWithLifecycle(initialValue = initialTheme)
             EmreGalleryTheme(theme) {
                 GalleryApp()
             }

@@ -56,11 +56,15 @@ class UiPreferencesManager(private val context: Context) {
         }
     }
 
+    fun getThemeSync(): String =
+        sharedPrefs.getString("theme", "system") ?: "system"
+
     val theme: Flow<String> = context.galleryDataStore.data.map {
-        it[themeKey] ?: "system"
+        it[themeKey] ?: getThemeSync()
     }.distinctUntilChanged()
 
     suspend fun setTheme(value: String) {
+        sharedPrefs.edit().putString("theme", value).apply()
         context.galleryDataStore.edit { it[themeKey] = value }
     }
 

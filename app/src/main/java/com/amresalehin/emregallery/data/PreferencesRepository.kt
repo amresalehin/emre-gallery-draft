@@ -35,6 +35,7 @@ class PreferencesRepository(context: Context) {
     suspend fun saveHomeScrollPosition(index: Int, offset: Int) = uiPrefs.saveHomeScrollPosition(index, offset)
     suspend fun clearHomeScrollPosition() = uiPrefs.clearHomeScrollPosition()
 
+    fun getThemeSync(): String = uiPrefs.getThemeSync()
     val theme: Flow<String> get() = uiPrefs.theme
     suspend fun setTheme(value: String) = uiPrefs.setTheme(value)
 
