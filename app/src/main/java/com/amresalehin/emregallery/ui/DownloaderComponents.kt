@@ -1015,6 +1015,44 @@ fun DownloaderResultsPage(
         }
     }
 
+    fun performFetch(target: String) {
+        val trimmed = target.trim()
+        if (trimmed.isNotBlank()) {
+            val sanitized = MediaClassifier.sanitizeUrl(trimmed)
+            if (sanitized != activeUrl) {
+                activeUrl = sanitized
+            } else {
+                selectedItemIds = emptySet()
+                downloadedItemIds = emptySet()
+                isDownloaded = false
+                dynamicDimensions.clear()
+                DownloaderSession.startSession(sanitized)
+                dualExtractor.extract(sanitized, scope)
+            }
+        }
+        isEditingUrl = false
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
+
+    fun performOpenInBrowser(target: String) {
+        val trimmed = target.trim()
+        if (trimmed.isNotBlank()) {
+            val destinationUrl = MediaClassifier.formatQueryOrUrl(trimmed)
+            isEditingUrl = false
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            if (onOpenBrowser != null) {
+                onOpenBrowser(destinationUrl)
+            } else {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(destinationUrl)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching { context.startActivity(intent) }
+            }
+        }
+    }
+
     val sessionItems by DownloaderSession.discoveredItems.collectAsState()
     val allScrapedItems = remember(extractorState.items, sessionItems) {
         MediaClassifier.deduplicateScrapedItems(extractorState.items + sessionItems)
@@ -1211,19 +1249,7 @@ fun DownloaderResultsPage(
                                     ),
                                     keyboardActions = KeyboardActions(
                                         onGo = {
-                                            val trimmed = urlTextFieldValue.text.trim()
-                                            if (trimmed.isNotBlank()) {
-                                                val sanitized = MediaClassifier.sanitizeUrl(trimmed)
-                                                activeUrl = sanitized
-                                                selectedItemIds = emptySet()
-                                                downloadedItemIds = emptySet()
-                                                isDownloaded = false
-                                                dynamicDimensions.clear()
-                                                dualExtractor.extract(sanitized, scope)
-                                            }
-                                            isEditingUrl = false
-                                            focusManager.clearFocus()
-                                            keyboardController?.hide()
+                                            performFetch(urlTextFieldValue.text)
                                         }
                                     ),
                                     textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -1240,82 +1266,121 @@ fun DownloaderResultsPage(
                         }
 
                         // Trailing Controls:
-                        // If tapped/editing: hides progress/reload and redirect buttons, shows cross (clear)
+                        // When editing/focused: show Clear, Open in Live Browser, AND Fetch button so user can fetch new sites or launch browser
                         if (isEditingUrl) {
-                            IconButton(
-                                onClick = {
-                                    if (urlTextFieldValue.text.isNotEmpty()) {
-                                        urlTextFieldValue = TextFieldValue("", selection = TextRange(0))
-                                    } else {
-                                        isEditingUrl = false
-                                        urlTextFieldValue = TextFieldValue(cleanDisplayUrl, selection = TextRange(cleanDisplayUrl.length))
-                                        focusManager.clearFocus()
-                                        keyboardController?.hide()
-                                    }
-                                },
-                                modifier = Modifier.size(38.dp).testTag("downloader_clear_btn")
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        } else {
-                            // When not editing: Progress indicator morphs into Reload button once scraping finishes
-                            if (extractorState.isRunning) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .padding(end = 2.dp)
-                                        .testTag("downloader_progress_indicator"),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            } else {
+                                // 1. Clear / Cancel Button
                                 IconButton(
                                     onClick = {
-                                        selectedItemIds = emptySet()
-                                        dynamicDimensions.clear()
-                                        dualExtractor.extract(activeUrl, scope)
+                                        if (urlTextFieldValue.text.isNotEmpty()) {
+                                            urlTextFieldValue = TextFieldValue("", selection = TextRange(0))
+                                        } else {
+                                            isEditingUrl = false
+                                            urlTextFieldValue = TextFieldValue(cleanDisplayUrl, selection = TextRange(cleanDisplayUrl.length))
+                                            focusManager.clearFocus()
+                                            keyboardController?.hide()
+                                        }
                                     },
-                                    modifier = Modifier.size(38.dp).testTag("downloader_refresh_btn")
+                                    modifier = Modifier.size(34.dp).testTag("downloader_clear_btn")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Reload",
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = if (urlTextFieldValue.text.isNotEmpty()) "Clear text" else "Cancel editing",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                // 2. Launch in Live Browser Button
+                                IconButton(
+                                    onClick = {
+                                        val target = urlTextFieldValue.text.ifBlank { activeUrl }
+                                        performOpenInBrowser(target)
+                                    },
+                                    modifier = Modifier.size(34.dp).testTag("downloader_action_browse_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                        contentDescription = "Open in browser",
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+
+                                // 3. Fetch / Scrape new site directly on this page
+                                Surface(
+                                    onClick = {
+                                        val target = urlTextFieldValue.text.ifBlank { activeUrl }
+                                        performFetch(target)
+                                    },
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(32.dp).testTag("downloader_action_fetch_btn")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = "Fetch media",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                // When not editing: Progress indicator morphs into Reload button once scraping finishes
+                                if (extractorState.isRunning) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .testTag("downloader_progress_indicator"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else {
+                                    IconButton(
+                                        onClick = {
+                                            selectedItemIds = emptySet()
+                                            dynamicDimensions.clear()
+                                            dualExtractor.extract(activeUrl, scope)
+                                        },
+                                        modifier = Modifier.size(36.dp).testTag("downloader_refresh_btn")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Reload",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                // External Browser Redirect Button
+                                IconButton(
+                                    onClick = {
+                                        performOpenInBrowser(activeUrl)
+                                    },
+                                    modifier = Modifier.size(36.dp).testTag("downloader_browser_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                        contentDescription = "Open in browser",
                                         tint = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
-                            }
-
-                            // External Browser Redirect Button
-                            IconButton(
-                                onClick = {
-                                    if (onOpenBrowser != null) {
-                                        onOpenBrowser(activeUrl)
-                                    } else {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(activeUrl)).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        }
-                                        runCatching { context.startActivity(intent) }
-                                    }
-                                },
-                                modifier = Modifier.size(38.dp).testTag("downloader_browser_btn")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                    contentDescription = "Open in browser",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(20.dp)
-                                )
                             }
                         }
                     }
