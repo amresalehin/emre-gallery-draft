@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -471,16 +473,24 @@ fun DownloaderActivityPage(
         }
     }
 
-    val downloadingItems = remember(activities) { activities.filter { it.isDownloading || it.isPaused || it.isRetrying } }
-    val failedItems = remember(activities) { activities.filter { it.isFailed } }
-    val finishedItems = remember(activities) { activities.filter { it.isFinished } }
+    BackHandler { onBack() }
+
+    val downloadingItems = remember(activities) {
+        activities.filter { it.isDownloading || it.isPaused || it.isRetrying }.distinctBy { it.id }
+    }
+    val failedItems = remember(activities) {
+        activities.filter { it.isFailed }.distinctBy { it.id }
+    }
+    val finishedItems = remember(activities) {
+        activities.filter { it.isFinished }.distinctBy { it.id }
+    }
 
     val filteredList = remember(activities, selectedFilter, downloadingItems, failedItems, finishedItems) {
         when (selectedFilter) {
             "Downloading" -> downloadingItems
             "Failed" -> failedItems
             "Finished" -> finishedItems
-            else -> activities
+            else -> activities.distinctBy { it.id }
         }
     }
 
@@ -613,7 +623,7 @@ fun DownloaderActivityPage(
                     // Active Downloads Section
                     if (selectedFilter == "All" || selectedFilter == "Downloading") {
                         if (downloadingItems.isNotEmpty()) {
-                            items(downloadingItems, key = { "active_${it.id}" }) { item ->
+                            itemsIndexed(downloadingItems, key = { index, item -> "active_${item.id}_$index" }) { _, item ->
                                 ActiveDownloadRow(
                                     item = item,
                                     currentTimeMillis = currentTimeMillis,
@@ -632,7 +642,7 @@ fun DownloaderActivityPage(
                     // Failed Downloads Section
                     if (selectedFilter == "All" || selectedFilter == "Failed") {
                         if (failedItems.isNotEmpty()) {
-                            items(failedItems, key = { "failed_${it.id}" }) { item ->
+                            itemsIndexed(failedItems, key = { index, item -> "failed_${item.id}_$index" }) { _, item ->
                                 FailedDownloadRow(
                                     item = item,
                                     currentTimeMillis = currentTimeMillis,
@@ -650,7 +660,7 @@ fun DownloaderActivityPage(
                     // Past Downloads Header & Items
                     if (selectedFilter == "All" || selectedFilter == "Finished") {
                         if (finishedItems.isNotEmpty()) {
-                            item {
+                            item(key = "past_downloads_header_label") {
                                 Text(
                                     text = "Past downloads",
                                     style = MaterialTheme.typography.titleMedium,
@@ -660,7 +670,7 @@ fun DownloaderActivityPage(
                                     modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                                 )
                             }
-                            items(finishedItems, key = { "finished_${it.id}" }) { item ->
+                            itemsIndexed(finishedItems, key = { index, item -> "finished_${item.id}_$index" }) { _, item ->
                                 FinishedDownloadRow(
                                     item = item,
                                     onClick = {
@@ -893,7 +903,10 @@ private fun ActiveDownloadRow(
             }
 
             LinearProgressIndicator(
-                progress = { if (item.isRetrying) 0.05f else item.progress.coerceIn(0.05f, 1f) },
+                progress = {
+                    val p = if (item.isRetrying) 0.05f else item.progress
+                    if (p.isNaN() || p.isInfinite() || p < 0f) 0.05f else p.coerceIn(0f, 1f)
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(4.dp)

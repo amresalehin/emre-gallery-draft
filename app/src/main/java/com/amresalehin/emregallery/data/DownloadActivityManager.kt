@@ -178,56 +178,62 @@ object DownloadActivityManager {
             val jsonArray = JSONArray(rawJson)
             val list = mutableListOf<DownloadActivityItem>()
             for (i in 0 until jsonArray.length()) {
-                val obj = jsonArray.getJSONObject(i)
-                val statusStr = obj.optString("status", DownloadActivityStatus.FAILED.name)
-                val status = runCatching { DownloadActivityStatus.valueOf(statusStr) }.getOrDefault(DownloadActivityStatus.FAILED)
-                val isVid = obj.optBoolean("isVideo", false)
-                val isAud = obj.optBoolean("isAudio", false)
-                val rawFmt = obj.optString("format", "").trim()
-                val cleanFormat = if (!isVid && rawFmt.contains("4K", ignoreCase = true)) {
-                    if (isAud) "MP3" else "JPG"
-                } else if (rawFmt.isNotBlank()) {
-                    rawFmt
-                } else {
-                    when {
-                        isVid -> "MP4"
-                        isAud -> "MP3"
-                        else -> "JPG"
+                try {
+                    val obj = jsonArray.getJSONObject(i)
+                    val statusStr = obj.optString("status", DownloadActivityStatus.FAILED.name)
+                    val status = runCatching { DownloadActivityStatus.valueOf(statusStr) }.getOrDefault(DownloadActivityStatus.FAILED)
+                    val isVid = obj.optBoolean("isVideo", false)
+                    val isAud = obj.optBoolean("isAudio", false)
+                    val rawFmt = obj.optString("format", "").trim()
+                    val cleanFormat = if (!isVid && rawFmt.contains("4K", ignoreCase = true)) {
+                        if (isAud) "MP3" else "JPG"
+                    } else if (rawFmt.isNotBlank()) {
+                        rawFmt
+                    } else {
+                        when {
+                            isVid -> "MP4"
+                            isAud -> "MP3"
+                            else -> "JPG"
+                        }
                     }
-                }
+                    val rawProgress = obj.optDouble("progress", 0.0).toFloat()
+                    val safeProgress = if (rawProgress.isNaN() || rawProgress.isInfinite() || rawProgress < 0f) 0f else rawProgress.coerceIn(0f, 1f)
 
-                list.add(
-                    DownloadActivityItem(
-                        id = obj.getString("id"),
-                        workId = obj.optString("workId").takeIf { it.isNotBlank() },
-                        title = obj.optString("title", "Media"),
-                        mediaUrl = obj.getString("mediaUrl"),
-                        thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() },
-                        localUri = obj.optString("localUri").takeIf { it.isNotBlank() },
-                        isVideo = isVid,
-                        isAudio = isAud,
-                        isStream = obj.optBoolean("isStream", false),
-                        format = cleanFormat,
-                        status = status,
-                        progress = obj.optDouble("progress", 0.0).toFloat(),
-                        bytesRead = obj.optLong("bytesRead", 0L),
-                        totalBytes = obj.optLong("totalBytes", 0L),
-                        speedBytesPerSec = obj.optLong("speedBytesPerSec", 0L),
-                        errorMessage = obj.optString("errorMessage").takeIf { it.isNotBlank() },
-                        timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis()),
-                        durationHint = obj.optString("durationHint").takeIf { it.isNotBlank() },
-                        retryCount = obj.optInt("retryCount", 0),
-                        maxRetries = obj.optInt("maxRetries", 5),
-                        nextRetryTimestampMillis = obj.optLong("nextRetryTimestampMillis", -1L).takeIf { it > 0L },
-                        retryDelaySeconds = obj.optLong("retryDelaySeconds", -1L).takeIf { it > 0L },
-                        stackId = obj.optString("stackId").takeIf { it.isNotBlank() },
-                        stackTitle = obj.optString("stackTitle").takeIf { it.isNotBlank() },
-                        sourceDomain = obj.optString("sourceDomain").takeIf { it.isNotBlank() },
-                        sourceUrl = obj.optString("sourceUrl").takeIf { it.isNotBlank() }
+                    list.add(
+                        DownloadActivityItem(
+                            id = obj.optString("id").takeIf { it.isNotBlank() } ?: "persisted_${System.currentTimeMillis()}_$i",
+                            workId = obj.optString("workId").takeIf { it.isNotBlank() },
+                            title = obj.optString("title", "Media"),
+                            mediaUrl = obj.optString("mediaUrl", ""),
+                            thumbnailUrl = obj.optString("thumbnailUrl").takeIf { it.isNotBlank() },
+                            localUri = obj.optString("localUri").takeIf { it.isNotBlank() },
+                            isVideo = isVid,
+                            isAudio = isAud,
+                            isStream = obj.optBoolean("isStream", false),
+                            format = cleanFormat,
+                            status = status,
+                            progress = safeProgress,
+                            bytesRead = obj.optLong("bytesRead", 0L),
+                            totalBytes = obj.optLong("totalBytes", 0L),
+                            speedBytesPerSec = obj.optLong("speedBytesPerSec", 0L),
+                            errorMessage = obj.optString("errorMessage").takeIf { it.isNotBlank() },
+                            timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis()),
+                            durationHint = obj.optString("durationHint").takeIf { it.isNotBlank() },
+                            retryCount = obj.optInt("retryCount", 0),
+                            maxRetries = obj.optInt("maxRetries", 5),
+                            nextRetryTimestampMillis = obj.optLong("nextRetryTimestampMillis", -1L).takeIf { it > 0L },
+                            retryDelaySeconds = obj.optLong("retryDelaySeconds", -1L).takeIf { it > 0L },
+                            stackId = obj.optString("stackId").takeIf { it.isNotBlank() },
+                            stackTitle = obj.optString("stackTitle").takeIf { it.isNotBlank() },
+                            sourceDomain = obj.optString("sourceDomain").takeIf { it.isNotBlank() },
+                            sourceUrl = obj.optString("sourceUrl").takeIf { it.isNotBlank() }
+                        )
                     )
-                )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error parsing persisted item index $i", e)
+                }
             }
-            _activities.value = list
+            _activities.value = list.distinctBy { it.id }
         } catch (e: Exception) {
             Log.e(TAG, "Error loading persisted download activities", e)
         }
@@ -241,12 +247,22 @@ object DownloadActivityManager {
         val repo = MediaInboxRepository.getInstance(ctx)
         val stacks = repo.stacks.value
         val finishedItems = mutableListOf<DownloadActivityItem>()
+        val seenIds = mutableSetOf<String>()
 
         for (stack in stacks) {
             for (item in stack.items) {
+                val candidateId = item.id.ifBlank { "${stack.id}_${item.localUri.hashCode()}" }
+                val uniqueId = if (seenIds.add(candidateId)) {
+                    candidateId
+                } else {
+                    val fallback = "${stack.id}_${candidateId}_${item.localUri.hashCode()}"
+                    seenIds.add(fallback)
+                    fallback
+                }
+
                 finishedItems.add(
                     DownloadActivityItem(
-                        id = item.id,
+                        id = uniqueId,
                         title = item.title,
                         mediaUrl = item.sourceUrl,
                         thumbnailUrl = item.localUri,
@@ -260,7 +276,9 @@ object DownloadActivityManager {
                         bytesRead = item.sizeBytes,
                         totalBytes = item.sizeBytes,
                         timestampMillis = item.dateAddedMillis,
-                        durationHint = if (item.isVideo) "HD" else null
+                        durationHint = if (item.isVideo) "HD" else null,
+                        stackId = stack.id,
+                        stackTitle = stack.title
                     )
                 )
             }
@@ -268,10 +286,10 @@ object DownloadActivityManager {
 
         val activeOrFailed = _activities.value.filter { it.status != DownloadActivityStatus.FINISHED }
         val activeIds = activeOrFailed.map { it.id }.toSet()
-        val uniqueFinished = finishedItems.filter { it.id !in activeIds }
+        val uniqueFinished = finishedItems.filter { it.id !in activeIds }.distinctBy { it.id }
 
         // Combined ordered: downloading first, retrying second, paused third, failed fourth, then finished newest first
-        _activities.value = (activeOrFailed + uniqueFinished).sortedWith(
+        _activities.value = (activeOrFailed + uniqueFinished).distinctBy { it.id }.sortedWith(
             compareBy<DownloadActivityItem> {
                 when (it.status) {
                     DownloadActivityStatus.DOWNLOADING -> 0
@@ -743,17 +761,20 @@ object DownloadActivityManager {
     }
 
     fun formatDate(timestampMillis: Long): String {
+        if (timestampMillis <= 0L) return "Recent"
         val now = System.currentTimeMillis()
         val diff = now - timestampMillis
         val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-        val timeStr = timeFormat.format(Date(timestampMillis))
+        val timeStr = runCatching { timeFormat.format(Date(timestampMillis)) }.getOrDefault("")
 
         return when {
-            diff < 24 * 3600 * 1000L -> "Today, $timeStr"
-            diff < 48 * 3600 * 1000L -> "Yesterday, $timeStr"
+            diff in 0..(24 * 3600 * 1000L) -> if (timeStr.isNotBlank()) "Today, $timeStr" else "Today"
+            diff in (24 * 3600 * 1000L)..(48 * 3600 * 1000L) -> if (timeStr.isNotBlank()) "Yesterday, $timeStr" else "Yesterday"
             else -> {
-                val dateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
-                dateFormat.format(Date(timestampMillis))
+                runCatching {
+                    val dateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
+                    dateFormat.format(Date(timestampMillis))
+                }.getOrDefault("Recent")
             }
         }
     }

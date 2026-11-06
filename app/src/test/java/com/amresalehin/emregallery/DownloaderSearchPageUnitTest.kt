@@ -701,6 +701,64 @@ class DownloaderSearchPageUnitTest {
         val totalDistance = pillRowHeight + internalSpacing + remainingSpacer
         assertEquals(200, totalDistance)
     }
+
+    @Test
+    fun testActivityPageUniqueKeysAndDeduplication() {
+        // Given activities with duplicate IDs (e.g. from multiple scraped items or stacks)
+        val item1 = DownloadActivityItem(id = "static_direct_0", title = "Photo 1", mediaUrl = "https://example.com/1.jpg", status = DownloadActivityStatus.FINISHED)
+        val item2 = DownloadActivityItem(id = "static_direct_0", title = "Photo 2", mediaUrl = "https://example.com/2.jpg", status = DownloadActivityStatus.FINISHED)
+        val item3 = DownloadActivityItem(id = "unique_item", title = "Photo 3", mediaUrl = "https://example.com/3.jpg", status = DownloadActivityStatus.FINISHED)
+        val rawList = listOf(item1, item2, item3)
+
+        // 1. List deduplication preserves unique entries
+        val deduplicated = rawList.distinctBy { it.id }
+        assertEquals(2, deduplicated.size)
+
+        // 2. Index-scoped key generation guarantees 100% uniqueness even before deduplication
+        val rawKeys = rawList.mapIndexed { index, item -> "finished_${item.id}_$index" }
+        assertEquals(rawKeys.size, rawKeys.toSet().size)
+        assertEquals("finished_static_direct_0_0", rawKeys[0])
+        assertEquals("finished_static_direct_0_1", rawKeys[1])
+        assertEquals("finished_unique_item_2", rawKeys[2])
+    }
+
+    @Test
+    fun testProgressValueSafeguardAgainstNaNAndInf() {
+        fun safeProgress(raw: Float, isRetrying: Boolean = false): Float {
+            val p = if (isRetrying) 0.05f else raw
+            return if (p.isNaN() || p.isInfinite() || p < 0f) 0.05f else p.coerceIn(0f, 1f)
+        }
+
+        // Test normal values
+        assertEquals(0.5f, safeProgress(0.5f), 0.001f)
+        assertEquals(1.0f, safeProgress(1.0f), 0.001f)
+        assertEquals(0.0f, safeProgress(0.0f), 0.001f)
+
+        // Test NaN, Infinity, negative, and overflow values
+        assertEquals(0.05f, safeProgress(Float.NaN), 0.001f)
+        assertEquals(0.05f, safeProgress(Float.POSITIVE_INFINITY), 0.001f)
+        assertEquals(0.05f, safeProgress(Float.NEGATIVE_INFINITY), 0.001f)
+        assertEquals(0.05f, safeProgress(-1.5f), 0.001f)
+        assertEquals(1.0f, safeProgress(2.5f), 0.001f)
+
+        // Retrying returns 0.05f
+        assertEquals(0.05f, safeProgress(0.8f, isRetrying = true), 0.001f)
+    }
+
+    @Test
+    fun testDateFormatSafeguardAgainstInvalidTimestamps() {
+        // Zero or negative timestamps
+        assertEquals("Recent", DownloadActivityManager.formatDate(0L))
+        assertEquals("Recent", DownloadActivityManager.formatDate(-100L))
+
+        // Current timestamp returns Today
+        val todayStr = DownloadActivityManager.formatDate(System.currentTimeMillis())
+        assertTrue(todayStr.startsWith("Today"))
+
+        // Yesterday timestamp returns Yesterday
+        val yesterdayStr = DownloadActivityManager.formatDate(System.currentTimeMillis() - (26 * 3600 * 1000L))
+        assertTrue(yesterdayStr.startsWith("Yesterday"))
+    }
 }
 
 

@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import java.net.URL
+import java.util.UUID
 
 /**
  * High-speed static HTML / DOM extractor powered by OkHttp and Jsoup.
@@ -42,7 +43,7 @@ class StaticMediaScraper {
             val fileName = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, targetClass.format, 0)
             val thumb = resolvedInfo.thumbnailUrl ?: if (targetClass.category == MediaCategory.IMAGES) downloadUrl else null
             val item = ScrapedMediaItem(
-                id = "static_direct_0",
+                id = "static_direct_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}",
                 url = downloadUrl,
                 title = fileName,
                 isVideo = targetClass.isVideo,
@@ -89,7 +90,7 @@ class StaticMediaScraper {
                 val directClass = MediaClassifier.classify(normalizedUrl, contentType)
                 val fileName = MediaClassifier.deriveFileName(normalizedUrl, directClass.format, 0)
                 val item = ScrapedMediaItem(
-                    id = "static_direct_0",
+                    id = "static_direct_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}",
                     url = normalizedUrl,
                     title = fileName,
                     isVideo = directClass.isVideo,
@@ -203,7 +204,7 @@ class StaticMediaScraper {
             metadataMap["source_url"] = baseUrl
 
             val item = ScrapedMediaItem(
-                id = "static_${itemsMap.size}",
+                id = "static_${System.currentTimeMillis()}_${itemsMap.size}",
                 url = downloadUrl,
                 title = title,
                 isVideo = targetClassification.isVideo,
