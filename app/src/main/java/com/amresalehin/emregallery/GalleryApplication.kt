@@ -10,6 +10,7 @@ import coil.memory.MemoryCache
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.io.File
 
 class GalleryApplication : Application() {
@@ -63,33 +64,31 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
 
-        // Initialize Chaquopy Python SDK and gallery-dl media engine
-        com.amresalehin.emregallery.data.GalleryDlEngine.init(this)
+        // Initialize Chaquopy Python SDK and gallery-dl media engine asynchronously in the background.
+        // Running this off the UI thread eliminates the 2-4s main thread blockage on cold start,
+        // allowing share sheets and activities to launch instantly.
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            com.amresalehin.emregallery.data.GalleryDlEngine.init(this@GalleryApplication)
+        }
 
-        // Initialize DownloadActivityManager to restore persisted downloads and resume retry schedules
-        com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this)
+        // Initialize DownloadActivityManager in background to avoid synchronous disk I/O on UI thread
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this@GalleryApplication)
+        }
 
-        // Pre-warm Chromium WebView engine on cold start so automatic scraping
-        // never stalls waiting for cold browser initialization
+        // Defer chromium cookie initialization so it never stalls cold start
         warmupChromium(this)
     }
 
     companion object {
         fun warmupChromium(context: Context) {
             runCatching {
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     try {
                         val cm = android.webkit.CookieManager.getInstance()
                         cm.setAcceptCookie(true)
-                        val warmupWv = android.webkit.WebView(context)
-                        cm.setAcceptThirdPartyCookies(warmupWv, true)
-                        warmupWv.settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                        }
-                        warmupWv.destroy()
                     } catch (_: Throwable) {}
-                }
+                }, 2000L)
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.ui
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -353,7 +354,8 @@ fun ViewerScreen(
     }
 
     val shareMedia: () -> Unit = {
-        shareMediaItem(context, item)
+        val current = (if (isStoryMode) currentStoryItems else items).getOrNull(pagerState.currentPage) ?: item
+        shareMediaItem(context, current)
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -1233,15 +1235,20 @@ private fun Context.findActivity(): Activity? {
 
 private fun shareMediaItem(context: Context, item: MediaItem) {
     runCatching {
-        context.startActivity(
-            Intent.createChooser(
-                Intent(Intent.ACTION_SEND).apply {
-                    type = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
-                    putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                },
-                "Share media"
-            )
-        )
+        val parsedUri = Uri.parse(item.uri)
+        val mimeType = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, parsedUri)
+            clipData = ClipData.newUri(context.contentResolver, item.name, parsedUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(sendIntent, "Share media").apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (context !is Activity) {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+        context.startActivity(chooser)
     }
 }

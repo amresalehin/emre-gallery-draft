@@ -56,18 +56,23 @@ data class GalleryDlExtractResult(
  */
 object GalleryDlEngine {
     private const val TAG = "GalleryDlEngine"
+    @Volatile
     private var isInitialized = false
+    private val initLock = Any()
 
     fun init(context: Context) {
         if (isInitialized) return
-        try {
-            if (!Python.isStarted()) {
-                Python.start(AndroidPlatform(context.applicationContext))
+        synchronized(initLock) {
+            if (isInitialized) return
+            try {
+                if (!Python.isStarted()) {
+                    Python.start(AndroidPlatform(context.applicationContext))
+                }
+                isInitialized = true
+                Log.d(TAG, "Chaquopy Python SDK and yt-dlp/gallery-dl runtime initialized successfully")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Python runtime initialization deferred or failed: ${t.message}")
             }
-            isInitialized = true
-            Log.d(TAG, "Chaquopy Python SDK and yt-dlp/gallery-dl runtime initialized successfully")
-        } catch (t: Throwable) {
-            Log.w(TAG, "Python runtime initialization deferred or failed: ${t.message}")
         }
     }
 
@@ -305,6 +310,13 @@ object GalleryDlEngine {
         url: String,
         options: GalleryDlOptions
     ): GalleryDlExtractResult = withContext(Dispatchers.IO) {
+        if (!isAvailable()) {
+            var waitCount = 0
+            while (!isAvailable() && waitCount < 10) {
+                kotlinx.coroutines.delay(100L)
+                waitCount++
+            }
+        }
         if (!isAvailable()) {
             return@withContext GalleryDlExtractResult(
                 success = false,

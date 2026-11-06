@@ -1733,30 +1733,55 @@ fun GalleryApp() {
 private fun shareMultipleMediaItems(context: android.content.Context, items: List<MediaItem>) {
     if (items.isEmpty()) return
     runCatching {
+        val activity = context as? android.app.Activity
         if (items.size == 1) {
             val item = items.first()
-            context.startActivity(
-                Intent.createChooser(
-                    Intent(Intent.ACTION_SEND).apply {
-                        type = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
-                        putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uri))
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    },
-                    "Share media"
-                )
-            )
+            val parsedUri = Uri.parse(item.uri)
+            val mimeType = item.mimeType ?: if (item.isVideo) "video/*" else "image/*"
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = mimeType
+                putExtra(Intent.EXTRA_STREAM, parsedUri)
+                clipData = android.content.ClipData.newUri(context.contentResolver, item.name, parsedUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooserIntent = Intent.createChooser(sendIntent, "Share media").apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                if (activity == null) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            context.startActivity(chooserIntent)
         } else {
             val uris = ArrayList(items.map { Uri.parse(it.uri) })
-            context.startActivity(
-                Intent.createChooser(
-                    Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                        type = "*/*"
-                        putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    },
-                    "Share media"
-                )
-            )
+            val allImages = items.all { !it.isVideo }
+            val allVideos = items.all { it.isVideo }
+            val commonMime = items.mapNotNull { it.mimeType }.distinct().singleOrNull()
+            val mimeType = commonMime ?: when {
+                allImages -> "image/*"
+                allVideos -> "video/*"
+                else -> "*/*"
+            }
+            val firstUri = uris.first()
+            val clipData = android.content.ClipData.newUri(context.contentResolver, items.first().name, firstUri)
+            for (i in 1 until uris.size) {
+                clipData.addItem(android.content.ClipData.Item(uris[i]))
+            }
+            val sendIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = mimeType
+                if (mimeType == "*/*") {
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                }
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                this.clipData = clipData
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooserIntent = Intent.createChooser(sendIntent, "Share media").apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                if (activity == null) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            context.startActivity(chooserIntent)
         }
     }
 }
