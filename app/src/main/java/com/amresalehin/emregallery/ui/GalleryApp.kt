@@ -85,9 +85,11 @@ fun GalleryApp() {
     var destination by remember { mutableStateOf(Destination.HOME) }
     var previousDestination by remember { mutableStateOf(Destination.HOME) }
     var albumFilterReturnDestination by remember { mutableStateOf(Destination.ALBUMS) }
-    var media by remember { mutableStateOf<List<MediaItem>>(MediaRepository.cachedMedia ?: emptyList()) }
+    var rawMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var galleryData by remember { mutableStateOf(ProcessedGalleryData()) }
+    var media by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var lockedVaultItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var loading by remember { mutableStateOf(MediaRepository.cachedMedia == null && hasMediaPermission(context)) }
+    var loading by remember { mutableStateOf(hasMediaPermission(context)) }
     var selectedMedia by remember { mutableStateOf<MediaItem?>(null) }
     var viewerMediaList by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var viewerStoryTitle by remember { mutableStateOf<String?>(null) }
@@ -144,7 +146,7 @@ fun GalleryApp() {
         scope.launch {
             if (userInitiated) {
                 isRefreshing = true
-            } else if (media.isEmpty()) {
+            } else if (rawMedia.isEmpty()) {
                 loading = true
             }
             val startTime = System.currentTimeMillis()
@@ -152,16 +154,24 @@ fun GalleryApp() {
                 lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
             }
             if (hasMediaPermission(context)) {
-                val loadedMedia = withContext(Dispatchers.IO) {
-                    runCatching { mediaRepository.loadMedia() }.getOrDefault(emptyList())
-                }
-                media = loadedMedia
-
-                // Start disk-backed preparation after permissions and the MediaStore list are ready.
-                // This worker is independent of composition and never holds the whole library in RAM.
-                withContext(Dispatchers.Default) {
-                    // URI fingerprinting may traverse tens of thousands of rows; keep it off Main.
-                    ThumbnailPrewarmManager.start(context.applicationContext, loadedMedia)
+                runCatching {
+                    mediaRepository.loadMediaProgressive { batch, isComplete ->
+                        val processed = withContext(Dispatchers.Default) {
+                            val eligible = batch.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
+                            processGalleryMedia(eligible, sortOrderPref, groupByPref, isComplete)
+                        }
+                        rawMedia = batch
+                        media = batch
+                        galleryData = processed
+                        if (batch.isNotEmpty()) {
+                            loading = false
+                        }
+                        if (isComplete) {
+                            withContext(Dispatchers.Default) {
+                                ThumbnailPrewarmManager.start(context.applicationContext, batch)
+                            }
+                        }
+                    }
                 }
             }
             if (userInitiated) {
@@ -180,6 +190,15 @@ fun GalleryApp() {
             lockedVaultItems = runCatching { lockedVaultManager.getVaultItems() }.getOrDefault(emptyList())
         }
         if (hasMediaPermission(context)) refreshMedia()
+    }
+    LaunchedEffect(sortOrderPref, groupByPref, hidden, inBin, archive) {
+        if (rawMedia.isNotEmpty()) {
+            val processed = withContext(Dispatchers.Default) {
+                val eligible = rawMedia.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
+                processGalleryMedia(eligible, sortOrderPref, groupByPref, galleryData.isComplete)
+            }
+            galleryData = processed
+        }
     }
     LaunchedEffect(media, hidden, inBin) {
         if (media.isNotEmpty()) {
@@ -811,8 +830,8 @@ fun GalleryApp() {
                     when (baseDestination) {
                     Destination.HOME -> HomeScreen(
                         listState = homeListState,
-                        media = visibleMedia,
-                        loading = loading,
+                        media = if (albumFilter == null) galleryData.sortedMedia else visibleMedia,
+                        loading = loading && galleryData.sortedMedia.isEmpty(),
                         isRefreshing = isRefreshing,
                         onRefresh = { refreshMedia(userInitiated = true) },
                         onPermissionGranted = { refreshMedia() },
@@ -845,8 +864,10 @@ fun GalleryApp() {
                         },
                         selectedUris = homeSelectedUris,
                         onSelectionChange = { homeSelectedUris = it },
+                        precomputedGroups = if (albumFilter == null) galleryData.groups else null,
+                        precomputedStories = if (albumFilter == null) galleryData.stories else null,
                         onOpenMemory = { stories, index -> openMemoriesInViewer(stories, index) },
-                        onOpen = { openMediaInViewer(it, visibleMedia) }
+                        onOpen = { openMediaInViewer(it, if (albumFilter == null) galleryData.sortedMedia else visibleMedia) }
                     )
                     Destination.ALBUMS -> AlbumsScreen(
                         media = media,

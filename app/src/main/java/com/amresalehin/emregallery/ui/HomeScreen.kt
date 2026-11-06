@@ -77,6 +77,8 @@ fun HomeScreen(
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit = { _, _ -> },
     archiveCount: Int = 0,
     onOpenArchive: (() -> Unit)? = null,
+    precomputedGroups: List<DayGroup>? = null,
+    precomputedStories: List<StoryGroup>? = null,
     onOpen: (MediaItem) -> Unit
 ) {
     val context = LocalContext.current
@@ -114,24 +116,16 @@ fun HomeScreen(
         return
     }
 
-    val sortedMedia = remember(media, sortOrder) {
-        when (sortOrder) {
-            "date_asc", "date_taken_asc" -> media.sortedWith(compareBy({ if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }, { it.id }))
-            "date_added_asc" -> media.sortedWith(compareBy({ it.dateAddedSeconds * 1000L }, { it.id }))
-            "date_added_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.dateAddedSeconds * 1000L }.thenBy { it.id })
-            "name_asc" -> media.sortedWith(compareBy({ it.name.lowercase(Locale.getDefault()) }, { it.id }))
-            "name_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.name.lowercase(Locale.getDefault()) }.thenBy { it.id })
-            "size_asc" -> media.sortedWith(compareBy<MediaItem> { it.sizeBytes }.thenBy { it.id })
-            "size_desc" -> media.sortedWith(compareByDescending<MediaItem> { it.sizeBytes }.thenBy { it.id })
-            else -> media.sortedWith(compareByDescending<MediaItem> { if (it.dateTakenMillis > 0) it.dateTakenMillis else it.dateAddedSeconds * 1000L }.thenBy { it.id })
+    val sortedMedia = if (precomputedGroups != null) {
+        media
+    } else {
+        remember(media, sortOrder) {
+            sortMediaItems(media, sortOrder)
         }
     }
 
-    val dayGroups = remember(sortedMedia) {
-        groupMediaByDay(sortedMedia)
-    }
-
-    val groups = remember(sortedMedia, groupBy, dayGroups) {
+    val groups = precomputedGroups ?: remember(sortedMedia, groupBy) {
+        val dayGroups = groupMediaByDay(sortedMedia)
         if (groupBy == "day") {
             dayGroups
         } else {
@@ -407,7 +401,7 @@ fun HomeScreen(
                     item(key = "memories_strip") {
                         MemoriesStrip(
                             media = sortedMedia,
-                            dayGroups = dayGroups,
+                            precomputedStories = precomputedStories,
                             onOpenMemory = onOpenMemory
                         )
                     }

@@ -341,16 +341,20 @@ fun HomeScreenSkeleton(
 fun MemoriesStrip(
     media: List<MediaItem> = emptyList(),
     dayGroups: List<DayGroup>? = null,
+    precomputedStories: List<com.amresalehin.emregallery.data.StoryGroup>? = null,
     onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit
 ) {
-    val today = remember { Calendar.getInstance() }
-    val currentYear = today.get(Calendar.YEAR)
-    val todayMonth = today.get(Calendar.MONTH)
-    val todayDay = today.get(Calendar.DAY_OF_YEAR)
-
-    val stories = remember(dayGroups, if (dayGroups == null) media else null, currentYear, todayMonth, todayDay) {
+    val stories = remember(precomputedStories, dayGroups, if (precomputedStories == null && dayGroups == null) media else null) {
+        if (precomputedStories != null) {
+            return@remember precomputedStories.map { it.title to it.items }
+        }
         val resolvedGroups = dayGroups ?: if (media.isNotEmpty()) groupMediaByDay(media) else emptyList()
         if (resolvedGroups.isEmpty()) return@remember emptyList()
+
+        val today = Calendar.getInstance()
+        val currentYear = today.get(Calendar.YEAR)
+        val todayMonth = today.get(Calendar.MONTH)
+        val todayDay = today.get(Calendar.DAY_OF_YEAR)
 
         val cal = Calendar.getInstance()
         val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
