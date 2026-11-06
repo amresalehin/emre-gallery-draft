@@ -1089,9 +1089,12 @@ object MediaClassifier {
                 }
 
                 val bestThumb = best.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
-                val mergedResolution = group.firstOrNull {
-                    !it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network"
-                }?.resolutionHint ?: best.resolutionHint
+                val mergedResolution = best.resolutionHint
+                    ?.takeIf { it.isNotBlank() && it != "Network" }
+                    ?: group.asSequence()
+                        .filter { !it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network" }
+                        .maxByOrNull { parsePixelArea(it) ?: 0L }
+                        ?.resolutionHint
 
                 val mergedHeaders = mutableMapOf<String, String>()
                 for (cand in group) {
