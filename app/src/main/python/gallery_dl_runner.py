@@ -50,6 +50,57 @@ def get_engine_status():
         "popular_extractors": POPULAR_EXTRACTORS
     })
 
+def is_ytdlp_available():
+    """Returns True if the yt-dlp Python package is imported and operational."""
+    return bool(YTDLP_AVAILABLE)
+
+def is_gallery_dl_available():
+    """Returns True if the gallery-dl Python package is imported and operational."""
+    return bool(GALLERY_DL_AVAILABLE)
+
+def _prepare_cookiefile(cookies_str, url=None):
+    """
+    Converts a cookie string ("key=val; key2=val2") into a temporary Netscape-formatted cookiefile.
+    yt-dlp and gallery-dl require a cookiefile for their internal cookie jars to authenticate sub-requests.
+    """
+    if not cookies_str or not isinstance(cookies_str, str):
+        return None
+    cookies_trimmed = cookies_str.strip()
+    if not cookies_trimmed:
+        return None
+    if os.path.exists(cookies_trimmed):
+        return cookies_trimmed
+
+    try:
+        base_domain = ""
+        if url:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            base_domain = parsed.hostname or ""
+        if not base_domain:
+            base_domain = ".youtube.com"
+        if not base_domain.startswith(".") and "." in base_domain:
+            base_domain = "." + base_domain
+
+        import tempfile
+        tf = tempfile.NamedTemporaryFile(mode="w", suffix="_cookies.txt", delete=False)
+        tf.write("# Netscape HTTP Cookie File\n")
+        
+        parts = cookies_trimmed.split(";")
+        for part in parts:
+            part = part.strip()
+            if not part or "=" not in part:
+                continue
+            k, v = part.split("=", 1)
+            k = k.strip()
+            v = v.strip()
+            if k:
+                tf.write(f"{base_domain}\tTRUE\t/\tTRUE\t2147483647\t{k}\t{v}\n")
+        tf.close()
+        return tf.name
+    except Exception:
+        return None
+
 def check_support(url):
     """
     Checks if a URL is handled by gallery-dl or yt-dlp extractors.
@@ -121,8 +172,17 @@ def extract_gallery_dl(url, options_json="{}"):
     try:
         with _gdl_lock:
             gdl_config.set(("extractor",), "user-agent", user_agent)
-            if cookies:
-                gdl_config.set(("extractor",), "cookies", cookies)
+            cookie_file = _prepare_cookiefile(cookies, clean_url)
+            if cookie_file:
+                try:
+                    gdl_config.set(("extractor",), "cookies", cookie_file)
+                except Exception:
+                    pass
+            elif cookies:
+                try:
+                    gdl_config.set(("extractor",), "cookies", cookies)
+                except Exception:
+                    pass
 
             ext = gdl_extractor.find(clean_url)
             if ext:
@@ -255,6 +315,7 @@ def extract_yt_dlp(url, options_json="{}"):
     seen_urls = set()
 
     try:
+        cookie_file = _prepare_cookiefile(cookies, clean_url)
         http_headers = {"User-Agent": user_agent}
         if cookies:
             http_headers["Cookie"] = cookies
@@ -273,6 +334,9 @@ def extract_yt_dlp(url, options_json="{}"):
                 }
             }
         }
+        if cookie_file:
+            ydl_opts["cookiefile"] = cookie_file
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
             if info:
@@ -476,6 +540,7 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
                 http_headers["Cookie"] = cookies
             http_headers.update(extra_headers)
 
+            cookie_file = _prepare_cookiefile(cookies, media_url)
             ydl_opts = {
                 "outtmpl": target_path,
                 "quiet": True,
@@ -490,6 +555,9 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
                     }
                 }
             }
+            if cookie_file:
+                ydl_opts["cookiefile"] = cookie_file
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([media_url])
 

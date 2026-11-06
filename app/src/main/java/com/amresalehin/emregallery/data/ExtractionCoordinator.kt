@@ -16,15 +16,25 @@ import kotlinx.coroutines.withContext
 import java.net.URL
 
 /**
- * Extraction Coordinator - Intelligent, routing-based media extraction engine.
+ * TargetMediaExpectation represents the expected media type based on URL classification.
+ * Used to govern routing decisions and determine whether an extraction result is actually
+ * sufficient or merely a partial preview (e.g. static OpenGraph poster).
+ */
+enum class TargetMediaExpectation {
+    VIDEO_OR_STREAM,
+    GALLERY_OR_ALBUM,
+    GENERIC_ANY
+}
+
+/**
+ * Extraction Coordinator - Goal-aware, routing-based media extraction engine.
  *
- * Instead of running direct, gallery-dl, yt-dlp, static HTML, and browser in parallel,
- * this coordinator routes the request based on URL classification:
- * 1. Direct Media Files -> Direct Resolver (instant)
- * 2. Video / Stream Platforms (YouTube, TikTok, Vimeo, Twitch, etc.) -> yt-dlp Adapter
- * 3. Gallery / Image Platforms (Reddit, Imgur, Pinterest, ArtStation, etc.) -> gallery-dl Adapter
- * 4. Generic Web Pages -> Static HTML Adapter (Jsoup + OpenGraph + DOM)
- * 5. Dynamic JavaScript Fallback -> BrowserSession headless extraction only if static extraction yielded 0 items
+ * Implements a dependable "is this the actual downloadable media?" decision model:
+ * 1. Categorizes user expectation (VIDEO_OR_STREAM, GALLERY_OR_ALBUM, GENERIC_ANY).
+ * 2. Checks explicit engine availability (isYtDlpAvailable, isGalleryDlAvailable) before invoking Python adapters.
+ * 3. Preserves extractor diagnostic error messages (e.g. bot challenge, login required, throttling) without swallowing them.
+ * 4. Ensures static thumbnails (og:image) never prematurely terminate video or album extraction pipelines.
+ * 5. Falls back to dynamic Chromium browser when specialized or static extractors do not satisfy the expectation.
  */
 typealias ExtractionState = DualMediaExtractor.ExtractionState
 typealias ExtractionPhase = DualMediaExtractor.ExtractionPhase
@@ -51,6 +61,7 @@ class ExtractionCoordinator(private val context: Context) {
 
         val requestContext = MediaRequestContext.create(trimmed)
         val domain = requestContext.domain
+        val expectation = determineExpectation(requestContext.url)
 
         _state.value = ExtractionState(
             isRunning = true,
@@ -63,6 +74,7 @@ class ExtractionCoordinator(private val context: Context) {
         extractionJob = scope.launch {
             val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
             val itemsMutex = Mutex()
+            var lastDiagnosticError: String? = null
 
             suspend fun updateItems(
                 newList: List<ScrapedMediaItem>,
@@ -121,56 +133,87 @@ class ExtractionCoordinator(private val context: Context) {
                     return@launch
                 }
 
-                val lower = requestContext.url.lowercase(java.util.Locale.ROOT)
-
                 // Route 2: Video / Stream Platforms -> yt-dlp
-                val isVideoPlatform = isVideoPlatformUrl(lower)
-                if (isVideoPlatform && GalleryDlEngine.isAvailable()) {
-                    updateStatus("Extracting via media platform adapter...", ExtractionPhase.GALLERY_DL)
-                    val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(requestContext.url).takeIf { it.isNotBlank() }
-                    val ytdlpRes = withContext(Dispatchers.IO) {
-                        runCatching {
-                            GalleryDlEngine.extractYtDlp(requestContext.url, GalleryDlOptions(cookies = cookies))
-                        }.getOrNull()
-                    }
-                    if (ytdlpRes != null && ytdlpRes.success && ytdlpRes.items.isNotEmpty()) {
-                        updateItems(ytdlpRes.items, title = ytdlpRes.pageTitle)
-                        finishSuccess(itemsMap.size)
-                        return@launch
+                if (expectation == TargetMediaExpectation.VIDEO_OR_STREAM) {
+                    if (GalleryDlEngine.isYtDlpAvailable()) {
+                        updateStatus("Extracting via media platform adapter...", ExtractionPhase.GALLERY_DL)
+                        val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(requestContext.url).takeIf { it.isNotBlank() }
+                        val ytdlpRes = withContext(Dispatchers.IO) {
+                            try {
+                                GalleryDlEngine.extractYtDlp(requestContext.url, GalleryDlOptions(cookies = cookies))
+                            } catch (e: Exception) {
+                                GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage ?: "yt-dlp execution error")
+                            }
+                        }
+
+                        if (ytdlpRes.success && ytdlpRes.items.isNotEmpty()) {
+                            updateItems(ytdlpRes.items, title = ytdlpRes.pageTitle)
+                            if (isExtractionSufficient(expectation, itemsMap.values)) {
+                                finishSuccess(itemsMap.size)
+                                return@launch
+                            }
+                        } else if (!ytdlpRes.errorMessage.isNullOrBlank()) {
+                            lastDiagnosticError = ytdlpRes.errorMessage
+                            Log.w("ExtractionCoordinator", "yt-dlp extraction failed: ${ytdlpRes.errorMessage}")
+                            updateStatus("Platform extractor: ${ytdlpRes.errorMessage?.take(50)}. Probing fallback...")
+                        }
+                    } else {
+                        lastDiagnosticError = "yt-dlp adapter is not installed or available in Python runtime"
+                        Log.i("ExtractionCoordinator", "yt-dlp unavailable in Python runtime, skipping to fallback")
                     }
                 }
 
                 // Route 3: Gallery / Image Platforms -> gallery-dl
-                val isGalleryPlatform = GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(requestContext.url).isSupported
-                if (isGalleryPlatform) {
-                    updateStatus("Extracting via gallery platform adapter...", ExtractionPhase.GALLERY_DL)
-                    val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(requestContext.url).takeIf { it.isNotBlank() }
-                    val gdlRes = withContext(Dispatchers.IO) {
-                        runCatching {
-                            GalleryDlEngine.extractGalleryDl(requestContext.url, GalleryDlOptions(cookies = cookies))
-                        }.getOrNull()
-                    }
-                    if (gdlRes != null && gdlRes.success && gdlRes.items.isNotEmpty()) {
-                        updateItems(gdlRes.items, title = gdlRes.pageTitle)
-                        finishSuccess(itemsMap.size)
-                        return@launch
+                if (expectation == TargetMediaExpectation.GALLERY_OR_ALBUM || GalleryDlEngine.checkSupport(requestContext.url).isSupported) {
+                    if (GalleryDlEngine.isGalleryDlAvailable()) {
+                        updateStatus("Extracting via gallery platform adapter...", ExtractionPhase.GALLERY_DL)
+                        val cookies = OkHttpDownloader.sharedCookieJar.getCookieString(requestContext.url).takeIf { it.isNotBlank() }
+                        val gdlRes = withContext(Dispatchers.IO) {
+                            try {
+                                GalleryDlEngine.extractGalleryDl(requestContext.url, GalleryDlOptions(cookies = cookies))
+                            } catch (e: Exception) {
+                                GalleryDlExtractResult(success = false, errorMessage = e.localizedMessage ?: "gallery-dl execution error")
+                            }
+                        }
+
+                        if (gdlRes.success && gdlRes.items.isNotEmpty()) {
+                            updateItems(gdlRes.items, title = gdlRes.pageTitle)
+                            if (isExtractionSufficient(expectation, itemsMap.values)) {
+                                finishSuccess(itemsMap.size)
+                                return@launch
+                            }
+                        } else if (!gdlRes.errorMessage.isNullOrBlank()) {
+                            lastDiagnosticError = gdlRes.errorMessage
+                            Log.w("ExtractionCoordinator", "gallery-dl extraction failed: ${gdlRes.errorMessage}")
+                        }
                     }
                 }
 
-                // Route 4: Generic Webpage -> Static HTML Scraper
-                updateStatus("Parsing webpage HTML & DOM...", ExtractionPhase.STATIC_SCRAPING)
+                // Route 4: Webpage HTML Scraper
+                updateStatus("Parsing webpage HTML & metadata...", ExtractionPhase.STATIC_SCRAPING)
                 val scraper = StaticMediaScraper()
                 val staticRes = withContext(Dispatchers.IO) {
-                    runCatching { scraper.scrape(requestContext.url) }.getOrNull()
+                    try {
+                        scraper.scrape(requestContext.url)
+                    } catch (e: Exception) {
+                        null
+                    }
                 }
 
                 if (staticRes != null && staticRes.items.isNotEmpty()) {
                     updateItems(staticRes.items, title = staticRes.pageTitle)
-                    finishSuccess(itemsMap.size)
-                    return@launch
+                    // Core validation gate: only finish if the discovered items actually satisfy expectation!
+                    if (isExtractionSufficient(expectation, itemsMap.values)) {
+                        finishSuccess(itemsMap.size)
+                        return@launch
+                    } else {
+                        // For video platforms, static scraper only discovered thumbnails/OpenGraph art
+                        Log.i("ExtractionCoordinator", "Static scraping found preview thumbnails, but video stream is unresolved. Continuing to browser...")
+                        updateStatus("Preview image discovered. Probing dynamic playback for video stream...", ExtractionPhase.BROWSER_INTERCEPTING)
+                    }
                 }
 
-                // Route 5: Dynamic JavaScript Fallback (only when static extraction found 0 items)
+                // Route 5: Dynamic JavaScript Browser Fallback
                 updateStatus("Probing dynamic page content...", ExtractionPhase.BROWSER_INTERCEPTING)
                 val browserRes = BrowserSession.extractHeadless(
                     context = context,
@@ -181,9 +224,29 @@ class ExtractionCoordinator(private val context: Context) {
 
                 if (browserRes.items.isNotEmpty()) {
                     updateItems(browserRes.items, title = browserRes.pageTitle)
+                }
+
+                // Final Goal Evaluation
+                if (isExtractionSufficient(expectation, itemsMap.values)) {
                     finishSuccess(itemsMap.size)
                 } else {
-                    val finalReason = browserRes.errorMessage ?: staticRes?.errorMessage ?: "No media discovered on this page."
+                    // Extraction failed to satisfy the media expectation.
+                    // Preserve and surface the true root diagnostic so user can take action.
+                    val diagnostic = lastDiagnosticError ?: browserRes.errorMessage ?: staticRes?.errorMessage
+                    val finalReason = when {
+                        diagnostic != null && (diagnostic.contains("bot", true) || diagnostic.contains("sign in", true) ||
+                                diagnostic.contains("challenge", true) || diagnostic.contains("waf", true) ||
+                                diagnostic.contains("429", true) || diagnostic.contains("captcha", true)) -> {
+                            "Verification Required: $diagnostic"
+                        }
+                        expectation == TargetMediaExpectation.VIDEO_OR_STREAM && itemsMap.isNotEmpty() -> {
+                            val detail = diagnostic ?: "Video stream is dynamically protected or requires login."
+                            "Only preview images found. $detail Tap 'Open in Live Browser' to play and capture."
+                        }
+                        diagnostic != null -> diagnostic
+                        else -> "No media discovered on this page."
+                    }
+
                     _state.value = _state.value.copy(
                         isRunning = false,
                         phase = ExtractionPhase.ERROR,
@@ -199,11 +262,12 @@ class ExtractionCoordinator(private val context: Context) {
                 )
             } catch (e: Exception) {
                 Log.e("ExtractionCoordinator", "Routing error", e)
+                val err = e.localizedMessage ?: "Extraction failed"
                 _state.value = _state.value.copy(
                     isRunning = false,
                     phase = ExtractionPhase.ERROR,
-                    statusMessage = "Extraction failed: ${e.localizedMessage}",
-                    errorMessage = e.localizedMessage
+                    statusMessage = "Extraction failed: $err",
+                    errorMessage = err
                 )
             }
         }
@@ -217,21 +281,67 @@ class ExtractionCoordinator(private val context: Context) {
         )
     }
 
-    private fun isDirectMediaUrl(url: String): Boolean {
-        if (!MediaClassifier.isValidMedia(url)) return false
-        val classification = MediaClassifier.classify(url)
-        return classification.isVideo || classification.isAudio || classification.isStream ||
-                url.endsWith(".jpg", true) || url.endsWith(".jpeg", true) ||
-                url.endsWith(".png", true) || url.endsWith(".webp", true) ||
-                url.endsWith(".gif", true) || url.endsWith(".svg", true)
-    }
+    companion object {
+        fun isDirectMediaUrl(url: String): Boolean {
+            if (!MediaClassifier.isValidMedia(url)) return false
+            val classification = MediaClassifier.classify(url)
+            return classification.isVideo || classification.isAudio || classification.isStream ||
+                    url.endsWith(".jpg", true) || url.endsWith(".jpeg", true) ||
+                    url.endsWith(".png", true) || url.endsWith(".webp", true) ||
+                    url.endsWith(".gif", true) || url.endsWith(".svg", true)
+        }
 
-    private fun isVideoPlatformUrl(lower: String): Boolean {
-        val videoHosts = listOf(
-            "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
-            "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com"
-        )
-        return videoHosts.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd")
+        fun determineExpectation(url: String): TargetMediaExpectation {
+            val lower = url.lowercase(java.util.Locale.ROOT)
+            if (isVideoPlatformUrl(lower) || lower.contains(".m3u8") || lower.contains(".mpd") || lower.contains("/videoplayback")) {
+                return TargetMediaExpectation.VIDEO_OR_STREAM
+            }
+            if (isGalleryPlatformUrl(lower)) {
+                return TargetMediaExpectation.GALLERY_OR_ALBUM
+            }
+            return TargetMediaExpectation.GENERIC_ANY
+        }
+
+        /**
+         * Determines whether the discovered media items satisfy the extraction goal.
+         * Prevents partial thumbnail/poster previews from being declared as success
+         * for video streams or album platforms.
+         */
+        fun isExtractionSufficient(
+            expectation: TargetMediaExpectation,
+            items: Collection<ScrapedMediaItem>
+        ): Boolean {
+            if (items.isEmpty()) return false
+            return when (expectation) {
+                TargetMediaExpectation.VIDEO_OR_STREAM -> {
+                    // Must have at least one playable video, stream, or audio item
+                    items.any { it.isVideo || it.isStream || it.isAudio }
+                }
+                TargetMediaExpectation.GALLERY_OR_ALBUM -> {
+                    items.isNotEmpty()
+                }
+                TargetMediaExpectation.GENERIC_ANY -> {
+                    items.isNotEmpty()
+                }
+            }
+        }
+
+        fun isVideoPlatformUrl(lower: String): Boolean {
+            val videoHosts = listOf(
+                "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
+                "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com/reel"
+            )
+            return videoHosts.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd")
+        }
+
+        fun isGalleryPlatformUrl(lower: String): Boolean {
+            val galleryHosts = listOf(
+                "reddit.com", "redd.it", "imgur.com", "pinterest.com", "pin.it",
+                "artstation.com", "deviantart.com", "flickr.com", "instagram.com/p/",
+                "instagram.com/tv/"
+            )
+            return galleryHosts.any { lower.contains(it) }
+        }
     }
 
     @Synchronized

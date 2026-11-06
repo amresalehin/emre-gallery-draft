@@ -534,6 +534,67 @@ class MediaDeduplicationPureUnitTest {
         assertNotNull(mergedVideo.thumbnailUrl)
         assertTrue(mergedVideo.thumbnailUrl!!.contains("e6nigwabc4s"))
     }
+
+    @Test
+    fun testTargetMediaExpectationAndSufficiencyCriteria() {
+        val posterOnly = listOf(
+            ScrapedMediaItem(
+                id = "thumb_1",
+                url = "https://i.ytimg.com/vi/abc123xyz/hqdefault.jpg",
+                title = "Thumbnail",
+                isVideo = false,
+                isAudio = false,
+                isStream = false,
+                category = MediaCategory.IMAGES
+            )
+        )
+
+        val videoFound = listOf(
+            ScrapedMediaItem(
+                id = "vid_1",
+                url = "https://rr---sn.googlevideo.com/videoplayback?id=123",
+                title = "Video.mp4",
+                isVideo = true,
+                isAudio = false,
+                isStream = false,
+                category = MediaCategory.VIDEOS
+            )
+        )
+
+        // 1. URL Expectation Classification
+        val ytExpectation = com.amresalehin.emregallery.data.ExtractionCoordinator.determineExpectation("https://www.youtube.com/shorts/E6nigwAbc4s")
+        assertEquals(com.amresalehin.emregallery.data.TargetMediaExpectation.VIDEO_OR_STREAM, ytExpectation)
+
+        val redditExpectation = com.amresalehin.emregallery.data.ExtractionCoordinator.determineExpectation("https://www.reddit.com/r/pics/comments/123/art")
+        assertEquals(com.amresalehin.emregallery.data.TargetMediaExpectation.GALLERY_OR_ALBUM, redditExpectation)
+
+        val genericExpectation = com.amresalehin.emregallery.data.ExtractionCoordinator.determineExpectation("https://example.com/blog/article")
+        assertEquals(com.amresalehin.emregallery.data.TargetMediaExpectation.GENERIC_ANY, genericExpectation)
+
+        // 2. For VIDEO_OR_STREAM: a static thumbnail alone MUST NOT be treated as sufficient success
+        assertFalse(
+            com.amresalehin.emregallery.data.ExtractionCoordinator.isExtractionSufficient(
+                com.amresalehin.emregallery.data.TargetMediaExpectation.VIDEO_OR_STREAM,
+                posterOnly
+            )
+        )
+
+        // 3. For VIDEO_OR_STREAM: a real playable video stream is sufficient success
+        assertTrue(
+            com.amresalehin.emregallery.data.ExtractionCoordinator.isExtractionSufficient(
+                com.amresalehin.emregallery.data.TargetMediaExpectation.VIDEO_OR_STREAM,
+                videoFound
+            )
+        )
+
+        // 4. For GENERIC_ANY: images or any media are sufficient
+        assertTrue(
+            com.amresalehin.emregallery.data.ExtractionCoordinator.isExtractionSufficient(
+                com.amresalehin.emregallery.data.TargetMediaExpectation.GENERIC_ANY,
+                posterOnly
+            )
+        )
+    }
 }
 
 

@@ -72,12 +72,40 @@ object GalleryDlEngine {
         }
     }
 
-    fun isAvailable(): Boolean {
+    fun isPythonStarted(): Boolean {
         return try {
             Python.isStarted()
         } catch (_: Throwable) {
             false
         }
+    }
+
+    fun isYtDlpAvailable(): Boolean {
+        if (!isPythonStarted()) return false
+        return try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            runner.callAttr("is_ytdlp_available").toBoolean()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed checking yt-dlp availability", e)
+            false
+        }
+    }
+
+    fun isGalleryDlAvailable(): Boolean {
+        if (!isPythonStarted()) return false
+        return try {
+            val py = Python.getInstance()
+            val runner = py.getModule("gallery_dl_runner")
+            runner.callAttr("is_gallery_dl_available").toBoolean()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed checking gallery-dl availability", e)
+            false
+        }
+    }
+
+    fun isAvailable(): Boolean {
+        return isPythonStarted() && (isYtDlpAvailable() || isGalleryDlAvailable())
     }
 
     /**
