@@ -106,9 +106,25 @@ fun AlbumsScreen(
     val normalMedia = remember(media, hidden, inBin, archive) {
         media.filter { it.uri !in hidden && it.uri !in inBin && it.uri !in archive }
     }
-    val folders = remember(normalMedia) {
-        normalMedia.groupBy { it.relativePath.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" } }
-            .entries.sortedByDescending { it.value.size }
+    var folders by remember(normalMedia) {
+        mutableStateOf(
+            if (normalMedia.size <= 250) {
+                normalMedia.groupBy { it.relativePath.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" } }
+                    .entries.sortedByDescending { it.value.size }
+            } else {
+                normalMedia.take(250).groupBy { it.relativePath.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" } }
+                    .entries.sortedByDescending { it.value.size }
+            }
+        )
+    }
+    LaunchedEffect(normalMedia) {
+        if (normalMedia.size > 250) {
+            val fullFolders = withContext(Dispatchers.Default) {
+                normalMedia.groupBy { it.relativePath.substringBeforeLast('/', "Internal storage").ifBlank { "Internal storage" } }
+                    .entries.sortedByDescending { it.value.size }
+            }
+            folders = fullFolders
+        }
     }
 
     val favouritesCount = favourites.size
@@ -720,25 +736,45 @@ fun AlbumsScreen(
                         .fillMaxWidth()
                         .height(180.dp)
                 ) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { ctx ->
-                            Configuration.getInstance().userAgentValue = ctx.packageName
-                            MapView(ctx).apply {
-                                setTileSource(TileSourceFactory.MAPNIK)
-                                setMultiTouchControls(false)
-                                setBuiltInZoomControls(false)
-                                controller.setZoom(4.5)
-                                controller.setCenter(GeoPoint(22.5, 79.0))
-                                isClickable = false
-                                isFocusable = false
+                    var mapPreviewReady by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) {
+                        kotlinx.coroutines.delay(160)
+                        mapPreviewReady = true
+                    }
+                    if (mapPreviewReady) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                Configuration.getInstance().userAgentValue = ctx.packageName
+                                MapView(ctx).apply {
+                                    setTileSource(TileSourceFactory.MAPNIK)
+                                    setMultiTouchControls(false)
+                                    setBuiltInZoomControls(false)
+                                    controller.setZoom(4.5)
+                                    controller.setCenter(GeoPoint(22.5, 79.0))
+                                    isClickable = false
+                                    isFocusable = false
+                                }
+                            },
+                            update = { preview ->
+                                preview.setOnTouchListener { _, _ -> false }
+                                preview.invalidate()
                             }
-                        },
-                        update = { preview ->
-                            preview.setOnTouchListener { _, _ -> false }
-                            preview.invalidate()
-                        }
-                    )
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                    )
+                                )
+                        )
+                    }
                     Box(
                         Modifier
                             .fillMaxSize()

@@ -752,115 +752,55 @@ fun GalleryApp() {
             val returnDestination = if (destination == Destination.VIEWER) previousDestination else destination
 
             CompositionLocalProvider(LocalViewerCoordinatedProgress provides { if (destination == Destination.VIEWER) viewerTransitionProgress.value else 0f }) {
-                AnimatedContent(
-                    targetState = baseDestination,
-                transitionSpec = {
-                    val mainPages = listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
-                    val initialIndex = mainPages.indexOf(initialState)
-                    val targetIndex = mainPages.indexOf(targetState)
-                    val isOpeningAlbumDetail = targetState == Destination.HOME && albumFilter != null
-                    val isExitingAlbumDetail = initialState == Destination.HOME && albumFilter != null && isNavigatingBack
-
-                    if (isOpeningAlbumDetail) {
-                        // Forward push when drilling down into an album
-                        (slideInHorizontally(
-                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> width }
-                        ) + fadeIn(animationSpec = tween(200)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    animationSpec = tween(240, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> -(width * 0.20f).toInt() }
-                                ) + fadeOut(animationSpec = tween(160))
-                            )
-                    } else if (isExitingAlbumDetail || isNavigatingBack) {
-                        // Pop backwards when returning
-                        (slideInHorizontally(
-                            animationSpec = tween(220, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> -(width * 0.20f).toInt() }
-                        ) + fadeIn(animationSpec = tween(180)) + scaleIn(initialScale = 0.96f, animationSpec = tween(220, easing = FastOutSlowInEasing)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    animationSpec = tween(220, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> width }
-                                ) + fadeOut(animationSpec = tween(160))
-                            )
-                    } else if (initialIndex >= 0 && targetIndex >= 0 && albumFilter == null) {
-                        // Crisp Material 3 lateral glide between bottom-nav primary tabs (Home, Albums, Settings)
-                        val direction = if (targetIndex > initialIndex) 1 else -1
-                        (slideInHorizontally(
-                            animationSpec = tween(200, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> (width * 0.14f * direction).toInt() }
-                        ) + fadeIn(animationSpec = tween(180)) + scaleIn(initialScale = 0.98f, animationSpec = tween(200, easing = FastOutSlowInEasing)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    animationSpec = tween(180, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> -(width * 0.10f * direction).toInt() }
-                                ) + fadeOut(animationSpec = tween(140))
-                            )
-                    } else {
-                        // Forward navigation to a subscreen:
-                        (slideInHorizontally(
-                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                            initialOffsetX = { width -> width }
-                        ) + fadeIn(animationSpec = tween(200)))
-                            .togetherWith(
-                                slideOutHorizontally(
-                                    animationSpec = tween(240, easing = FastOutSlowInEasing),
-                                    targetOffsetX = { width -> -(width * 0.20f).toInt() }
-                                ) + fadeOut(animationSpec = tween(160)) + scaleOut(targetScale = 0.96f, animationSpec = tween(240, easing = FastOutSlowInEasing))
-                            )
-                    }
-                },
-                label = "destination_screen_transition",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        if (isPredictiveBackActive && predictiveBackProgress > 0f) {
-                            val p = predictiveBackProgress
-                            val scale = 1f - (p * 0.12f)
-                            scaleX = scale
-                            scaleY = scale
-                            val maxShift = 48.dp.toPx()
-                            translationX = if (predictiveBackEdge == BackEventCompat.EDGE_LEFT) {
-                                p * maxShift
-                            } else {
-                                -p * maxShift
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            if (isPredictiveBackActive && predictiveBackProgress > 0f) {
+                                val p = predictiveBackProgress
+                                val scale = 1f - (p * 0.12f)
+                                scaleX = scale
+                                scaleY = scale
+                                val maxShift = 48.dp.toPx()
+                                translationX = if (predictiveBackEdge == BackEventCompat.EDGE_LEFT) {
+                                    p * maxShift
+                                } else {
+                                    -p * maxShift
+                                }
+                                shape = RoundedCornerShape((p * 28).dp)
+                                clip = true
+                                shadowElevation = (p * 20).dp.toPx()
                             }
-                            shape = RoundedCornerShape((p * 28).dp)
-                            clip = true
-                            shadowElevation = (p * 20).dp.toPx()
                         }
-                    }
-                    .pointerInput(destination, showSidePanel, albumFilter) {
-                        // Inward swipe from left edge to open side panel on main screens without conflicting with list scrolling
-                        if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) {
-                            val edgeWidth = 32.dp.toPx()
-                            val slop = viewConfiguration.touchSlop * 1.5f
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                if (down.position.x <= edgeWidth) {
-                                    var totalDragX = 0f
-                                    var totalDragY = 0f
-                                    do {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull { it.id == down.id }
-                                        if (change != null) {
-                                            totalDragX += change.position.x - change.previousPosition.x
-                                            totalDragY += change.position.y - change.previousPosition.y
-                                            if (totalDragX > slop && kotlin.math.abs(totalDragX) > kotlin.math.abs(totalDragY) * 1.5f) {
-                                                showSidePanel = true
-                                                change.consume()
-                                                break
+                        .pointerInput(destination, showSidePanel, albumFilter) {
+                            // Inward swipe from left edge to open side panel on main screens without conflicting with list scrolling
+                            if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) {
+                                val edgeWidth = 32.dp.toPx()
+                                val slop = viewConfiguration.touchSlop * 1.5f
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    if (down.position.x <= edgeWidth) {
+                                        var totalDragX = 0f
+                                        var totalDragY = 0f
+                                        do {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == down.id }
+                                            if (change != null) {
+                                                totalDragX += change.position.x - change.previousPosition.x
+                                                totalDragY += change.position.y - change.previousPosition.y
+                                                if (totalDragX > slop && kotlin.math.abs(totalDragX) > kotlin.math.abs(totalDragY) * 1.5f) {
+                                                    showSidePanel = true
+                                                    change.consume()
+                                                    break
+                                                }
                                             }
-                                        }
-                                    } while (event.changes.any { it.pressed })
+                                        } while (event.changes.any { it.pressed })
+                                    }
                                 }
                             }
                         }
-                    }
-            ) { currentDestination ->
-                when (currentDestination) {
+                ) {
+                    when (baseDestination) {
                     Destination.HOME -> HomeScreen(
                         listState = homeListState,
                         media = visibleMedia,

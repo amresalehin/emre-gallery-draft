@@ -6,6 +6,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -155,22 +156,22 @@ fun FloatingNavigationBar(
                 val isPressed by interactionSource.collectIsPressedAsState()
                 val pillWidth by animateDpAsState(
                     targetValue = if (selected) 58.dp else 40.dp,
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                    animationSpec = snap(),
                     label = "nav_pill_width"
                 )
                 val pillColor by animateColorAsState(
                     targetValue = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                    animationSpec = tween(180),
+                    animationSpec = snap(),
                     label = "nav_pill_color"
                 )
                 val iconTint by animateColorAsState(
                     targetValue = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                    animationSpec = tween(180),
+                    animationSpec = snap(),
                     label = "nav_icon_tint"
                 )
                 val scale by animateFloatAsState(
-                    targetValue = if (isPressed) 0.92f else 1.0f,
-                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+                    targetValue = if (isPressed) 0.94f else 1.0f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh),
                     label = "nav_item_press"
                 )
 
