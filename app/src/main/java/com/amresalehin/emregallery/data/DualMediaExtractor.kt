@@ -19,10 +19,16 @@ import java.net.URL
 
 data class MediaRequestContext(
     val url: String,
-    val domain: String
+    val domain: String,
+    val originalUrl: String = url,
+    val contentTypeHint: String? = null
 ) {
     companion object {
-        fun create(targetUrl: String): MediaRequestContext {
+        fun create(
+            targetUrl: String,
+            originalUrl: String = targetUrl,
+            contentTypeHint: String? = null
+        ): MediaRequestContext {
             val trimmed = targetUrl.trim()
             val normalized = if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
                 "https://$trimmed"
@@ -30,7 +36,12 @@ data class MediaRequestContext(
                 trimmed
             }
             val domain = runCatching { URL(normalized).host }.getOrDefault("")
-            return MediaRequestContext(url = normalized, domain = domain)
+            return MediaRequestContext(
+                url = normalized,
+                domain = domain,
+                originalUrl = originalUrl,
+                contentTypeHint = contentTypeHint
+            )
         }
     }
 }
@@ -52,9 +63,14 @@ interface ExtractionProvider {
 
 class DirectMediaProvider : ExtractionProvider {
     override fun isApplicable(context: MediaRequestContext): Boolean {
-        if (!MediaClassifier.isValidMedia(context.url)) return false
-        val classification = MediaClassifier.classify(context.url)
+        val mimeType = context.contentTypeHint.orEmpty()
+        val contentTypeIsMedia = mimeType.startsWith("image/") ||
+                mimeType.startsWith("video/") || mimeType.startsWith("audio/") ||
+                mimeType.contains("mpegurl") || mimeType.contains("dash+xml")
+        if (!MediaClassifier.isValidMedia(context.url) && !contentTypeIsMedia) return false
+        val classification = MediaClassifier.classify(context.url, mimeType)
         return classification.isVideo || classification.isAudio || classification.isStream ||
+                contentTypeIsMedia ||
                 context.url.endsWith(".jpg", true) || context.url.endsWith(".jpeg", true) ||
                 context.url.endsWith(".png", true) || context.url.endsWith(".webp", true) ||
                 context.url.endsWith(".gif", true) || context.url.endsWith(".svg", true)
@@ -67,7 +83,7 @@ class DirectMediaProvider : ExtractionProvider {
     ): MediaExtractionResult {
         val resolvedInfo = MediaClassifier.resolveOriginalMedia(context.url)
         val downloadUrl = resolvedInfo.mediaUrl
-        val classification = MediaClassifier.classify(downloadUrl)
+        val classification = MediaClassifier.classify(downloadUrl, context.contentTypeHint)
         val fileName = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, classification.format, 0)
         val thumb = resolvedInfo.thumbnailUrl ?: if (classification.category == MediaCategory.IMAGES) downloadUrl else null
         val item = ScrapedMediaItem(
@@ -84,12 +100,16 @@ class DirectMediaProvider : ExtractionProvider {
             source = "Direct Link",
             provenance = MediaProvenance(
                 extractorEngine = "Direct URL",
-                pageUrl = context.url
+                pageUrl = context.originalUrl
             ),
-            metadata = mapOf("source_url" to context.url),
+            metadata = mapOf(
+                "source_url" to context.originalUrl,
+                "mime_hint" to context.contentTypeHint.orEmpty(),
+                "resolved_response_media" to "true"
+            ),
             downloadHeaders = mapOf(
                 "User-Agent" to OkHttpDownloader.DEFAULT_USER_AGENT,
-                "Referer" to context.url
+                "Referer" to context.originalUrl
             )
         )
         onItemDiscovered(item)
@@ -253,7 +273,12 @@ class DualMediaExtractor(private val context: Context) {
         cancel()
 
         val trimmed = targetUrl.trim()
-        if (!MediaClassifier.isValidWebUrl(trimmed)) {
+        val submittedUrl = if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) {
+            trimmed
+        } else {
+            "https://$trimmed"
+        }
+        if (!MediaClassifier.isValidWebUrl(submittedUrl)) {
             _state.value = ExtractionState(
                 errorMessage = "Please enter a valid URL (e.g. https://example.com)",
                 isRunning = false,
@@ -262,18 +287,29 @@ class DualMediaExtractor(private val context: Context) {
             return
         }
 
-        val requestContext = MediaRequestContext.create(trimmed)
-        val domain = requestContext.domain
+        val initialDomain = MediaClassifier.cleanDomainFromUrl(submittedUrl)
 
         _state.value = ExtractionState(
             isRunning = true,
             statusMessage = "Starting extraction engine...",
             phase = ExtractionPhase.DIRECT_MEDIA,
-            domain = domain,
+            domain = initialDomain,
             items = emptyList()
         )
 
         extractionJob = scope.launch {
+            val resolution = OkHttpDownloader.resolveFinalUrl(submittedUrl)
+            val resolvedUrl = resolution.finalUrl.takeIf { MediaClassifier.isValidWebUrl(it) } ?: submittedUrl
+            val requestContext = MediaRequestContext.create(
+                targetUrl = resolvedUrl,
+                originalUrl = submittedUrl,
+                contentTypeHint = resolution.contentType
+            )
+            val domain = requestContext.domain
+            _state.value = _state.value.copy(
+                domain = domain,
+                statusMessage = if (resolvedUrl != submittedUrl) "Resolved shared link; checking final URL..." else "Starting extraction engine..."
+            )
             val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
             val itemsMutex = Mutex()
 

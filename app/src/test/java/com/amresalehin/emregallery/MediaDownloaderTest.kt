@@ -5,10 +5,14 @@ import android.os.Environment
 import androidx.test.core.app.ApplicationProvider
 import com.amresalehin.emregallery.data.ContentAwareMediaFilter
 import com.amresalehin.emregallery.data.DualMediaExtractor
+import com.amresalehin.emregallery.data.DirectMediaProvider
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
+import com.amresalehin.emregallery.data.MediaCandidatePipeline
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxStack
+import com.amresalehin.emregallery.data.MediaProviderRouting
+import com.amresalehin.emregallery.data.MediaRequestContext
 import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
@@ -541,6 +545,45 @@ class MediaDownloaderTest {
             assertFalse(result.isSuccessful)
             assertNull(result.file)
             assertTrue(result.errorMessage?.contains("webpage") == true || result.errorMessage?.contains("HTML") == true)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun sharedLinkRedirectIsResolvedBeforeProviderRouting() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/watch?v=abcdefghijk"))
+        server.enqueue(MockResponse().setResponseCode(200).addHeader("Content-Type", "text/html; charset=utf-8").setBody("<html></html>"))
+        server.start()
+        try {
+            val sourceUrl = server.url("/share").toString()
+            val resolution = OkHttpDownloader.resolveFinalUrl(sourceUrl)
+            assertTrue(resolution.finalUrl.endsWith("/watch?v=abcdefghijk"))
+            val context = MediaRequestContext.create(resolution.finalUrl, sourceUrl, resolution.contentType)
+            assertTrue(MediaProviderRouting.isYtDlpUrl(context.url))
+            assertEquals("text/html", context.contentTypeHint)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun redirectedOpaqueMediaUsesResponseMimeForDirectMediaRouting() = runBlocking {
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/asset?id=42"))
+        server.enqueue(MockResponse().setResponseCode(206).addHeader("Content-Type", "video/mp4").setBody("x"))
+        server.start()
+        try {
+            val sourceUrl = server.url("/share").toString()
+            val resolution = OkHttpDownloader.resolveFinalUrl(sourceUrl)
+            val context = MediaRequestContext.create(resolution.finalUrl, sourceUrl, resolution.contentType)
+            assertTrue(DirectMediaProvider().isApplicable(context))
+            assertEquals("video/mp4", context.contentTypeHint)
+            var candidate: ScrapedMediaItem? = null
+            DirectMediaProvider().extract(context, { candidate = it }, {})
+            assertNotNull(candidate)
+            assertTrue(MediaCandidatePipeline.isUsefulCandidate(candidate!!))
         } finally {
             server.shutdown()
         }
@@ -1709,6 +1752,4 @@ class MediaDownloaderTest {
         newFile.delete()
     }
 }
-
-
 

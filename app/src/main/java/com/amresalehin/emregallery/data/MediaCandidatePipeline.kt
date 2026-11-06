@@ -24,8 +24,13 @@ object MediaCandidatePipeline {
                 (explicitMime?.startsWith("image/", ignoreCase = true) == true) ||
                 (item.mimeType.startsWith("image/", ignoreCase = true) &&
                         !item.mimeType.equals("image/jpeg", ignoreCase = true))
+        val confirmedResponseMime = explicitMime.orEmpty().lowercase(Locale.ROOT)
+        val verifiedDirectMediaResponse = item.metadata["resolved_response_media"] == "true" &&
+                (confirmedResponseMime.startsWith("image/") || confirmedResponseMime.startsWith("video/") ||
+                        confirmedResponseMime.startsWith("audio/") || confirmedResponseMime.contains("mpegurl") ||
+                        confirmedResponseMime.contains("dash+xml"))
         if (!MediaClassifier.isValidMedia(url) &&
-            (!hasMediaTypeEvidence || !isSafeOpaqueMediaUrl(url))
+            (!hasMediaTypeEvidence || (!isSafeOpaqueMediaUrl(url) && !verifiedDirectMediaResponse))
         ) return false
 
         val isNonVisualMedia = item.isVideo || item.isAudio || item.isStream

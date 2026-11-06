@@ -6,6 +6,7 @@ import android.os.Environment
 import android.util.Log
 import android.webkit.CookieManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import okhttp3.Cookie
 import okhttp3.CookieJar
@@ -172,6 +173,15 @@ object OkHttpDownloader {
         val errorMessage: String? = null
     )
 
+    data class UrlResolution(
+        val originalUrl: String,
+        val finalUrl: String,
+        val contentType: String = "",
+        val contentDisposition: String? = null,
+        val statusCode: Int = -1,
+        val errorMessage: String? = null
+    )
+
     data class DownloadResult(
         val file: File?,
         val isSuccessful: Boolean,
@@ -203,6 +213,29 @@ object OkHttpDownloader {
             } else null
         } catch (_: Exception) {
             null
+        }
+    }
+
+    /** Follows redirects before provider routing without reading a media response body. */
+    suspend fun resolveFinalUrl(url: String): UrlResolution = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(url)
+            .header("Range", "bytes=0-0")
+            .get()
+            .build()
+        try {
+            client.newCall(request).execute().use { response ->
+                UrlResolution(
+                    originalUrl = url,
+                    finalUrl = response.request.url.toString(),
+                    contentType = response.header("Content-Type")?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT).orEmpty(),
+                    contentDisposition = response.header("Content-Disposition"),
+                    statusCode = response.code
+                )
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            UrlResolution(url, url, errorMessage = e.message ?: "URL resolution failed")
         }
     }
 
