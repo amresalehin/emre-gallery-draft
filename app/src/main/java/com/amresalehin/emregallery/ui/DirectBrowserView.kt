@@ -595,48 +595,41 @@ fun DirectBrowserView(
                                     return handleExternalNavigation(view, url)
                                 }
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    if (url.isNullOrBlank() || url == "about:blank") {
+                                        isLoading = false
+                                        canGoBack = false
+                                        canGoForward = false
+                                        return
+                                    }
                                     isLoading = true
                                     BotDetectionMitigator.injectStealth(view)
-                                    url?.let {
-                                        if (it == "about:blank" || it.isBlank()) {
-                                            currentUrl = ""
-                                            addressInput = ""
-                                            pageTitle = ""
-                                            onUrlChange?.invoke("")
-                                        } else {
-                                            currentUrl = it
-                                            addressInput = it
-                                            onUrlChange?.invoke(it)
-                                            tabSession.updateNavigation(it, pageTitle)
-                                        }
-                                    }
+                                    currentUrl = url
+                                    addressInput = url
+                                    onUrlChange?.invoke(url)
+                                    tabSession.updateNavigation(url, pageTitle)
                                     canGoBack = view?.canGoBack() == true
                                     canGoForward = view?.canGoForward() == true
                                 }
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     isLoading = false
+                                    if (url.isNullOrBlank() || url == "about:blank") {
+                                        canGoBack = false
+                                        canGoForward = false
+                                        return
+                                    }
                                     BotDetectionMitigator.injectStealth(view)
                                     BotDetectionMitigator.syncCookiesFromWebView(url)
-                                    url?.let {
-                                        if (it == "about:blank" || it.isBlank()) {
-                                            currentUrl = ""
-                                            addressInput = ""
-                                            pageTitle = ""
-                                            onUrlChange?.invoke("")
-                                        } else {
-                                            currentUrl = it
-                                            addressInput = it
-                                            onUrlChange?.invoke(it)
-                                            tabSession.updateNavigation(it, view?.title)
-                                            coroutineScope.launch {
-                                                historyManager.recordVisit(it, view?.title)
-                                            }
-                                            // Setup live MutationObserver and scan page DOM
-                                            view?.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
-                                            scanCurrentPageDOM(view)
-                                        }
+                                    currentUrl = url
+                                    addressInput = url
+                                    onUrlChange?.invoke(url)
+                                    tabSession.updateNavigation(url, view?.title)
+                                    coroutineScope.launch {
+                                        historyManager.recordVisit(url, view?.title)
                                     }
+                                    // Setup live MutationObserver and scan page DOM
+                                    view?.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
+                                    scanCurrentPageDOM(view)
                                     canGoBack = view?.canGoBack() == true
                                     canGoForward = view?.canGoForward() == true
                                 }
@@ -661,8 +654,6 @@ fun DirectBrowserView(
 
                             if (startUrl.isNotBlank()) {
                                 loadUrl(startUrl)
-                            } else {
-                                loadUrl("about:blank")
                             }
                         }
                     },

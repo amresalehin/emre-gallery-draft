@@ -81,14 +81,36 @@ class GalleryApplication : Application() {
     }
 
     companion object {
+        @Volatile
+        private var isChromiumWarmedUp = false
+
         fun warmupChromium(context: Context) {
+            if (isChromiumWarmedUp) return
             runCatching {
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    try {
-                        val cm = android.webkit.CookieManager.getInstance()
-                        cm.setAcceptCookie(true)
-                    } catch (_: Throwable) {}
-                }, 2000L)
+                val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                handler.post {
+                    if (isChromiumWarmedUp) return@post
+                    val doWarmup = {
+                        if (!isChromiumWarmedUp) {
+                            try {
+                                val cm = android.webkit.CookieManager.getInstance()
+                                cm.setAcceptCookie(true)
+                                val dummy = android.webkit.WebView(context.applicationContext)
+                                dummy.destroy()
+                                isChromiumWarmedUp = true
+                            } catch (_: Throwable) {}
+                        }
+                    }
+                    runCatching {
+                        android.os.Looper.myQueue().addIdleHandler {
+                            doWarmup()
+                            false
+                        }
+                    }
+                    handler.postDelayed({
+                        doWarmup()
+                    }, 1200L)
+                }
             }
         }
     }

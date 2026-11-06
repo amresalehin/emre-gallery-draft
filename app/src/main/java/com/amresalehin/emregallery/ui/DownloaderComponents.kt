@@ -159,6 +159,7 @@ fun DownloaderSearchMainPage(
     LaunchedEffect(Unit) {
         DownloadActivityManager.initialize(context)
         DownloadActivityManager.syncWithInboxRepository()
+        com.amresalehin.emregallery.GalleryApplication.warmupChromium(context)
     }
 
     var urlInput by remember { mutableStateOf("") }
@@ -1189,22 +1190,6 @@ fun DownloaderResultsPage(
         MediaNormalizer.deduplicate(extractorState.items + sessionItems)
     }
 
-    // Automatically open browser if both yt-dlp and gallery-dl fail, UNLESS sign-in is explicitly required
-    // (when sign-in is required, the user is prompted directly on the page to sign in).
-    LaunchedEffect(extractorState.isRunning, extractorState.phase, extractorState.errorMessage, extractorState.requiresSignIn, allScrapedItems.size) {
-        if (!extractorState.isRunning &&
-            !extractorState.requiresSignIn &&
-            (extractorState.phase == DualMediaExtractor.ExtractionPhase.ERROR ||
-             (!extractorState.errorMessage.isNullOrBlank() && allScrapedItems.isEmpty())) &&
-            allScrapedItems.isEmpty() &&
-            activeUrl.isNotBlank() &&
-            !hasAutoOpenedBrowser
-        ) {
-            hasAutoOpenedBrowser = true
-            performOpenInBrowser(activeUrl)
-        }
-    }
-
     // Auto-select newly discovered items
     LaunchedEffect(allScrapedItems.size) {
         if (allScrapedItems.isNotEmpty() && selectedItemIds.isEmpty() && !extractorState.isRunning) {
@@ -1843,12 +1828,28 @@ fun DownloaderResultsPage(
                         }
                     }
                 } else if (extractorState.isRunning) {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp),
-                        contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        item {
-                            ThreeColumnSkeletonGrid()
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            modifier = Modifier.widthIn(max = 320.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(44.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                strokeWidth = 3.dp
+                            )
+                            Text(
+                                text = extractorState.statusMessage.ifBlank { "Discovering media..." },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
                         }
                     }
                 } else {
@@ -1878,19 +1879,19 @@ fun DownloaderResultsPage(
                             Icon(
                                 imageVector = if (isChallenge) Icons.Default.Shield else Icons.Default.SearchOff,
                                 contentDescription = null,
-                                tint = if (isChallenge) MaterialTheme.colorScheme.primary else Color(0xFF6C757D),
+                                tint = if (isChallenge) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(48.dp)
                             )
                             Text(
                                 text = if (isChallenge) "Verification Required" else "No media discovered",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF212529)
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             if (failureReason != null) {
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
-                                    color = if (isChallenge) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color(0xFFF1F3F5),
+                                    color = if (isChallenge) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceContainerHigh,
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
                                 ) {
                                     Column(
@@ -1901,7 +1902,7 @@ fun DownloaderResultsPage(
                                             text = failureReason,
                                             style = MaterialTheme.typography.bodySmall,
                                             fontWeight = FontWeight.Medium,
-                                            color = if (isChallenge) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFF495057),
+                                            color = if (isChallenge) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                                             textAlign = TextAlign.Center
                                         )
                                         if (isChallenge) {
@@ -1919,7 +1920,7 @@ fun DownloaderResultsPage(
                                 Text(
                                     text = "The webpage might be dynamically protected, require login, or filter settings are excluding items.",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF6C757D),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center
                                 )
                             }
@@ -1934,7 +1935,7 @@ fun DownloaderResultsPage(
                                             onOpenBrowser(activeUrl)
                                         }
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF212529))
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                                 ) {
                                     Icon(Icons.Default.TravelExplore, contentDescription = null)
                                     Spacer(Modifier.width(6.dp))

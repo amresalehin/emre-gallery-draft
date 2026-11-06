@@ -2,6 +2,9 @@ package com.amresalehin.emregallery.data
 
 import android.webkit.CookieManager
 import android.webkit.WebView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Anti-bot detection mitigations for WebViews, headless scrapers, and network requests.
@@ -103,14 +106,20 @@ object BotDetectionMitigator {
     }
 
     fun injectStealth(webView: WebView?) {
-        webView?.evaluateJavascript(STEALTH_JS, null)
+        val current = webView?.url
+        if (current.isNullOrBlank() || current == "about:blank") return
+        webView.evaluateJavascript(STEALTH_JS, null)
     }
 
     fun syncCookiesFromWebView(url: String?) {
-        if (url.isNullOrBlank()) return
+        if (url.isNullOrBlank() || url == "about:blank") return
         try {
             val cm = CookieManager.getInstance()
-            cm.flush()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    cm.flush()
+                } catch (_: Throwable) {}
+            }
         } catch (_: Throwable) {}
     }
 

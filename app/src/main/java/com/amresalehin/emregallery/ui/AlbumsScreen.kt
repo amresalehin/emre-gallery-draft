@@ -83,6 +83,9 @@ fun AlbumsScreen(
     onOpenBrowser: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        com.amresalehin.emregallery.GalleryApplication.warmupChromium(context)
+    }
     val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
     val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
     var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }

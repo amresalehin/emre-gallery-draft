@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.ui
 
 import android.net.Uri
+import com.amresalehin.emregallery.GalleryApplication
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -132,6 +133,10 @@ fun MediaInboxScreen(
 
     var currentViewMode by remember(initialViewMode) { mutableStateOf(initialViewMode) }
     var activeFetchUrl by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        GalleryApplication.warmupChromium(context)
+    }
 
     BackHandler(enabled = !showFullScreenBrowser) {
         if (isSelectionMode) {
