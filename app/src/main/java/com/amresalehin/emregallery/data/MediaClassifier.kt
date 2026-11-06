@@ -147,6 +147,10 @@ object MediaClassifier {
         if (lower.startsWith("data:")) {
             return !isSubstantialDataUri(url)
         }
+        // YouTube video playback endpoints are the master playable stream, not fragment discards
+        if (lower.contains("googlevideo.com/videoplayback") || lower.contains("/videoplayback")) {
+            return false
+        }
 
         val clean = lower.substringBefore("?").substringBefore("#")
 
@@ -851,6 +855,18 @@ object MediaClassifier {
                 return "ytthumb:$videoId"
             }
 
+            // 1c. YouTube Video Playback Stream CDN (googlevideo.com/videoplayback)
+            if (normalizedHostAndPath.contains("googlevideo.com/videoplayback") || normalizedHostAndPath.contains("/videoplayback")) {
+                val qParams = queryPart.split("&").associate {
+                    it.substringBefore("=").lowercase(Locale.ROOT) to it.substringAfter("=", "")
+                }
+                val videoId = qParams["id"] ?: ""
+                val itag = qParams["itag"] ?: ""
+                if (videoId.isNotBlank()) {
+                    return "googlevideo:${videoId}_itag_$itag"
+                }
+            }
+
             // 2. Google User Content: Strip dynamic sizing modifiers (=w... / =s...)
             if (normalizedHostAndPath.contains("googleusercontent.com")) {
                 normalizedHostAndPath = normalizedHostAndPath.substringBefore("=")
@@ -1070,6 +1086,8 @@ object MediaClassifier {
                     val ytId = extractYouTubeVideoId(entry.url)
                         ?: entry.thumbnailUrl?.let { extractYouTubeVideoId(it) }
                         ?: extractYouTubeVideoId(entry.provenance.pageUrl)
+                        ?: entry.metadata["source_url"]?.let { extractYouTubeVideoId(it) }
+                        ?: entry.metadata["webpage_url"]?.let { extractYouTubeVideoId(it) }
                     if (ytId != null) {
                         keys.add("ytthumb:${ytId.lowercase(Locale.ROOT)}")
                     }
@@ -1086,6 +1104,8 @@ object MediaClassifier {
                 val ytId = extractYouTubeVideoId(item.url)
                     ?: item.thumbnailUrl?.let { extractYouTubeVideoId(it) }
                     ?: extractYouTubeVideoId(item.provenance.pageUrl)
+                    ?: item.metadata["source_url"]?.let { extractYouTubeVideoId(it) }
+                    ?: item.metadata["webpage_url"]?.let { extractYouTubeVideoId(it) }
                 val videoPosterKeys = mutableSetOf<String>()
                 item.thumbnailUrl?.let { videoPosterKeys.add(deduplicationKey(it)) }
                 if (ytId != null) videoPosterKeys.add("ytthumb:${ytId.lowercase(Locale.ROOT)}")
@@ -1129,7 +1149,9 @@ object MediaClassifier {
                     if (vItem.isVideo) {
                         val ytId = extractYouTubeVideoId(vItem.url)
                             ?: vItem.thumbnailUrl?.let { extractYouTubeVideoId(it) }
-                            ?: extractYouTubeVideoId(vItem.provenance.pageUrl)
+                            ?: vItem.provenance.pageUrl.let { extractYouTubeVideoId(it) }
+                            ?: vItem.metadata["source_url"]?.let { extractYouTubeVideoId(it) }
+                            ?: vItem.metadata["webpage_url"]?.let { extractYouTubeVideoId(it) }
                         val matches = (vItem.thumbnailUrl != null && deduplicationKey(vItem.thumbnailUrl) == key) ||
                                 (ytId != null && "ytthumb:${ytId.lowercase(Locale.ROOT)}" == key)
                         if (matches) {
@@ -1252,6 +1274,29 @@ object MediaClassifier {
         }
 
         // 2. Video formats
+        if (lower.contains("/videoplayback") || lower.contains("googlevideo.com")) {
+            val isAudioStream = lower.contains("mime=audio") || mimeLower.contains("audio/")
+            return if (isAudioStream) {
+                ClassificationResult(
+                    category = MediaCategory.AUDIO,
+                    format = "M4A",
+                    mimeType = "audio/mp4",
+                    isVideo = false,
+                    isAudio = true,
+                    isStream = false
+                )
+            } else {
+                ClassificationResult(
+                    category = MediaCategory.VIDEOS,
+                    format = "MP4",
+                    mimeType = "video/mp4",
+                    isVideo = true,
+                    isAudio = false,
+                    isStream = false
+                )
+            }
+        }
+
         if (lower.contains(".mp4") || mimeLower.contains("video/mp4") || lower.contains("video/mp4")) {
             return ClassificationResult(
                 category = MediaCategory.VIDEOS,

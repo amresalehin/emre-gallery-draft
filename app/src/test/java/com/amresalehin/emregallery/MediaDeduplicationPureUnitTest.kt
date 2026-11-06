@@ -464,6 +464,76 @@ class MediaDeduplicationPureUnitTest {
         assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://cdn.example.com/videos/nature_documentary.mp4"))
         assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://upload.wikimedia.org/wikipedia/commons/1/10/Sample.jpg"))
     }
+
+    @Test
+    fun testYouTubeDecipheredStreamIsRecognizedAndClassifiedAsVideo() {
+        val streamUrl = "https://rr2---sn-4g5ednkk.googlevideo.com/videoplayback?expire=1715000000&id=e6nigwabc4s&itag=22&ip=1.2.3.4&sparams=expire,id,ip,itag&sig=abc"
+        
+        // 1. Must not be rejected as a fragment
+        assertFalse(MediaClassifier.isMediaFragment(streamUrl))
+        
+        // 2. Must be considered valid media
+        assertTrue(MediaClassifier.isValidMedia(streamUrl))
+        
+        // 3. Must be classified as VIDEOS
+        val classification = MediaClassifier.classify(streamUrl)
+        assertEquals(MediaCategory.VIDEOS, classification.category)
+        assertTrue(classification.isVideo)
+        assertFalse(classification.isAudio)
+    }
+
+    @Test
+    fun testYouTubeVideoPlaybackDeduplicationKeyMapsAcrossSlices() {
+        val base = "https://rr2---sn-4g5ednkk.googlevideo.com/videoplayback?expire=1715000000&id=e6nigwabc4s&itag=22&ip=1.2.3.4"
+        val slice1 = "$base&sq=0&range=0-1048576"
+        val slice2 = "$base&sq=1&range=1048577-2097152"
+        
+        val key1 = MediaClassifier.deduplicationKey(slice1)
+        val key2 = MediaClassifier.deduplicationKey(slice2)
+        
+        assertEquals(key1, key2)
+        assertEquals("googlevideo:e6nigwabc4s_itag_22", key1)
+    }
+
+    @Test
+    fun testYouTubePosterFoldsIntoDirectVideoItem() {
+        val videoUrl = "https://rr2---sn-4g5ednkk.googlevideo.com/videoplayback?expire=1715000000&id=e6nigwabc4s&itag=22&ip=1.2.3.4"
+        val posterUrl = "https://i.ytimg.com/vi/e6nigwabc4s/hqdefault.jpg"
+        
+        val posterItem = ScrapedMediaItem(
+            id = "yt_img_1",
+            url = posterUrl,
+            title = "youtube_e6nigwabc4s_hqdefault.jpg",
+            isVideo = false,
+            category = MediaCategory.IMAGES,
+            resolutionHint = "480x360"
+        )
+        
+        val videoItem = ScrapedMediaItem(
+            id = "ytdlp_1",
+            url = videoUrl,
+            title = "BEHIND THE SCENES FILMING THE JUTSU.mp4",
+            isVideo = true,
+            category = MediaCategory.VIDEOS,
+            resolutionHint = "720x1280",
+            metadata = mapOf("source_url" to "https://www.youtube.com/shorts/e6nigwabc4s")
+        )
+        
+        val map = LinkedHashMap<String, ScrapedMediaItem>()
+        // Merge poster first (as static scraper might)
+        com.amresalehin.emregallery.data.MediaNormalizer.mergeCandidates(map, listOf(posterItem))
+        assertEquals(1, map.size)
+        
+        // Merge video second (from yt-dlp)
+        com.amresalehin.emregallery.data.MediaNormalizer.mergeCandidates(map, listOf(videoItem))
+        // Poster image must fold into the video, leaving exactly 1 video item
+        assertEquals(1, map.size)
+        val mergedVideo = map.values.first()
+        assertTrue(mergedVideo.isVideo)
+        assertEquals(MediaCategory.VIDEOS, mergedVideo.category)
+        assertNotNull(mergedVideo.thumbnailUrl)
+        assertTrue(mergedVideo.thumbnailUrl!!.contains("e6nigwabc4s"))
+    }
 }
 
 

@@ -118,22 +118,38 @@ class MediaDownloadWorker(
             var downloadedFile: File? = null
             var errorDiagnostic: String? = null
 
-            val isSocialUrl = listOf("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "vimeo.com", "twitter.com", "x.com")
-                .any { mediaUrl.contains(it, ignoreCase = true) }
+            val isSocialUrl = listOf("youtube.com", "youtu.be", "googlevideo.com", "tiktok.com", "instagram.com", "vimeo.com", "twitter.com", "x.com")
+                .any { mediaUrl.contains(it, ignoreCase = true) || sourceUrl.contains(it, ignoreCase = true) }
             val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
-            val isYtDlpTarget = sourceEngine == "yt-dlp" || isSocialUrl || isStreamingMedia
+            val isYtDlpTarget = sourceEngine.contains("yt-dlp") || isSocialUrl || isStreamingMedia
 
             // 1. For social video and HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp)
             if (isYtDlpTarget && GalleryDlEngine.isAvailable()) {
                 setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Downloading stream/video: $title..."))
+                val targetUrl = if (sourceUrl.contains("youtube.com", ignoreCase = true) || sourceUrl.contains("youtu.be", ignoreCase = true)) {
+                    sourceUrl
+                } else {
+                    mediaUrl
+                }
                 downloadedFile = GalleryDlEngine.downloadMedia(
                     context = applicationContext,
-                    mediaUrl = mediaUrl,
+                    mediaUrl = targetUrl,
                     fileName = fileName,
-                    referer = referer,
+                    referer = referer ?: sourceUrl,
                     headers = downloadHeaders,
                     cookies = cookieString
                 )
+                // If download via sourceUrl didn't yield a file, try direct mediaUrl if different
+                if ((downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) && targetUrl != mediaUrl) {
+                    downloadedFile = GalleryDlEngine.downloadMedia(
+                        context = applicationContext,
+                        mediaUrl = mediaUrl,
+                        fileName = fileName,
+                        referer = referer ?: sourceUrl,
+                        headers = downloadHeaders,
+                        cookies = cookieString
+                    )
+                }
             }
 
             // 2. Standard or fallback download via OkHttp with HTTP Range resumability

@@ -248,19 +248,30 @@ def extract_yt_dlp(url, options_json="{}"):
         opts = {}
 
     user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    cookies = opts.get("cookies")
 
     items = []
     page_title = ""
     seen_urls = set()
 
     try:
+        http_headers = {"User-Agent": user_agent}
+        if cookies:
+            http_headers["Cookie"] = cookies
+
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best",
-            "socket_timeout": 20,
-            "user_agent": user_agent
+            "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo+bestaudio/best",
+            "socket_timeout": 30,
+            "http_headers": http_headers,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "ios", "mweb", "tv_embedded"],
+                    "player_skip": ["webpage", "configs"]
+                }
+            }
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
@@ -270,9 +281,37 @@ def extract_yt_dlp(url, options_json="{}"):
                     if not entry or not isinstance(entry, dict):
                         continue
 
-                    # For social videos, preserve page URL so yt-dlp re-extracts non-expired muxed streams at save time
                     page_url = entry.get("webpage_url") or clean_url
-                    direct_url = page_url
+
+                    # Extract the direct playable media stream URL
+                    direct_url = entry.get("url")
+                    v_ext = entry.get("ext") or "mp4"
+
+                    formats = entry.get("formats") or []
+                    best_fmt = None
+                    if not direct_url and formats:
+                        # 1. Prefer pre-muxed video+audio format (itag 18, 22, etc.)
+                        muxed = [f for f in formats if f.get("url") and f.get("vcodec") != "none" and f.get("acodec") != "none"]
+                        if muxed:
+                            best_fmt = muxed[-1]
+                            direct_url = best_fmt.get("url")
+                            v_ext = best_fmt.get("ext") or v_ext
+                        else:
+                            # 2. Prefer any video format with a url
+                            video_fmts = [f for f in formats if f.get("url") and f.get("vcodec") != "none"]
+                            if video_fmts:
+                                best_fmt = video_fmts[-1]
+                                direct_url = best_fmt.get("url")
+                                v_ext = best_fmt.get("ext") or v_ext
+                            else:
+                                valid_fmts = [f for f in formats if f.get("url")]
+                                if valid_fmts:
+                                    best_fmt = valid_fmts[-1]
+                                    direct_url = best_fmt.get("url")
+                                    v_ext = best_fmt.get("ext") or v_ext
+
+                    if not direct_url:
+                        direct_url = page_url
 
                     if not direct_url or direct_url in seen_urls:
                         continue
@@ -280,20 +319,19 @@ def extract_yt_dlp(url, options_json="{}"):
                     seen_urls.add(direct_url)
 
                     v_title = entry.get("title") or entry.get("id") or f"media_{len(items) + 1}"
-                    v_ext = entry.get("ext") or "mp4"
                     item_title = f"{v_title}.{v_ext}" if not v_title.endswith(f".{v_ext}") else v_title
 
                     if not page_title:
                         page_title = v_title
 
-                    width = entry.get("width")
-                    height = entry.get("height")
+                    width = entry.get("width") or (best_fmt.get("width") if best_fmt else None)
+                    height = entry.get("height") or (best_fmt.get("height") if best_fmt else None)
                     resolution_hint = f"{width}x{height}" if width and height else None
                     thumb = entry.get("thumbnail")
-                    filesize = entry.get("filesize") or entry.get("filesize_approx")
+                    filesize = entry.get("filesize") or entry.get("filesize_approx") or (best_fmt.get("filesize") if best_fmt else None)
 
                     is_audio_only = entry.get("vcodec") == "none" or v_ext in ["mp3", "m4a", "opus", "aac"]
-                    is_stream = (".m3u8" in clean_url) or (".mpd" in clean_url)
+                    is_stream = (".m3u8" in direct_url) or (".mpd" in direct_url)
                     category = "AUDIO" if is_audio_only else ("STREAMS" if is_stream else "VIDEOS")
 
                     url_hash = hashlib.sha256(direct_url.encode('utf-8')).hexdigest()[:12]
@@ -310,8 +348,36 @@ def extract_yt_dlp(url, options_json="{}"):
                         "thumbnailUrl": thumb,
                         "resolutionHint": resolution_hint,
                         "sizeBytes": filesize,
-                        "source": "yt-dlp"
+                        "source": "yt-dlp",
+                        "pageUrl": page_url
                     })
+
+                    # Also provide the best standalone audio track if formats are present
+                    audio_fmts = [f for f in formats if f.get("url") and f.get("vcodec") == "none" and f.get("acodec") != "none"]
+                    if audio_fmts and not is_audio_only:
+                        best_audio = audio_fmts[-1]
+                        a_url = best_audio.get("url")
+                        if a_url and a_url not in seen_urls:
+                            seen_urls.add(a_url)
+                            a_ext = best_audio.get("ext") or "m4a"
+                            a_title = f"{v_title}.{a_ext}" if not v_title.endswith(f".{a_ext}") else v_title
+                            a_hash = hashlib.sha256(a_url.encode('utf-8')).hexdigest()[:12]
+                            items.append({
+                                "id": f"ytdlp_audio_{len(items)}_{a_hash}",
+                                "url": a_url,
+                                "title": a_title,
+                                "category": "AUDIO",
+                                "format": a_ext.upper(),
+                                "mimeType": f"audio/{a_ext}",
+                                "isVideo": False,
+                                "isAudio": True,
+                                "isStream": False,
+                                "thumbnailUrl": thumb,
+                                "resolutionHint": None,
+                                "sizeBytes": best_audio.get("filesize") or best_audio.get("filesize_approx"),
+                                "source": "yt-dlp",
+                                "pageUrl": page_url
+                            })
     except Exception as e:
         return json.dumps({
             "success": False,
@@ -414,9 +480,15 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
                 "outtmpl": target_path,
                 "quiet": True,
                 "no_warnings": True,
-                "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best",
+                "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/bestvideo+bestaudio/best",
                 "socket_timeout": 30,
-                "http_headers": http_headers
+                "http_headers": http_headers,
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["android", "ios", "mweb", "tv_embedded"],
+                        "player_skip": ["webpage", "configs"]
+                    }
+                }
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([media_url])

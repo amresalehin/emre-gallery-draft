@@ -487,6 +487,7 @@ object MediaCaptureEngine {
 
         val isVideo = isStream || cleanReqPath.endsWith(".mp4") || cleanReqPath.endsWith(".webm") ||
                 cleanReqPath.endsWith(".mov") || cleanReqPath.endsWith(".mkv") ||
+                cleanReqPath.contains("/videoplayback") || cleanReqPath.contains("googlevideo.com") ||
                 acceptHeader.contains("video/")
 
         val isAudio = cleanReqPath.endsWith(".mp3") || cleanReqPath.endsWith(".m4a") ||
@@ -505,11 +506,17 @@ object MediaCaptureEngine {
 
         if (isVideo || isAudio || isImage) {
             val cleanReqUrl = if (isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
+            val ytPoster = if (isVideo) {
+                MediaClassifier.extractYouTubeVideoId(baseUrl)?.let { ytId ->
+                    "https://i.ytimg.com/vi/$ytId/maxresdefault.jpg"
+                }
+            } else null
             val item = buildMediaItem(
                 rawUrl = cleanReqUrl,
                 source = ExtractionSource.NETWORK_INTERCEPT,
                 baseUrl = baseUrl,
-                mimeHint = null
+                poster = ytPoster,
+                mimeHint = if (cleanReqPath.contains("/videoplayback")) "video/mp4" else null
             )
             if (item != null) {
                 onMediaDiscovered(item)
