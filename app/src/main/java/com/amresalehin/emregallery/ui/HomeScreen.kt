@@ -127,15 +127,22 @@ fun HomeScreen(
         }
     }
 
-    val groups = remember(sortedMedia, groupBy) {
-        when (groupBy) {
-            "day" -> groupMediaByDay(sortedMedia)
-            "month" -> groupMediaByMonth(sortedMedia)
-            "year" -> groupMediaByYear(sortedMedia)
-            "folder" -> groupMediaByFolder(sortedMedia)
-            "initial" -> groupMediaByInitial(sortedMedia)
-            "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
-            else -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+    val dayGroups = remember(sortedMedia) {
+        groupMediaByDay(sortedMedia)
+    }
+
+    val groups = remember(sortedMedia, groupBy, dayGroups) {
+        if (groupBy == "day") {
+            dayGroups
+        } else {
+            when (groupBy) {
+                "month" -> groupMediaByMonth(sortedMedia)
+                "year" -> groupMediaByYear(sortedMedia)
+                "folder" -> groupMediaByFolder(sortedMedia)
+                "initial" -> groupMediaByInitial(sortedMedia)
+                "none" -> listOf(DayGroup(dayKey = 0L, dayLabel = "", items = sortedMedia))
+                else -> dayGroups
+            }
         }
     }
 
@@ -366,7 +373,8 @@ fun HomeScreen(
                     HomeScreenSkeleton(
                         gridColumns = pinchGridColumns,
                         gridStyle = gridStyle,
-                        showMemories = albumTitle == null
+                        showMemories = albumTitle == null,
+                        containerWidth = containerWidth
                     )
                 }
             } else if (sortedMedia.isEmpty()) {
@@ -403,7 +411,13 @@ fun HomeScreen(
                     item { LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape)) }
                 }
                 if (albumTitle == null) {
-                    item(key = "memories_strip") { MemoriesStrip(sortedMedia, onOpenMemory) }
+                    item(key = "memories_strip") {
+                        MemoriesStrip(
+                            media = sortedMedia,
+                            dayGroups = dayGroups,
+                            onOpenMemory = onOpenMemory
+                        )
+                    }
                 }
 
                 groupedRows.forEach { (group, rowChunks) ->

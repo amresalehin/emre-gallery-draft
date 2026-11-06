@@ -147,7 +147,8 @@ fun HomeFastScrollbar(
 fun HomeScreenSkeleton(
     gridColumns: Int = 3,
     gridStyle: String = "masonry",
-    showMemories: Boolean = true
+    showMemories: Boolean = true,
+    containerWidth: Dp = 360.dp
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "skeleton_shimmer")
     val alphaAnim by infiniteTransition.animateFloat(
@@ -160,14 +161,19 @@ fun HomeScreenSkeleton(
         label = "skeleton_alpha"
     )
 
+    val isSquare = (gridStyle == "square")
+    val validCols = gridColumns.coerceIn(1, 6)
+    val gap = 4.dp
+    val totalGap = gap * (validCols - 1)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("home_screen_skeleton"),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         if (showMemories) {
-            // Memories row skeleton
+            // Memories row skeleton matching actual MemoriesStrip dimensions (132.dp x 184.dp, 16.dp corners)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -177,9 +183,9 @@ fun HomeScreenSkeleton(
                 repeat(4) {
                     Box(
                         modifier = Modifier
-                            .width(118.dp)
-                            .height(174.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .width(132.dp)
+                            .height(184.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(
                                 MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
                             )
@@ -198,18 +204,18 @@ fun HomeScreenSkeleton(
             }
         }
 
-        // Section header skeleton
+        // Section 1 header skeleton
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .width(110.dp)
-                    .height(22.dp)
+                    .width(120.dp)
+                    .height(24.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(
                         MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
@@ -217,7 +223,7 @@ fun HomeScreenSkeleton(
             )
             Box(
                 modifier = Modifier
-                    .width(48.dp)
+                    .width(52.dp)
                     .height(16.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(
@@ -226,32 +232,105 @@ fun HomeScreenSkeleton(
             )
         }
 
-        // Multi-column grid skeleton
-        val masonryHeights = listOf(140.dp, 190.dp, 130.dp, 170.dp, 120.dp, 180.dp, 150.dp, 130.dp, 160.dp, 140.dp, 200.dp, 135.dp)
-        val validCols = gridColumns.coerceIn(1, 6)
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            for (col in 0 until validCols) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    repeat(4) { rowIndex ->
-                        val itemIndex = (col + rowIndex * validCols) % masonryHeights.size
-                        val height = if (gridStyle == "square") 110.dp else masonryHeights[itemIndex]
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(height)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
-                                )
-                        )
+        // Section 1: Justified mosaic rows matching the exact layout algorithm of JustifiedMosaicRow
+        repeat(3) { rowIndex ->
+            val aspects = if (isSquare) {
+                List(validCols) { 1f }
+            } else {
+                List(validCols) { colIndex ->
+                    when ((rowIndex + colIndex).mod(4)) {
+                        0 -> 0.72f
+                        1 -> 0.9f
+                        2 -> 1.0f
+                        else -> 1.35f
                     }
+                }
+            }
+            val aspectsSum = aspects.sum().coerceAtLeast(0.1f)
+            val rowHeight = ((containerWidth - totalGap) / aspectsSum).coerceIn(72.dp, 220.dp)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(gap)
+            ) {
+                aspects.forEach { aspect ->
+                    Box(
+                        modifier = Modifier
+                            .weight(aspect)
+                            .height(rowHeight)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
+                            )
+                    )
+                }
+            }
+        }
+
+        // Section 2 header skeleton
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(90.dp)
+                    .height(24.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
+                    )
+            )
+            Box(
+                modifier = Modifier
+                    .width(44.dp)
+                    .height(16.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = alphaAnim * 0.8f)
+                    )
+            )
+        }
+
+        // Section 2: Justified mosaic rows matching the exact layout algorithm of JustifiedMosaicRow
+        repeat(2) { rowIndex ->
+            val actualRowIndex = rowIndex + 3
+            val aspects = if (isSquare) {
+                List(validCols) { 1f }
+            } else {
+                List(validCols) { colIndex ->
+                    when ((actualRowIndex + colIndex).mod(4)) {
+                        0 -> 0.72f
+                        1 -> 0.9f
+                        2 -> 1.0f
+                        else -> 1.35f
+                    }
+                }
+            }
+            val aspectsSum = aspects.sum().coerceAtLeast(0.1f)
+            val rowHeight = ((containerWidth - totalGap) / aspectsSum).coerceIn(72.dp, 220.dp)
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(gap)
+            ) {
+                aspects.forEach { aspect ->
+                    Box(
+                        modifier = Modifier
+                            .weight(aspect)
+                            .height(rowHeight)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = alphaAnim)
+                            )
+                    )
                 }
             }
         }
@@ -259,33 +338,39 @@ fun HomeScreenSkeleton(
 }
 
 @Composable
-fun MemoriesStrip(media: List<MediaItem>, onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit) {
+fun MemoriesStrip(
+    media: List<MediaItem> = emptyList(),
+    dayGroups: List<DayGroup>? = null,
+    onOpenMemory: (stories: List<StoryGroup>, startIndex: Int) -> Unit
+) {
     val today = remember { Calendar.getInstance() }
     val currentYear = today.get(Calendar.YEAR)
     val todayMonth = today.get(Calendar.MONTH)
     val todayDay = today.get(Calendar.DAY_OF_YEAR)
 
-    val stories = remember(media, currentYear, todayMonth, todayDay) {
-        if (media.isEmpty()) return@remember emptyList()
-        val cal = Calendar.getInstance()
-        val eligible = ArrayList<Pair<MediaItem, Long>>(media.size)
-        val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
-        val tripsMap = LinkedHashMap<Int, MutableList<Pair<MediaItem, Long>>>()
+    val stories = remember(dayGroups, if (dayGroups == null) media else null, currentYear, todayMonth, todayDay) {
+        val resolvedGroups = dayGroups ?: if (media.isNotEmpty()) groupMediaByDay(media) else emptyList()
+        if (resolvedGroups.isEmpty()) return@remember emptyList()
 
-        for (item in media) {
-            val timestamp = if (item.dateTakenMillis > 0L) item.dateTakenMillis else item.dateAddedSeconds * 1000L
-            if (timestamp <= 0L) continue
-            eligible.add(item to timestamp)
-            cal.timeInMillis = timestamp
+        val cal = Calendar.getInstance()
+        val onThisDayMap = mutableMapOf<Int, MutableList<MediaItem>>()
+        val tripCandidates = mutableListOf<Pair<String, List<MediaItem>>>()
+        val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+
+        for (group in resolvedGroups) {
+            if (group.dayKey <= 0L || group.items.isEmpty()) continue
+            cal.timeInMillis = group.dayKey
             val y = cal.get(Calendar.YEAR)
             val m = cal.get(Calendar.MONTH)
             val d = cal.get(Calendar.DAY_OF_YEAR)
 
             if (m == todayMonth && d == todayDay && y < currentYear) {
-                onThisDayMap.getOrPut(y) { mutableListOf() }.add(item)
+                onThisDayMap.getOrPut(y) { mutableListOf() }.addAll(group.items)
             }
-            val tripKey = y * 1000 + d
-            tripsMap.getOrPut(tripKey) { mutableListOf() }.add(item to timestamp)
+            if (group.items.size >= 4) {
+                val label = dateFormat.format(Date(group.dayKey))
+                tripCandidates.add(label to group.items)
+            }
         }
 
         val result = mutableListOf<Pair<String, List<MediaItem>>>()
@@ -296,17 +381,12 @@ fun MemoriesStrip(media: List<MediaItem>, onOpenMemory: (stories: List<StoryGrou
         }
 
         // Real date-based trip/story groups from the library
-        val dateFormat = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
-        tripsMap.entries
-            .filter { it.value.size >= 4 }
-            .sortedByDescending { it.key }
-            .take(8)
-            .forEach { (_, entries) ->
-                val label = dateFormat.format(Date(entries.first().second))
-                if (result.none { it.second.any { storyItem -> storyItem.uri == entries.first().first.uri } }) {
-                    result += label to entries.map { it.first }
-                }
+        for (trip in tripCandidates) {
+            if (result.none { it.second.any { storyItem -> storyItem.uri == trip.second.first().uri } }) {
+                result += trip
             }
+            if (result.size >= 10) break
+        }
 
         result.filter { it.second.isNotEmpty() }.take(10)
     }

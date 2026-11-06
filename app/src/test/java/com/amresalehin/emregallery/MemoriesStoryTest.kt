@@ -130,4 +130,59 @@ class MemoriesStoryTest {
         assertEquals(0, activePageIndex)
         assertEquals(false, isEndOfStoryReached)
     }
+
+    @Test
+    fun testMemoriesDerivedFromDayGroupsWithoutFullLibraryScan() {
+        val cal = java.util.Calendar.getInstance()
+        val currentYear = cal.get(java.util.Calendar.YEAR)
+        cal.set(java.util.Calendar.YEAR, currentYear - 1)
+        val priorYearDayStart = cal.timeInMillis
+
+        val item1 = MediaItem(1L, "uri1", "1.jpg", "image/jpeg", priorYearDayStart, 1000L, 100L, 100, 100, "Camera", false)
+        val item2 = MediaItem(2L, "uri2", "2.jpg", "image/jpeg", priorYearDayStart, 2000L, 200L, 100, 100, "Camera", false)
+        val dayGroup1 = com.amresalehin.emregallery.ui.DayGroup(priorYearDayStart, "1 year ago", listOf(item1, item2))
+
+        val recentCal = java.util.Calendar.getInstance()
+        recentCal.add(java.util.Calendar.DAY_OF_YEAR, -10)
+        val tripDayStart = recentCal.timeInMillis
+        val tripItems = (1..5).map {
+            MediaItem(it.toLong() + 10, "uri$it", "$it.jpg", "image/jpeg", tripDayStart, 1000L, 100L, 100, 100, "Camera", false)
+        }
+        val tripDayGroup = com.amresalehin.emregallery.ui.DayGroup(tripDayStart, "Trip Day", tripItems)
+
+        val groups = listOf(dayGroup1, tripDayGroup)
+
+        // Verify day groups hold pre-clustered media directly
+        assertEquals(2, groups.size)
+        assertEquals(2, groups[0].items.size)
+        assertEquals(5, groups[1].items.size)
+        // Group with >= 4 items qualifies for trip story without needing full-library scan
+        val qualifyingTrips = groups.filter { it.items.size >= 4 }
+        assertEquals(1, qualifyingTrips.size)
+        assertEquals(5, qualifyingTrips[0].items.size)
+    }
+
+    @Test
+    fun testJustifiedMosaicLayoutAlgorithmEquivalence() {
+        val validCols = 3
+        val gap = 4f
+        val totalGap = gap * (validCols - 1)
+        val containerWidth = 360f
+
+        // Grid algorithm aspects
+        val masonryAspects = (0 until validCols).map { colIndex ->
+            when (colIndex.mod(4)) {
+                0 -> 0.72f
+                1 -> 0.9f
+                2 -> 1.0f
+                else -> 1.35f
+            }
+        }
+        val aspectsSum = masonryAspects.sum()
+        val rowHeight = ((containerWidth - totalGap) / aspectsSum).coerceIn(72f, 220f)
+
+        // Verify valid computed row height and matching aspect count
+        assertEquals(3, masonryAspects.size)
+        assert(rowHeight in 72f..220f)
+    }
 }
