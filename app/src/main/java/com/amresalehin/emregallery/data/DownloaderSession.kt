@@ -68,21 +68,7 @@ object DownloaderSession {
     fun addDiscoveredItems(newItems: List<ScrapedMediaItem>, title: String? = null) {
         if (newItems.isEmpty()) return
         synchronized(itemsLock) {
-            var updated = false
-            for (item in newItems) {
-                val key = MediaClassifier.canonicalKey(item.url)
-                val existing = canonicalMap[key]
-                if (existing == null) {
-                    canonicalMap[key] = item
-                    updated = true
-                } else if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
-                    canonicalMap[key] = item.copy(
-                        id = existing.id,
-                        thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
-                    )
-                    updated = true
-                }
-            }
+            val updated = MediaNormalizer.mergeCandidates(canonicalMap, newItems)
             if (updated) {
                 val sorted = canonicalMap.values.toList()
                 _discoveredItems.value = sorted

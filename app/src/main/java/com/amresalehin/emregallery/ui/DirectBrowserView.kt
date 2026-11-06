@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.amresalehin.emregallery.data.AdBlockEngine
 import com.amresalehin.emregallery.data.BrowserHistoryManager
-import com.amresalehin.emregallery.data.BrowserMediaExtractor
+import com.amresalehin.emregallery.data.BrowserSession
 import com.amresalehin.emregallery.data.BrowserSite
 import com.amresalehin.emregallery.data.DownloaderSession
 import com.amresalehin.emregallery.data.ExtractionSource
@@ -104,6 +104,9 @@ fun DirectBrowserView(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val historyManager = remember { BrowserHistoryManager(context) }
+    val tabSession = remember { BrowserSession.getTabSession("tab_main") }
+    val tabDetectedCount by tabSession.detectedCount.collectAsState()
+    val totalDetectedCount = maxOf(discoveredCount, tabDetectedCount)
 
     // Intercept back button when browser can navigate back
     BackHandler(enabled = canGoBack) {
@@ -117,6 +120,7 @@ fun DirectBrowserView(
         addressInput = formatted
         currentUrl = formatted
         onUrlChange?.invoke(formatted)
+        tabSession.updateNavigation(formatted, pageTitle)
         coroutineScope.launch {
             historyManager.recordVisit(formatted)
         }
@@ -133,6 +137,7 @@ fun DirectBrowserView(
             val discovered = MediaCaptureEngine.parseJsDomScanResult(jsonRaw, current)
             if (discovered.isNotEmpty()) {
                 val domain = runCatching { java.net.URL(current).host }.getOrDefault("")
+                tabSession.registerMediaBatch(discovered, pageTitle)
                 onBatchExtracted(discovered, pageTitle, domain)
                 DownloaderSession.addDiscoveredItems(discovered, pageTitle)
             }
@@ -329,13 +334,15 @@ fun DirectBrowserView(
                         )
                     }
 
-                    // Discovered Media count badge or Scan button
-                    if (discoveredCount > 0) {
+                    // 1DM-style continuous detected-media indicator (opens registry without rescanning)
+                    if (totalDetectedCount > 0) {
                         Surface(
                             onClick = onSwitchToMediaTab,
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.height(32.dp).testTag("browser_media_badge_top")
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("browser_media_badge_top")
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -343,13 +350,13 @@ fun DirectBrowserView(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.PermMedia,
-                                    contentDescription = null,
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Detected media ($totalDetectedCount)",
                                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                                 Text(
-                                    text = "$discoveredCount",
+                                    text = "$totalDetectedCount",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
@@ -358,13 +365,15 @@ fun DirectBrowserView(
                         }
                     } else if (currentUrl.isNotBlank()) {
                         IconButton(
-                            onClick = { scanCurrentPageDOM(webViewInstance) },
-                            modifier = Modifier.size(34.dp).testTag("browser_scan_page_btn")
+                            onClick = onSwitchToMediaTab,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .testTag("browser_media_badge_top")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.TravelExplore,
-                                contentDescription = "Scan media",
-                                tint = MaterialTheme.colorScheme.primary,
+                                imageVector = Icons.Default.Download,
+                                contentDescription = "Detected media (0)",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                 modifier = Modifier.size(19.dp)
                             )
                         }
@@ -412,13 +421,14 @@ fun DirectBrowserView(
                             }
 
                             addJavascriptInterface(
-                                BrowserMediaExtractor.EmreMediaBridge { rawUrl ->
+                                BrowserSession.EmreMediaBridge { rawUrl ->
                                     val item = MediaCaptureEngine.buildMediaItem(
                                         rawUrl = rawUrl,
                                         source = ExtractionSource.DOM_SCRAPE,
                                         baseUrl = currentUrl
                                     )
                                     if (item != null) {
+                                        tabSession.registerMedia(item)
                                         onMediaExtracted(item)
                                         DownloaderSession.addDiscoveredItem(item)
                                     }
@@ -435,6 +445,7 @@ fun DirectBrowserView(
                                 override fun onReceivedTitle(view: WebView?, title: String?) {
                                     pageTitle = title.orEmpty()
                                     onPageTitleChanged?.invoke(pageTitle)
+                                    tabSession.updateNavigation(currentUrl, pageTitle)
                                 }
                             }
 
@@ -550,6 +561,7 @@ fun DirectBrowserView(
                                             currentUrl = it
                                             addressInput = it
                                             onUrlChange?.invoke(it)
+                                            tabSession.updateNavigation(it, pageTitle)
                                         }
                                     }
                                     canGoBack = view?.canGoBack() == true
@@ -568,6 +580,7 @@ fun DirectBrowserView(
                                             currentUrl = it
                                             addressInput = it
                                             onUrlChange?.invoke(it)
+                                            tabSession.updateNavigation(it, view?.title)
                                             coroutineScope.launch {
                                                 historyManager.recordVisit(it, view?.title)
                                             }
@@ -591,6 +604,7 @@ fun DirectBrowserView(
                                         request = request,
                                         baseUrl = currentUrl
                                     ) { item ->
+                                        tabSession.registerMedia(item)
                                         DownloaderSession.addDiscoveredItem(item)
                                         onMediaExtracted(item)
                                     }

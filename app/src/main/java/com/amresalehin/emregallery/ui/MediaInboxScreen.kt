@@ -65,12 +65,14 @@ import androidx.compose.ui.zIndex
 import androidx.work.WorkInfo
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.amresalehin.emregallery.data.BrowserSession
 import com.amresalehin.emregallery.data.DownloadQueueManager
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
+import com.amresalehin.emregallery.data.MediaNormalizer
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import kotlinx.coroutines.delay
@@ -2280,25 +2282,11 @@ fun FullScreenBrowserView(
                 onUrlChange = { currentUrl = it },
                 onPageTitleChanged = { pageTitle = it },
                 onMediaExtracted = { item ->
-                    val key = MediaClassifier.canonicalKey(item.url)
-                    val existingIndex = discoveredItems.indexOfFirst { MediaClassifier.canonicalKey(it.url) == key }
-                    if (existingIndex == -1) {
-                        discoveredItems = discoveredItems + item
-                    } else {
-                        val existing = discoveredItems[existingIndex]
-                        if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
-                            val updated = discoveredItems.toMutableList()
-                            updated[existingIndex] = item.copy(
-                                id = existing.id,
-                                thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
-                            )
-                            discoveredItems = updated
-                        }
-                    }
+                    discoveredItems = MediaNormalizer.deduplicateList(discoveredItems + item)
                 },
                 onBatchExtracted = { batch, title, domain ->
                     title?.let { if (it.isNotBlank()) pageTitle = it }
-                    discoveredItems = MediaClassifier.deduplicateScrapedItems(discoveredItems + batch)
+                    discoveredItems = MediaNormalizer.deduplicateList(discoveredItems + batch)
                 },
                 onSwitchToMediaTab = {
                     showDiscoveredMediaSheet = true

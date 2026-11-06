@@ -181,7 +181,10 @@ object AdBlockEngine {
             } else {
                 lowerUrl
             }
-            URI(candidate).host
+            java.net.URL(candidate).host
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: runCatching {
+            val withoutScheme = lowerUrl.substringAfter("://")
+            withoutScheme.substringBefore("/").substringBefore("?").substringBefore(":")
         }.getOrNull()
 
         if (!host.isNullOrBlank() && isAdHost(host)) {

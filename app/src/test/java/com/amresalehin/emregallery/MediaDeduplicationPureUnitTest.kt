@@ -5,6 +5,7 @@ import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaProvenance
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -374,5 +375,95 @@ class MediaDeduplicationPureUnitTest {
             )
         }
     }
+
+    @Test
+    fun testBrowserTabSessionMaintainsMediaRegistryWithoutRescan() {
+        val tabSession = com.amresalehin.emregallery.data.BrowserTabSession(tabId = "test_tab_1")
+        assertEquals(0, tabSession.detectedCount.value)
+        assertTrue(tabSession.detectedItems.value.isEmpty())
+
+        val item1 = ScrapedMediaItem(
+            id = "item_1",
+            url = "https://example.com/video.mp4",
+            title = "Video 1",
+            isVideo = true,
+            category = MediaCategory.VIDEOS,
+            thumbnailUrl = "https://example.com/video_thumb_low.jpg"
+        )
+        val posterItem = ScrapedMediaItem(
+            id = "item_poster",
+            url = "https://example.com/video_thumb_low.jpg",
+            title = "Video Poster",
+            isVideo = false,
+            category = MediaCategory.IMAGES,
+            resolutionHint = "1280x720"
+        )
+
+        tabSession.registerMedia(item1)
+        assertEquals(1, tabSession.detectedCount.value)
+        assertEquals(1, tabSession.getDetectedMedia().size)
+
+        // Registering poster image of the same video should fold into the video without increasing count
+        tabSession.registerMedia(posterItem)
+        assertEquals(1, tabSession.detectedCount.value)
+        val detected = tabSession.getDetectedMedia()[0]
+        assertEquals("item_1", detected.id)
+        assertEquals("https://example.com/video_thumb_low.jpg", detected.thumbnailUrl)
+
+        // Clearing tab media resets registry cleanly
+        tabSession.clearMedia()
+        assertEquals(0, tabSession.detectedCount.value)
+        assertTrue(tabSession.getDetectedMedia().isEmpty())
+    }
+
+    @Test
+    fun testMediaNormalizerDeduplicatesAndFoldsPosters() {
+        val masterVideo = ScrapedMediaItem(
+            id = "vid_1080",
+            url = "https://cdn.example.com/media/clip_1080p.mp4",
+            title = "Clip 1080p",
+            isVideo = true,
+            resolutionHint = "1920x1080"
+        )
+        val lowResVideo = ScrapedMediaItem(
+            id = "vid_720",
+            url = "https://cdn.example.com/media/clip_720p.mp4",
+            title = "Clip 720p",
+            isVideo = true,
+            resolutionHint = "1280x720"
+        )
+        val folded = com.amresalehin.emregallery.data.MediaNormalizer.deduplicate(listOf(lowResVideo, masterVideo))
+        assertEquals(1, folded.size)
+        assertEquals("1920x1080", folded[0].resolutionHint)
+    }
+
+    @Test
+    fun testExtractionPhaseAndExtractionSourceCompatibility() {
+        assertEquals("gallery-dl", com.amresalehin.emregallery.data.ExtractionSource.GALLERY_DL.label)
+        assertEquals("GALLERY_DL", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.GALLERY_DL.name)
+        assertEquals("DIRECT_MEDIA", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.DIRECT_MEDIA.name)
+        assertEquals("STATIC_SCRAPING", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.STATIC_SCRAPING.name)
+        assertEquals("BROWSER_INTERCEPTING", com.amresalehin.emregallery.data.DualMediaExtractor.ExtractionPhase.BROWSER_INTERCEPTING.name)
+    }
+
+    @Test
+    fun testAdBlockEngineIdentifiesAdHostsAndTrackers() {
+        // Exact and subdomain matching
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://securepubads.g.doubleclick.net/gampad/ads?iu=123"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://ad.doubleclick.net/ddm/track/123"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://static.criteo.net/js/ld/ld.js"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://script.hotjar.com/modules.js"))
+
+        // Path patterns
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://example.com/pagead/banner.png"))
+        assertTrue(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://example.com/track/pixel?id=456"))
+
+        // Legitimate media URLs should NOT be blocked
+        assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://images.unsplash.com/photo-12345?w=1080"))
+        assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://cdn.example.com/videos/nature_documentary.mp4"))
+        assertFalse(com.amresalehin.emregallery.data.AdBlockEngine.isAdOrTracker("https://upload.wikimedia.org/wikipedia/commons/1/10/Sample.jpg"))
+    }
 }
+
 

@@ -1050,112 +1050,149 @@ object MediaClassifier {
     }
 
     /**
+     * Merges incoming media items into a target map keyed by deduplicationKey.
+     * Unified pipeline for deduplication, video-poster folding, quality upgrades,
+     * resolution hint selection, provenance merging, and header retention.
+     * Returns true if any item was added, replaced, or upgraded.
+     */
+    fun mergeMediaItems(
+        targetMap: MutableMap<String, ScrapedMediaItem>,
+        incoming: List<ScrapedMediaItem>
+    ): Boolean {
+        if (incoming.isEmpty()) return false
+        var modified = false
+
+        fun getVideoThumbKeys(): Set<String> {
+            val keys = mutableSetOf<String>()
+            for (entry in targetMap.values) {
+                if (entry.isVideo) {
+                    entry.thumbnailUrl?.let { keys.add(deduplicationKey(it)) }
+                    val ytId = extractYouTubeVideoId(entry.url)
+                        ?: entry.thumbnailUrl?.let { extractYouTubeVideoId(it) }
+                        ?: extractYouTubeVideoId(entry.provenance.pageUrl)
+                    if (ytId != null) {
+                        keys.add("ytthumb:${ytId.lowercase(Locale.ROOT)}")
+                    }
+                }
+            }
+            return keys
+        }
+
+        for (item in incoming) {
+            val key = deduplicationKey(item.url)
+
+            // Case A: Incoming item is a Video -> fold existing matching poster image into thumbnail
+            if (item.isVideo) {
+                val ytId = extractYouTubeVideoId(item.url)
+                    ?: item.thumbnailUrl?.let { extractYouTubeVideoId(it) }
+                    ?: extractYouTubeVideoId(item.provenance.pageUrl)
+                val videoPosterKeys = mutableSetOf<String>()
+                item.thumbnailUrl?.let { videoPosterKeys.add(deduplicationKey(it)) }
+                if (ytId != null) videoPosterKeys.add("ytthumb:${ytId.lowercase(Locale.ROOT)}")
+
+                var bestThumb = item.thumbnailUrl
+                for (pKey in videoPosterKeys) {
+                    val existingImg = targetMap[pKey]
+                    if (existingImg != null && !existingImg.isVideo) {
+                        if (bestThumb == null || compareMediaQuality(existingImg, item.copy(url = bestThumb)) > 0) {
+                            bestThumb = existingImg.thumbnailUrl ?: existingImg.url
+                        }
+                        targetMap.remove(pKey)
+                        modified = true
+                    }
+                }
+                val candidateVideo = if (bestThumb != item.thumbnailUrl) item.copy(thumbnailUrl = bestThumb) else item
+                val existing = targetMap[key]
+                if (existing == null) {
+                    targetMap[key] = candidateVideo
+                    modified = true
+                } else {
+                    val cmp = compareMediaQuality(candidateVideo, existing)
+                    val preferred = if (cmp > 0) candidateVideo else existing
+                    val secondary = if (preferred === candidateVideo) existing else candidateVideo
+                    val upgraded = preferred.copy(
+                        id = existing.id,
+                        thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl
+                    )
+                    if (upgraded != existing) {
+                        targetMap[key] = upgraded
+                        modified = true
+                    }
+                }
+                continue
+            }
+
+            // Case B: Incoming item is an Image -> check if it matches an existing video's thumbnail/poster
+            val currentVideoThumbKeys = getVideoThumbKeys()
+            if (key in currentVideoThumbKeys) {
+                for ((vKey, vItem) in targetMap.entries.toList()) {
+                    if (vItem.isVideo) {
+                        val ytId = extractYouTubeVideoId(vItem.url)
+                            ?: vItem.thumbnailUrl?.let { extractYouTubeVideoId(it) }
+                            ?: extractYouTubeVideoId(vItem.provenance.pageUrl)
+                        val matches = (vItem.thumbnailUrl != null && deduplicationKey(vItem.thumbnailUrl) == key) ||
+                                (ytId != null && "ytthumb:${ytId.lowercase(Locale.ROOT)}" == key)
+                        if (matches) {
+                            if (vItem.thumbnailUrl == null || compareMediaQuality(item, vItem.copy(url = vItem.thumbnailUrl)) > 0) {
+                                targetMap[vKey] = vItem.copy(thumbnailUrl = item.thumbnailUrl ?: item.url)
+                                modified = true
+                            }
+                        }
+                    }
+                }
+                continue
+            }
+
+            // Case C: Standard media insertion / quality upgrade
+            val existing = targetMap[key]
+            if (existing == null) {
+                targetMap[key] = item
+                modified = true
+            } else {
+                val cmp = compareMediaQuality(item, existing)
+                val preferred = if (cmp > 0) item else existing
+                val secondary = if (preferred === item) existing else item
+
+                val engines = listOf(existing.provenance.extractorEngine, item.provenance.extractorEngine).distinct()
+                val mergedEngine = engines.joinToString(" + ")
+                val mergedThumb = preferred.thumbnailUrl ?: secondary.thumbnailUrl
+                val mergedResolution = when {
+                    parsePixelArea(preferred) != null -> preferred.resolutionHint ?: secondary.resolutionHint
+                    parsePixelArea(secondary) != null -> secondary.resolutionHint ?: preferred.resolutionHint
+                    !preferred.resolutionHint.isNullOrBlank() && preferred.resolutionHint != "Network" -> preferred.resolutionHint
+                    !secondary.resolutionHint.isNullOrBlank() && secondary.resolutionHint != "Network" -> secondary.resolutionHint
+                    else -> preferred.resolutionHint ?: secondary.resolutionHint
+                }
+                val mergedHeaders = secondary.downloadHeaders + preferred.downloadHeaders
+                val resolvedUrl = resolveOriginalMedia(preferred.url).mediaUrl
+
+                val upgraded = preferred.copy(
+                    id = existing.id,
+                    url = resolvedUrl,
+                    thumbnailUrl = mergedThumb,
+                    resolutionHint = mergedResolution,
+                    provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
+                    downloadHeaders = mergedHeaders
+                )
+                if (upgraded != existing) {
+                    targetMap[key] = upgraded
+                    modified = true
+                }
+            }
+        }
+        return modified
+    }
+
+    /**
      * Deduplicates a list of scraped media items discovered by one or more extraction engines.
-     * When duplicates are identified:
-     * - Retains the item with the highest resolution / quality / full original URL
-     * - Retains valid thumbnails from either source
-     * - Combines provenance info (indicating multiple scrapers identified the item)
-     * - Preserves required download headers
+     * Retains the highest-quality master file, folds video posters, combines provenance,
+     * and preserves required download headers.
      */
     fun deduplicateScrapedItems(items: List<ScrapedMediaItem>): List<ScrapedMediaItem> {
         if (items.isEmpty()) return emptyList()
-
-        val grouped = LinkedHashMap<String, MutableList<ScrapedMediaItem>>()
-        for (item in items) {
-            val key = deduplicationKey(item.url)
-            val list = grouped.getOrPut(key) { mutableListOf() }
-            list.add(item)
-        }
-
-        val result = mutableListOf<ScrapedMediaItem>()
-        for ((_, group) in grouped) {
-            if (group.size == 1) {
-                result.add(group[0])
-            } else {
-                var best = group[0]
-                for (i in 1 until group.size) {
-                    if (compareMediaQuality(group[i], best) > 0) {
-                        best = group[i]
-                    }
-                }
-
-                val engines = group.map { it.provenance.extractorEngine }.distinct()
-                val mergedProvenance = if (engines.size > 1) {
-                    best.provenance.copy(
-                        extractorEngine = engines.joinToString(" + ")
-                    )
-                } else {
-                    best.provenance
-                }
-
-                val bestThumb = best.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }
-                val mergedResolution = group.firstOrNull {
-                    !it.resolutionHint.isNullOrBlank() && it.resolutionHint != "Network"
-                }?.resolutionHint ?: best.resolutionHint
-
-                val mergedHeaders = mutableMapOf<String, String>()
-                for (cand in group) {
-                    mergedHeaders.putAll(cand.downloadHeaders)
-                }
-
-                val resolvedOriginalUrl = resolveOriginalMedia(best.url).mediaUrl
-                val merged = best.copy(
-                    url = resolvedOriginalUrl,
-                    thumbnailUrl = bestThumb,
-                    resolutionHint = mergedResolution,
-                    provenance = mergedProvenance,
-                    downloadHeaders = mergedHeaders
-                )
-                result.add(merged)
-            }
-        }
-
-        // Video poster folding: If a video is present, fold standalone images matching its poster/thumbnail into the video
-        val videoThumbKeys = mutableSetOf<String>()
-        for (item in result) {
-            if (item.isVideo) {
-                item.thumbnailUrl?.let { videoThumbKeys.add(deduplicationKey(it)) }
-                val ytId = extractYouTubeVideoId(item.url) ?:
-                           item.thumbnailUrl?.let { extractYouTubeVideoId(it) } ?:
-                           extractYouTubeVideoId(item.provenance.pageUrl)
-                if (ytId != null) {
-                    videoThumbKeys.add("ytthumb:${ytId.lowercase(Locale.ROOT)}")
-                }
-            }
-        }
-
-        if (videoThumbKeys.isEmpty()) {
-            return result
-        }
-
-        val finalResult = mutableListOf<ScrapedMediaItem>()
-        for (item in result) {
-            if (!item.isVideo) {
-                val itemKey = deduplicationKey(item.url)
-                if (itemKey in videoThumbKeys) {
-                    val matchingVideoIdx = finalResult.indexOfFirst { v ->
-                        val vUrlYt = extractYouTubeVideoId(v.url)?.lowercase(Locale.ROOT)
-                        val vThumbYt = v.thumbnailUrl?.let { extractYouTubeVideoId(it)?.lowercase(Locale.ROOT) }
-                        val vPageYt = extractYouTubeVideoId(v.provenance.pageUrl)?.lowercase(Locale.ROOT)
-                        v.isVideo && (
-                            (v.thumbnailUrl != null && deduplicationKey(v.thumbnailUrl) == itemKey) ||
-                            (vUrlYt != null && "ytthumb:$vUrlYt" == itemKey) ||
-                            (vThumbYt != null && "ytthumb:$vThumbYt" == itemKey) ||
-                            (vPageYt != null && "ytthumb:$vPageYt" == itemKey)
-                        )
-                    }
-                    if (matchingVideoIdx != -1) {
-                        val matchingVideo = finalResult[matchingVideoIdx]
-                        if (matchingVideo.thumbnailUrl == null || compareMediaQuality(item, matchingVideo.copy(url = matchingVideo.thumbnailUrl)) > 0) {
-                            finalResult[matchingVideoIdx] = matchingVideo.copy(thumbnailUrl = item.thumbnailUrl ?: item.url)
-                        }
-                    }
-                    continue
-                }
-            }
-            finalResult.add(item)
-        }
-        return finalResult
+        val map = LinkedHashMap<String, ScrapedMediaItem>()
+        mergeMediaItems(map, items)
+        return map.values.toList()
     }
 
     /**

@@ -347,7 +347,12 @@ object MediaCaptureEngine {
         poster: String? = null,
         resolutionHint: String? = null,
         mimeHint: String? = null,
-        indexHint: Int = 0
+        indexHint: Int = 0,
+        titleHint: String? = null,
+        domSelector: String? = null,
+        declaredWidth: Int? = null,
+        declaredHeight: Int? = null,
+        customId: String? = null
     ): ScrapedMediaItem? {
         val trimmed = rawUrl.trim()
         if (trimmed.startsWith("blob:", ignoreCase = true)) return null
@@ -365,11 +370,15 @@ object MediaCaptureEngine {
 
         val classification = MediaClassifier.classify(cleanedUrl, mimeHint)
         val isVidAudStream = classification.isVideo || classification.isAudio || classification.isStream
-        val title = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, indexHint)
+        val title = resolvedInfo.cleanTitle
+            ?: titleHint?.takeIf { it.isNotBlank() }
+            ?: MediaClassifier.deriveFileName(cleanedUrl, classification.format, indexHint)
 
         if (ContentAwareMediaFilter.isUiChromeUrl(
                 url = cleanedUrl,
                 title = title,
+                width = declaredWidth,
+                height = declaredHeight,
                 isVideoOrAudioOrStream = isVidAudStream
             )
         ) {
@@ -391,8 +400,20 @@ object MediaCaptureEngine {
         mimeHint?.let { metadataMap["mime_hint"] = it }
         metadataMap["source_url"] = baseUrl
 
+        val engineLabel = when (source) {
+            ExtractionSource.STATIC_HTML -> "Static HTML"
+            ExtractionSource.NETWORK_INTERCEPT -> "Browser Chromium (Network Intercept)"
+            ExtractionSource.DOM_SCRAPE -> "Static HTML (DOM Scrape)"
+            ExtractionSource.SRCSET -> "Static HTML (Srcset)"
+            ExtractionSource.CSS_BACKGROUND -> "Static HTML (CSS Background)"
+            ExtractionSource.IFRAME -> "Static HTML (iFrame)"
+            ExtractionSource.GALLERY_DL -> "gallery-dl"
+        }
+
+        val itemId = customId ?: "captured_${indexHint}_${System.currentTimeMillis()}_${cleanedUrl.hashCode()}"
+
         return ScrapedMediaItem(
-            id = "captured_${indexHint}_${System.currentTimeMillis()}_${cleanedUrl.hashCode()}",
+            id = itemId,
             url = cleanedUrl,
             title = title,
             isVideo = classification.isVideo,
@@ -405,9 +426,9 @@ object MediaCaptureEngine {
             mimeType = classification.mimeType,
             resolutionHint = resolutionHint,
             provenance = MediaProvenance(
-                extractorEngine = "MediaCaptureEngine (${source.label})",
+                extractorEngine = engineLabel,
                 pageUrl = baseUrl,
-                domSelector = if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null
+                domSelector = domSelector ?: if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null
             ),
             metadata = metadataMap,
             downloadHeaders = headers
