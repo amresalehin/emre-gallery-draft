@@ -133,7 +133,7 @@ object DownloadActivityManager {
         try {
             val jsonArray = JSONArray()
             // Only persist active, paused, retrying, or failed items (finished are in repository)
-            val toSave = _activities.value.filter { it.status != DownloadActivityStatus.FINISHED }.take(50)
+            val toSave = _activities.value.filter { it.status != DownloadActivityStatus.FINISHED }.take(500)
             for (item in toSave) {
                 val obj = JSONObject().apply {
                     put("id", item.id)
@@ -477,6 +477,14 @@ object DownloadActivityManager {
         if (index < 0) return false
 
         val item = current[index]
+        if (item.status == DownloadActivityStatus.PAUSED ||
+            item.status == DownloadActivityStatus.FINISHED ||
+            item.errorMessage == "Cancelled by user"
+        ) {
+            Log.d(TAG, "Ignoring failure callback for item $itemId with status ${item.status}")
+            return false
+        }
+
         val isTransient = isTemporaryFailure(statusCode, errorMessage)
         val nextAttempt = item.retryCount + 1
 

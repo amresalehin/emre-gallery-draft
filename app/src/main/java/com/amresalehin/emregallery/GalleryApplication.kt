@@ -68,6 +68,30 @@ class GalleryApplication : Application() {
 
         // Initialize DownloadActivityManager to restore persisted downloads and resume retry schedules
         com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this)
+
+        // Pre-warm Chromium WebView engine on cold start so automatic scraping
+        // never stalls waiting for cold browser initialization
+        warmupChromium(this)
+    }
+
+    companion object {
+        fun warmupChromium(context: Context) {
+            runCatching {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    try {
+                        val cm = android.webkit.CookieManager.getInstance()
+                        cm.setAcceptCookie(true)
+                        val warmupWv = android.webkit.WebView(context)
+                        cm.setAcceptThirdPartyCookies(warmupWv, true)
+                        warmupWv.settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                        }
+                        warmupWv.destroy()
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
     }
 
     /**

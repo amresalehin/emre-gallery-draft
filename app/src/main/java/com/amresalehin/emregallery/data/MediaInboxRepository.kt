@@ -112,9 +112,6 @@ class MediaInboxRepository(private val context: Context) {
                 when {
                     existing.id == stack.id -> true
                     existing.sourceUrl.isNotBlank() && stack.sourceUrl.isNotBlank() && existing.sourceUrl == stack.sourceUrl -> true
-                    existing.title.isNotBlank() && stack.title.isNotBlank() &&
-                        existing.title.equals(stack.title, ignoreCase = true) &&
-                        existing.title != "Discovered Media" && existing.title != "Media Download" -> true
                     else -> false
                 }
             }
@@ -190,22 +187,29 @@ class MediaInboxRepository(private val context: Context) {
         val current = _stacks.value.toMutableList()
         // 1. Try to find existing stack by stackId
         var existingIndex = current.indexOfFirst { it.id == stackId }
-        // 2. If not found by stackId, match by sourceUrl if non-blank
+        // 2. If not found by stackId, match strictly by sourceUrl if non-blank
         if (existingIndex < 0 && sourceUrl.isNotBlank()) {
             existingIndex = current.indexOfFirst { it.sourceUrl == sourceUrl }
-        }
-        // 3. If still not found, match by stackTitle if non-generic
-        if (existingIndex < 0 && stackTitle.isNotBlank() && stackTitle != "Discovered Media" && stackTitle != "Media Download") {
-            existingIndex = current.indexOfFirst {
-                it.title.equals(stackTitle, ignoreCase = true) &&
-                    (sourceDomain.isBlank() || it.sourceDomain.isBlank() || it.sourceDomain.equals(sourceDomain, ignoreCase = true))
-            }
         }
 
         if (existingIndex >= 0) {
             val existing = current[existingIndex]
+            // When replacing an item with the same sourceUrl or id, delete old file on disk if path changed
+            val replacedItems = existing.items.filter {
+                (it.id == item.id || (it.sourceUrl.isNotBlank() && it.sourceUrl == item.sourceUrl)) && it.localUri != item.localUri
+            }
+            for (oldItem in replacedItems) {
+                runCatching {
+                    val path = oldItem.localUri.removePrefix("file://")
+                    val file = File(path)
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                }
+            }
+
             val updatedItems = existing.items.filter {
-                it.id != item.id && it.sourceUrl != item.sourceUrl && it.localUri != item.localUri
+                it.id != item.id && (it.sourceUrl.isBlank() || it.sourceUrl != item.sourceUrl) && it.localUri != item.localUri
             } + item
             current[existingIndex] = existing.copy(
                 items = updatedItems,

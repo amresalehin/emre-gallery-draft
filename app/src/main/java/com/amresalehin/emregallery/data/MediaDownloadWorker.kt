@@ -13,24 +13,32 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
+import kotlin.math.abs
 
 /**
  * Persistent background downloader worker powered by Android Jetpack WorkManager.
- * Runs as a foreground service with a silent notification to ensure uninterrupted downloading.
- * Incorporates byte-level progress reporting, HTTP Range resumable downloading, and stream remuxing.
+ * Runs as a foreground service with a unique notification ID to ensure uninterrupted downloading.
+ * Incorporates byte-level progress reporting, HTTP Range resumable downloading, headers/cookies propagation,
+ * and social video remuxing with yt-dlp.
  */
 class MediaDownloadWorker(
     appContext: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
-    override suspend fun getForegroundInfo(): ForegroundInfo {
-        val title = inputData.getString(KEY_TITLE) ?: inputData.getString(KEY_FILE_NAME) ?: "Media"
-        return createSilentForegroundInfo(title)
+    private fun getWorkerNotificationId(key: String): Int {
+        return 4001 + (abs(key.hashCode()) % 50000)
     }
 
-    private fun createSilentForegroundInfo(title: String): ForegroundInfo {
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val itemId = inputData.getString(KEY_ITEM_ID) ?: id.toString()
+        val title = inputData.getString(KEY_TITLE) ?: inputData.getString(KEY_FILE_NAME) ?: "Media"
+        return createSilentForegroundInfo(title, getWorkerNotificationId(itemId))
+    }
+
+    private fun createSilentForegroundInfo(title: String, notificationId: Int): ForegroundInfo {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (notificationManager.getNotificationChannel(SILENT_CHANNEL_ID) == null) {
@@ -59,9 +67,9 @@ class MediaDownloadWorker(
             .build()
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ForegroundInfo(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            ForegroundInfo(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
-            ForegroundInfo(NOTIFICATION_ID, notification)
+            ForegroundInfo(notificationId, notification)
         }
     }
 
@@ -79,6 +87,24 @@ class MediaDownloadWorker(
         val stackTitle = inputData.getString(KEY_STACK_TITLE) ?: "Discovered Media"
         val sourceDomain = inputData.getString(KEY_SOURCE_DOMAIN) ?: ""
         val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: mediaUrl
+        val sourceEngine = inputData.getString(KEY_SOURCE_ENGINE) ?: ""
+        val headersJson = inputData.getString(KEY_HEADERS_JSON)
+
+        val downloadHeaders: Map<String, String> = runCatching {
+            if (!headersJson.isNullOrBlank()) {
+                val obj = JSONObject(headersJson)
+                val map = mutableMapOf<String, String>()
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    map[k] = obj.getString(k)
+                }
+                map
+            } else emptyMap()
+        }.getOrDefault(emptyMap())
+
+        val cookieString = OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
+            ?: downloadHeaders["Cookie"]
 
         try {
             setForeground(getForegroundInfo())
@@ -92,22 +118,28 @@ class MediaDownloadWorker(
             var downloadedFile: File? = null
             var errorDiagnostic: String? = null
 
-            // 1. For HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp)
+            val isSocialUrl = listOf("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "vimeo.com", "twitter.com", "x.com")
+                .any { mediaUrl.contains(it, ignoreCase = true) }
             val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
-            if (isStreamingMedia && GalleryDlEngine.isAvailable()) {
-                setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Remuxing stream: $title..."))
+            val isYtDlpTarget = sourceEngine == "yt-dlp" || isSocialUrl || isStreamingMedia
+
+            // 1. For social video and HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp)
+            if (isYtDlpTarget && GalleryDlEngine.isAvailable()) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Downloading stream/video: $title..."))
                 downloadedFile = GalleryDlEngine.downloadMedia(
                     context = applicationContext,
                     mediaUrl = mediaUrl,
                     fileName = fileName,
-                    referer = referer
+                    referer = referer,
+                    headers = downloadHeaders,
+                    cookies = cookieString
                 )
             }
 
             // 2. Standard or fallback download via OkHttp with HTTP Range resumability
             var okHttpResult: OkHttpDownloader.DownloadResult? = null
             if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
-                var lastProgressUpdate = 0L
+                var lastProgressUpdate = System.currentTimeMillis()
                 var lastBytes = 0L
                 val result = OkHttpDownloader.downloadMediaFileDetailed(
                     context = applicationContext,
@@ -115,6 +147,7 @@ class MediaDownloadWorker(
                     fileName = fileName,
                     referer = referer,
                     downloadId = itemId,
+                    headers = downloadHeaders,
                     onProgress = { bytesRead, totalBytes ->
                         val now = System.currentTimeMillis()
                         if (now - lastProgressUpdate > 300) {
@@ -157,10 +190,17 @@ class MediaDownloadWorker(
                             context = applicationContext,
                             mediaUrl = mediaUrl,
                             fileName = fileName,
-                            referer = referer
+                            referer = referer,
+                            headers = downloadHeaders,
+                            cookies = cookieString
                         )
                     }
                 }
+            }
+
+            if (isStopped) {
+                Log.d(TAG, "MediaDownloadWorker was stopped for $mediaUrl")
+                return@withContext Result.failure()
             }
 
             if (downloadedFile != null && downloadedFile.exists() && downloadedFile.length() > 0L) {
@@ -205,25 +245,40 @@ class MediaDownloadWorker(
                 val statusCode = okHttpResult?.statusCode ?: -1
                 val retryAfter = okHttpResult?.retryAfterSeconds
 
-                DownloadActivityManager.handleDownloadFailure(
-                    context = applicationContext,
-                    itemId = itemId,
-                    statusCode = statusCode,
-                    errorMessage = finalError,
-                    retryAfterSeconds = retryAfter
-                )
+                val currentItem = DownloadActivityManager.activities.value.firstOrNull { it.id == itemId }
+                val isPausedOrCancelled = isStopped ||
+                    currentItem?.status == DownloadActivityStatus.PAUSED ||
+                    currentItem?.errorMessage == "Cancelled by user"
+
+                if (!isPausedOrCancelled) {
+                    DownloadActivityManager.handleDownloadFailure(
+                        context = applicationContext,
+                        itemId = itemId,
+                        statusCode = statusCode,
+                        errorMessage = finalError,
+                        retryAfterSeconds = retryAfter
+                    )
+                }
                 Result.failure(workDataOf(KEY_ERROR to finalError))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error in MediaDownloadWorker for $mediaUrl", e)
             val err = e.message ?: "Unknown error"
-            DownloadActivityManager.handleDownloadFailure(
-                context = applicationContext,
-                itemId = itemId,
-                statusCode = -1,
-                errorMessage = err,
-                retryAfterSeconds = null
-            )
+            val currentItem = DownloadActivityManager.activities.value.firstOrNull { it.id == itemId }
+            val isPausedOrCancelled = isStopped ||
+                e is kotlinx.coroutines.CancellationException ||
+                currentItem?.status == DownloadActivityStatus.PAUSED ||
+                currentItem?.errorMessage == "Cancelled by user"
+
+            if (!isPausedOrCancelled) {
+                DownloadActivityManager.handleDownloadFailure(
+                    context = applicationContext,
+                    itemId = itemId,
+                    statusCode = -1,
+                    errorMessage = err,
+                    retryAfterSeconds = null
+                )
+            }
             Result.failure(workDataOf(KEY_ERROR to err))
         } finally {
             DownloadQueueManager.markDownloadCompleted(itemId)
@@ -247,6 +302,8 @@ class MediaDownloadWorker(
         const val KEY_STACK_TITLE = "stack_title"
         const val KEY_SOURCE_DOMAIN = "source_domain"
         const val KEY_SOURCE_URL = "source_url"
+        const val KEY_SOURCE_ENGINE = "source_engine"
+        const val KEY_HEADERS_JSON = "headers_json"
 
         const val KEY_PROGRESS = "progress"
         const val KEY_BYTES_READ = "bytes_read"

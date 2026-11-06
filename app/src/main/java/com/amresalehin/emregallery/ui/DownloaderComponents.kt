@@ -975,6 +975,14 @@ fun DownloaderResultsPage(
     var isDownloaded by remember { mutableStateOf(false) }
     var downloadedItemIds by remember { mutableStateOf(setOf<String>()) }
 
+    val activities by DownloadActivityManager.activities.collectAsState()
+    val finishedMediaUrls = remember(activities) {
+        activities.filter { it.status == DownloadActivityStatus.FINISHED }.map { it.mediaUrl }.toSet()
+    }
+    val finishedIds = remember(activities) {
+        activities.filter { it.status == DownloadActivityStatus.FINISHED }.map { it.id }.toSet()
+    }
+
     LaunchedEffect(isEditingUrl) {
         if (isEditingUrl) {
             urlTextFieldValue = TextFieldValue(
@@ -1002,12 +1010,14 @@ fun DownloaderResultsPage(
             downloadedItemIds = emptySet()
             isDownloaded = false
             dynamicDimensions.clear()
+            DownloaderSession.startSession(activeUrl)
             dualExtractor.extract(activeUrl, scope)
         }
     }
 
-    val allScrapedItems = remember(extractorState.items) {
-        MediaClassifier.deduplicateScrapedItems(extractorState.items)
+    val sessionItems by DownloaderSession.discoveredItems.collectAsState()
+    val allScrapedItems = remember(extractorState.items, sessionItems) {
+        MediaClassifier.deduplicateScrapedItems(extractorState.items + sessionItems)
     }
 
     // Auto-select newly discovered items
@@ -1557,7 +1567,7 @@ fun DownloaderResultsPage(
                             DownloaderMediaCard(
                                 item = item,
                                 isSelected = item.id in selectedItemIds,
-                                isDownloaded = item.id in downloadedItemIds,
+                                isDownloaded = item.id in finishedIds || item.url in finishedMediaUrls,
                                 dynamicDimensions = dynamicDimensions,
                                 onToggle = {
                                     isDownloaded = false
@@ -1658,9 +1668,7 @@ fun DownloaderResultsPage(
                                 downloadProgress = 1.0f
                                 downloadStatusText = "Queued ${deduplicated.size} item(s)"
                                 delay(300)
-                                downloadedItemIds = downloadedItemIds + deduplicated.map { it.id }.toSet()
                                 isDownloading = false
-                                isDownloaded = true
                                 onDownloadComplete(deduplicated.size)
                             }
                         }

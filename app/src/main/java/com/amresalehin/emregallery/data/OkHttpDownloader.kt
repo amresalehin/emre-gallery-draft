@@ -241,7 +241,7 @@ object OkHttpDownloader {
                     source.request(maxBytes)
                     val buffer = source.buffer
                     val toRead = minOf(buffer.size, maxBytes)
-                    buffer.clone().readUtf8()
+                    buffer.clone().readUtf8(toRead)
                 } else {
                     ""
                 }
@@ -308,6 +308,7 @@ object OkHttpDownloader {
         fileName: String,
         referer: String? = null,
         downloadId: String? = null,
+        headers: Map<String, String>? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): DownloadResult = withContext(Dispatchers.IO) {
         // Handle Base64 inline data URIs directly without network calls
@@ -361,6 +362,12 @@ object OkHttpDownloader {
             reqBuilder.header("Referer", referer)
         }
 
+        headers?.forEach { (k, v) ->
+            if (!k.equals("Range", ignoreCase = true) && !k.equals("If-Range", ignoreCase = true)) {
+                reqBuilder.header(k, v)
+            }
+        }
+
         // Enable resumable downloads via HTTP Range header if partial data exists
         if (existingBytes > 0L) {
             reqBuilder.header("Range", "bytes=$existingBytes-")
@@ -403,7 +410,14 @@ object OkHttpDownloader {
                     val cleanRequest = Request.Builder()
                         .url(mediaUrl)
                         .header("Accept", "*/*")
-                        .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
+                        .apply {
+                            if (!referer.isNullOrBlank()) header("Referer", referer)
+                            headers?.forEach { (k, v) ->
+                                if (!k.equals("Range", ignoreCase = true) && !k.equals("If-Range", ignoreCase = true)) {
+                                    header(k, v)
+                                }
+                            }
+                        }
                         .build()
                     response = client.newCall(cleanRequest).execute()
                 }
@@ -434,7 +448,14 @@ object OkHttpDownloader {
                 val cleanRequest = Request.Builder()
                     .url(mediaUrl)
                     .header("Accept", "*/*")
-                    .apply { if (!referer.isNullOrBlank()) header("Referer", referer) }
+                    .apply {
+                        if (!referer.isNullOrBlank()) header("Referer", referer)
+                        headers?.forEach { (k, v) ->
+                            if (!k.equals("Range", ignoreCase = true) && !k.equals("If-Range", ignoreCase = true)) {
+                                header(k, v)
+                            }
+                        }
+                    }
                     .build()
                 activeResponse = client.newCall(cleanRequest).execute()
             }
@@ -496,39 +517,18 @@ object OkHttpDownloader {
                     )
                 }
 
-                // 2. Accept genuine HLS/DASH manifest MIME types, rejecting arbitrary documents
-                if (isManifest && mimeType != null) {
-                    val allowedHlsTypes = setOf(
-                        "application/vnd.apple.mpegurl",
-                        "application/x-mpegurl",
-                        "audio/mpegurl",
-                        "application/octet-stream",
-                        "text/plain"
+                // 2. Reject streaming manifest URLs (.m3u8/.mpd) from direct OkHttp file commits
+                if (isManifest) {
+                    tempFile.delete()
+                    metaFile.delete()
+                    return@withContext DownloadResult(
+                        file = null,
+                        isSuccessful = false,
+                        statusCode = code,
+                        bytesDownloaded = 0L,
+                        totalBytes = -1L,
+                        errorMessage = "Streaming manifests (.m3u8/.mpd) must be downloaded and remuxed via stream engine"
                     )
-                    val allowedDashTypes = setOf(
-                        "application/dash+xml",
-                        "video/vnd.mpeg.dash.mpd",
-                        "application/xml",
-                        "text/xml",
-                        "application/octet-stream"
-                    )
-                    val isValidManifestMime = if (isHlsManifest) {
-                        allowedHlsTypes.contains(mimeType) || mimeType.contains("mpegurl")
-                    } else {
-                        allowedDashTypes.contains(mimeType) || mimeType.contains("dash")
-                    }
-                    if (!isValidManifestMime) {
-                        tempFile.delete()
-                        metaFile.delete()
-                        return@withContext DownloadResult(
-                            file = null,
-                            isSuccessful = false,
-                            statusCode = code,
-                            bytesDownloaded = 0L,
-                            totalBytes = -1L,
-                            errorMessage = "Invalid MIME type for streaming manifest: $mimeType"
-                        )
-                    }
                 }
 
                 val contentRange = resp.header("Content-Range")
@@ -698,9 +698,9 @@ object OkHttpDownloader {
                 )
             }
 
-            // Manifest-specific content validation
-            if (isHlsManifest && !headStr.contains("#extm3u") && !headStr.contains("#ext-x-")) {
-                Log.w(TAG, "Downloaded HLS manifest does not contain #EXTM3U: ${tempFile.name}")
+            // Reject raw streaming playlists (.m3u8 or .mpd) from being saved as finished media files
+            if (isHlsManifest || isDashManifest || headStr.contains("#extm3u") || headStr.contains("<mpd") || headStr.contains("urn:mpeg:dash:schema")) {
+                Log.w(TAG, "Streaming playlist text (.m3u8 / .mpd) cannot be saved as finished media: ${tempFile.name}")
                 tempFile.delete()
                 metaFile.delete()
                 return DownloadResult(
@@ -709,21 +709,7 @@ object OkHttpDownloader {
                     statusCode = code,
                     bytesDownloaded = 0L,
                     totalBytes = -1L,
-                    errorMessage = "Downloaded file is not a valid HLS manifest (missing #EXTM3U header)"
-                )
-            }
-
-            if (isDashManifest && !headStr.contains("<mpd") && !headStr.contains("urn:mpeg:dash:schema")) {
-                Log.w(TAG, "Downloaded DASH manifest does not contain <MPD: ${tempFile.name}")
-                tempFile.delete()
-                metaFile.delete()
-                return DownloadResult(
-                    file = null,
-                    isSuccessful = false,
-                    statusCode = code,
-                    bytesDownloaded = 0L,
-                    totalBytes = -1L,
-                    errorMessage = "Downloaded file is not a valid DASH manifest (missing <MPD> root tag)"
+                    errorMessage = "Cannot save streaming playlist text (.m3u8/.mpd) as finished media file"
                 )
             }
         }
@@ -900,9 +886,10 @@ object OkHttpDownloader {
         fileName: String,
         referer: String? = null,
         downloadId: String? = null,
+        headers: Map<String, String>? = null,
         onProgress: ((bytesRead: Long, totalBytes: Long) -> Unit)? = null
     ): File? {
-        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, downloadId, onProgress)
+        val res = downloadMediaFileDetailed(context, mediaUrl, fileName, referer, downloadId, headers, onProgress)
         return res.file
     }
 }

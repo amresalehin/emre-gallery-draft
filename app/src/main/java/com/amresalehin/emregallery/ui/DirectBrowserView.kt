@@ -44,7 +44,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.amresalehin.emregallery.data.AdBlockEngine
 import com.amresalehin.emregallery.data.BrowserHistoryManager
+import com.amresalehin.emregallery.data.BrowserMediaExtractor
 import com.amresalehin.emregallery.data.BrowserSite
+import com.amresalehin.emregallery.data.DownloaderSession
+import com.amresalehin.emregallery.data.ExtractionSource
+import com.amresalehin.emregallery.data.MediaCaptureEngine
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import kotlinx.coroutines.launch
@@ -124,70 +128,13 @@ fun DirectBrowserView(
         if (wv == null) return
         val current = wv.url ?: return
         if (current.isBlank() || current == "about:blank" || currentUrl.isBlank()) return
-        val js = """
-            (function() {
-                var results = [];
-                function addUrl(u) {
-                    if (u && typeof u === 'string' && u.length > 5 && !u.startsWith('data:') && !u.startsWith('javascript:')) {
-                        results.push(u);
-                    }
-                }
-                document.querySelectorAll('video, video source, audio, audio source').forEach(function(el) {
-                    addUrl(el.src);
-                    addUrl(el.currentSrc);
-                });
-                document.querySelectorAll('img').forEach(function(img) {
-                    addUrl(img.src);
-                    addUrl(img.currentSrc);
-                    addUrl(img.getAttribute('data-src'));
-                    addUrl(img.getAttribute('data-original'));
-                    var ss = img.getAttribute('srcset');
-                    if (ss) {
-                        ss.split(',').forEach(function(part) {
-                            var p = part.trim().split(/\s+/)[0];
-                            addUrl(p);
-                        });
-                    }
-                });
-                return JSON.stringify(results);
-            })();
-        """.trimIndent()
 
-        wv.evaluateJavascript(js) { jsonRaw ->
-            if (jsonRaw != null && jsonRaw != "null") {
-                try {
-                    val cleanJson = if (jsonRaw.startsWith("\"") && jsonRaw.endsWith("\"")) {
-                        org.json.JSONTokener(jsonRaw).nextValue().toString()
-                    } else {
-                        jsonRaw
-                    }
-                    val arr = JSONArray(cleanJson)
-                    val discovered = mutableListOf<ScrapedMediaItem>()
-                    for (i in 0 until arr.length()) {
-                        val raw = arr.optString(i)
-                        val resolved = MediaClassifier.resolveUrl(raw, current) ?: continue
-                        val classification = MediaClassifier.classify(resolved)
-                        val fileName = MediaClassifier.deriveFileName(resolved, classification.format, i)
-                        discovered.add(
-                            ScrapedMediaItem(
-                                id = "dom_${System.currentTimeMillis()}_$i",
-                                url = resolved,
-                                title = fileName,
-                                isVideo = classification.isVideo,
-                                isAudio = classification.isAudio,
-                                isStream = classification.isStream,
-                                category = classification.category,
-                                format = classification.format,
-                                mimeType = classification.mimeType,
-                                source = "Live Browser DOM"
-                            )
-                        )
-                    }
-                    if (discovered.isNotEmpty()) {
-                        val domain = runCatching { URL(current).host }.getOrDefault("")
-                        onBatchExtracted(discovered, wv.title, domain)
-                    }
-                } catch (_: Exception) {}
+        wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { jsonRaw ->
+            val discovered = MediaCaptureEngine.parseJsDomScanResult(jsonRaw, current)
+            if (discovered.isNotEmpty()) {
+                val domain = runCatching { java.net.URL(current).host }.getOrDefault("")
+                onBatchExtracted(discovered, pageTitle, domain)
+                DownloaderSession.addDiscoveredItems(discovered, pageTitle)
             }
         }
     }
@@ -464,6 +411,21 @@ fun DirectBrowserView(
                                 userAgentString = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
                             }
 
+                            addJavascriptInterface(
+                                BrowserMediaExtractor.EmreMediaBridge { rawUrl ->
+                                    val item = MediaCaptureEngine.buildMediaItem(
+                                        rawUrl = rawUrl,
+                                        source = ExtractionSource.DOM_SCRAPE,
+                                        baseUrl = currentUrl
+                                    )
+                                    if (item != null) {
+                                        onMediaExtracted(item)
+                                        DownloaderSession.addDiscoveredItem(item)
+                                    }
+                                },
+                                "EmreBridge"
+                            )
+
                             webChromeClient = object : WebChromeClient() {
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                     loadingProgress = newProgress / 100f
@@ -609,7 +571,8 @@ fun DirectBrowserView(
                                             coroutineScope.launch {
                                                 historyManager.recordVisit(it, view?.title)
                                             }
-                                            // Automatically scan page DOM for media once loaded
+                                            // Setup live MutationObserver and scan page DOM
+                                            view?.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
                                             scanCurrentPageDOM(view)
                                         }
                                     }
@@ -624,44 +587,13 @@ fun DirectBrowserView(
                                     val reqUrl = request?.url?.toString() ?: return null
                                     if (reqUrl.startsWith("about:")) return null
 
-                                    // 1. Block ad networks and tracking requests with empty response
-                                    if (AdBlockEngine.isAdOrTracker(reqUrl)) {
-                                        return AdBlockEngine.createEmptyResponse()
-                                    }
-
-                                    // 2. Reject streaming fragments and slices
-                                    if (MediaClassifier.isMediaFragment(reqUrl)) {
-                                        return null
-                                    }
-
-                                    if (currentUrl.isBlank()) return null
-                                    val classified = MediaClassifier.classify(reqUrl)
-
-                                    // Intercept video streams (HLS/DASH), standalone videos, audio files, or quality media
-                                    if (classified.isStream || classified.isVideo || classified.isAudio ||
-                                        (classified.category == com.amresalehin.emregallery.data.MediaCategory.IMAGES &&
-                                                (reqUrl.contains("jpg") || reqUrl.contains("png") || reqUrl.contains("webp")) &&
-                                                !AdBlockEngine.isAdOrTracker(reqUrl) &&
-                                                !reqUrl.contains("analytics") && !reqUrl.contains("tracker") && !reqUrl.contains("pixel"))
-                                    ) {
-                                        val cleanReqUrl = if (classified.isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
-                                        val fileName = MediaClassifier.deriveFileName(cleanReqUrl, classified.format, 0)
-                                        val item = ScrapedMediaItem(
-                                            id = "intercept_${System.currentTimeMillis()}_${cleanReqUrl.hashCode()}",
-                                            url = cleanReqUrl,
-                                            title = fileName,
-                                            isVideo = classified.isVideo,
-                                            isAudio = classified.isAudio,
-                                            isStream = classified.isStream,
-                                            category = classified.category,
-                                            format = classified.format,
-                                            mimeType = classified.mimeType,
-                                            source = "Browser Interceptor"
-                                        )
+                                    return MediaCaptureEngine.shouldInterceptRequest(
+                                        request = request,
+                                        baseUrl = currentUrl
+                                    ) { item ->
+                                        DownloaderSession.addDiscoveredItem(item)
                                         onMediaExtracted(item)
                                     }
-
-                                    return null
                                 }
                             }
 

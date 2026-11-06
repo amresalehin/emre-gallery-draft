@@ -9,11 +9,14 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.flow.Flow
+import org.json.JSONObject
 import java.util.UUID
+import kotlin.math.abs
 
 /**
  * Manages persistent media downloads through Android Jetpack WorkManager.
  * Schedules, tracks, and cancels background downloads with network constraints.
+ * Keys unique work by deduped URL and synchronizes active work IDs with running jobs.
  */
 object DownloadQueueManager {
 
@@ -27,7 +30,11 @@ object DownloadQueueManager {
     private val activeDownloadCount = java.util.concurrent.atomic.AtomicInteger(0)
     private val activeItemIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
-    fun isDownloading(itemId: String): Boolean = activeItemIds.contains(itemId)
+    fun isDownloading(itemId: String): Boolean {
+        if (activeItemIds.contains(itemId)) return true
+        val activity = DownloadActivityManager.activities.value.firstOrNull { it.id == itemId }
+        return activity?.status == DownloadActivityStatus.DOWNLOADING || activity?.status == DownloadActivityStatus.RETRYING
+    }
 
     fun markDownloadStarted(count: Int = 1, itemId: String? = null) {
         if (itemId != null) activeItemIds.add(itemId)
@@ -44,6 +51,20 @@ object DownloadQueueManager {
         }
     }
 
+    private fun serializeHeaders(headers: Map<String, String>): String? {
+        if (headers.isEmpty()) return null
+        return runCatching {
+            val json = JSONObject()
+            headers.forEach { (k, v) ->
+                // Guard against exceeding the 10KB WorkManager Data limit by capping individual header values
+                if (v.length <= 2048) {
+                    json.put(k, v)
+                }
+            }
+            json.toString().takeIf { it.length <= 4096 }
+        }.getOrNull()
+    }
+
     fun enqueueDownload(
         context: Context,
         item: ScrapedMediaItem,
@@ -58,6 +79,7 @@ object DownloadQueueManager {
         val sTitle = stackTitle ?: sourceDomain ?: "Discovered Media"
         val domain = sourceDomain ?: ""
         val url = sourceUrl ?: item.url
+        val headersJson = serializeHeaders(item.downloadHeaders)
 
         val inputData = Data.Builder()
             .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
@@ -73,6 +95,12 @@ object DownloadQueueManager {
             .putString(MediaDownloadWorker.KEY_STACK_TITLE, sTitle)
             .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, domain)
             .putString(MediaDownloadWorker.KEY_SOURCE_URL, url)
+            .putString(MediaDownloadWorker.KEY_SOURCE_ENGINE, item.provenance.extractorEngine)
+            .apply {
+                if (!headersJson.isNullOrBlank()) {
+                    putString(MediaDownloadWorker.KEY_HEADERS_JSON, headersJson)
+                }
+            }
             .build()
 
         val request = OneTimeWorkRequestBuilder<MediaDownloadWorker>()
@@ -82,12 +110,33 @@ object DownloadQueueManager {
             .addTag("item_${item.id}")
             .build()
 
-        val uniqueWorkName = "download_${MediaClassifier.deduplicationKey(item.url).hashCode()}_${item.id}"
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            uniqueWorkName,
-            if (isRetry) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
-            request
-        )
+        val dedupKey = MediaClassifier.deduplicationKey(item.url)
+        val uniqueWorkName = "download_${abs(dedupKey.hashCode())}"
+
+        val workManager = WorkManager.getInstance(context)
+        val existingWorkList = runCatching {
+            workManager.getWorkInfosForUniqueWork(uniqueWorkName).get()
+        }.getOrDefault(emptyList())
+
+        val activeWork = existingWorkList.firstOrNull {
+            it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
+        }
+
+        val finalWorkId: UUID
+        if (activeWork != null && !isRetry) {
+            // Re-use already active WorkManager request ID so pause/cancel references the running job
+            finalWorkId = activeWork.id
+            activeItemIds.add(item.id)
+        } else {
+            finalWorkId = request.id
+            workManager.enqueueUniqueWork(
+                uniqueWorkName,
+                if (isRetry) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                request
+            )
+            markDownloadStarted(count = 1, itemId = item.id)
+        }
+
         DownloadActivityManager.initialize(context)
         DownloadActivityManager.recordQueued(
             id = item.id,
@@ -98,15 +147,15 @@ object DownloadQueueManager {
             isAudio = item.isAudio,
             isStream = item.isStream,
             format = item.format,
-            workId = request.id.toString(),
+            workId = finalWorkId.toString(),
             isRetry = isRetry,
             stackId = sId,
             stackTitle = sTitle,
             sourceDomain = domain,
             sourceUrl = url
         )
-        markDownloadStarted(count = 1, itemId = item.id)
-        return request.id
+
+        return finalWorkId
     }
 
     fun enqueueBatch(
@@ -125,10 +174,9 @@ object DownloadQueueManager {
 
         val workManager = WorkManager.getInstance(context)
         val distinctItems = MediaClassifier.deduplicateScrapedItems(items)
-        if (distinctItems.isNotEmpty()) {
-            markDownloadStarted(distinctItems.size)
-        }
-        val requests = distinctItems.map { item ->
+
+        val workIds = distinctItems.map { item ->
+            val headersJson = serializeHeaders(item.downloadHeaders)
             val inputData = Data.Builder()
                 .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
                 .putString(MediaDownloadWorker.KEY_FILE_NAME, item.title)
@@ -143,6 +191,12 @@ object DownloadQueueManager {
                 .putString(MediaDownloadWorker.KEY_STACK_TITLE, sTitle)
                 .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, domain)
                 .putString(MediaDownloadWorker.KEY_SOURCE_URL, url)
+                .putString(MediaDownloadWorker.KEY_SOURCE_ENGINE, item.provenance.extractorEngine)
+                .apply {
+                    if (!headersJson.isNullOrBlank()) {
+                        putString(MediaDownloadWorker.KEY_HEADERS_JSON, headersJson)
+                    }
+                }
                 .build()
 
             val request = OneTimeWorkRequestBuilder<MediaDownloadWorker>()
@@ -152,26 +206,42 @@ object DownloadQueueManager {
                 .addTag("item_${item.id}")
                 .build()
 
-            val uniqueWorkName = "download_${MediaClassifier.deduplicationKey(item.url).hashCode()}_${item.id}"
-            workManager.enqueueUniqueWork(
-                uniqueWorkName,
-                ExistingWorkPolicy.KEEP,
-                request
-            )
-            request.id
+            val dedupKey = MediaClassifier.deduplicationKey(item.url)
+            val uniqueWorkName = "download_${abs(dedupKey.hashCode())}"
+
+            val existingWorkList = runCatching {
+                workManager.getWorkInfosForUniqueWork(uniqueWorkName).get()
+            }.getOrDefault(emptyList())
+
+            val activeWork = existingWorkList.firstOrNull {
+                it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
+            }
+
+            if (activeWork != null) {
+                activeItemIds.add(item.id)
+                activeWork.id
+            } else {
+                workManager.enqueueUniqueWork(
+                    uniqueWorkName,
+                    ExistingWorkPolicy.KEEP,
+                    request
+                )
+                markDownloadStarted(count = 1, itemId = item.id)
+                request.id
+            }
         }
 
         DownloadActivityManager.initialize(context)
         DownloadActivityManager.recordBatchQueued(
             items = distinctItems,
-            workIds = requests,
+            workIds = workIds,
             stackId = sId,
             stackTitle = sTitle,
             sourceDomain = domain,
             sourceUrl = url
         )
 
-        return requests
+        return workIds
     }
 
     fun getActiveDownloadsFlow(context: Context): Flow<List<WorkInfo>> {
@@ -190,6 +260,7 @@ object DownloadQueueManager {
         runCatching {
             WorkManager.getInstance(context).cancelAllWorkByTag(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
         }
+        activeItemIds.clear()
         activeDownloadCount.set(0)
         _inMemoryDownloading.value = false
     }

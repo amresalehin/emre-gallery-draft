@@ -296,7 +296,9 @@ object GalleryDlEngine {
         context: Context,
         mediaUrl: String,
         fileName: String,
-        referer: String? = null
+        referer: String? = null,
+        headers: Map<String, String>? = null,
+        cookies: String? = null
     ): File? = withContext(Dispatchers.IO) {
         try {
             val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -316,6 +318,14 @@ object GalleryDlEngine {
             val sanitizedName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
             val targetFile = File(dir, "${System.currentTimeMillis()}_$sanitizedName")
 
+            val userAgent = headers?.get("User-Agent") ?: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+            val effectiveCookies = cookies ?: headers?.get("Cookie")
+            val headersJson = if (!headers.isNullOrEmpty()) {
+                val json = JSONObject()
+                headers.forEach { (k, v) -> json.put(k, v) }
+                json.toString()
+            } else ""
+
             // Try Python download if available
             if (isAvailable()) {
                 val py = Python.getInstance()
@@ -325,7 +335,9 @@ object GalleryDlEngine {
                     mediaUrl,
                     targetFile.absolutePath,
                     referer ?: "",
-                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                    userAgent,
+                    effectiveCookies ?: "",
+                    headersJson
                 ).toBoolean()
 
                 if (success && targetFile.exists() && targetFile.length() > 0L) {
@@ -339,12 +351,13 @@ object GalleryDlEngine {
                 }
             }
 
-            // Fallback to OkHttp download with shared session cookies
+            // Fallback to OkHttp download with shared session cookies and headers
             OkHttpDownloader.downloadMediaFile(
                 context = context,
                 mediaUrl = mediaUrl,
                 fileName = fileName,
-                referer = referer
+                referer = referer,
+                headers = headers
             )
         } catch (e: Exception) {
             Log.e(TAG, "downloadMedia failed", e)

@@ -27,11 +27,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.PreferencesRepository
-import com.amresalehin.emregallery.ui.MediaScraperDrawer
+import com.amresalehin.emregallery.ui.DownloaderResultsPage
+import com.amresalehin.emregallery.ui.FullScreenBrowserView
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -50,6 +53,9 @@ class ShareReceiverActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        window?.decorView?.post {
+            GalleryApplication.warmupChromium(this)
+        }
 
         val extracted = extractUrlFromIntent(intent)
         if (extracted == null) {
@@ -124,23 +130,16 @@ private fun ShareReceiverScreen(
     onDismiss: () -> Unit,
     onDownloadComplete: () -> Unit
 ) {
-    var isVisible by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        isVisible = true
-    }
-
-    fun triggerDismiss() {
-        scope.launch {
-            isVisible = false
-            delay(150)
-            onDismiss()
-        }
-    }
+    var showLiveBrowser by remember { mutableStateOf(false) }
+    var liveBrowserUrl by remember { mutableStateOf(url) }
+    val context = LocalContext.current
 
     BackHandler {
-        triggerDismiss()
+        if (showLiveBrowser) {
+            showLiveBrowser = false
+        } else {
+            onDismiss()
+        }
     }
 
     Box(
@@ -148,51 +147,36 @@ private fun ShareReceiverScreen(
             .fillMaxSize()
             .testTag("share_receiver_root")
     ) {
-        // Scrim over the caller's app (transparent dark overlay, clicking outside dismisses)
-        AnimatedVisibility(
-            visible = isVisible,
-            enter = fadeIn(animationSpec = tween(150)),
-            exit = fadeOut(animationSpec = tween(150))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        triggerDismiss()
-                    }
-                    .testTag("share_receiver_scrim")
-            )
-        }
-
-        // Bottom Media Selector Drawer
-        AnimatedVisibility(
-            visible = isVisible,
-            enter = slideInVertically(
-                initialOffsetY = { it },
-                animationSpec = tween(250)
-            ) + fadeIn(animationSpec = tween(200)),
-            exit = slideOutVertically(
-                targetOffsetY = { it },
-                animationSpec = tween(200)
-            ) + fadeOut(animationSpec = tween(150)),
+        DownloaderResultsPage(
+            targetUrl = url,
+            onBack = onDismiss,
+            onOpenBrowser = { browserUrl ->
+                liveBrowserUrl = browserUrl
+                showLiveBrowser = true
+            },
+            onDownloadComplete = { count ->
+                onDownloadComplete()
+            },
+            onViewSavedLibrary = {
+                val mainIntent = Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+                context.startActivity(mainIntent)
+                onDismiss()
+            },
             modifier = Modifier.fillMaxSize()
-        ) {
-            MediaScraperDrawer(
-                initialUrl = url,
+        )
+
+        if (showLiveBrowser) {
+            FullScreenBrowserView(
+                initialUrl = liveBrowserUrl,
                 onClose = {
-                    triggerDismiss()
+                    showLiveBrowser = false
                 },
                 onDownloadComplete = {
                     onDownloadComplete()
                 },
-                onOpenBrowser = null,
-                heightFraction = 0.50f,
-                showSearchBar = false,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize().zIndex(25f)
             )
         }
     }

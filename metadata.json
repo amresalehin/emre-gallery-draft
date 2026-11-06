@@ -1,6 +1,0 @@
-{
-  "name": "Emre Gallery",
-  "description": "Smart gallery with powerful media downloader, face recognition, OCR, and photo map",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

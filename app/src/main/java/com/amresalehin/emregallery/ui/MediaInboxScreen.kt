@@ -103,9 +103,8 @@ fun MediaInboxScreen(
     val workInfos by remember(context) {
         DownloadQueueManager.getActiveDownloadsFlow(context)
     }.collectAsState(initial = emptyList())
-    val inMemoryDownloading by DownloadQueueManager.inMemoryDownloading.collectAsState()
-    val isDownloading = remember(workInfos, inMemoryDownloading) {
-        inMemoryDownloading || workInfos.any {
+    val isDownloading = remember(workInfos) {
+        workInfos.any {
             it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED
         }
     }
@@ -116,7 +115,6 @@ fun MediaInboxScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     var selectedStackForDetail by remember { mutableStateOf<MediaInboxStack?>(null) }
     var showFilterSheet by remember { mutableStateOf(false) }
-    var showScraperDrawer by remember { mutableStateOf(false) }
     var showFullScreenBrowser by remember { mutableStateOf(false) }
     var browserInitialUrl by remember { mutableStateOf("") }
     var sortOrder by remember { mutableStateOf("Newest") }
@@ -146,8 +144,6 @@ fun MediaInboxScreen(
             selectedStackForDetail = null
         } else if (showFilterSheet) {
             showFilterSheet = false
-        } else if (showScraperDrawer) {
-            showScraperDrawer = false
         } else if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
             currentViewMode = DownloaderViewMode.SEARCH_PAGE
         } else {
@@ -520,7 +516,7 @@ fun MediaInboxScreen(
                             onSelectStack = { stack ->
                                 selectedStackForDetail = stack
                             },
-                            activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED } + if (inMemoryDownloading) 1 else 0,
+                            activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED },
                             savedStacksCount = stacks.size,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -750,51 +746,6 @@ fun MediaInboxScreen(
         }
     }
 
-    // Media Scraper Drawer opening from below up to 80% of screen height with 20% scrim at top
-    AnimatedVisibility(
-        visible = showScraperDrawer,
-        modifier = Modifier.fillMaxSize(),
-        enter = fadeIn(animationSpec = tween(200)),
-        exit = fadeOut(animationSpec = tween(200))
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            // 20% Top Scrim area (covers entire background behind sheet, dismisses drawer on click)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        showScraperDrawer = false
-                    }
-                    .testTag("scraper_scrim")
-            )
-
-            // Scraper Drawer with top floating bar and bottom 80% sheet
-            MediaScraperDrawer(
-                onClose = {
-                    showScraperDrawer = false
-                },
-                onDownloadComplete = {
-                    showScraperDrawer = false
-                    scope.launch {
-                        snackbarHostState.showSnackbar("Media stack added to Inbox!")
-                    }
-                },
-                onOpenBrowser = { url ->
-                    browserInitialUrl = url
-                    showFullScreenBrowser = true
-                    showScraperDrawer = false
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-    }
 
     // Full Screen In-App Browser (opens when clicking browser button above plus FAB)
     AnimatedVisibility(
