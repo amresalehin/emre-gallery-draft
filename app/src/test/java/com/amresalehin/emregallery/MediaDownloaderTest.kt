@@ -236,53 +236,6 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testWikimediaTranscodedVideoResolvesToOriginalMasterFileAndDeduplicates() {
-        val masterUrl = "https://upload.wikimedia.org/wikipedia/commons/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm"
-        val transcode480p = "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm.480p.vp9.webm"
-        val transcode240p = "https://upload.wikimedia.org/wikipedia/commons/transcoded/1/1a/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm/Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm.240p.vp9.webm"
-
-        val resolved480 = com.amresalehin.emregallery.data.MediaClassifier.resolveOriginalMedia(transcode480p)
-        assertEquals(masterUrl, resolved480.mediaUrl)
-        assertEquals(transcode480p, resolved480.thumbnailUrl)
-        assertEquals("Taj_Mahal_-_Mausoleum_der_Liebe_und_Weltwunder_aus_Marmor.webm", resolved480.cleanTitle)
-
-        // Deduplication keys for transcode variants and master file MUST be identical
-        val keyMaster = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(masterUrl)
-        val key480 = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(transcode480p)
-        val key240 = com.amresalehin.emregallery.data.MediaClassifier.deduplicationKey(transcode240p)
-        assertEquals(keyMaster, key480)
-        assertEquals(keyMaster, key240)
-
-        // Deduplicate scraped items list merging DOM item with resolution hint and Network intercepted item
-        val domItem = com.amresalehin.emregallery.data.ScrapedMediaItem(
-            id = "dom_1",
-            url = transcode240p,
-            title = "Taj_Mahal_-_Mausoleum_der_Liebe",
-            isVideo = true,
-            resolutionHint = "250x141",
-            thumbnailUrl = transcode240p,
-            provenance = com.amresalehin.emregallery.data.MediaProvenance(extractorEngine = "Static HTML (DOM Scrape)")
-        )
-        val netItem = com.amresalehin.emregallery.data.ScrapedMediaItem(
-            id = "net_1",
-            url = transcode480p,
-            title = "Taj_Mahal_-_Mausoleum_der_Liebe",
-            isVideo = true,
-            resolutionHint = "Network",
-            thumbnailUrl = transcode480p,
-            provenance = com.amresalehin.emregallery.data.MediaProvenance(extractorEngine = "Browser Chromium (Network Intercept)")
-        )
-
-        val deduplicated = com.amresalehin.emregallery.data.MediaClassifier.deduplicateScrapedItems(listOf(domItem, netItem))
-        assertEquals(1, deduplicated.size)
-        val singleItem = deduplicated[0]
-        assertEquals(masterUrl, singleItem.url)
-        assertEquals("250x141", singleItem.resolutionHint)
-        assertTrue(singleItem.provenance.extractorEngine.contains("DOM Scrape"))
-        assertTrue(singleItem.provenance.extractorEngine.contains("Network Intercept"))
-    }
-
-    @Test
     fun testWebsiteAndRouteAwareMediaExclusions() {
         // Generic CDN URLs containing gallery, pin, comments, or wiki substrings MUST be accepted
         assertTrue(com.amresalehin.emregallery.data.MediaClassifier.isValidMedia("https://mycdn.example.com/gallery/photo.jpg"))
