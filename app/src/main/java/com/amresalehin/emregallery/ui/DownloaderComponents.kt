@@ -1598,26 +1598,69 @@ fun DownloaderResultsPage(
                     ) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.widthIn(max = 420.dp)
                         ) {
+                            val failureReason = extractorState.errorMessage?.ifBlank { null }
+                                ?: extractorState.statusMessage.takeIf {
+                                    it.contains("protect", true) || it.contains("challenge", true) ||
+                                    it.contains("waf", true) || it.contains("restricted", true) ||
+                                    it.contains("timeout", true) || it.contains("failed", true)
+                                }
+                            val isChallenge = failureReason?.let {
+                                it.contains("protect", true) || it.contains("challenge", true) ||
+                                it.contains("waf", true) || it.contains("bot", true) ||
+                                it.contains("turnstile", true) || it.contains("captcha", true)
+                            } == true
+
                             Icon(
-                                imageVector = Icons.Default.SearchOff,
+                                imageVector = if (isChallenge) Icons.Default.Shield else Icons.Default.SearchOff,
                                 contentDescription = null,
-                                tint = Color(0xFF6C757D),
+                                tint = if (isChallenge) MaterialTheme.colorScheme.primary else Color(0xFF6C757D),
                                 modifier = Modifier.size(48.dp)
                             )
                             Text(
-                                text = "No media discovered",
+                                text = if (isChallenge) "Verification Required" else "No media discovered",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF212529)
                             )
-                            Text(
-                                text = "The webpage might be dynamically protected, require login, or filter settings are excluding items.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color(0xFF6C757D),
-                                textAlign = TextAlign.Center
-                            )
+                            if (failureReason != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isChallenge) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color(0xFFF1F3F5),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = failureReason,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (isChallenge) MaterialTheme.colorScheme.onPrimaryContainer else Color(0xFF495057),
+                                            textAlign = TextAlign.Center
+                                        )
+                                        if (isChallenge) {
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(
+                                                text = "Open Live Browser once to resolve the challenge. Media will automatically appear here.",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "The webpage might be dynamically protected, require login, or filter settings are excluding items.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF6C757D),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                             Spacer(Modifier.height(4.dp))
                             Button(
                                 onClick = {
@@ -1629,7 +1672,7 @@ fun DownloaderResultsPage(
                             ) {
                                 Icon(Icons.Default.TravelExplore, contentDescription = null)
                                 Spacer(Modifier.width(6.dp))
-                                Text("Open in Live Browser")
+                                Text(if (isChallenge) "Verify in Live Browser" else "Open in Live Browser")
                             }
                         }
                     }

@@ -199,10 +199,13 @@ class BrowserProvider(private val context: Context) : ExtractionProvider {
                 discoveredList.add(item)
                 onItemDiscovered(item)
             },
-            onFinished = {
+            onFinished = { failureReason ->
                 if (continuation.isActive) {
                     continuation.resume(
-                        MediaExtractionResult(items = discoveredList),
+                        MediaExtractionResult(
+                            items = discoveredList,
+                            errorMessage = if (discoveredList.isEmpty()) failureReason else null
+                        ),
                         onCancellation = { browserExtractor.cleanup() }
                     )
                 }
@@ -473,6 +476,11 @@ class DualMediaExtractor(private val context: Context) {
                 val browserProvider = BrowserProvider(context)
                 activeBrowserProvider = browserProvider
 
+                var gdlResult: MediaExtractionResult? = null
+                var ytdlpResult: MediaExtractionResult? = null
+                var staticResult: MediaExtractionResult? = null
+                var browserResult: MediaExtractionResult? = null
+
                 try {
                     // Launch all providers concurrently using structured concurrency under coroutineScope
                     coroutineScope {
@@ -555,10 +563,10 @@ class DualMediaExtractor(private val context: Context) {
                             }
                         }
 
-                        val gdlResult = gdlDeferred.await()
-                        val ytdlpResult = ytdlpDeferred.await()
-                        val staticResult = staticDeferred.await()
-                        val browserResult = browserDeferred.await()
+                        gdlResult = gdlDeferred.await()
+                        ytdlpResult = ytdlpDeferred.await()
+                        staticResult = staticDeferred.await()
+                        browserResult = browserDeferred.await()
 
                         if (gdlResult != null && gdlResult.items.isNotEmpty()) {
                             updateItems(gdlResult.items, title = gdlResult.pageTitle)
@@ -580,11 +588,21 @@ class DualMediaExtractor(private val context: Context) {
 
                 itemsMutex.withLock {
                     val finalCount = itemsMap.size
+                    val detectedReason: String? = if (finalCount == 0) {
+                        browserResult?.errorMessage?.takeIf { it.isNotBlank() }
+                            ?: staticResult?.errorMessage?.takeIf { it.isNotBlank() }
+                            ?: gdlResult?.errorMessage?.takeIf { it.isNotBlank() }
+                    } else null
+
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        phase = ExtractionPhase.COMPLETED,
-                        statusMessage = if (finalCount > 0) "Extraction completed. Discovered $finalCount media items." else "No media discovered on this page."
+                        phase = if (detectedReason != null) ExtractionPhase.ERROR else ExtractionPhase.COMPLETED,
+                        statusMessage = if (finalCount > 0) "Extraction completed. Discovered $finalCount media items." else (detectedReason ?: "No media discovered on this page."),
+                        errorMessage = detectedReason
                     )
+                    if (detectedReason != null && finalCount == 0) {
+                        DownloaderSession.setStatusMessage(detectedReason)
+                    }
                 }
             } catch (ce: CancellationException) {
                 _state.value = _state.value.copy(
