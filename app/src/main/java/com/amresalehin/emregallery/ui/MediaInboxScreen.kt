@@ -1977,7 +1977,7 @@ private fun DiscoveredMediaPage(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        imageVector = Icons.Outlined.ImageSearch,
+                        imageVector = Icons.Default.Image,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(42.dp)
