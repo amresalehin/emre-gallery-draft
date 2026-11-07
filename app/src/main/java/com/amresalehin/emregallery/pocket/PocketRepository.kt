@@ -143,6 +143,99 @@ class PocketRepository(private val context: Context) {
         newItem
     }
 
+
+    /**
+     * One-time, non-destructive import from the legacy downloader Saved Library.
+     * The old SharedPreferences key and media files are deliberately retained.
+     */
+    suspend fun migrateLegacySavedLibrary(): MigrationResult = withContext(Dispatchers.IO) {
+        val marker = stringPreferencesKey("pocket_legacy_saved_library_migration_v1")
+        val prefs = context.galleryDataStore.data.first()
+        if (prefs[marker] == "complete") return@withContext MigrationResult(alreadyMigrated = true)
+
+        val legacyPrefs = context.getSharedPreferences("media_inbox_prefs", Context.MODE_PRIVATE)
+        val raw = legacyPrefs.getString("inbox_stacks_json", null)
+        if (raw.isNullOrBlank()) {
+            context.galleryDataStore.edit { it[marker] = "complete" }
+            return@withContext MigrationResult()
+        }
+
+        val migrated = runCatching {
+            val stacks = JSONArray(raw)
+            buildList {
+                for (i in 0 until stacks.length()) {
+                    val stack = stacks.optJSONObject(i) ?: continue
+                    val sourceUrl = stack.optString("sourceUrl", "")
+                    val attachments = JSONArray()
+                    val images = JSONArray()
+                    val oldItems = stack.optJSONArray("items") ?: JSONArray()
+                    for (j in 0 until oldItems.length()) {
+                        val media = oldItems.optJSONObject(j) ?: continue
+                        val localUri = media.optString("localUri", "")
+                        if (localUri.isBlank()) continue
+                        val isVideo = media.optBoolean("isVideo", false)
+                        val isAudio = media.optBoolean("isAudio", false)
+                        attachments.put(JSONObject().apply {
+                            put("id", media.optString("id", UUID.randomUUID().toString()))
+                            put("title", media.optString("title", "Downloaded media"))
+                            put("localUri", localUri)
+                            put("sourceUrl", media.optString("sourceUrl", sourceUrl))
+                            put("isVideo", isVideo)
+                            put("isAudio", isAudio)
+                            put("isStream", media.optBoolean("isStream", false))
+                            put("format", media.optString("format", ""))
+                            put("sizeBytes", media.optLong("sizeBytes", 0L))
+                            put("dateAddedMillis", media.optLong("dateAddedMillis", stack.optLong("timestampMillis", System.currentTimeMillis())))
+                        })
+                        if (!isVideo && !isAudio) images.put(localUri)
+                    }
+                    if (sourceUrl.isNotBlank() || attachments.length() > 0) add(JSONObject().apply {
+                        put("id", stack.optString("id", UUID.randomUUID().toString()))
+                        put("title", stack.optString("title", "Saved media").ifBlank { "Saved media" })
+                        put("url", sourceUrl)
+                        put("domain", stack.optString("sourceDomain", "").ifBlank { PocketItem.extractDomain(sourceUrl) })
+                        put("imageUrls", images)
+                        put("timestamp", stack.optLong("timestampMillis", System.currentTimeMillis()))
+                        put("note", "")
+                        put("tags", JSONArray(listOf("Migrated", "Saved media")))
+                        put("description", stack.optString("description", ""))
+                        put("isFavorite", false)
+                        put("isRead", false)
+                        put("attachments", attachments)
+                    })
+                }
+            }
+        }.getOrElse { error ->
+            return@withContext MigrationResult(error = "Legacy Saved Library import failed: ${error.message ?: "invalid JSON"}")
+        }
+
+        val rawPocket = prefs[pocketKey]
+        val destination = if (rawPocket.isNullOrBlank()) JSONArray() else runCatching { JSONArray(rawPocket) }.getOrElse {
+            return@withContext MigrationResult(error = "Existing Pocket data is invalid; nothing was migrated.")
+        }
+        val existingIds = mutableSetOf<String>()
+        for (i in 0 until destination.length()) existingIds.add(destination.optJSONObject(i)?.optString("id").orEmpty())
+        var added = 0
+        migrated.forEach { item ->
+            if (existingIds.add(item.optString("id"))) {
+                destination.put(item)
+                added++
+            }
+        }
+        context.galleryDataStore.edit {
+            it[pocketKey] = destination.toString()
+            it[marker] = "complete"
+        }
+        MigrationResult(migratedItems = added, sourceRecords = migrated.size)
+    }
+
+    data class MigrationResult(
+        val migratedItems: Int = 0,
+        val sourceRecords: Int = 0,
+        val alreadyMigrated: Boolean = false,
+        val error: String? = null
+    )
+
     private suspend fun getCurrentItemsList(): List<PocketItem> {
         val prefs = context.galleryDataStore.data.first()
         val raw = prefs[pocketKey]
@@ -166,6 +259,7 @@ class PocketRepository(private val context: Context) {
                 put("description", item.description)
                 put("isFavorite", item.isFavorite)
                 put("isRead", item.isRead)
+                put("attachments", JSONArray(item.attachments.map { JSONObject(it) }))
 
                 val imgArr = JSONArray()
                 item.imageUrls.forEach { imgArr.put(it) }
@@ -209,7 +303,10 @@ class PocketRepository(private val context: Context) {
                     tags = tags,
                     description = obj.optString("description", ""),
                     isFavorite = obj.optBoolean("isFavorite", false),
-                    isRead = obj.optBoolean("isRead", false)
+                    isRead = obj.optBoolean("isRead", false),
+                    attachments = obj.optJSONArray("attachments")?.let { arr ->
+                        (0 until arr.length()).mapNotNull { index -> arr.optJSONObject(index)?.toString() }
+                    } ?: emptyList()
                 )
             )
         }
