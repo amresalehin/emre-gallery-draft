@@ -52,7 +52,6 @@ fun SearchScreen(
     customTagsMap: Map<String, Set<String>>,
     customPeopleMap: Map<String, Set<String>>,
     favourites: Set<String>,
-    themePref: String = "system",
     onQueryChange: (String) -> Unit,
     onSubmitSearch: (String) -> Unit,
     onClearRecent: () -> Unit,
