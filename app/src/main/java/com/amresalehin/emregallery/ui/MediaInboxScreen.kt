@@ -150,7 +150,7 @@ fun MediaInboxScreen(
         } else if (selectedStackForDetail != null) {
             selectedStackForDetail = null
         } else if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE) {
-            currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
+            currentViewMode = DownloaderViewMode.SEARCH_PAGE
         } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
             currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
         } else if (showFilterSheet) {
