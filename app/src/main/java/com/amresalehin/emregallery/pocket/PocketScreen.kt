@@ -67,7 +67,7 @@ fun PocketScreen(
     }
 
     // Filter items
-    val filteredItems = remember(items, searchQuery, selectedDomainFilter, selectedTagFilter) {
+    val filteredItems = remember(items, searchQuery, selectedDomainFilter, selectedTagFilter, showArchived) {
         items.filter { item ->
             val matchesArchive = item.isArchived == showArchived
             val matchesQuery = if (searchQuery.isBlank()) {
