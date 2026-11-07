@@ -66,10 +66,7 @@ data class NavBackStackEntry(
     val currentStoryIndex: Int = 0,
     val mapFocusItem: MediaItem? = null,
     val albumFilter: String? = null,
-    val albumFilterReturnDestination: Destination = Destination.ALBUMS,
-    val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
-    val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-    val inboxInitialOpenBrowser: Boolean = false
+    val albumFilterReturnDestination: Destination = Destination.ALBUMS
 )
 
 val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
@@ -136,9 +133,6 @@ fun GalleryApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
-    var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
-    var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
-    var inboxInitialOpenBrowser by remember { mutableStateOf(false) }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -501,10 +495,7 @@ fun GalleryApp() {
         newViewerMediaList: List<MediaItem> = viewerMediaList,
         newViewerStoryTitle: String? = if (dest == Destination.VIEWER) viewerStoryTitle else null,
         newViewerStories: List<StoryGroup> = if (dest == Destination.VIEWER) viewerStories else emptyList(),
-        newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0,
-        newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
-        newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-        newInboxInitialOpenBrowser: Boolean = false
+        newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -522,10 +513,7 @@ fun GalleryApp() {
                     currentStoryIndex = currentStoryIndex,
                     mapFocusItem = mapFocusItem,
                     albumFilter = albumFilter,
-                    albumFilterReturnDestination = albumFilterReturnDestination,
-                    inboxInitialViewMode = inboxInitialViewMode,
-                    inboxInitialStack = inboxInitialStack,
-                    inboxInitialOpenBrowser = inboxInitialOpenBrowser
+                    albumFilterReturnDestination = albumFilterReturnDestination
                 )
             )
             previousDestination = destination
@@ -537,9 +525,6 @@ fun GalleryApp() {
         viewerStoryTitle = newViewerStoryTitle
         viewerStories = newViewerStories
         currentStoryIndex = newCurrentStoryIndex
-        inboxInitialViewMode = newInboxInitialViewMode
-        inboxInitialStack = newInboxInitialStack
-        inboxInitialOpenBrowser = newInboxInitialOpenBrowser
     }
 
     fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
@@ -616,9 +601,6 @@ fun GalleryApp() {
                 mapFocusItem = entry.mapFocusItem
                 albumFilter = entry.albumFilter
                 albumFilterReturnDestination = entry.albumFilterReturnDestination
-                inboxInitialViewMode = entry.inboxInitialViewMode
-                inboxInitialStack = entry.inboxInitialStack
-                inboxInitialOpenBrowser = entry.inboxInitialOpenBrowser
                 previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
             }
             albumFilter != null -> {
@@ -649,10 +631,6 @@ fun GalleryApp() {
                 Destination.ABOUT
             ) -> {
                 destination = Destination.SETTINGS
-                viewerStoryTitle = null
-            }
-            destination == Destination.MEDIA_INBOX -> {
-                destination = if (previousDestination == Destination.ALBUMS) Destination.ALBUMS else Destination.SETTINGS
                 viewerStoryTitle = null
             }
             destination == Destination.VIEWER -> {
@@ -880,39 +858,13 @@ fun GalleryApp() {
                         bottomContentPadding = bottomContentPadding,
                         isRefreshing = isRefreshing,
                         onRefresh = { refreshMedia(userInitiated = true) },
-                        onOpenBrowser = {
-                            albumFilter = null
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE,
-                                newInboxInitialOpenBrowser = true
-                            )
-                        },
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
-                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; "Browser" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE, newInboxInitialOpenBrowser = true) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
                             navigateTo(Destination.PEOPLE)
-                        },
-                        onOpenSavedLibrary = {
-                            albumFilter = null
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY
-                            )
-                        },
-                        onOpenSavedStack = { stack ->
-                            albumFilter = null
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY,
-                                newInboxInitialStack = stack
-                            )
                         },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -1228,65 +1180,6 @@ fun GalleryApp() {
                     )
                     Destination.ABOUT -> AboutScreen(
                         onBack = { performBackNavigation() }
-                    )
-                    Destination.MEDIA_INBOX -> MediaInboxScreen(
-                        initialViewMode = inboxInitialViewMode,
-                        initialStackForDetail = inboxInitialStack,
-                        initialOpenBrowser = inboxInitialOpenBrowser,
-                        onBack = { performBackNavigation() },
-                        onOpenMediaItem = { uri ->
-                            val match = media.firstOrNull { it.uri == uri || (it.name.isNotBlank() && uri.contains(it.name)) }
-                            val targetItem = match ?: run {
-                                val file = java.io.File(uri)
-                                val name = if (file.exists()) file.name else uri.substringAfterLast('/').ifBlank { "media_item" }
-                                val isVid = name.endsWith(".mp4", ignoreCase = true) ||
-                                            name.endsWith(".webm", ignoreCase = true) ||
-                                            name.endsWith(".mkv", ignoreCase = true) ||
-                                            name.endsWith(".mov", ignoreCase = true)
-                                MediaItem(
-                                    id = uri.hashCode().toLong(),
-                                    uri = uri,
-                                    name = name,
-                                    mimeType = if (isVid) "video/*" else "image/*",
-                                    dateAddedSeconds = System.currentTimeMillis() / 1000,
-                                    dateTakenMillis = System.currentTimeMillis(),
-                                    sizeBytes = if (file.exists()) file.length() else 0L,
-                                    width = 0,
-                                    height = 0,
-                                    relativePath = "",
-                                    isVideo = isVid
-                                )
-                            }
-                            openMediaInViewer(targetItem, listOf(targetItem))
-                        },
-                        onOpenMediaWithList = { uri, allUris ->
-                            val safeUris = if (allUris.contains(uri)) allUris else (listOf(uri) + allUris)
-                            val viewerItems = safeUris.map { u ->
-                                media.firstOrNull { it.uri == u || (it.name.isNotBlank() && u.contains(it.name)) } ?: run {
-                                    val file = java.io.File(u)
-                                    val name = if (file.exists()) file.name else u.substringAfterLast('/').ifBlank { "media_item" }
-                                    val isVid = name.endsWith(".mp4", ignoreCase = true) ||
-                                                name.endsWith(".webm", ignoreCase = true) ||
-                                                name.endsWith(".mkv", ignoreCase = true) ||
-                                                name.endsWith(".mov", ignoreCase = true)
-                                    MediaItem(
-                                        id = u.hashCode().toLong(),
-                                        uri = u,
-                                        name = name,
-                                        mimeType = if (isVid) "video/*" else "image/*",
-                                        dateAddedSeconds = System.currentTimeMillis() / 1000,
-                                        dateTakenMillis = System.currentTimeMillis(),
-                                        sizeBytes = if (file.exists()) file.length() else 0L,
-                                        width = 0,
-                                        height = 0,
-                                        relativePath = "",
-                                        isVideo = isVid
-                                    )
-                                }
-                            }
-                            val target = viewerItems.firstOrNull { it.uri == uri } ?: viewerItems.first()
-                            openMediaInViewer(target, viewerItems)
-                        }
                     )
                     Destination.SEARCH -> {
                         val searchScopeMedia = remember(media, hidden, inBin, archive) {

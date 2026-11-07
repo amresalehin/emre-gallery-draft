@@ -77,21 +77,13 @@ fun AlbumsScreen(
     onCreateAlbumClick: (parentPreset: String) -> Unit,
     onDeleteAlbum: (String) -> Unit,
     onRenameAlbum: (String, String) -> Unit,
-    onOpenPerson: ((String) -> Unit)? = null,
-    onOpenSavedLibrary: (() -> Unit)? = null,
-    onOpenSavedStack: ((com.amresalehin.emregallery.data.MediaInboxStack) -> Unit)? = null,
-    onOpenBrowser: (() -> Unit)? = null
+    onOpenPerson: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        com.amresalehin.emregallery.GalleryApplication.warmupChromium(context)
-    }
     val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
     val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
     var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
     val faceStore = remember(context) { FaceClusterStore(context.applicationContext) }
-    val inboxRepo = remember(context) { com.amresalehin.emregallery.data.MediaInboxRepository.getInstance(context) }
-    val savedStacks by inboxRepo.stacks.collectAsState()
     var detectedPeople by remember { mutableStateOf(emptyList<PersonSummary>()) }
     var engineMenuExpanded by remember { mutableStateOf(false) }
 
@@ -203,7 +195,7 @@ fun AlbumsScreen(
             bottom = bottomContentPadding
         )
     ) {
-        // 0. The tiles - Collections (Favourites, Bin, Locked folder, Inbox) moved to top
+        // 0. The tiles - Collections (Favourites, Bin, Locked folder, Archive) moved to top
         item {
             // Top primary pills: Favourites & Bin
             Row(
@@ -232,7 +224,7 @@ fun AlbumsScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // 2-column tiles: Locked folder & Inbox
+            // 2-column tiles: Locked folder & Archive
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -244,33 +236,6 @@ fun AlbumsScreen(
                     iconTint = MaterialTheme.colorScheme.onSurface,
                     iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
                     onClick = { onFilter("Hidden") },
-                    modifier = Modifier.weight(1f)
-                )
-                CollectionTile(
-                    title = "Inbox",
-                    count = "",
-                    icon = Icons.Default.Inbox,
-                    iconTint = MaterialTheme.colorScheme.onSurface,
-                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onFilter("Inbox") },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // 2-column tiles: Browser & Archive
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                CollectionTile(
-                    title = "Browser",
-                    count = "",
-                    icon = Icons.Default.TravelExplore,
-                    iconTint = MaterialTheme.colorScheme.onSurface,
-                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    onClick = { onOpenBrowser?.invoke() ?: onFilter("Browser") },
                     modifier = Modifier.weight(1f)
                 )
                 CollectionTile(
@@ -724,29 +689,6 @@ fun AlbumsScreen(
             }
         }
 
-        // Saved Container (Matching Downloader Main Page)
-        item {
-            SavedPreviewSection(
-                stacks = savedStacks,
-                onViewSavedLibrary = {
-                    if (onOpenSavedLibrary != null) {
-                        onOpenSavedLibrary()
-                    } else {
-                        onFilter("Saved")
-                    }
-                },
-                onSelectStack = { stack ->
-                    if (onOpenSavedStack != null) {
-                        onOpenSavedStack(stack)
-                    } else {
-                        onFilter("Saved")
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("albums_saved_preview_section")
-            )
-        }
 
         // 3. Maps Card (strictly black-grey-white)
         item {

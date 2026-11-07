@@ -8,9 +8,7 @@ import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.amresalehin.emregallery.data.MediaStoreThumbnailFetcher
-import com.amresalehin.emregallery.data.OkHttpDownloader
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import java.io.File
 
 class GalleryApplication : Application() {
@@ -31,7 +29,6 @@ class GalleryApplication : Application() {
         val imageComputeDispatcher = Dispatchers.Default
 
         val imageLoader = ImageLoader.Builder(this)
-            .okHttpClient { OkHttpDownloader.client }
             .fetcherDispatcher(imageIoDispatcher)
             .decoderDispatcher(imageComputeDispatcher)
             .memoryCache {
@@ -63,56 +60,6 @@ class GalleryApplication : Application() {
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.BuffaloLFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceEngineRegistry.register(com.amresalehin.emregallery.face.EnteFaceEngineFactory)
         com.amresalehin.emregallery.face.FaceProcessingCoordinator.init(this)
-
-        // Initialize Chaquopy Python SDK and gallery-dl media engine asynchronously in the background.
-        // Running this off the UI thread eliminates the 2-4s main thread blockage on cold start,
-        // allowing share sheets and activities to launch instantly.
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            com.amresalehin.emregallery.data.GalleryDlEngine.init(this@GalleryApplication)
-        }
-
-        // Initialize DownloadActivityManager in background to avoid synchronous disk I/O on UI thread
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            com.amresalehin.emregallery.data.DownloadActivityManager.initialize(this@GalleryApplication)
-        }
-
-        // Defer chromium cookie initialization so it never stalls cold start
-        warmupChromium(this)
-    }
-
-    companion object {
-        @Volatile
-        private var isChromiumWarmedUp = false
-
-        fun warmupChromium(context: Context) {
-            if (isChromiumWarmedUp) return
-            runCatching {
-                val handler = android.os.Handler(android.os.Looper.getMainLooper())
-                handler.post {
-                    if (isChromiumWarmedUp) return@post
-                    val doWarmup = {
-                        if (!isChromiumWarmedUp) {
-                            try {
-                                val cm = android.webkit.CookieManager.getInstance()
-                                cm.setAcceptCookie(true)
-                                val dummy = android.webkit.WebView(context.applicationContext)
-                                dummy.destroy()
-                                isChromiumWarmedUp = true
-                            } catch (_: Throwable) {}
-                        }
-                    }
-                    runCatching {
-                        android.os.Looper.myQueue().addIdleHandler {
-                            doWarmup()
-                            false
-                        }
-                    }
-                    handler.postDelayed({
-                        doWarmup()
-                    }, 1200L)
-                }
-            }
-        }
     }
 
     /**
