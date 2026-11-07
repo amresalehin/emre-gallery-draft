@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Face
@@ -995,12 +996,7 @@ private fun PersonalizeAiConfigCard() {
                 modifier = Modifier.size(46.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = Color(0xFF181C22)
-                    )
+                    AiIcon(tint = Color(0xFF181C22))
                 }
             }
 
@@ -1142,6 +1138,43 @@ private fun FaceRecognitionIcon(modifier: Modifier = Modifier, tint: Color = Col
         }
         Icon(
             imageVector = Icons.Default.Face,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = tint
+        )
+    }
+}
+
+@Composable
+private fun AiIcon(modifier: Modifier = Modifier, tint: Color = Color(0xFF181C22)) {
+    Box(
+        modifier = modifier.size(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 1.6.dp.toPx()
+            val cornerLength = 4.5.dp.toPx()
+            val w = size.width
+            val h = size.height
+
+            // Top-left
+            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(cornerLength, 0f), strokeWidth)
+            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(0f, cornerLength), strokeWidth)
+
+            // Top-right
+            drawLine(tint, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w - cornerLength, 0f), strokeWidth)
+            drawLine(tint, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w, cornerLength), strokeWidth)
+
+            // Bottom-left
+            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(cornerLength, h), strokeWidth)
+            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(0f, h - cornerLength), strokeWidth)
+
+            // Bottom-right
+            drawLine(tint, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w - cornerLength, h), strokeWidth)
+            drawLine(tint, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w, h - cornerLength), strokeWidth)
+        }
+        Icon(
+            imageVector = Icons.Default.AutoAwesome,
             contentDescription = null,
             modifier = Modifier.size(14.dp),
             tint = tint

@@ -1,11 +1,13 @@
 package com.amresalehin.emregallery.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -19,11 +21,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amresalehin.emregallery.data.CloudAiProvider
@@ -34,10 +38,23 @@ import com.amresalehin.emregallery.data.FlorenceStatus
 import com.amresalehin.emregallery.data.PreferencesRepository
 import kotlinx.coroutines.launch
 
+private enum class AiModeTab {
+    CLOUD,
+    LOCAL
+}
+
+/**
+ * Sleek, minimal AI Configuration card designed to match the Welcome Screen cards aesthetic.
+ * Features rounded 26.dp corners, frosted/clean surface styling, circular avatar halo with Emre's
+ * signature corner-bracket icon, segmented button controls, and a minimal layout free of redundant
+ * explanatory subtitles. Cloud setup is collapsed by default.
+ */
 @Composable
 fun AiConfigurationCard(
     modifier: Modifier = Modifier,
     prefs: PreferencesRepository,
+    cardBackground: Color? = null,
+    cardBorder: BorderStroke? = null,
     onShowSnackbar: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -47,13 +64,15 @@ fun AiConfigurationCard(
     val activeProvider by prefs.activeCloudProvider.collectAsState(initial = null)
     val florenceState by prefs.florenceModelState.collectAsState(initial = FlorenceModelState())
 
+    var isExpanded by remember { mutableStateOf(true) }
+    var selectedTab by remember { mutableStateOf(AiModeTab.CLOUD) }
+
     var providerName by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
     var modelId by remember { mutableStateOf("") }
     var showApiKey by remember { mutableStateOf(false) }
 
-    var isFormExpanded by remember { mutableStateOf(true) }
     var isTestingCloud by remember { mutableStateOf(false) }
     var cloudTestFeedback by remember { mutableStateOf<String?>(null) }
     var showFlorenceDetailsDialog by remember { mutableStateOf(false) }
@@ -63,430 +82,498 @@ fun AiConfigurationCard(
         FlorenceModelManager.refreshState(context)
     }
 
-    ElevatedCard(
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val effectiveCardBackground = cardBackground ?: if (isDark) {
+        MaterialTheme.colorScheme.surfaceContainer
+    } else {
+        Color(0x75F5F7FA)
+    }
+
+    val effectiveCardBorder = cardBorder ?: BorderStroke(
+        1.dp,
+        if (isDark) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+        else Color.White.copy(alpha = 0.65f)
+    )
+
+    Surface(
+        shape = RoundedCornerShape(26.dp),
+        color = effectiveCardBackground,
+        border = effectiveCardBorder,
         modifier = modifier
             .fillMaxWidth()
-            .testTag("ai_configuration_card"),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        )
+            .animateContentSize()
+            .testTag("ai_configuration_card")
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // ==================== CLOUD SECTION ====================
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Cloud,
-                        contentDescription = "Cloud AI",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Cloud",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    // Dynamic status-indicator button for Cloud
-                    DynamicCloudStatusIndicator(
-                        activeProvider = activeProvider,
-                        isTesting = isTestingCloud,
-                        onClick = {
-                            if (activeProvider != null) {
-                                scope.launch {
-                                    isTestingCloud = true
-                                    cloudTestFeedback = "Testing connection..."
-                                    val status = prefs.testActiveCloudProvider()
-                                    isTestingCloud = false
-                                    cloudTestFeedback = if (status == CloudProviderStatus.CONNECTED) {
-                                        "Connected successfully"
-                                    } else {
-                                        activeProvider?.statusMessage ?: "Connection test failed"
-                                    }
-                                    onShowSnackbar?.invoke(cloudTestFeedback ?: "")
-                                }
-                            } else {
-                                isFormExpanded = true
-                                onShowSnackbar?.invoke("Please configure a Cloud provider below")
-                            }
-                        }
-                    )
-
-                    // Template '+' button
-                    IconButton(
-                        onClick = {
-                            isFormExpanded = !isFormExpanded
-                        },
-                        modifier = Modifier
-                            .size(32.dp)
-                            .testTag("ai_cloud_add_toggle_button")
-                    ) {
-                        Icon(
-                            imageVector = if (isFormExpanded && cloudProviders.isNotEmpty()) Icons.Default.Close else Icons.Default.Add,
-                            contentDescription = "Toggle Cloud form",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
-
-            // Quick preset chips & compact input form
-            AnimatedVisibility(visible = isFormExpanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Quick presets row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val presets = listOf(
-                            Triple("OpenAI", "https://api.openai.com/v1", "gpt-4o"),
-                            Triple("Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
-                            Triple("Ollama", "http://10.0.2.2:11434/v1", "llama3.2"),
-                            Triple("OpenRouter", "https://openrouter.ai/api/v1", "meta-llama/llama-3.2-3b-instruct")
-                        )
-                        presets.forEach { (name, url, model) ->
-                            SuggestionChip(
-                                onClick = {
-                                    providerName = name
-                                    baseUrl = url
-                                    modelId = model
-                                },
-                                label = { Text(name, fontSize = 11.sp) },
-                                shape = CircleShape,
-                                modifier = Modifier.height(26.dp),
-                                colors = SuggestionChipDefaults.suggestionChipColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ),
-                                border = null
-                            )
-                        }
-                    }
-
-                    // 1. Provider name input (compact)
-                    CompactAiInputField(
-                        value = providerName,
-                        onValueChange = { providerName = it },
-                        placeholder = "Provider name",
-                        testTag = "ai_provider_name_input"
-                    )
-
-                    // 2. Base URL input (compact)
-                    CompactAiInputField(
-                        value = baseUrl,
-                        onValueChange = { baseUrl = it },
-                        placeholder = "Base URL",
-                        testTag = "ai_base_url_input"
-                    )
-
-                    // 3. API key input (compact)
-                    CompactAiInputField(
-                        value = apiKey,
-                        onValueChange = { apiKey = it },
-                        placeholder = "API key",
-                        isPassword = true,
-                        showPassword = showApiKey,
-                        onToggleShowPassword = { showApiKey = !showApiKey },
-                        testTag = "ai_api_key_input"
-                    )
-
-                    // 4. Model ID input (compact)
-                    CompactAiInputField(
-                        value = modelId,
-                        onValueChange = { modelId = it },
-                        placeholder = "Model ID",
-                        testTag = "ai_model_id_input"
-                    )
-
-                    // "Add provider" Button (compact pill button)
-                    Button(
-                        onClick = {
-                            val name = providerName.trim()
-                            val url = baseUrl.trim()
-                            val model = modelId.trim()
-                            if (name.isBlank() || url.isBlank() || model.isBlank()) {
-                                onShowSnackbar?.invoke("Please fill in Provider name, Base URL, and Model ID")
-                                return@Button
-                            }
-
-                            val newProvider = CloudAiProvider(
-                                name = name,
-                                baseUrl = url,
-                                apiKey = apiKey.trim(),
-                                modelId = model,
-                                isActive = true,
-                                status = CloudProviderStatus.UNCONFIGURED
-                            )
-
-                            scope.launch {
-                                prefs.saveCloudProvider(newProvider)
-                                onShowSnackbar?.invoke("Provider '$name' added")
-                                providerName = ""
-                                baseUrl = ""
-                                apiKey = ""
-                                modelId = ""
-                                isTestingCloud = true
-                                prefs.testCloudProvider(newProvider.id)
-                                isTestingCloud = false
-                            }
-                        },
-                        shape = CircleShape,
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            contentColor = MaterialTheme.colorScheme.onSurface
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(38.dp)
-                            .testTag("ai_add_provider_button"),
-                        contentPadding = PaddingValues(vertical = 0.dp)
-                    ) {
-                        Text(
-                            text = "Add provider",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
-
-            // Existing Configured Providers List (if any)
-            if (cloudProviders.isNotEmpty()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        "Configured Providers",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    cloudProviders.forEach { provider ->
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (provider.isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                            else MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(
-                                1.dp,
-                                if (provider.isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    scope.launch { prefs.setActiveCloudProvider(provider.id) }
-                                }
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    RadioButton(
-                                        selected = provider.isActive,
-                                        onClick = {
-                                            scope.launch { prefs.setActiveCloudProvider(provider.id) }
-                                        },
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Column {
-                                        Text(
-                                            provider.name,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            "${provider.modelId} • ${provider.baseUrl.removePrefix("https://").removePrefix("http://").take(22)}...",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    IconButton(
-                                        onClick = {
-                                            scope.launch {
-                                                prefs.testCloudProvider(provider.id)
-                                            }
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Refresh,
-                                            contentDescription = "Test connection",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = {
-                                            scope.launch {
-                                                prefs.deleteCloudProvider(provider.id)
-                                                onShowSnackbar?.invoke("Provider '${provider.name}' removed")
-                                            }
-                                        },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.DeleteOutline,
-                                            contentDescription = "Remove provider",
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==================== HORIZONTAL DIVIDER ====================
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 2.dp),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-            )
-
-            // ==================== LOCAL SECTION ====================
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.Smartphone,
-                    contentDescription = "Local AI",
-                    modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-                Text(
-                    text = "Local",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-
-            // Florence-2 Model Item Row
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Header Row (Clickable to expand / collapse)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .clickable { isExpanded = !isExpanded }
+                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Florence-2",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = when (florenceState.status) {
-                            FlorenceStatus.NOT_INSTALLED -> "Vision-Language model (~38 MB)"
-                            FlorenceStatus.DOWNLOADING -> "Downloading weights and config..."
-                            FlorenceStatus.VERIFYING -> "Verifying model artifacts..."
-                            FlorenceStatus.INSTALLED -> "Ready for on-device inference"
-                            FlorenceStatus.ERROR -> florenceState.errorMessage ?: "Installation failed"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (florenceState.status == FlorenceStatus.ERROR) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                // Circular Halo with Emre AI Signature Icon
+                Surface(
+                    shape = CircleShape,
+                    color = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    else Color.White.copy(alpha = 0.60f),
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        AiSignatureIcon(tint = MaterialTheme.colorScheme.onSurface)
+                    }
                 }
 
-                // Dynamic Status-Indicator Button for Florence-2
-                DynamicFlorenceStatusButton(
-                    state = florenceState,
-                    onInstall = {
-                        scope.launch {
-                            FlorenceModelManager.downloadAndInstall(context)
+                Spacer(Modifier.width(16.dp))
+
+                // Clean title without explanatory text below it
+                Text(
+                    text = "AI Configuration",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    modifier = Modifier.weight(1f)
+                )
+
+                // Header status badge / test pill when collapsed or expanded
+                DynamicCloudStatusIndicator(
+                    activeProvider = activeProvider,
+                    isTesting = isTestingCloud,
+                    isDark = isDark,
+                    onClick = {
+                        if (activeProvider != null) {
+                            scope.launch {
+                                isTestingCloud = true
+                                cloudTestFeedback = "Testing connection..."
+                                val status = prefs.testActiveCloudProvider()
+                                isTestingCloud = false
+                                cloudTestFeedback = if (status == CloudProviderStatus.CONNECTED) {
+                                    "Connected successfully"
+                                } else {
+                                    activeProvider?.statusMessage ?: "Connection test failed"
+                                }
+                                onShowSnackbar?.invoke(cloudTestFeedback ?: "")
+                            }
+                        } else {
+                            isExpanded = true
+                            selectedTab = AiModeTab.CLOUD
+                            onShowSnackbar?.invoke("Please configure a Cloud provider below")
                         }
-                    },
-                    onCancel = {
-                        FlorenceModelManager.cancelDownload(context)
-                    },
-                    onDetails = {
-                        showFlorenceDetailsDialog = true
                     }
+                )
+
+                Spacer(Modifier.width(6.dp))
+
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.ChevronRight,
+                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            // Progress bar when downloading
-            if (florenceState.status == FlorenceStatus.DOWNLOADING || florenceState.status == FlorenceStatus.VERIFYING) {
+            // Expanded Content
+            if (isExpanded) {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(horizontal = 18.dp)
+                )
+
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp)
                 ) {
-                    LinearProgressIndicator(
-                        progress = { florenceState.progress.coerceIn(0f, 1f) },
+                    // Segmented Button: Cloud | Local
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(4.dp)
-                            .clip(CircleShape),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .height(44.dp)
                     ) {
-                        Text(
-                            text = if (florenceState.totalBytes > 0) {
-                                "${formatBytes(florenceState.bytesDownloaded)} / ${formatBytes(florenceState.totalBytes)}"
-                            } else {
-                                "Downloading..."
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "${(florenceState.progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AiSegmentOption(
+                                text = "Cloud",
+                                isSelected = selectedTab == AiModeTab.CLOUD,
+                                isDark = isDark,
+                                onClick = { selectedTab = AiModeTab.CLOUD },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            VerticalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                modifier = Modifier
+                                    .fillMaxHeight(0.6f)
+                                    .width(1.dp)
+                            )
+
+                            AiSegmentOption(
+                                text = "Local",
+                                isSelected = selectedTab == AiModeTab.LOCAL,
+                                isDark = isDark,
+                                onClick = { selectedTab = AiModeTab.LOCAL },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // ==========================================
+                    // TAB 1: CLOUD
+                    // ==========================================
+                    if (selectedTab == AiModeTab.CLOUD) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            // 1. Provider name input
+                            MinimalAiInputField(
+                                value = providerName,
+                                onValueChange = { providerName = it },
+                                placeholder = "Provider name (e.g. OpenAI)",
+                                icon = Icons.Outlined.Label,
+                                testTag = "ai_provider_name_input"
+                            )
+
+                            // 2. Base URL input
+                            MinimalAiInputField(
+                                value = baseUrl,
+                                onValueChange = { baseUrl = it },
+                                placeholder = "Base URL (e.g. https://api.openai.com/v1)",
+                                icon = Icons.Outlined.Link,
+                                testTag = "ai_base_url_input"
+                            )
+
+                            // 3. API key input
+                            MinimalAiInputField(
+                                value = apiKey,
+                                onValueChange = { apiKey = it },
+                                placeholder = "API key",
+                                icon = Icons.Outlined.Key,
+                                isPassword = true,
+                                showPassword = showApiKey,
+                                onToggleShowPassword = { showApiKey = !showApiKey },
+                                testTag = "ai_api_key_input"
+                            )
+
+                            // 4. Model ID input
+                            MinimalAiInputField(
+                                value = modelId,
+                                onValueChange = { modelId = it },
+                                placeholder = "Model ID (e.g. gpt-4o)",
+                                icon = Icons.Outlined.Memory,
+                                testTag = "ai_model_id_input"
+                            )
+
+                            Spacer(Modifier.height(2.dp))
+
+                            // "Add Provider" Button matching Welcome Screen button style
+                            Button(
+                                onClick = {
+                                    val name = providerName.trim()
+                                    val url = baseUrl.trim()
+                                    val model = modelId.trim()
+                                    if (name.isBlank() || url.isBlank() || model.isBlank()) {
+                                        onShowSnackbar?.invoke("Please fill in Provider name, Base URL, and Model ID")
+                                        return@Button
+                                    }
+
+                                    val newProvider = CloudAiProvider(
+                                        name = name,
+                                        baseUrl = url,
+                                        apiKey = apiKey.trim(),
+                                        modelId = model,
+                                        isActive = true,
+                                        status = CloudProviderStatus.UNCONFIGURED
+                                    )
+
+                                    scope.launch {
+                                        prefs.saveCloudProvider(newProvider)
+                                        onShowSnackbar?.invoke("Provider '$name' added")
+                                        providerName = ""
+                                        baseUrl = ""
+                                        apiKey = ""
+                                        modelId = ""
+                                        isTestingCloud = true
+                                        prefs.testCloudProvider(newProvider.id)
+                                        isTestingCloud = false
+                                    }
+                                },
+                                    shape = RoundedCornerShape(32.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20),
+                                        contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+                                    ),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .testTag("ai_add_provider_button")
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "Add Provider",
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                        // Configured Providers List
+                        if (cloudProviders.isNotEmpty()) {
+                            Spacer(Modifier.height(16.dp))
+
+                            Text(
+                                text = "Configured Providers",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+
+                            Spacer(Modifier.height(8.dp))
+
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                cloudProviders.forEach { provider ->
+                                    Surface(
+                                        shape = RoundedCornerShape(18.dp),
+                                        color = if (provider.isActive) {
+                                            if (isDark) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                            else Color.White.copy(alpha = 0.85f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                                        },
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (provider.isActive) {
+                                                if (isDark) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                                else Color(0xFF161A20).copy(alpha = 0.6f)
+                                            } else {
+                                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                            }
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                scope.launch { prefs.setActiveCloudProvider(provider.id) }
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                RadioButton(
+                                                    selected = provider.isActive,
+                                                    onClick = {
+                                                        scope.launch { prefs.setActiveCloudProvider(provider.id) }
+                                                    },
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                                Column {
+                                                    Text(
+                                                        text = provider.name,
+                                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                                            fontSize = 14.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    )
+                                                    Text(
+                                                        text = "${provider.modelId} • ${provider.baseUrl.removePrefix("https://").removePrefix("http://").take(24)}",
+                                                        style = MaterialTheme.typography.labelSmall.copy(
+                                                            fontSize = 11.5.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    )
+                                                }
+                                            }
+
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                IconButton(
+                                                    onClick = {
+                                                        scope.launch {
+                                                            prefs.testCloudProvider(provider.id)
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Refresh,
+                                                        contentDescription = "Test connection",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+
+                                                IconButton(
+                                                    onClick = {
+                                                        scope.launch {
+                                                            prefs.deleteCloudProvider(provider.id)
+                                                            onShowSnackbar?.invoke("Provider '${provider.name}' removed")
+                                                        }
+                                                    },
+                                                    modifier = Modifier.size(32.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.DeleteOutline,
+                                                        contentDescription = "Remove provider",
+                                                        tint = MaterialTheme.colorScheme.error,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ==========================================
+                    // TAB 2: LOCAL AI (FLORENCE-2)
+                    // ==========================================
+                    if (selectedTab == AiModeTab.LOCAL) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 16.dp)
+                            ) {
+                                // Header row without explanatory text below it
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Florence-2 Base",
+                                        style = MaterialTheme.typography.bodyLarge.copy(
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    )
+
+                                    DynamicFlorenceStatusButton(
+                                        state = florenceState,
+                                        isDark = isDark,
+                                        onInstall = {
+                                            scope.launch {
+                                                FlorenceModelManager.downloadAndInstall(context)
+                                            }
+                                        },
+                                        onCancel = {
+                                            FlorenceModelManager.cancelDownload(context)
+                                        },
+                                        onDetails = {
+                                            showFlorenceDetailsDialog = true
+                                        }
+                                    )
+                                }
+
+                                // Progress bar when downloading
+                                if (florenceState.status == FlorenceStatus.DOWNLOADING || florenceState.status == FlorenceStatus.VERIFYING) {
+                                    Spacer(Modifier.height(14.dp))
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        LinearProgressIndicator(
+                                            progress = { florenceState.progress.coerceIn(0f, 1f) },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(4.dp)
+                                                .clip(CircleShape),
+                                            color = MaterialTheme.colorScheme.primary,
+                                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = if (florenceState.totalBytes > 0) {
+                                                    "${formatBytes(florenceState.bytesDownloaded)} / ${formatBytes(florenceState.totalBytes)}"
+                                                } else {
+                                                    "Downloading..."
+                                                },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontSize = 10.5.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            Text(
+                                                text = "${(florenceState.progress * 100).toInt()}%",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 10.5.sp,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (florenceState.status == FlorenceStatus.INSTALLED) {
+                                    Spacer(Modifier.height(10.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        TextButton(
+                                            onClick = { showFlorenceDetailsDialog = true },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                        ) {
+                                            Text("Options", fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
                 }
             }
         }
@@ -556,13 +643,108 @@ fun AiConfigurationCard(
 }
 
 /**
- * Compact rounded outlined input field matching the template pill styling.
+ * Custom AI Signature Icon with Emre's iconic 4 viewfinder corners and central sparkle.
  */
 @Composable
-private fun CompactAiInputField(
+private fun AiSignatureIcon(
+    modifier: Modifier = Modifier,
+    tint: Color = Color(0xFF181C22)
+) {
+    Box(
+        modifier = modifier.size(24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val strokeWidth = 1.6.dp.toPx()
+            val cornerLength = 4.5.dp.toPx()
+            val w = size.width
+            val h = size.height
+
+            // Top-left
+            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(cornerLength, 0f), strokeWidth)
+            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(0f, cornerLength), strokeWidth)
+
+            // Top-right
+            drawLine(tint, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w - cornerLength, 0f), strokeWidth)
+            drawLine(tint, androidx.compose.ui.geometry.Offset(w, 0f), androidx.compose.ui.geometry.Offset(w, cornerLength), strokeWidth)
+
+            // Bottom-left
+            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(cornerLength, h), strokeWidth)
+            drawLine(tint, androidx.compose.ui.geometry.Offset(0f, h), androidx.compose.ui.geometry.Offset(0f, h - cornerLength), strokeWidth)
+
+            // Bottom-right
+            drawLine(tint, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w - cornerLength, h), strokeWidth)
+            drawLine(tint, androidx.compose.ui.geometry.Offset(w, h), androidx.compose.ui.geometry.Offset(w, h - cornerLength), strokeWidth)
+        }
+        Icon(
+            imageVector = Icons.Default.AutoAwesome,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = tint
+        )
+    }
+}
+
+/**
+ * Sleek Segment Option button matching Welcome Screen's SegmentButton.
+ */
+@Composable
+private fun AiSegmentOption(
+    text: String,
+    isSelected: Boolean,
+    isDark: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (isSelected) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20),
+            modifier = modifier.fillMaxHeight()
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
+                    )
+                )
+            }
+        }
+    } else {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = modifier
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(20.dp))
+                .clickable(onClick = onClick)
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        }
+    }
+}
+
+/**
+ * Minimalist input field with rounded capsule styling matching Welcome Screen elements.
+ */
+@Composable
+private fun MinimalAiInputField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier,
     isPassword: Boolean = false,
     showPassword: Boolean = false,
@@ -570,12 +752,12 @@ private fun CompactAiInputField(
     testTag: String = ""
 ) {
     Surface(
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
         modifier = modifier
             .fillMaxWidth()
-            .height(40.dp)
+            .height(44.dp)
             .testTag(testTag)
     ) {
         Row(
@@ -584,6 +766,13 @@ private fun CompactAiInputField(
                 .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.width(10.dp))
             Box(
                 modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.CenterStart
@@ -593,8 +782,10 @@ private fun CompactAiInputField(
                         text = placeholder,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        )
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 BasicTextField(
@@ -613,7 +804,7 @@ private fun CompactAiInputField(
             if (isPassword && value.isNotEmpty()) {
                 IconButton(
                     onClick = { onToggleShowPassword?.invoke() },
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(28.dp)
                 ) {
                     Icon(
                         imageVector = if (showPassword) Icons.Default.VisibilityOff else Icons.Default.Visibility,
@@ -628,12 +819,13 @@ private fun CompactAiInputField(
 }
 
 /**
- * Dynamic Status-Indicator Button for Cloud State
+ * Dynamic Status-Indicator Button for Cloud State with sleek capsule styling.
  */
 @Composable
 private fun DynamicCloudStatusIndicator(
     activeProvider: CloudAiProvider?,
     isTesting: Boolean,
+    isDark: Boolean,
     onClick: () -> Unit
 ) {
     val status = when {
@@ -644,23 +836,23 @@ private fun DynamicCloudStatusIndicator(
 
     val (bg, border, contentColor) = when (status) {
         CloudProviderStatus.CONNECTED -> Triple(
-            Color(0xFFE8F5E9),
-            Color(0xFF81C784),
-            Color(0xFF2E7D32)
+            if (isDark) Color(0xFF1B3822) else Color(0xFFE8F5E9),
+            if (isDark) Color(0xFF2E7D32) else Color(0xFF81C784),
+            if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
         )
         CloudProviderStatus.CHECKING -> Triple(
-            MaterialTheme.colorScheme.surfaceContainerHigh,
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
             MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
             MaterialTheme.colorScheme.primary
         )
         CloudProviderStatus.ERROR -> Triple(
-            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
-            MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
-            MaterialTheme.colorScheme.error
+            if (isDark) Color(0xFF381E1E) else Color(0xFFFFEBEE),
+            if (isDark) Color(0xFFC62828) else Color(0xFFEF9A9A),
+            if (isDark) Color(0xFFEF9A9A) else Color(0xFFC62828)
         )
         CloudProviderStatus.UNCONFIGURED -> Triple(
-            MaterialTheme.colorScheme.surfaceContainerHigh,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
             MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
@@ -671,11 +863,11 @@ private fun DynamicCloudStatusIndicator(
         color = bg,
         border = BorderStroke(1.dp, border),
         modifier = Modifier
-            .height(30.dp)
+            .height(32.dp)
             .testTag("ai_cloud_status_button")
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp),
+            modifier = Modifier.padding(horizontal = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
@@ -689,8 +881,10 @@ private fun DynamicCloudStatusIndicator(
                     )
                     Text(
                         text = activeProvider?.name?.ifBlank { "Connected" } ?: "Connected",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
                         color = contentColor
                     )
                 }
@@ -702,8 +896,10 @@ private fun DynamicCloudStatusIndicator(
                     )
                     Text(
                         text = "Testing...",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
                         color = contentColor
                     )
                 }
@@ -716,8 +912,10 @@ private fun DynamicCloudStatusIndicator(
                     )
                     Text(
                         text = "Offline",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
                         color = contentColor
                     )
                 }
@@ -730,8 +928,10 @@ private fun DynamicCloudStatusIndicator(
                     )
                     Text(
                         text = "Not set",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
                         color = contentColor
                     )
                 }
@@ -741,54 +941,61 @@ private fun DynamicCloudStatusIndicator(
 }
 
 /**
- * Dynamic Status-Indicator Button for Florence-2 Local Model
+ * Dynamic Status Button for Florence-2 Local Model matching Welcome Screen capsule buttons.
  */
 @Composable
 private fun DynamicFlorenceStatusButton(
     state: FlorenceModelState,
+    isDark: Boolean,
     onInstall: () -> Unit,
     onCancel: () -> Unit,
     onDetails: () -> Unit
 ) {
     when (state.status) {
         FlorenceStatus.NOT_INSTALLED -> {
-            OutlinedButton(
+            Surface(
                 onClick = onInstall,
                 shape = CircleShape,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.8f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                 modifier = Modifier
-                    .height(32.dp)
+                    .height(34.dp)
                     .testTag("florence_install_button")
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.FileDownload,
-                    contentDescription = "Install Florence-2",
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    text = "Install",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.FileDownload,
+                        contentDescription = "Install Florence-2",
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Install",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                }
             }
         }
 
         FlorenceStatus.DOWNLOADING, FlorenceStatus.VERIFYING -> {
             Surface(
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
                 modifier = Modifier
-                    .height(32.dp)
+                    .height(34.dp)
                     .testTag("florence_downloading_button")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
@@ -800,18 +1007,20 @@ private fun DynamicFlorenceStatusButton(
                     )
                     Text(
                         text = "${(state.progress * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     )
                     IconButton(
                         onClick = onCancel,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(20.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Cancel download",
-                            modifier = Modifier.size(12.dp),
+                            modifier = Modifier.size(13.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -820,17 +1029,21 @@ private fun DynamicFlorenceStatusButton(
         }
 
         FlorenceStatus.INSTALLED -> {
+            val bg = if (isDark) Color(0xFF1B3822) else Color(0xFFE8F5E9)
+            val border = if (isDark) Color(0xFF2E7D32) else Color(0xFF81C784)
+            val contentColor = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
+
             Surface(
                 onClick = onDetails,
                 shape = CircleShape,
-                color = Color(0xFFE8F5E9),
-                border = BorderStroke(1.dp, Color(0xFF81C784)),
+                color = bg,
+                border = BorderStroke(1.dp, border),
                 modifier = Modifier
-                    .height(32.dp)
+                    .height(34.dp)
                     .testTag("florence_installed_button")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
@@ -838,42 +1051,54 @@ private fun DynamicFlorenceStatusButton(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Installed",
                         modifier = Modifier.size(15.dp),
-                        tint = Color(0xFF2E7D32)
+                        tint = contentColor
                     )
                     Text(
                         text = "Installed",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF2E7D32)
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = contentColor
+                        )
                     )
                 }
             }
         }
 
         FlorenceStatus.ERROR -> {
-            OutlinedButton(
+            val bg = if (isDark) Color(0xFF381E1E) else Color(0xFFFFEBEE)
+            val border = if (isDark) Color(0xFFC62828) else Color(0xFFEF9A9A)
+            val contentColor = if (isDark) Color(0xFFEF9A9A) else Color(0xFFC62828)
+
+            Surface(
                 onClick = onInstall,
                 shape = CircleShape,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error
-                ),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                color = bg,
+                border = BorderStroke(1.dp, border),
                 modifier = Modifier
-                    .height(32.dp)
+                    .height(34.dp)
                     .testTag("florence_retry_button")
             ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Retry download",
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    text = "Retry",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Retry download",
+                        modifier = Modifier.size(15.dp),
+                        tint = contentColor
+                    )
+                    Text(
+                        text = "Retry",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = contentColor
+                        )
+                    )
+                }
             }
         }
     }
