@@ -89,7 +89,8 @@ enum class DownloaderViewMode {
     SEARCH_PAGE,
     DOWNLOADER_PAGE,
     SAVED_LIBRARY,
-    ACTIVITY_PAGE
+    ACTIVITY_PAGE,
+    DISCOVERED_MEDIA
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -495,7 +496,12 @@ fun MediaInboxScreen(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    if (currentViewMode == DownloaderViewMode.SEARCH_PAGE || currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
+                    if (currentViewMode == DownloaderViewMode.DISCOVERED_MEDIA) {
+                        DiscoveredMediaPage(
+                            onBack = onBack,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else if (currentViewMode == DownloaderViewMode.SEARCH_PAGE || currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
                         DownloaderActivityPage(
                             onBack = {
                                 if (initialViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
@@ -1921,4 +1927,131 @@ fun FullScreenBrowserView(
         onSwitchToMediaTab = { onDownloadComplete(0) },
         modifier = modifier
     )
+}
+
+
+/**
+ * Current browser-tab discoveries. This is deliberately separate from download activity:
+ * detected candidates are not downloads until the user explicitly queues them.
+ */
+@Composable
+private fun DiscoveredMediaPage(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val discoveredItems by com.amresalehin.emregallery.data.DownloaderSession.discoveredItems.collectAsState()
+    val sourceUrl by com.amresalehin.emregallery.data.DownloaderSession.currentUrl.collectAsState()
+    val sourceDomain by com.amresalehin.emregallery.data.DownloaderSession.sourceDomain.collectAsState()
+
+    Column(modifier = modifier.background(MaterialTheme.colorScheme.background)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(58.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Discovered media",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "${discoveredItems.size} unique items",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        if (discoveredItems.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(28.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Outlined.ImageSearch,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(42.dp)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text("No media discovered on this page", fontWeight = FontWeight.Medium)
+                    Text(
+                        "Browse a page containing images, videos, or other media and detected items will appear here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(discoveredItems, key = { it.id }) { item ->
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = item.thumbnailUrl?.takeIf { it.isNotBlank() } ?: item.url,
+                                contentDescription = item.title,
+                                modifier = Modifier.size(68.dp).clip(RoundedCornerShape(10.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title.ifBlank { item.url },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = if (item.isVideo || item.isStream) "Video" else item.format.ifBlank { "Image" },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    DownloadQueueManager.enqueueDownload(
+                                        context = context,
+                                        item = item,
+                                        referer = sourceUrl,
+                                        stackId = "discovered_${sourceUrl.hashCode()}",
+                                        stackTitle = sourceDomain.ifBlank { "Discovered Media" },
+                                        sourceDomain = sourceDomain,
+                                        sourceUrl = sourceUrl
+                                    )
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Download,
+                                    contentDescription = "Download ${item.title}"
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
