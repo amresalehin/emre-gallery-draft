@@ -124,7 +124,7 @@ private fun ShareReceiverScreen(
         if (showDiscoveredMedia) {
             MediaInboxScreen(
                 onBack = { showDiscoveredMedia = false },
-                initialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
+                initialViewMode = DownloaderViewMode.DISCOVERED_MEDIA,
                 modifier = Modifier.fillMaxSize()
             )
         } else {
