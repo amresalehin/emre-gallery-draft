@@ -260,6 +260,7 @@ class PocketRepository(context: Context) {
                 put("description", item.description)
                 put("isFavorite", item.isFavorite)
                 put("isRead", item.isRead)
+                put("isArchived", item.isArchived)
                 put("canonicalUrl", item.canonicalUrl)
                 put("siteName", item.siteName)
                 put("faviconUrl", item.faviconUrl)
@@ -309,6 +310,7 @@ class PocketRepository(context: Context) {
                     description = obj.optString("description", ""),
                     isFavorite = obj.optBoolean("isFavorite", false),
                     isRead = obj.optBoolean("isRead", false),
+                    isArchived = obj.optBoolean("isArchived", false),
                     canonicalUrl = obj.optNullableString("canonicalUrl"),
                     siteName = obj.optNullableString("siteName"),
                     faviconUrl = obj.optNullableString("faviconUrl"),
