@@ -296,11 +296,7 @@ fun MediaInboxScreen(
                                                         focusManager.clearFocus()
                                                         keyboardController?.hide()
                                                     } else {
-                                                        if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) {
-                                                            onBack()
-                                                        } else {
-                                                            currentViewMode = DownloaderViewMode.SEARCH_PAGE
-                                                        }
+                                                        onBack()
                                                     }
                                                 },
                                                 modifier = Modifier
@@ -345,24 +341,7 @@ fun MediaInboxScreen(
                                                             }
                                                         }
 
-                                                        // Saved icon only
-                                                        Surface(
-                                                            onClick = { currentViewMode = DownloaderViewMode.SAVED_LIBRARY },
-                                                            shape = RoundedCornerShape(14.dp),
-                                                            color = if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                                                            modifier = Modifier
-                                                                .size(width = 34.dp, height = 30.dp)
-                                                                .testTag("tab_saved_library")
-                                                        ) {
-                                                            Box(contentAlignment = Alignment.Center) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.Folder,
-                                                                    contentDescription = "Saved",
-                                                                    tint = if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                    modifier = Modifier.size(16.dp)
-                                                                )
-                                                            }
-                                                        }
+
                                                     }
                                                 }
 
@@ -467,25 +446,7 @@ fun MediaInboxScreen(
                     }
                 },
                 floatingActionButton = {
-                    if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY && !isSelectionMode) {
-                        FloatingActionButton(
-                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                            shape = RoundedCornerShape(20.dp),
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-                            modifier = Modifier
-                                .padding(bottom = 16.dp, end = 8.dp)
-                                .size(56.dp)
-                                .testTag("media_inbox_fab_add")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "New Media Download",
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
+
                 }
             ) { innerPadding ->
                 Box(
@@ -508,12 +469,10 @@ fun MediaInboxScreen(
                                 currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
                             },
                             onBack = onBack,
-                            savedStacks = stacks,
-                            onSelectStack = { stack ->
-                                selectedStackForDetail = stack
-                            },
+                            savedStacks = emptyList(),
+                            onSelectStack = {},
                             activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED },
-                            savedStacksCount = stacks.size,
+                            savedStacksCount = 0,
                             modifier = Modifier.fillMaxSize()
                         )
                     } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
