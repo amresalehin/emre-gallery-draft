@@ -1112,7 +1112,15 @@ fun GalleryApp() {
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
                         onMenuClick = { showSidePanel = true },
-                        onDetailViewerStateChange = { isPocketDetailOpen = it }
+                        onDetailViewerStateChange = { isPocketDetailOpen = it },
+                        onOpenDiscoveredMedia = {
+                            navigateTo(
+                                dest = Destination.MEDIA_INBOX,
+                                rememberPrevious = true,
+                                newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
+                                newInboxInitialOpenBrowser = false
+                            )
+                        }
                     )
                     Destination.SETTINGS -> SettingsScreen(
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
