@@ -151,9 +151,6 @@ fun DirectBrowserView(
             // Keep Emre's browser chrome themed, but do not rewrite website colors.
             webView.settings.forceDark = WebSettings.FORCE_DARK_OFF
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            webView.settings.algorithmicDarkeningAllowed = false
-        }
     }
 
     fun navigateToUrl(target: String) {
