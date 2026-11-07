@@ -159,24 +159,6 @@ fun MediaInboxScreen(
         }
     }
 
-    // Filter stacks based on search query
-    val filteredStacks = remember(stacks, searchQuery, sortOrder) {
-        val base = if (searchQuery.isBlank()) {
-            stacks
-        } else {
-            stacks.filter { stack ->
-                stack.title.contains(searchQuery, ignoreCase = true) ||
-                        stack.sourceDomain.contains(searchQuery, ignoreCase = true) ||
-                        stack.items.any { it.title.contains(searchQuery, ignoreCase = true) }
-            }
-        }
-        if (sortOrder == "Newest") {
-            base.sortedByDescending { it.timestampMillis }
-        } else {
-            base.sortedBy { it.timestampMillis }
-        }
-    }
-
     Box(
         modifier = modifier
             .fillMaxSize()
