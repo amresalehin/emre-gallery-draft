@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 // Emre Gallery is strictly monochrome. Palette built from pure neutrals:
 // whites, grays, and near-blacks carry the entire interface. Color is not decoration.
@@ -56,20 +57,35 @@ private val Dark = darkColorScheme(
     onTertiary = Color(0xFF1A1A1A),
     tertiaryContainer = Color(0xFF2E2E2E),
     onTertiaryContainer = Color(0xFFEEEEEE),
-    background = Color(0xFF101010),
-    onBackground = Color(0xFFEDEDED),
-    surface = Color(0xFF101010),
-    onSurface = Color(0xFFEDEDED),
-    surfaceVariant = Color(0xFF262626),
+    background = Color(0xFF151515),
+    onBackground = Color(0xFFF0F0F0),
+    surface = Color(0xFF1B1B1B),
+    onSurface = Color(0xFFF0F0F0),
+    surfaceDim = Color(0xFF121212),
+    surfaceBright = Color(0xFF303030),
+    surfaceContainerLowest = Color(0xFF101010),
+    surfaceContainerLow = Color(0xFF1A1A1A),
+    surfaceContainer = Color(0xFF202020),
+    surfaceContainerHigh = Color(0xFF282828),
+    surfaceContainerHighest = Color(0xFF303030),
+    surfaceVariant = Color(0xFF292929),
     onSurfaceVariant = Color(0xFFC0C0C0),
     surfaceTint = Color(0x00000000),
     inverseSurface = Color(0xFFEDEDED),
     inverseOnSurface = Color(0xFF222222),
     inversePrimary = Color(0xFF404040),
-    outline = Color(0xFF808080),
-    outlineVariant = Color(0xFF404040),
+    outline = Color(0xFF858585),
+    outlineVariant = Color(0xFF484848),
     scrim = Color(0x99000000)
 )
+
+/**
+ * Read the resolved app theme from MaterialTheme rather than the device theme.
+ * This keeps every screen consistent with the user's Light / Dark / System choice.
+ */
+@Composable
+fun isAppInDarkTheme(): Boolean =
+    MaterialTheme.colorScheme.background.luminance() < 0.5f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

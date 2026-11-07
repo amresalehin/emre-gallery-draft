@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import com.amresalehin.emregallery.ui.theme.isAppInDarkTheme
 import android.net.Uri
 import com.amresalehin.emregallery.GalleryApplication
 import androidx.activity.compose.BackHandler
@@ -9,7 +10,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -790,7 +790,7 @@ fun ImageStackCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppInDarkTheme()
     val layerColors = remember(accentIndex, isDark) {
         val list = if (isDark) StackLayerPalettesDark else StackLayerPalettesLight
         list[accentIndex % list.size]

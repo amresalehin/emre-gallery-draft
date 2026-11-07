@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import com.amresalehin.emregallery.ui.theme.isAppInDarkTheme
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
@@ -8,7 +9,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -52,7 +52,6 @@ fun SearchScreen(
     customTagsMap: Map<String, Set<String>>,
     customPeopleMap: Map<String, Set<String>>,
     favourites: Set<String>,
-    themePref: String = "system",
     onQueryChange: (String) -> Unit,
     onSubmitSearch: (String) -> Unit,
     onClearRecent: () -> Unit,
@@ -65,11 +64,7 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
 
-    val isDark = when (themePref) {
-        "dark" -> true
-        "light" -> false
-        else -> isSystemInDarkTheme()
-    }
+    val isDark = isAppInDarkTheme()
 
     val searchEngine = remember { SearchEngine(context) }
 

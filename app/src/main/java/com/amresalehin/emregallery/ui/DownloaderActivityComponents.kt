@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import com.amresalehin.emregallery.ui.theme.isAppInDarkTheme
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -7,7 +8,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -118,7 +118,7 @@ fun ActivityPreviewCard(
     onOpenActivity: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppInDarkTheme()
     val containerShape = RoundedCornerShape(26.dp)
 
     val downloading = remember(activities) { activities.filter { it.isDownloading || it.isPaused || it.isRetrying } }

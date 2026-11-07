@@ -1,10 +1,10 @@
 package com.amresalehin.emregallery.ui
 
+import com.amresalehin.emregallery.ui.theme.isAppInDarkTheme
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -1252,7 +1252,7 @@ private fun CollageCell(
 private fun AlbumsEmptyState(
     onCreateClick: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppInDarkTheme()
     val cardBg = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface
     val cardBorder = MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.4f else 0.55f)
     val textBarPrimary = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDark) 0.32f else 0.22f)
@@ -1336,7 +1336,7 @@ private fun AlbumsEmptyState(
 
 @Composable
 private fun FoldersEmptyState() {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppInDarkTheme()
     val cardBg = if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface
     val cardBorder = MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.4f else 0.55f)
     val textBarPrimary = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDark) 0.32f else 0.22f)
@@ -1417,7 +1417,7 @@ private fun FoldersEmptyState() {
 
 @Composable
 private fun PlaceholderGridCell(modifier: Modifier = Modifier) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = isAppInDarkTheme()
     val cellBg = if (isDark) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.surfaceContainer
     val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isDark) 0.38f else 0.32f)
 

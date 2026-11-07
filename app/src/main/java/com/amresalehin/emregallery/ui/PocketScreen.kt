@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import com.amresalehin.emregallery.ui.theme.isAppInDarkTheme
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -18,7 +19,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
@@ -162,7 +162,7 @@ fun PocketScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val isDark = isAppInDarkTheme()
     val pocketRepo = remember { PocketRepository.getInstance(context) }
     val stacks by pocketRepo.bookmarks.collectAsState()
 
