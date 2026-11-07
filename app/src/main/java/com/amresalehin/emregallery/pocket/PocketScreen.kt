@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -433,10 +434,14 @@ fun PocketStackedCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val cardShape = RoundedCornerShape(22.dp)
 
+    // Independent backing cards produce a genuine layered deck.
+    // Front-card content, dimensions and parent masonry layout are retained.
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .padding(end = 10.dp, bottom = 10.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -444,32 +449,43 @@ fun PocketStackedCard(
             )
             .testTag("pocket_card_${item.title.lowercase().replace(" ", "_")}")
     ) {
-        // Backmost Layer 2: Offset (8.dp, 8.dp)
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .offset(x = 6.dp, y = 6.dp)
-                .clip(RoundedCornerShape(22.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-        )
-
-        // Middle Layer 1: Offset (4.dp, 4.dp)
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .offset(x = 3.dp, y = 3.dp)
-                .clip(RoundedCornerShape(22.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainer)
-        )
-
-        // Front Main Card
         Surface(
-            shape = RoundedCornerShape(22.dp),
+            shape = cardShape,
+            color = MaterialTheme.colorScheme.surfaceVariant,
+            tonalElevation = 1.dp,
+            shadowElevation = 2.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+            modifier = Modifier
+                .matchParentSize()
+                .offset(x = 7.dp, y = 2.dp)
+                .rotate(2.2f)
+        ) {
+            Box(Modifier.matchParentSize())
+        }
+
+        Surface(
+            shape = cardShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 2.dp,
+            shadowElevation = 3.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            modifier = Modifier
+                .matchParentSize()
+                .offset(x = 4.dp, y = 5.dp)
+                .rotate(-1.4f)
+        ) {
+            Box(Modifier.matchParentSize())
+        }
+
+        Surface(
+            shape = cardShape,
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             tonalElevation = 3.dp,
             shadowElevation = 5.dp,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .zIndex(1f)
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 // Image section with top rounded corners
