@@ -58,6 +58,7 @@ class BrowserTabSession(
             clearMedia()
             _url.value = cleanUrl
             _title.value = ""
+            DownloaderSession.updateBrowserPage(cleanUrl)
         }
         if (!newTitle.isNullOrBlank()) {
             _title.value = newTitle
