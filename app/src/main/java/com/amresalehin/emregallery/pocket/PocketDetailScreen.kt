@@ -125,7 +125,36 @@ fun PocketDetailScreen(
                         }
                     }
 
-                    // 2. Copy / Share Icon
+                    // Archive or restore this bookmark without deleting it.
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        tonalElevation = 4.dp,
+                        shadowElevation = 6.dp,
+                        modifier = Modifier.size(46.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                val archived = !item.isArchived
+                                onUpdate(item.copy(isArchived = archived))
+                                Toast.makeText(
+                                    context,
+                                    if (archived) "Moved to archive" else "Restored to active library",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            modifier = Modifier.fillMaxSize().testTag("pocket_detail_archive")
+                        ) {
+                            Icon(
+                                imageVector = if (item.isArchived) Icons.Default.Unarchive else Icons.Default.Archive,
+                                contentDescription = if (item.isArchived) "Restore bookmark" else "Archive bookmark",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(21.dp)
+                            )
+                        }
+                    }
+
+                    // 3. Copy / Share Icon
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -151,7 +180,7 @@ fun PocketDetailScreen(
                         }
                     }
 
-                    // 3. Delete / Trash Icon
+                    // 4. Delete / Trash Icon
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
