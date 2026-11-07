@@ -56,6 +56,10 @@ import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.data.StoryGroup
+import com.amresalehin.emregallery.pocket.PocketItem
+import com.amresalehin.emregallery.pocket.PocketRepository
+import com.amresalehin.emregallery.pocket.PocketScreen
+import com.amresalehin.emregallery.pocket.PocketDetailScreen
 
 data class NavBackStackEntry(
     val destination: Destination,
@@ -69,7 +73,8 @@ data class NavBackStackEntry(
     val albumFilterReturnDestination: Destination = Destination.ALBUMS,
     val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
     val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-    val inboxInitialOpenBrowser: Boolean = false
+    val inboxInitialOpenBrowser: Boolean = false,
+    val selectedPocketItem: PocketItem? = null
 )
 
 val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
@@ -139,6 +144,18 @@ fun GalleryApp() {
     var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
     var inboxInitialOpenBrowser by remember { mutableStateOf(false) }
+    val pocketRepository = remember { PocketRepository(context.applicationContext) }
+    val pocketItems by pocketRepository.items.collectAsStateWithLifecycle(initialValue = emptyList())
+    var selectedPocketItem by remember { mutableStateOf<PocketItem?>(null) }
+
+    LaunchedEffect(pocketRepository) {
+        val migration = pocketRepository.migrateLegacySavedLibrary()
+        if (migration.error != null) {
+            snackbarHostState.showSnackbar(migration.error)
+        } else if (migration.migratedItems > 0) {
+            snackbarHostState.showSnackbar("Moved ${migration.migratedItems} saved collections into Pocket")
+        }
+    }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -504,7 +521,8 @@ fun GalleryApp() {
         newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0,
         newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
         newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-        newInboxInitialOpenBrowser: Boolean = false
+        newInboxInitialOpenBrowser: Boolean = false,
+        newSelectedPocketItem: PocketItem? = null
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -525,7 +543,8 @@ fun GalleryApp() {
                     albumFilterReturnDestination = albumFilterReturnDestination,
                     inboxInitialViewMode = inboxInitialViewMode,
                     inboxInitialStack = inboxInitialStack,
-                    inboxInitialOpenBrowser = inboxInitialOpenBrowser
+                    inboxInitialOpenBrowser = inboxInitialOpenBrowser,
+                    selectedPocketItem = selectedPocketItem
                 )
             )
             previousDestination = destination
@@ -540,6 +559,7 @@ fun GalleryApp() {
         inboxInitialViewMode = newInboxInitialViewMode
         inboxInitialStack = newInboxInitialStack
         inboxInitialOpenBrowser = newInboxInitialOpenBrowser
+        selectedPocketItem = newSelectedPocketItem
     }
 
     fun openMediaInViewer(item: MediaItem, list: List<MediaItem>) {
@@ -619,6 +639,7 @@ fun GalleryApp() {
                 inboxInitialViewMode = entry.inboxInitialViewMode
                 inboxInitialStack = entry.inboxInitialStack
                 inboxInitialOpenBrowser = entry.inboxInitialOpenBrowser
+                selectedPocketItem = entry.selectedPocketItem
                 previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
             }
             albumFilter != null -> {
@@ -640,6 +661,11 @@ fun GalleryApp() {
             ) -> {
                 destination = Destination.ALBUMS
                 mapFocusItem = null
+                viewerStoryTitle = null
+            }
+            destination == Destination.POCKET -> {
+                selectedPocketItem = null
+                destination = Destination.HOME
                 viewerStoryTitle = null
             }
             destination in listOf(
@@ -891,7 +917,7 @@ fun GalleryApp() {
                         },
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
-                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; "Browser" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE, newInboxInitialOpenBrowser = true) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Saved", "Saved Media Library", "Saved Library" -> { albumFilter = null; navigateTo(Destination.POCKET) }; "Media Downloader", "Media Inbox", "Inbox" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE) }; "Browser" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE, newInboxInitialOpenBrowser = true) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
@@ -899,20 +925,7 @@ fun GalleryApp() {
                         },
                         onOpenSavedLibrary = {
                             albumFilter = null
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY
-                            )
-                        },
-                        onOpenSavedStack = { stack ->
-                            albumFilter = null
-                            navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY,
-                                newInboxInitialStack = stack
-                            )
+                            navigateTo(Destination.POCKET)
                         },
                         onCreateAlbumClick = { parentPreset ->
                             createAlbumPresetParent = parentPreset
@@ -1229,6 +1242,31 @@ fun GalleryApp() {
                     Destination.ABOUT -> AboutScreen(
                         onBack = { performBackNavigation() }
                     )
+                    Destination.POCKET -> {
+                        val selected = selectedPocketItem
+                        if (selected == null) {
+                            PocketScreen(
+                                items = pocketItems,
+                                onOpenItem = { selectedPocketItem = it },
+                                onSaveUrl = { url ->
+                                    scope.launch {
+                                        runCatching { pocketRepository.saveFromUrl(url) }
+                                            .onFailure { snackbarHostState.showSnackbar("Could not save link: ${it.message ?: "unknown error"}") }
+                                    }
+                                },
+                                onMenuClick = { showSidePanel = true },
+                                topContentPadding = topContentPadding,
+                                bottomContentPadding = bottomContentPadding
+                            )
+                        } else {
+                            PocketDetailScreen(
+                                item = selected,
+                                onBack = { selectedPocketItem = null },
+                                onDelete = { item -> scope.launch { pocketRepository.deleteItem(item.id); selectedPocketItem = null } },
+                                onUpdate = { item -> scope.launch { pocketRepository.updateItem(item); selectedPocketItem = item } }
+                            )
+                        }
+                    }
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
                         initialViewMode = inboxInitialViewMode,
                         initialStackForDetail = inboxInitialStack,
