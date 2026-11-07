@@ -131,8 +131,9 @@ fun MediaInboxScreen(
     val isSelectionMode = selectedStackIds.isNotEmpty()
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
-    var currentViewMode by remember(initialViewMode) { mutableStateOf(initialViewMode) }
-    var activeFetchUrl by remember { mutableStateOf("") }
+    var currentViewMode by remember(initialViewMode) {
+        mutableStateOf(if (initialViewMode == DownloaderViewMode.DOWNLOADER_PAGE) DownloaderViewMode.SEARCH_PAGE else initialViewMode)
+    }
 
     LaunchedEffect(Unit) {
         GalleryApplication.warmupChromium(context)
@@ -188,22 +189,7 @@ fun MediaInboxScreen(
             .fillMaxSize()
             .testTag("media_inbox_screen")
     ) {
-        if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE && activeFetchUrl.isNotBlank()) {
-            DownloaderResultsPage(
-                targetUrl = activeFetchUrl,
-                onBack = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
-                onOpenBrowser = { url ->
-                    browserInitialUrl = url
-                    showFullScreenBrowser = true
-                },
-                onDownloadComplete = { /* Silent foreground download with no toast */ },
-                onViewSavedLibrary = {
-                    currentViewMode = DownloaderViewMode.SAVED_LIBRARY
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            Scaffold(
+        Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 containerColor = MaterialTheme.colorScheme.background,
@@ -517,8 +503,8 @@ fun MediaInboxScreen(
                     if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) {
                         DownloaderSearchMainPage(
                             onFetchUrl = { targetUrl ->
-                                activeFetchUrl = targetUrl
-                                currentViewMode = DownloaderViewMode.DOWNLOADER_PAGE
+                                browserInitialUrl = targetUrl
+                                showFullScreenBrowser = true
                             },
                             onOpenBrowser = { targetUrl ->
                                 browserInitialUrl = targetUrl
@@ -786,7 +772,6 @@ fun MediaInboxScreen(
             },
             modifier = Modifier.fillMaxSize()
         )
-    }
     }
 }
 
@@ -2131,92 +2116,6 @@ fun DownloadingSkeletonCard(
                         .height(8.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = alphaAnim * 0.35f))
-                )
-            }
-        }
-    }
-}
-
-/**
- * Skeleton wireframe grid matching Screenshot 1 layout precisely
- */
-@Composable
-fun SkeletonWireframeGrid() {
-    // Skeletons matching the varied heights from Screenshot 1:
-    // Left column: 130dp, 190dp, 130dp, 160dp
-    // Right column: 190dp, 120dp, 170dp, 120dp
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Left Column
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            SkeletonCard(heightDp = 130)
-            SkeletonCard(heightDp = 190)
-            SkeletonCard(heightDp = 130)
-            SkeletonCard(heightDp = 160)
-        }
-
-        // Right Column
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            SkeletonCard(heightDp = 190)
-            SkeletonCard(heightDp = 120)
-            SkeletonCard(heightDp = 170)
-            SkeletonCard(heightDp = 120)
-        }
-    }
-}
-
-/**
- * Single skeleton card matching Screenshot 1 wireframe
- */
-@Composable
-fun SkeletonCard(heightDp: Int) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Upper thumbnail skeleton block
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(heightDp.dp)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            )
-
-            // Lower info skeleton bars
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                // Top longer horizontal bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.85f)
-                        .height(8.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                )
-                // Bottom shorter horizontal bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.55f)
-                        .height(7.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                 )
             }
         }

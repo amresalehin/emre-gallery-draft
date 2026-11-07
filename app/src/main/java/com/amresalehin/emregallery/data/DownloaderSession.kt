@@ -7,13 +7,11 @@ import java.net.URL
 
 /**
  * Single source of truth for downloader sessions across:
- * - DownloaderResultsPage
  * - FullScreenBrowserView
  * - DownloaderSearchMainPage
  * - ShareReceiverActivity
  *
- * Ensures discoveries made in the live browser automatically merge into the
- * results page and vice versa.
+ * Ensures discoveries made in the live browser automatically merge across sessions.
  */
 object DownloaderSession {
 

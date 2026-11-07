@@ -13,25 +13,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.PreferencesRepository
-import com.amresalehin.emregallery.ui.DownloaderResultsPage
 import com.amresalehin.emregallery.ui.FullScreenBrowserView
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 
 /**
- * Translucent share-sheet target that opens directly over the sharing app
- * (e.g. Chrome, Twitter, Instagram, YouTube) without switching applications.
- *
- * It immediately extracts media from the shared link and displays a bottom
- * drawer for selecting and downloading media in the background.
+ * Share-sheet receiver that opens the browser directly with the shared link,
+ * removing any intermediate scraper steps.
  */
 class ShareReceiverActivity : ComponentActivity() {
 
@@ -115,16 +108,8 @@ private fun ShareReceiverScreen(
     onDismiss: () -> Unit,
     onDownloadComplete: () -> Unit
 ) {
-    var showLiveBrowser by remember { mutableStateOf(false) }
-    var liveBrowserUrl by remember { mutableStateOf(url) }
-    val context = LocalContext.current
-
     BackHandler {
-        if (showLiveBrowser) {
-            showLiveBrowser = false
-        } else {
-            onDismiss()
-        }
+        onDismiss()
     }
 
     Box(
@@ -132,37 +117,13 @@ private fun ShareReceiverScreen(
             .fillMaxSize()
             .testTag("share_receiver_root")
     ) {
-        DownloaderResultsPage(
-            targetUrl = url,
-            onBack = onDismiss,
-            onOpenBrowser = { browserUrl ->
-                liveBrowserUrl = browserUrl
-                showLiveBrowser = true
-            },
-            onDownloadComplete = { count ->
+        FullScreenBrowserView(
+            initialUrl = url,
+            onClose = onDismiss,
+            onDownloadComplete = {
                 onDownloadComplete()
-            },
-            onViewSavedLibrary = {
-                val mainIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                }
-                context.startActivity(mainIntent)
-                onDismiss()
             },
             modifier = Modifier.fillMaxSize()
         )
-
-        if (showLiveBrowser) {
-            FullScreenBrowserView(
-                initialUrl = liveBrowserUrl,
-                onClose = {
-                    showLiveBrowser = false
-                },
-                onDownloadComplete = {
-                    onDownloadComplete()
-                },
-                modifier = Modifier.fillMaxSize().zIndex(25f)
-            )
-        }
     }
 }
