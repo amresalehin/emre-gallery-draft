@@ -1452,8 +1452,8 @@ fun GalleryApp() {
             )
         }
 
-        // Wider top and bottom edge blur across app screens, smoothly fading with return progress
-        val showEdgeBlurs = (destination != Destination.VIEWER) || viewerTransitionProgress.value < 0.99f
+        // Wider top and bottom edge blur across app screens, smoothly fading with return progress (disabled on browser)
+        val showEdgeBlurs = (destination in listOf(Destination.HOME, Destination.ALBUMS)) && destination != Destination.VIEWER && destination != Destination.BROWSER
         if (showEdgeBlurs) {
             Box(
                 modifier = Modifier
@@ -1499,7 +1499,7 @@ fun GalleryApp() {
         }
 
         // Floating search bar across Home and Albums - coordinated entrance downward from above screen edge
-        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER
+        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && destination != Destination.BROWSER
         if (showSearchBar) {
             Box(
                 modifier = Modifier
@@ -1537,7 +1537,7 @@ fun GalleryApp() {
         }
 
         // Floating Bottom Navigation Bar across Home, Albums, Pocket, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.POCKET, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && !isPocketDetailOpen
+        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.POCKET, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && destination != Destination.BROWSER && !isPocketDetailOpen
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier

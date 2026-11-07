@@ -26,9 +26,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import android.app.Activity
+import android.os.Build
 import com.amresalehin.emregallery.data.BotDetectionMitigator
 import com.amresalehin.emregallery.data.BrowserHistoryManager
 import com.amresalehin.emregallery.data.BrowserSession
@@ -103,6 +107,17 @@ fun DirectBrowserView(
     var showHistorySheet by remember { mutableStateOf(false) }
     var showTabsSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
+
+    val currentView = LocalView.current
+    DisposableEffect(isDark) {
+        val window = (currentView.context as? Activity)?.window
+        if (window != null) {
+            val insetsController = WindowCompat.getInsetsController(window, currentView)
+            insetsController.isAppearanceLightStatusBars = !isDark
+            insetsController.isAppearanceLightNavigationBars = !isDark
+        }
+        onDispose { }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -317,6 +332,11 @@ fun DirectBrowserView(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
                             )
 
+                            setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                settings.forceDark = if (isDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
+                            }
+
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
@@ -517,6 +537,10 @@ fun DirectBrowserView(
                     },
                     update = { wv ->
                         webViewInstance = wv
+                        wv.setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            wv.settings.forceDark = if (isDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
+                        }
                     },
                     onRelease = { wv ->
                         wv.stopLoading()

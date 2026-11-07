@@ -311,6 +311,7 @@ fun AnthropicAiLogo(modifier: Modifier = Modifier) {
 fun BrandFavicon(
     domain: String,
     title: String,
+    isDark: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val d = domain.lowercase()
@@ -321,8 +322,8 @@ fun BrandFavicon(
         d.contains("wikipedia") || t.contains("wikipedia") -> Box(
             modifier = modifier
                 .size(38.dp)
-                .background(Color.White, shape = CircleShape)
-                .border(1.dp, Color(0xFFEAEAEA), CircleShape),
+                .background(if (isDark) Color(0xFF262628) else Color.White, shape = CircleShape)
+                .border(1.dp, if (isDark) Color(0xFF38383C) else Color(0xFFEAEAEA), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             WikipediaLogo(Modifier.size(24.dp))
@@ -330,8 +331,8 @@ fun BrandFavicon(
         d.contains("youtube") || t.contains("youtube") -> Box(
             modifier = modifier
                 .size(38.dp)
-                .background(Color(0xFFF9FAFB), shape = CircleShape)
-                .border(1.dp, Color(0xFFEAEAEA), CircleShape),
+                .background(if (isDark) Color(0xFF262628) else Color(0xFFF9FAFB), shape = CircleShape)
+                .border(1.dp, if (isDark) Color(0xFF38383C) else Color(0xFFEAEAEA), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             YouTubeLogo(Modifier.size(26.dp))
@@ -340,8 +341,8 @@ fun BrandFavicon(
         d.contains("github") || t.contains("github") -> Box(
             modifier = modifier
                 .size(38.dp)
-                .background(Color.White, shape = CircleShape)
-                .border(1.dp, Color(0xFFEAEAEA), CircleShape),
+                .background(if (isDark) Color(0xFF262628) else Color.White, shape = CircleShape)
+                .border(1.dp, if (isDark) Color(0xFF38383C) else Color(0xFFEAEAEA), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             GitHubLogo(Modifier.size(24.dp))
@@ -349,8 +350,8 @@ fun BrandFavicon(
         d.contains("drive.google") || t.contains("drive") -> Box(
             modifier = modifier
                 .size(38.dp)
-                .background(Color.White, shape = CircleShape)
-                .border(1.dp, Color(0xFFEAEAEA), CircleShape),
+                .background(if (isDark) Color(0xFF262628) else Color.White, shape = CircleShape)
+                .border(1.dp, if (isDark) Color(0xFF38383C) else Color(0xFFEAEAEA), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             GoogleDriveLogo(Modifier.size(24.dp))
@@ -360,15 +361,15 @@ fun BrandFavicon(
             Box(
                 modifier = modifier
                     .size(38.dp)
-                    .background(Color(0xFFF4F4F5), shape = CircleShape)
-                    .border(1.dp, Color(0xFFE4E4E7), CircleShape),
+                    .background(if (isDark) Color(0xFF262628) else Color(0xFFF4F4F5), shape = CircleShape)
+                    .border(1.dp, if (isDark) Color(0xFF38383C) else Color(0xFFE4E4E7), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = letter,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.Black
+                    color = if (isDark) Color.White else Color.Black
                 )
             }
         }
@@ -917,7 +918,7 @@ fun BrowserHomeContent(
                                     "wikipedia" -> WikipediaLogo()
                                     "github" -> GitHubLogo()
                                     "drive" -> GoogleDriveLogo()
-                                    else -> BrandFavicon(item.url, item.title)
+                                    else -> BrandFavicon(item.url, item.title, isDark = isDark)
                                 }
                             }
                         }
@@ -1057,7 +1058,8 @@ fun BrowserHomeContent(
                         ) {
                             BrandFavicon(
                                 domain = site.domain,
-                                title = site.title
+                                title = site.title,
+                                isDark = isDark
                             )
 
                             Spacer(Modifier.width(14.dp))
@@ -1412,7 +1414,7 @@ fun BrowserHistoryBottomSheet(
                                     .padding(horizontal = 14.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                BrandFavicon(item.domain, item.title)
+                                BrandFavicon(item.domain, item.title, isDark = isDark)
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
