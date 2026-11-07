@@ -88,7 +88,6 @@ import kotlin.math.sqrt
 enum class DownloaderViewMode {
     SEARCH_PAGE,
     DOWNLOADER_PAGE,
-    SAVED_LIBRARY,
     ACTIVITY_PAGE
 }
 
@@ -152,15 +151,9 @@ fun MediaInboxScreen(
         } else if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE) {
             currentViewMode = DownloaderViewMode.SEARCH_PAGE
         } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
-            currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
+            currentViewMode = DownloaderViewMode.SEARCH_PAGE
         } else if (showFilterSheet) {
             showFilterSheet = false
-        } else if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
-            if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) {
-                onBack()
-            } else {
-                currentViewMode = DownloaderViewMode.SEARCH_PAGE
-            }
         } else {
             onBack()
         }
@@ -195,7 +188,7 @@ fun MediaInboxScreen(
                 containerColor = MaterialTheme.colorScheme.background,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 topBar = {
-                    if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
+                    if (false) {
                         Surface(
                             color = MaterialTheme.colorScheme.background,
                             modifier = Modifier
@@ -510,9 +503,7 @@ fun MediaInboxScreen(
                                 browserInitialUrl = targetUrl
                                 showFullScreenBrowser = true
                             },
-                            onViewSavedLibrary = {
-                                currentViewMode = DownloaderViewMode.SAVED_LIBRARY
-                            },
+                            onViewSavedLibrary = {},
                             onOpenActivity = {
                                 currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
                             },
@@ -536,70 +527,6 @@ fun MediaInboxScreen(
                             },
                             modifier = Modifier.fillMaxSize()
                         )
-                    } else {
-                        // SAVED LIBRARY VIEW
-                        if (filteredStacks.isNotEmpty() || isDownloading) {
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(2),
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(start = 12.dp, end = 20.dp)
-                                    .testTag("inbox_media_grid"),
-                                contentPadding = PaddingValues(top = 10.dp, bottom = 96.dp),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                if (isDownloading) {
-                                    item(key = "downloading_skeleton_card_item") {
-                                        DownloadingSkeletonCard()
-                                    }
-                                }
-                                itemsIndexed(filteredStacks, key = { _, stack -> stack.id }) { index, stack ->
-                                    val isSelected = stack.id in selectedStackIds
-                                    ImageStackCard(
-                                        stack = stack,
-                                        accentIndex = index,
-                                        isSelected = isSelected,
-                                        isSelectionMode = isSelectionMode,
-                                        onClick = {
-                                            if (isSelectionMode) {
-                                                selectedStackIds = if (isSelected) {
-                                                    selectedStackIds - stack.id
-                                                } else {
-                                                    selectedStackIds + stack.id
-                                                }
-                                            } else {
-                                                selectedStackForDetail = stack
-                                            }
-                                        },
-                                        onLongClick = {
-                                            if (!isSelectionMode) {
-                                                selectedStackIds = setOf(stack.id)
-                                            } else {
-                                                selectedStackIds = if (isSelected) {
-                                                    selectedStackIds - stack.id
-                                                } else {
-                                                    selectedStackIds + stack.id
-                                                }
-                                            }
-                                        },
-                                        onDelete = {
-                                            inboxRepo.deleteStack(stack.id)
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar("Stack removed from Inbox")
-                                            }
-                                        }
-                                    )
-                                }
-                            }
-                        } else {
-                            // In empty state keep completely blank as requested
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .testTag("inbox_empty_state")
-                            )
-                        }
                     }
                 }
             }
@@ -688,21 +615,6 @@ fun MediaInboxScreen(
                 }
 
                 HorizontalDivider()
-
-                if (stacks.isNotEmpty()) {
-                    TextButton(
-                        onClick = {
-                            inboxRepo.clearAll()
-                            showFilterSheet = false
-                            scope.launch { snackbarHostState.showSnackbar("All inbox stacks cleared") }
-                        },
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Icon(Icons.Default.DeleteSweep, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Clear All Inbox Stacks")
-                    }
-                }
 
                 Spacer(Modifier.height(8.dp))
                 Button(
