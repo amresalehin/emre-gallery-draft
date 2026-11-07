@@ -68,8 +68,6 @@ import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.MediaClassifier
-import com.amresalehin.emregallery.data.MediaInboxItem
-import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.PocketRepository
 import kotlinx.coroutines.launch
@@ -159,8 +157,6 @@ fun PocketScreen(
     topContentPadding: Dp = 0.dp,
     bottomContentPadding: Dp = 0.dp,
     onMenuClick: () -> Unit = {},
-    onOpenMediaItem: ((String) -> Unit)? = null,
-    onOpenMediaWithList: ((String, List<String>) -> Unit)? = null,
     onDetailViewerStateChange: ((Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -487,8 +483,6 @@ fun PocketScreen(
                         }
                     },
                     onEditNote = { editingStack = stack },
-                    onOpenMediaItem = onOpenMediaItem,
-                    onOpenMediaWithList = onOpenMediaWithList,
                     isDark = isDark,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -1218,8 +1212,6 @@ fun PocketBookmarkViewerPage(
     onOpenBrowser: (String) -> Unit,
     onDelete: () -> Unit,
     onEditNote: () -> Unit,
-    onOpenMediaItem: ((String) -> Unit)? = null,
-    onOpenMediaWithList: ((String, List<String>) -> Unit)? = null,
     isDark: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -1437,17 +1429,7 @@ fun PocketBookmarkViewerPage(
                                 }
 
                                 Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clickable {
-                                            val all = mediaItems.map { it.localUri.ifBlank { it.sourceUrl } }
-                                            val target = item.localUri.ifBlank { item.sourceUrl }
-                                            if (onOpenMediaWithList != null) {
-                                                onOpenMediaWithList(target, all)
-                                            } else {
-                                                onOpenMediaItem?.invoke(target)
-                                            }
-                                        },
+                                    modifier = Modifier.fillMaxSize(),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     AsyncImage(

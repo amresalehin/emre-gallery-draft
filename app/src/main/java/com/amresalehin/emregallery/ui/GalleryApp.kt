@@ -1113,21 +1113,6 @@ fun GalleryApp() {
                         topContentPadding = topContentPadding,
                         bottomContentPadding = bottomContentPadding,
                         onMenuClick = { showSidePanel = true },
-                        onOpenMediaItem = { uriStr ->
-                            val matched = media.firstOrNull { it.uri == uriStr }
-                            if (matched != null) {
-                                openMediaInViewer(matched, media)
-                            }
-                        },
-                        onOpenMediaWithList = { uriStr, allUris ->
-                            val matched = media.firstOrNull { it.uri == uriStr }
-                            val list = allUris.mapNotNull { u -> media.firstOrNull { it.uri == u } }
-                            if (matched != null && list.isNotEmpty()) {
-                                openMediaInViewer(matched, list)
-                            } else if (matched != null) {
-                                openMediaInViewer(matched, media)
-                            }
-                        },
                         onDetailViewerStateChange = { isPocketDetailOpen = it }
                     )
                     Destination.SETTINGS -> SettingsScreen(
