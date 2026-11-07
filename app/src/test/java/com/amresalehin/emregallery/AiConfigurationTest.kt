@@ -129,4 +129,35 @@ class AiConfigurationTest {
         assertEquals("/path/florence2", state.installedPath)
         assertEquals(100000L, state.installedSizeBytes)
     }
+
+    @Test
+    fun testSupportedLocalModelsList() {
+        val models = com.amresalehin.emregallery.data.FlorenceModelManager.SUPPORTED_MODELS
+        assertEquals(4, models.size)
+
+        val modelNames = models.map { it.displayName }
+        assertTrue(modelNames.contains("Gemma 4 E2B"))
+        assertTrue(modelNames.contains("LFM2.5-VL-450M-Extract"))
+        assertTrue(modelNames.contains("Qwen3.5-0.8B"))
+        assertTrue(modelNames.contains("Florence-2 Base"))
+    }
+
+    @Test
+    fun testLocalModelSpecLookup() {
+        val gemma = com.amresalehin.emregallery.data.FlorenceModelManager.getSpec("gemma_4_e2b")
+        assertEquals("Gemma 4 E2B", gemma.displayName)
+        assertEquals("gemma", gemma.testTagPrefix)
+
+        val lfm = com.amresalehin.emregallery.data.FlorenceModelManager.getSpec("lfm2_5_vl_450m_extract")
+        assertEquals("LFM2.5-VL-450M-Extract", lfm.displayName)
+        assertEquals("lfm", lfm.testTagPrefix)
+
+        val qwen = com.amresalehin.emregallery.data.FlorenceModelManager.getSpec("qwen3_5_0_8b")
+        assertEquals("Qwen3.5-0.8B", qwen.displayName)
+        assertEquals("qwen", qwen.testTagPrefix)
+
+        val florence = com.amresalehin.emregallery.data.FlorenceModelManager.getSpec("florence2")
+        assertEquals("Florence-2 Base", florence.displayName)
+        assertEquals("florence", florence.testTagPrefix)
+    }
 }

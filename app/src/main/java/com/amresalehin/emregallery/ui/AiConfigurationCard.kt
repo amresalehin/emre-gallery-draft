@@ -63,6 +63,7 @@ fun AiConfigurationCard(
     val cloudProviders by prefs.cloudProviders.collectAsState(initial = emptyList())
     val activeProvider by prefs.activeCloudProvider.collectAsState(initial = null)
     val florenceState by prefs.florenceModelState.collectAsState(initial = FlorenceModelState())
+    val allModelStates by FlorenceModelManager.allModelStates.collectAsState()
 
     var isExpanded by remember { mutableStateOf(true) }
     var selectedTab by remember { mutableStateOf(AiModeTab.CLOUD) }
@@ -75,11 +76,11 @@ fun AiConfigurationCard(
 
     var isTestingCloud by remember { mutableStateOf(false) }
     var cloudTestFeedback by remember { mutableStateOf<String?>(null) }
-    var showFlorenceDetailsDialog by remember { mutableStateOf(false) }
+    var selectedModelForDetails by remember { mutableStateOf<FlorenceModelManager.LocalModelSpec?>(null) }
 
-    // Synchronize initial Florence model state on mount
+    // Synchronize initial Local models state on mount
     LaunchedEffect(Unit) {
-        FlorenceModelManager.refreshState(context)
+        FlorenceModelManager.refreshAllStates(context)
     }
 
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -469,103 +470,100 @@ fun AiConfigurationCard(
                     }
 
                     // ==========================================
-                    // TAB 2: LOCAL AI (FLORENCE-2)
+                    // TAB 2: LOCAL AI MODELS
                     // ==========================================
                     if (selectedTab == AiModeTab.LOCAL) {
-                        Surface(
-                            shape = RoundedCornerShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 16.dp)
-                            ) {
-                                // Header row without explanatory text below it
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
+                            FlorenceModelManager.SUPPORTED_MODELS.forEach { model ->
+                                val modelState = allModelStates[model.id] ?: FlorenceModelState()
+
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.70f),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isDark) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.85f)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(
-                                        text = "Florence-2 Base",
-                                        style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    DynamicFlorenceStatusButton(
-                                        state = florenceState,
-                                        isDark = isDark,
-                                        onInstall = {
-                                            scope.launch {
-                                                FlorenceModelManager.downloadAndInstall(context)
-                                            }
-                                        },
-                                        onCancel = {
-                                            FlorenceModelManager.cancelDownload(context)
-                                        },
-                                        onDetails = {
-                                            showFlorenceDetailsDialog = true
-                                        }
-                                    )
-                                }
-
-                                // Progress bar when downloading
-                                if (florenceState.status == FlorenceStatus.DOWNLOADING || florenceState.status == FlorenceStatus.VERIFYING) {
-                                    Spacer(Modifier.height(14.dp))
-                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        LinearProgressIndicator(
-                                            progress = { florenceState.progress.coerceIn(0f, 1f) },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(4.dp)
-                                                .clip(CircleShape),
-                                            color = MaterialTheme.colorScheme.primary,
-                                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                                        )
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                                    ) {
+                                        // Header row without any icon, clean and minimal
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
                                             Text(
-                                                text = if (florenceState.totalBytes > 0) {
-                                                    "${formatBytes(florenceState.bytesDownloaded)} / ${formatBytes(florenceState.totalBytes)}"
-                                                } else {
-                                                    "Downloading..."
-                                                },
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontSize = 10.5.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                text = model.displayName,
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                ),
+                                                modifier = Modifier.weight(1f)
                                             )
-                                            Text(
-                                                text = "${(florenceState.progress * 100).toInt()}%",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 10.5.sp,
-                                                color = MaterialTheme.colorScheme.primary
+
+                                            DynamicFlorenceStatusButton(
+                                                state = modelState,
+                                                testTagPrefix = model.testTagPrefix,
+                                                isDark = isDark,
+                                                onInstall = {
+                                                    scope.launch {
+                                                        FlorenceModelManager.downloadAndInstallModel(context, model.id)
+                                                    }
+                                                },
+                                                onCancel = {
+                                                    FlorenceModelManager.cancelDownload(context, model.id)
+                                                },
+                                                onDetails = {
+                                                    selectedModelForDetails = model
+                                                }
                                             )
                                         }
-                                    }
-                                }
 
-                                if (florenceState.status == FlorenceStatus.INSTALLED) {
-                                    Spacer(Modifier.height(10.dp))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.End,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        TextButton(
-                                            onClick = { showFlorenceDetailsDialog = true },
-                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("Options", fontSize = 12.sp)
+                                        // Progress bar when downloading or verifying
+                                        if (modelState.status == FlorenceStatus.DOWNLOADING || modelState.status == FlorenceStatus.VERIFYING) {
+                                            Spacer(Modifier.height(14.dp))
+                                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                                LinearProgressIndicator(
+                                                    progress = { modelState.progress.coerceIn(0f, 1f) },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(4.dp)
+                                                        .clip(CircleShape),
+                                                    color = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20),
+                                                    trackColor = if (isDark) MaterialTheme.colorScheme.surfaceVariant else Color(0x1F000000)
+                                                )
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text(
+                                                        text = if (modelState.totalBytes > 0) {
+                                                            "${formatBytes(modelState.bytesDownloaded)} / ${formatBytes(modelState.totalBytes)}"
+                                                        } else {
+                                                            "Downloading..."
+                                                        },
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontSize = 10.5.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    Text(
+                                                        text = "${(modelState.progress * 100).toInt()}%",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 10.5.sp,
+                                                        color = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -579,13 +577,14 @@ fun AiConfigurationCard(
         }
     }
 
-    // Florence-2 Details / Options Dialog
-    if (showFlorenceDetailsDialog) {
+    // Local Model Details / Options Dialog
+    selectedModelForDetails?.let { model ->
+        val state = allModelStates[model.id] ?: FlorenceModelState()
         AlertDialog(
-            onDismissRequest = { showFlorenceDetailsDialog = false },
+            onDismissRequest = { selectedModelForDetails = null },
             title = {
                 Text(
-                    "Florence-2 Local Model",
+                    "${model.displayName} Local Model",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -593,23 +592,23 @@ fun AiConfigurationCard(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        "Status: ${if (florenceState.status == FlorenceStatus.INSTALLED) "Installed & Validated" else "Not installed"}",
+                        "Status: ${if (state.status == FlorenceStatus.INSTALLED) "Installed & Validated" else "Not installed"}",
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "Model: Microsoft Florence-2 Base (ONNX)",
+                        "Model: ${model.description}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (florenceState.installedSizeBytes > 0) {
+                    if (state.installedSizeBytes > 0) {
                         Text(
-                            "Storage footprint: ${formatBytes(florenceState.installedSizeBytes)}",
+                            "Storage footprint: ${formatBytes(state.installedSizeBytes)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    florenceState.installedPath?.let { path ->
+                    state.installedPath?.let { path ->
                         Text(
                             "Path: $path",
                             style = MaterialTheme.typography.bodySmall,
@@ -620,7 +619,7 @@ fun AiConfigurationCard(
                 }
             },
             confirmButton = {
-                Button(onClick = { showFlorenceDetailsDialog = false }) {
+                Button(onClick = { selectedModelForDetails = null }) {
                     Text("Done")
                 }
             },
@@ -628,9 +627,9 @@ fun AiConfigurationCard(
                 TextButton(
                     onClick = {
                         scope.launch {
-                            FlorenceModelManager.uninstall(context)
-                            showFlorenceDetailsDialog = false
-                            onShowSnackbar?.invoke("Florence-2 uninstalled")
+                            FlorenceModelManager.uninstallModel(context, model.id)
+                            selectedModelForDetails = null
+                            onShowSnackbar?.invoke("${model.displayName} uninstalled")
                         }
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
@@ -941,12 +940,14 @@ private fun DynamicCloudStatusIndicator(
 }
 
 /**
- * Dynamic Status Button for Florence-2 Local Model matching Welcome Screen capsule buttons.
+ * Dynamic Status Button for Florence-2 Local Model matching Welcome Screen capsule buttons
+ * and app monochrome theme tokens.
  */
 @Composable
 private fun DynamicFlorenceStatusButton(
     state: FlorenceModelState,
     isDark: Boolean,
+    testTagPrefix: String = "florence",
     onInstall: () -> Unit,
     onCancel: () -> Unit,
     onDetails: () -> Unit
@@ -956,20 +957,23 @@ private fun DynamicFlorenceStatusButton(
             Surface(
                 onClick = onInstall,
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                color = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else Color(0x0F000000),
+                border = BorderStroke(
+                    1.dp,
+                    if (isDark) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f) else Color(0x1F000000)
+                ),
                 modifier = Modifier
                     .height(34.dp)
-                    .testTag("florence_install_button")
+                    .testTag("${testTagPrefix}_install_button")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                    modifier = Modifier.padding(horizontal = 13.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.FileDownload,
-                        contentDescription = "Install Florence-2",
+                        contentDescription = "Install Model",
                         modifier = Modifier.size(15.dp),
                         tint = MaterialTheme.colorScheme.onSurface
                     )
@@ -988,11 +992,14 @@ private fun DynamicFlorenceStatusButton(
         FlorenceStatus.DOWNLOADING, FlorenceStatus.VERIFYING -> {
             Surface(
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                color = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else Color(0x0F000000),
+                border = BorderStroke(
+                    1.dp,
+                    if (isDark) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f) else Color(0x26000000)
+                ),
                 modifier = Modifier
                     .height(34.dp)
-                    .testTag("florence_downloading_button")
+                    .testTag("${testTagPrefix}_downloading_button")
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp),
@@ -1003,14 +1010,14 @@ private fun DynamicFlorenceStatusButton(
                         progress = { state.progress.coerceIn(0.05f, 1f) },
                         modifier = Modifier.size(13.dp),
                         strokeWidth = 1.8.dp,
-                        color = MaterialTheme.colorScheme.primary
+                        color = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
                     )
                     Text(
                         text = "${(state.progress * 100).toInt()}%",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
                         )
                     )
                     IconButton(
@@ -1029,9 +1036,9 @@ private fun DynamicFlorenceStatusButton(
         }
 
         FlorenceStatus.INSTALLED -> {
-            val bg = if (isDark) Color(0xFF1B3822) else Color(0xFFE8F5E9)
-            val border = if (isDark) Color(0xFF2E7D32) else Color(0xFF81C784)
-            val contentColor = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
+            val bg = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
+            val border = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
+            val contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
 
             Surface(
                 onClick = onDetails,
@@ -1040,17 +1047,17 @@ private fun DynamicFlorenceStatusButton(
                 border = BorderStroke(1.dp, border),
                 modifier = Modifier
                     .height(34.dp)
-                    .testTag("florence_installed_button")
+                    .testTag("${testTagPrefix}_installed_button")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                    modifier = Modifier.padding(horizontal = 13.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Installed",
-                        modifier = Modifier.size(15.dp),
+                        modifier = Modifier.size(14.dp),
                         tint = contentColor
                     )
                     Text(
@@ -1066,9 +1073,9 @@ private fun DynamicFlorenceStatusButton(
         }
 
         FlorenceStatus.ERROR -> {
-            val bg = if (isDark) Color(0xFF381E1E) else Color(0xFFFFEBEE)
-            val border = if (isDark) Color(0xFFC62828) else Color(0xFFEF9A9A)
-            val contentColor = if (isDark) Color(0xFFEF9A9A) else Color(0xFFC62828)
+            val bg = if (isDark) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+            val border = MaterialTheme.colorScheme.error.copy(alpha = 0.45f)
+            val contentColor = if (isDark) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onErrorContainer
 
             Surface(
                 onClick = onInstall,
@@ -1077,17 +1084,17 @@ private fun DynamicFlorenceStatusButton(
                 border = BorderStroke(1.dp, border),
                 modifier = Modifier
                     .height(34.dp)
-                    .testTag("florence_retry_button")
+                    .testTag("${testTagPrefix}_retry_button")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 11.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Retry download",
-                        modifier = Modifier.size(15.dp),
+                        modifier = Modifier.size(14.dp),
                         tint = contentColor
                     )
                     Text(
