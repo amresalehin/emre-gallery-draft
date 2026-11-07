@@ -546,7 +546,7 @@ fun BrowserTopBar(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.PhotoLibrary,
+                    imageVector = Icons.Default.PhotoLibrary,
                     contentDescription = "View discovered media",
                     tint = BrowserThemeColors.iconTint(isDark),
                     modifier = Modifier.size(24.dp)
