@@ -56,14 +56,6 @@ class ShareReceiverActivity : ComponentActivity() {
                         url = currentUrl!!,
                         onDismiss = {
                             finishWithFade()
-                        },
-                        onDownloadComplete = {
-                            Toast.makeText(
-                                applicationContext,
-                                "Download queued in background",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                            finishWithFade()
                         }
                     )
                 }
@@ -107,8 +99,7 @@ class ShareReceiverActivity : ComponentActivity() {
 @Composable
 private fun ShareReceiverScreen(
     url: String,
-    onDismiss: () -> Unit,
-    onDownloadComplete: () -> Unit
+    onDismiss: () -> Unit
 ) {
     var showDiscoveredMedia by remember { mutableStateOf(false) }
 
