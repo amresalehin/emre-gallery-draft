@@ -503,9 +503,9 @@ internal class PocketBrowserBackend(context: Context) {
                   'script, style, noscript, nav, header, footer, aside, form, button, [aria-hidden="true"]'
                 ).forEach((node) => node.remove());
               }
-              const readableContent = cleanText(
+              const readableContent = (
                 contentClone ? (contentClone.innerText || contentClone.textContent || "") : ""
-              ).slice(0, 60000);
+              ).replace(/[ \\t]+/g, " ").replace(/\\n{3,}/g, "\\n\\n").trim().slice(0, 60000);
 
               return JSON.stringify({
                 title: title,
