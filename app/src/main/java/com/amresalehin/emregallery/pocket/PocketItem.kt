@@ -23,6 +23,8 @@ data class PocketItem(
     val description: String = "",
     val isFavorite: Boolean = false,
     val isRead: Boolean = false,
+    /** Archived bookmarks are retained but hidden from the active library by default. */
+    val isArchived: Boolean = false,
     val canonicalUrl: String? = null,
     val siteName: String? = null,
     val faviconUrl: String? = null,
