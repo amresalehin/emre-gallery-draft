@@ -604,6 +604,7 @@ fun DirectBrowserView(
                 },
                 isDark = isDark,
                 modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 
