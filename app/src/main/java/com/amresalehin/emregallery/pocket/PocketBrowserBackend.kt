@@ -343,17 +343,37 @@ internal class PocketBrowserBackend(context: Context) {
                 output.fd.sync()
             }
 
-            if (destination.exists()) destination.delete()
-            if (!temporary.renameTo(destination)) {
-                temporary.copyTo(destination, overwrite = true)
-                temporary.delete()
+            // Replace atomically where supported. Never delete a previously valid preview
+            // until the fully encoded temporary file is ready to take its place.
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                java.nio.file.Files.move(
+                    temporary.toPath(),
+                    destination.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE
+                )
+            } else {
+                if (destination.exists() && !destination.delete()) {
+                    throw IllegalStateException("Could not replace the previous preview")
+                }
+                if (!temporary.renameTo(destination)) {
+                    temporary.copyTo(destination, overwrite = true)
+                    temporary.delete()
+                }
             }
             destination.absolutePath
         } catch (_: Exception) {
             null
         } finally {
+            temporaryFileFor(bookmarkId)?.let { runCatching { it.delete() } }
             if (!bitmap.isRecycled) bitmap.recycle()
         }
+    }
+
+    private fun temporaryFileFor(bookmarkId: String): File? {
+        val safeId = bookmarkId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+            .ifBlank { "bookmark" }
+        return File(File(appContext.filesDir, PREVIEW_DIRECTORY), "$safeId.jpg.tmp")
     }
 
     private data class LoadedPage(
@@ -470,7 +490,7 @@ internal class PocketBrowserBackend(context: Context) {
               const canonicalElement = document.querySelector('link[rel="canonical"]');
               const canonicalUrl = canonicalElement
                 ? toHttpUrl(canonicalElement.getAttribute("href") || canonicalElement.href)
-                : location.href;
+                : "";
 
               return JSON.stringify({
                 title: title,
