@@ -48,28 +48,23 @@ object PocketDownloadBridge {
             put("dateAddedMillis", dateAddedMillis)
         }.toString()
 
-        if (existing != null) {
-            val updatedAttachments = (existing.attachments + attachment).distinctBy { raw ->
-                runCatching { JSONObject(raw).optString("id") }.getOrDefault(raw)
-            }
-            repository.updateItem(existing.copy(attachments = updatedAttachments))
-        } else {
-            val source = normalizedSource.ifBlank { mediaUrl }
-            val safeUrl = source.takeIf { it.startsWith("http://") || it.startsWith("https://") }
-            val domain = sourceDomain.ifBlank { PocketItem.extractDomain(source) }
-            val generatedId = "download-source-${UUID.nameUUIDFromBytes(source.toByteArray()).toString()}"
-            val newItem = com.amresalehin.emregallery.pocket.PocketItem(
-                id = generatedId,
+        val source = normalizedSource.ifBlank { mediaUrl }
+        val domain = sourceDomain.ifBlank { PocketItem.extractDomain(source) }
+        val target = existing ?: run {
+            val safeUrl = source.takeIf { it.startsWith("http://") || it.startsWith("https://") }.orEmpty()
+            PocketItem(
+                id = "download-source-${UUID.nameUUIDFromBytes(source.toByteArray())}",
                 title = title.ifBlank { domain.ifBlank { "Downloaded media" } },
-                url = safeUrl.orEmpty(),
+                url = safeUrl,
                 domain = domain,
                 timestamp = dateAddedMillis,
                 tags = listOf("Downloaded"),
-                description = "Downloaded from ${domain.ifBlank { "the web" }}.",
-                attachments = listOf(attachment)
+                description = "Downloaded from ${domain.ifBlank { "the web" }}."
             )
-            repository.updateItem(newItem)
         }
+        val updatedAttachments = (target.attachments + attachment).distinctBy { raw ->
+            runCatching { JSONObject(raw).optString("id") }.getOrDefault(raw)
         }
+        repository.updateItem(target.copy(attachments = updatedAttachments))
     }
 }
