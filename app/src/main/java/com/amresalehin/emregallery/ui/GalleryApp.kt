@@ -652,7 +652,9 @@ fun GalleryApp() {
                 viewerStoryTitle = null
             }
             destination == Destination.MEDIA_INBOX -> {
-                destination = if (previousDestination == Destination.ALBUMS) Destination.ALBUMS else Destination.SETTINGS
+                destination = previousDestination.takeIf {
+                    it in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)
+                } ?: Destination.HOME
                 viewerStoryTitle = null
             }
             destination == Destination.VIEWER -> {
