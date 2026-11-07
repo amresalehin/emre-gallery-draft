@@ -23,6 +23,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         applyHighRefreshRate()
+        warmupChromiumEngine()
 
         setContent {
             val preferences = remember { PreferencesRepository(applicationContext) }
@@ -93,6 +94,12 @@ class MainActivity : FragmentActivity() {
         }
 
         prefs.edit().putFloat("configured_refresh_rate", targetFps).apply()
+    }
+
+    private fun warmupChromiumEngine() {
+        window?.decorView?.post {
+            GalleryApplication.warmupChromium(this)
+        }
     }
 }
 

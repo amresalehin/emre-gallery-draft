@@ -77,9 +77,15 @@ fun AlbumsScreen(
     onCreateAlbumClick: (parentPreset: String) -> Unit,
     onDeleteAlbum: (String) -> Unit,
     onRenameAlbum: (String, String) -> Unit,
-    onOpenPerson: ((String) -> Unit)? = null
+    onOpenPerson: ((String) -> Unit)? = null,
+    onOpenSavedLibrary: (() -> Unit)? = null,
+    onOpenSavedStack: ((com.amresalehin.emregallery.data.MediaInboxStack) -> Unit)? = null,
+    onOpenBrowser: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        com.amresalehin.emregallery.GalleryApplication.warmupChromium(context)
+    }
     val isProcessingActive by FaceProcessingCoordinator.isProcessingActive.collectAsStateWithLifecycle()
     val isBusy = isProcessingActive || FaceProcessingCoordinator.isBusy(context)
     var selectedEngineId by remember { mutableStateOf(FaceRecognitionSettings.getActiveEngine(context)) }
@@ -127,6 +133,18 @@ fun AlbumsScreen(
     val binCount = inBin.size
     val hiddenCount = hidden.size
     val archiveCount = archive.size
+
+    val downloadActivities by com.amresalehin.emregallery.data.DownloadActivityManager.activities.collectAsState()
+    val activityCountText = remember(downloadActivities) {
+        val active = downloadActivities.count { it.status == com.amresalehin.emregallery.data.DownloadActivityStatus.DOWNLOADING || it.status == com.amresalehin.emregallery.data.DownloadActivityStatus.RETRYING }
+        val failed = downloadActivities.count { it.status == com.amresalehin.emregallery.data.DownloadActivityStatus.FAILED }
+        when {
+            active > 0 -> "$active active"
+            failed > 0 -> "$failed failed"
+            downloadActivities.isNotEmpty() -> "${downloadActivities.size} items"
+            else -> ""
+        }
+    }
 
     var albumToRename by remember { mutableStateOf<CustomAlbum?>(null) }
     var renameText by remember { mutableStateOf("") }
@@ -195,7 +213,7 @@ fun AlbumsScreen(
             bottom = bottomContentPadding
         )
     ) {
-        // 0. The tiles - Collections (Favourites, Bin, Locked folder, Archive) moved to top
+        // 0. The tiles - Collections (Favourites, Bin, Locked folder, Inbox) moved to top
         item {
             // Top primary pills: Favourites & Bin
             Row(
@@ -224,7 +242,7 @@ fun AlbumsScreen(
 
             Spacer(Modifier.height(10.dp))
 
-            // 2-column tiles: Locked folder & Archive
+            // 2-column tiles: Locked folder & Activity
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -236,6 +254,33 @@ fun AlbumsScreen(
                     iconTint = MaterialTheme.colorScheme.onSurface,
                     iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
                     onClick = { onFilter("Hidden") },
+                    modifier = Modifier.weight(1f)
+                )
+                CollectionTile(
+                    title = "Activity",
+                    count = activityCountText,
+                    icon = Icons.Default.MonitorHeart,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onFilter("Activity") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // 2-column tiles: Browser & Archive
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                CollectionTile(
+                    title = "Browser",
+                    count = "",
+                    icon = Icons.Default.TravelExplore,
+                    iconTint = MaterialTheme.colorScheme.onSurface,
+                    iconBg = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    onClick = { onOpenBrowser?.invoke() ?: onFilter("Browser") },
                     modifier = Modifier.weight(1f)
                 )
                 CollectionTile(

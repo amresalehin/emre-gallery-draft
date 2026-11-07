@@ -146,7 +146,7 @@ fun FloatingNavigationBar(
             val items = listOf(
                 Destination.HOME to ("Home" to Icons.Default.Home),
                 Destination.ALBUMS to ("Albums" to Icons.Default.PhotoLibrary),
-                Destination.POCKET to ("Pocket" to Icons.Default.Bookmarks),
+                Destination.POCKET to ("Pocket" to Icons.Default.Bookmark),
                 Destination.SETTINGS to ("Settings" to Icons.Default.Settings)
             )
 
@@ -318,7 +318,7 @@ fun SideNavigationDrawer(
                         listOf(
                             Triple(Destination.HOME, "Home", Icons.Default.Home),
                             Triple(Destination.ALBUMS, "Albums", Icons.Default.PhotoLibrary),
-                            Triple(Destination.POCKET, "Pocket", Icons.Default.Bookmarks),
+                            Triple(Destination.POCKET, "Pocket", Icons.Default.Bookmark),
                             Triple(Destination.FAVOURITES, "Favourites", Icons.Default.Favorite)
                         ),
                         listOf(
@@ -331,8 +331,8 @@ fun SideNavigationDrawer(
                             Triple(Destination.BIN, "Bin", Icons.Default.Delete)
                         ),
                         listOf(
-                            Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings),
-                            Triple(Destination.INDEXING_STATUS, "Indexing Status", Icons.Default.Storage)
+                            Triple(Destination.MEDIA_INBOX, "Inbox", Icons.Default.Inbox),
+                            Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings)
                         )
                     )
 

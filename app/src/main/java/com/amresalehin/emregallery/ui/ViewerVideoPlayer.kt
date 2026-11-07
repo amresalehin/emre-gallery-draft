@@ -35,10 +35,12 @@ import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import com.amresalehin.emregallery.data.OkHttpDownloader
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -114,7 +116,11 @@ fun rememberViewerVideoState(
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
 
+            val httpDataSourceFactory = OkHttpDataSource.Factory(OkHttpDownloader.client)
+                .setUserAgent(OkHttpDownloader.DEFAULT_USER_AGENT)
+            val upstreamDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = DefaultMediaSourceFactory(context)
+                .setDataSourceFactory(upstreamDataSourceFactory)
 
             val parsedUri = Uri.parse(uri)
             val isHls = uri.contains(".m3u8", ignoreCase = true) || uri.contains("mpegurl", ignoreCase = true)
