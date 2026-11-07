@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery
 
+import com.amresalehin.emregallery.data.BrowserTabSession
 import com.amresalehin.emregallery.data.MediaCategory
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaProvenance
@@ -11,6 +12,40 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaDeduplicationPureUnitTest {
+
+    @Test
+    fun browserTabMediaCountResetsWhenNavigatingToAnotherPage() {
+        val session = BrowserTabSession(
+            tabId = "browser_navigation_test",
+            initialUrl = "https://example.com/first"
+        )
+        session.registerMedia(
+            ScrapedMediaItem(
+                id = "first-page-image",
+                url = "https://cdn.example.com/first.jpg",
+                title = "First page image"
+            )
+        )
+        assertEquals(1, session.detectedCount.value)
+
+        // A different path on the same domain is still a different page.
+        session.updateNavigation("https://example.com/second")
+        assertEquals(0, session.detectedCount.value)
+        assertTrue(session.detectedItems.value.isEmpty())
+
+        session.registerMedia(
+            ScrapedMediaItem(
+                id = "second-page-image",
+                url = "https://cdn.example.com/second.jpg",
+                title = "Second page image"
+            )
+        )
+        assertEquals(1, session.detectedCount.value)
+
+        // Returning to the browser's home/blank page clears the page badge too.
+        session.updateNavigation("")
+        assertEquals(0, session.detectedCount.value)
+    }
 
     @Test
     fun testPinterestResolutionAndFormatVariantDeduplication() {
