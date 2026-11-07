@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
 import com.amresalehin.emregallery.data.preferences.MediaCollectionsPreferencesManager
 import com.amresalehin.emregallery.data.preferences.OcrPreferencesManager
 import com.amresalehin.emregallery.data.preferences.UiPreferencesManager
@@ -18,6 +19,7 @@ val Context.galleryDataStore: DataStore<Preferences> by preferencesDataStore(nam
  * - [vaultPrefs]: Security, locked folder PIN hash, and biometrics
  * - [ocrPrefs]: OCR models, languages, and engines
  * - [mediaPrefs]: Albums, tags, people, favorites, trash bin, archive, and search history
+ * - [aiPrefs]: Cloud AI providers, active models, and local Florence-2 model status
  */
 class PreferencesRepository(context: Context) {
 
@@ -25,6 +27,7 @@ class PreferencesRepository(context: Context) {
     private val vaultPrefs = VaultPreferencesManager(context)
     private val ocrPrefs = OcrPreferencesManager(context)
     private val mediaPrefs = MediaCollectionsPreferencesManager(context)
+    private val aiPrefs = AiPreferencesManager(context)
 
     // --- Onboarding & UI Navigation ---
     fun isWelcomeCompletedSync(): Boolean = uiPrefs.isWelcomeCompletedSync()
@@ -99,4 +102,15 @@ class PreferencesRepository(context: Context) {
     suspend fun clearRecentSearches() = mediaPrefs.clearRecentSearches()
     suspend fun addTagForMedia(uri: String, tag: String) = mediaPrefs.addTagForMedia(uri, tag)
     suspend fun addPersonForMedia(uri: String, person: String) = mediaPrefs.addPersonForMedia(uri, person)
+
+    // --- AI Configuration & Models ---
+    val cloudProviders: Flow<List<com.amresalehin.emregallery.data.CloudAiProvider>> get() = aiPrefs.cloudProviders
+    val activeCloudProvider: Flow<com.amresalehin.emregallery.data.CloudAiProvider?> get() = aiPrefs.activeProvider
+    val florenceModelState: Flow<com.amresalehin.emregallery.data.FlorenceModelState> get() = aiPrefs.florenceModelState
+
+    suspend fun saveCloudProvider(provider: com.amresalehin.emregallery.data.CloudAiProvider) = aiPrefs.saveProvider(provider)
+    suspend fun setActiveCloudProvider(providerId: String) = aiPrefs.setActiveProvider(providerId)
+    suspend fun deleteCloudProvider(providerId: String) = aiPrefs.deleteProvider(providerId)
+    suspend fun testCloudProvider(providerId: String): com.amresalehin.emregallery.data.CloudProviderStatus = aiPrefs.testProvider(providerId)
+    suspend fun testActiveCloudProvider(): com.amresalehin.emregallery.data.CloudProviderStatus = aiPrefs.testActiveProvider()
 }

@@ -30,17 +30,29 @@ fun SettingsScreen(
     onRefresh: () -> Unit,
     onSettings: (String) -> Unit,
     onPermissionSettings: () -> Unit,
-    onMenuClick: () -> Unit
+    onMenuClick: () -> Unit,
+    prefs: com.amresalehin.emregallery.data.PreferencesRepository? = null,
+    onShowSnackbar: ((String) -> Unit)? = null
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val actualPrefs = prefs ?: remember {
+        com.amresalehin.emregallery.data.PreferencesRepository(context.applicationContext)
+    }
     var query by remember { mutableStateOf("") }
 
     val entries = listOf(
-        "Media Downloader" to Icons.Default.CloudDownload,
         "Theme" to Icons.Default.Palette,
         "Indexing Status" to Icons.Default.Storage,
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, true) }
+
+    val matchesAi = query.isBlank() ||
+        "ai configuration".contains(query, ignoreCase = true) ||
+        "cloud".contains(query, ignoreCase = true) ||
+        "local".contains(query, ignoreCase = true) ||
+        "florence".contains(query, ignoreCase = true) ||
+        "model".contains(query, ignoreCase = true) ||
+        "provider".contains(query, ignoreCase = true)
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -51,7 +63,16 @@ fun SettingsScreen(
                 bottom = bottomContentPadding
             )
         ) {
-            if (entries.isEmpty() && query.isNotBlank()) {
+            if (matchesAi) {
+                item(key = "ai_configuration_card") {
+                    AiConfigurationCard(
+                        prefs = actualPrefs,
+                        onShowSnackbar = onShowSnackbar
+                    )
+                }
+            }
+
+            if (entries.isEmpty() && query.isNotBlank() && !matchesAi) {
                 item {
                     Box(
                         modifier = Modifier
@@ -231,7 +252,6 @@ fun SettingsScreen(
                                 Text(label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 Text(
                                     when (label) {
-                                        "Media Downloader" -> "Download videos & photos directly to gallery"
                                         "OCR Settings" -> "Google ML Kit (multi-language) & Tesseract models"
                                         "Indexing Status" -> "Local MediaStore scan & OCR status"
                                         "About" -> "Emre Gallery · 0.1.0"

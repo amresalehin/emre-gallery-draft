@@ -1137,10 +1137,11 @@ fun GalleryApp() {
                             when (label) {
                                 "Indexing Status" -> navigateTo(Destination.INDEXING_STATUS)
                                 "About" -> navigateTo(Destination.ABOUT)
-                                "Media Downloader", "Inbox" -> navigateTo(Destination.MEDIA_INBOX)
                             }
                         },
-                        onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) }
+                        onPermissionSettings = { context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))) },
+                        prefs = prefs,
+                        onShowSnackbar = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } }
                     )
                     Destination.LIBRARY_OVERVIEW -> LibraryOverviewScreen(
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
