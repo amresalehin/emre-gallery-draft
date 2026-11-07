@@ -57,6 +57,7 @@ fun PocketScreen(
     var showFilterSheet by remember { mutableStateOf(false) }
     var selectedDomainFilter by remember { mutableStateOf<String?>(null) }
     var selectedTagFilter by remember { mutableStateOf<String?>(null) }
+    var showArchived by remember { mutableStateOf(false) }
 
     val allDomains = remember(items) {
         items.map { it.domain }.distinct().sorted()
@@ -68,6 +69,7 @@ fun PocketScreen(
     // Filter items
     val filteredItems = remember(items, searchQuery, selectedDomainFilter, selectedTagFilter) {
         items.filter { item ->
+            val matchesArchive = item.isArchived == showArchived
             val matchesQuery = if (searchQuery.isBlank()) {
                 true
             } else {
@@ -80,7 +82,7 @@ fun PocketScreen(
             }
             val matchesDomain = selectedDomainFilter == null || item.domain.equals(selectedDomainFilter, ignoreCase = true)
             val matchesTag = selectedTagFilter == null || item.tags.any { it.equals(selectedTagFilter, ignoreCase = true) }
-            matchesQuery && matchesDomain && matchesTag
+            matchesArchive && matchesQuery && matchesDomain && matchesTag
         }
     }
 
@@ -125,7 +127,7 @@ fun PocketScreen(
                     }
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = if (searchQuery.isNotBlank() || selectedDomainFilter != null || selectedTagFilter != null)
+                        text = if (searchQuery.isNotBlank() || selectedDomainFilter != null || selectedTagFilter != null || showArchived)
                             "No matching saved items"
                         else
                             "Your Pocket is empty",
@@ -150,6 +152,7 @@ fun PocketScreen(
                                 searchQuery = ""
                                 selectedDomainFilter = null
                                 selectedTagFilter = null
+                                showArchived = false
                             }
                         ) {
                             Text("Clear filters")
@@ -358,15 +361,35 @@ fun PocketScreen(
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold
                         )
-                        if (selectedDomainFilter != null || selectedTagFilter != null) {
+                        if (selectedDomainFilter != null || selectedTagFilter != null || showArchived) {
                             TextButton(onClick = {
                                 selectedDomainFilter = null
                                 selectedTagFilter = null
+                                showArchived = false
                             }) {
                                 Text("Reset")
                             }
                         }
                     }
+                    Spacer(Modifier.height(16.dp))
+                    Text("Library", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !showArchived,
+                            onClick = { showArchived = false },
+                            label = { Text("Active") }
+                        )
+                        FilterChip(
+                            selected = showArchived,
+                            onClick = { showArchived = true },
+                            label = { Text("Archived") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Archive, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        )
+                    }
+
                     Spacer(Modifier.height(16.dp))
 
                     Text("By Domain", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
