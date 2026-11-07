@@ -42,6 +42,7 @@ internal data class PocketBrowserMetadata(
     val canonicalUrl: String? = null,
     val siteName: String? = null,
     val faviconUrl: String? = null,
+    val readableContent: String? = null,
     val previewImagePath: String? = null
 )
 
@@ -275,7 +276,8 @@ internal class PocketBrowserBackend(context: Context) {
                 imageUrls = images.take(MAX_IMAGE_URLS),
                 canonicalUrl = json.optionalString("canonicalUrl")?.takeIf(::isHttpUrl) ?: pageUrl,
                 siteName = json.optionalString("siteName"),
-                faviconUrl = json.optionalString("faviconUrl")?.takeIf(::isHttpUrl)
+                faviconUrl = json.optionalString("faviconUrl")?.takeIf(::isHttpUrl),
+                readableContent = json.optionalString("readableContent")?.take(60_000)
             )
         }.getOrElse {
             PocketBrowserMetadata(canonicalUrl = pageUrl)
@@ -492,13 +494,27 @@ internal class PocketBrowserBackend(context: Context) {
                 ? toHttpUrl(canonicalElement.getAttribute("href") || canonicalElement.href)
                 : "";
 
+              const contentRoot = document.querySelector(
+                'article, [itemprop="articleBody"], main, [role="main"]'
+              ) || document.body;
+              const contentClone = contentRoot ? contentRoot.cloneNode(true) : null;
+              if (contentClone) {
+                contentClone.querySelectorAll(
+                  'script, style, noscript, nav, header, footer, aside, form, button, [aria-hidden="true"]'
+                ).forEach((node) => node.remove());
+              }
+              const readableContent = cleanText(
+                contentClone ? (contentClone.innerText || contentClone.textContent || "") : ""
+              ).slice(0, 60000);
+
               return JSON.stringify({
                 title: title,
                 description: description,
                 images: images.slice(0, 16),
                 canonicalUrl: canonicalUrl,
                 siteName: meta('meta[property="og:site_name"]'),
-                faviconUrl: faviconUrl
+                faviconUrl: faviconUrl,
+                readableContent: readableContent
               });
             })();
         """.trimIndent()
