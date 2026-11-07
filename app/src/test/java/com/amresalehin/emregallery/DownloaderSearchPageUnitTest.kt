@@ -18,11 +18,16 @@ class DownloaderSearchPageUnitTest {
     @Test
     fun testDownloaderViewModeEnumValues() {
         val modes = DownloaderViewMode.values().map { it.name }
-        assertTrue(modes.contains("SEARCH_PAGE"))
-        assertTrue(modes.contains("DOWNLOADER_PAGE"))
-        assertTrue(modes.contains("SAVED_LIBRARY"))
-        assertTrue(modes.contains("ACTIVITY_PAGE"))
-        assertEquals(4, modes.size)
+        assertEquals(
+            listOf(
+                "SEARCH_PAGE",
+                "DOWNLOADER_PAGE",
+                "SAVED_LIBRARY",
+                "ACTIVITY_PAGE",
+                "DISCOVERED_MEDIA"
+            ),
+            modes
+        )
     }
 
     @Test
