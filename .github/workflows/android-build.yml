@@ -7,7 +7,6 @@ on:
       - 'integration/**'
       - 'fix/**'
       - 'chore/**'
-      - 'feature/**'
   pull_request:
     branches:
       - Develop
