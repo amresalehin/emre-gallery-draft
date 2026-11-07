@@ -340,7 +340,7 @@ class MediaDownloaderTest {
     }
 
     @Test
-    fun testGalleryDlEngineStatusAndSupportedSites() {
+    fun testGalleryDlEngineStatus() {
         val status = com.amresalehin.emregallery.data.GalleryDlEngine.getStatus()
         assertTrue(status.popularSites.isNotEmpty())
         assertTrue(status.popularSites.any { it.name == "Reddit" })
@@ -1473,15 +1473,15 @@ class MediaDownloaderTest {
 
     @Test
     fun testPlatformDetectionFromUrls() {
-        assertEquals(DetectedPlatform.YOUTUBE, detectPlatform("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
-        assertEquals(DetectedPlatform.YOUTUBE, detectPlatform("https://youtu.be/dQw4w9WgXcQ"))
-        assertEquals(DetectedPlatform.INSTAGRAM, detectPlatform("https://instagram.com/reel/Cx123456/"))
-        assertEquals(DetectedPlatform.TIKTOK, detectPlatform("https://www.tiktok.com/@user/video/1234567890"))
-        assertEquals(DetectedPlatform.TWITTER, detectPlatform("https://x.com/user/status/123456"))
-        assertEquals(DetectedPlatform.TWITTER, detectPlatform("https://twitter.com/user/status/123456"))
-        assertEquals(DetectedPlatform.REDDIT, detectPlatform("https://reddit.com/r/pics/comments/xyz123"))
-        assertEquals(DetectedPlatform.PINTEREST, detectPlatform("https://pinterest.com/pin/123456789/"))
-        assertEquals(DetectedPlatform.FACEBOOK, detectPlatform("https://www.facebook.com/watch/?v=123456"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://youtu.be/dQw4w9WgXcQ"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://instagram.com/reel/Cx123456/"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://www.tiktok.com/@user/video/1234567890"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://x.com/user/status/123456"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://twitter.com/user/status/123456"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://reddit.com/r/pics/comments/xyz123"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://pinterest.com/pin/123456789/"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://www.facebook.com/watch/?v=123456"))
         assertEquals(DetectedPlatform.DIRECT_MEDIA, detectPlatform("https://example.com/videos/stream.m3u8"))
         assertEquals(DetectedPlatform.DIRECT_MEDIA, detectPlatform("https://example.com/clip.mp4"))
         assertEquals(DetectedPlatform.DIRECT_MEDIA, detectPlatform("https://example.com/photo.jpg"))

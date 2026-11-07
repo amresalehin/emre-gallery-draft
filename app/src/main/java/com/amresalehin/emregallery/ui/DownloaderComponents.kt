@@ -56,7 +56,7 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
- * Recognized media platforms with custom brand color and iconography.
+ * Generic media source classification for direct files vs web pages.
  */
 enum class DetectedPlatform(
     val title: String,
@@ -66,27 +66,13 @@ enum class DetectedPlatform(
     val description: String,
     val defaultUrl: String
 ) {
-    YOUTUBE("YouTube", Icons.Default.PlayCircle, Color(0xFFE53935), Color.White, "Videos, Shorts & Audio", "https://youtube.com"),
-    INSTAGRAM("Instagram", Icons.Default.CameraAlt, Color(0xFFE1306C), Color.White, "Reels, Posts & Stories", "https://instagram.com"),
-    TIKTOK("TikTok", Icons.Default.Audiotrack, Color(0xFF010101), Color.White, "No-watermark Clips", "https://tiktok.com"),
-    TWITTER("X / Twitter", Icons.Default.AlternateEmail, Color(0xFF1DA1F2), Color.White, "Videos, GIFs & Media", "https://x.com"),
-    REDDIT("Reddit", Icons.Default.Forum, Color(0xFFFF4500), Color.White, "Posts & Video Clips", "https://reddit.com"),
-    PINTEREST("Pinterest", Icons.Default.PushPin, Color(0xFFBD081C), Color.White, "Full-res Pins & Boards", "https://pinterest.com"),
-    FACEBOOK("Facebook", Icons.Default.VideoLibrary, Color(0xFF1877F2), Color.White, "Public Reels & Videos", "https://facebook.com"),
-    DIRECT_MEDIA("Direct Media", Icons.Default.Download, Color(0xFF2E7D32), Color.White, "Raw MP4, WEBM or JPG", ""),
-    GENERIC_WEB("Any Website", Icons.Default.Language, Color(0xFF455A64), Color.White, "Deep Scrape All Media", "")
+    DIRECT_MEDIA("Direct Media", Icons.Default.Download, Color(0xFF2E7D32), Color.White, "Direct Audio / Video / Image Stream", ""),
+    GENERIC_WEB("Web Page", Icons.Default.Language, Color(0xFF455A64), Color.White, "Generic Web Media", "")
 }
 
 fun detectPlatform(url: String): DetectedPlatform {
     val lower = url.trim().lowercase(Locale.ROOT)
     return when {
-        lower.contains("youtube.com") || lower.contains("youtu.be") -> DetectedPlatform.YOUTUBE
-        lower.contains("instagram.com") -> DetectedPlatform.INSTAGRAM
-        lower.contains("tiktok.com") -> DetectedPlatform.TIKTOK
-        lower.contains("twitter.com") || lower.contains("x.com") -> DetectedPlatform.TWITTER
-        lower.contains("reddit.com") || lower.contains("redd.it") -> DetectedPlatform.REDDIT
-        lower.contains("pinterest.com") || lower.contains("pin.it") -> DetectedPlatform.PINTEREST
-        lower.contains("facebook.com") || lower.contains("fb.watch") -> DetectedPlatform.FACEBOOK
         lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".m3u8") ||
                 lower.endsWith(".mpd") || lower.endsWith(".jpg") || lower.endsWith(".png") ||
                 lower.endsWith(".gif") || lower.endsWith(".webp") || lower.endsWith(".mp3") -> DetectedPlatform.DIRECT_MEDIA
@@ -165,8 +151,6 @@ fun DownloaderSearchMainPage(
         }
         onFetchUrl(normalized)
     }
-
-    var showSupportedSitesSheet by remember { mutableStateOf(false) }
 
     fun openInBrowser(queryOrUrl: String) {
         val trimmed = queryOrUrl.trim()
@@ -653,21 +637,6 @@ fun DownloaderSearchMainPage(
             modifier = Modifier.fillMaxWidth()
         )
     }
-
-    if (showSupportedSitesSheet) {
-        SupportedSitesBottomSheet(
-            onDismiss = { showSupportedSitesSheet = false },
-            onSelectSite = { site ->
-                showSupportedSitesSheet = false
-                urlInput = site.exampleUrl
-                submitSearch(site.exampleUrl)
-            },
-            onBrowseSite = { site ->
-                showSupportedSitesSheet = false
-                openInBrowser(site.exampleUrl)
-            }
-        )
-    }
 }
 
 /**
@@ -1050,251 +1019,5 @@ fun passesDimensionFilter(
     val widthOk = if (minWidth > 0) w >= minWidth else true
     val heightOk = if (minHeight > 0) h >= minHeight else true
     return widthOk && heightOk
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SupportedSitesBottomSheet(
-    onDismiss: () -> Unit,
-    onSelectSite: (com.amresalehin.emregallery.data.SupportedSiteItem) -> Unit,
-    onBrowseSite: (com.amresalehin.emregallery.data.SupportedSiteItem) -> Unit
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf("All") }
-
-    val categories = remember {
-        listOf("All", "Video", "Social", "Images", "Music", "Art", "Manga")
-    }
-
-    val sites = remember(searchQuery, selectedCategory) {
-        com.amresalehin.emregallery.data.SupportedSitesRepository.querySupportedSites(
-            query = searchQuery,
-            category = selectedCategory
-        )
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-        modifier = Modifier.testTag("downloader_supported_sites_sheet")
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.88f)
-                .padding(horizontal = 16.dp)
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Official Supported Sites",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "yt-dlp (Primary) & gallery-dl (Secondary) engines",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // Search Bar
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search site, domain or engine (e.g. reddit, x, video)...") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear")
-                        }
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("downloader_supported_sites_search_input")
-            )
-
-            Spacer(Modifier.height(10.dp))
-
-            // Category Filter Pills
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(categories) { cat ->
-                    val isSelected = selectedCategory == cat
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedCategory = cat },
-                        label = { Text(cat) },
-                        leadingIcon = if (isSelected) {
-                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                        } else null
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            // Sites Count Indicator
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${sites.size} platforms available",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "Tap to fetch • Globe to browse",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            // Sites List
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .testTag("downloader_supported_sites_list"),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 24.dp)
-            ) {
-                items(sites, key = { it.domain + it.name }) { site ->
-                    Surface(
-                        onClick = { onSelectSite(site) },
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(38.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = when (site.category) {
-                                            "Video" -> Icons.Default.PlayArrow
-                                            "Music" -> Icons.Default.MusicNote
-                                            "Images", "Art" -> Icons.Default.Image
-                                            "Social" -> Icons.Default.Share
-                                            else -> Icons.Default.Language
-                                        },
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Text(
-                                        text = site.name,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = if (site.engine.startsWith("yt-dlp")) {
-                                            MaterialTheme.colorScheme.primaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.secondaryContainer
-                                        }
-                                    ) {
-                                        Text(
-                                            text = site.engine,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (site.engine.startsWith("yt-dlp")) {
-                                                MaterialTheme.colorScheme.onPrimaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.onSecondaryContainer
-                                            },
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = site.domain,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 11.sp
-                                )
-                                Text(
-                                    text = site.description,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-
-                            IconButton(
-                                onClick = { onBrowseSite(site) },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.TravelExplore,
-                                    contentDescription = "Browse ${site.name}",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 

@@ -27,35 +27,6 @@ class DownloaderSearchPageUnitTest {
 
     @Test
     fun testPlatformDetectionFromVariousUrls() {
-        // YouTube detection
-        assertEquals(DetectedPlatform.YOUTUBE, detectPlatform("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
-        assertEquals(DetectedPlatform.YOUTUBE, detectPlatform("https://youtu.be/dQw4w9WgXcQ"))
-        assertEquals(DetectedPlatform.YOUTUBE, detectPlatform("https://m.youtube.com/shorts/12345"))
-
-        // Instagram detection
-        assertEquals(DetectedPlatform.INSTAGRAM, detectPlatform("https://instagram.com/reel/C123456/"))
-        assertEquals(DetectedPlatform.INSTAGRAM, detectPlatform("https://www.instagram.com/p/B987654/"))
-
-        // TikTok detection
-        assertEquals(DetectedPlatform.TIKTOK, detectPlatform("https://www.tiktok.com/@creator/video/987654321"))
-        assertEquals(DetectedPlatform.TIKTOK, detectPlatform("https://vm.tiktok.com/ZM8abcde/"))
-
-        // Twitter / X detection
-        assertEquals(DetectedPlatform.TWITTER, detectPlatform("https://x.com/user/status/1234567890"))
-        assertEquals(DetectedPlatform.TWITTER, detectPlatform("https://twitter.com/user/status/9876543210"))
-
-        // Reddit detection
-        assertEquals(DetectedPlatform.REDDIT, detectPlatform("https://www.reddit.com/r/Android/comments/abc123/new_feature/"))
-        assertEquals(DetectedPlatform.REDDIT, detectPlatform("https://redd.it/xyz987"))
-
-        // Pinterest detection
-        assertEquals(DetectedPlatform.PINTEREST, detectPlatform("https://pinterest.com/pin/123456789/"))
-        assertEquals(DetectedPlatform.PINTEREST, detectPlatform("https://pin.it/abc1234"))
-
-        // Facebook detection
-        assertEquals(DetectedPlatform.FACEBOOK, detectPlatform("https://www.facebook.com/watch/?v=123456"))
-        assertEquals(DetectedPlatform.FACEBOOK, detectPlatform("https://fb.watch/xyz123/"))
-
         // Direct media links
         assertEquals(DetectedPlatform.DIRECT_MEDIA, detectPlatform("https://cdn.example.com/videos/stream.m3u8"))
         assertEquals(DetectedPlatform.DIRECT_MEDIA, detectPlatform("https://cdn.example.com/videos/manifest.mpd"))
@@ -67,6 +38,8 @@ class DownloaderSearchPageUnitTest {
         // Generic websites
         assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://en.wikipedia.org/wiki/Kotlin"))
         assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://github.com/trending"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://example.com/article"))
+        assertEquals(DetectedPlatform.GENERIC_WEB, detectPlatform("https://blog.example.org/news"))
     }
 
     @Test
