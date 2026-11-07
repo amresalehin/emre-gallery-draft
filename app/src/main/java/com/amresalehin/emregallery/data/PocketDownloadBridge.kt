@@ -5,6 +5,7 @@ import com.amresalehin.emregallery.pocket.PocketItem
 import com.amresalehin.emregallery.pocket.PocketRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 import java.util.UUID
 
