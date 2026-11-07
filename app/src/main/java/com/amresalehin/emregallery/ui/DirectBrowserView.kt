@@ -187,65 +187,13 @@ fun DirectBrowserView(
             .testTag("direct_browser_view"),
         color = BrowserThemeColors.background(isDark)
     ) {
-        // Pin both browser controls to the viewport. Only the page canvas scrolls.
-        val topBarReservedHeight =
-            WindowInsets.statusBars.asPaddingValues().calculateTopPadding() +
-                66.dp + if (isLoading) 3.dp else 0.dp
-        val bottomBarReservedHeight =
-            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding() + 76.dp
-
+        // The webpage fills the browser canvas. Native browser controls float above it.
         Box(modifier = Modifier.fillMaxSize()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(
-                        top = topBarReservedHeight,
-                        bottom = bottomBarReservedHeight
-                    )
-            ) {
-            // Anti-Bot Verification / Cloudflare Challenge Active Banner
-            val isChallengeActive = remember(pageTitle, currentUrl) {
-                BotDetectionMitigator.isBotChallenge(pageTitle, currentUrl)
-            }
-            AnimatedVisibility(
-                visible = isChallengeActive,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut()
-            ) {
-                Surface(
-                    color = Color(0xFFFEF3C7),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .testTag("browser_bot_challenge_banner")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = null,
-                            tint = Color(0xFF92400E),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Security Verification: Tap captcha checkbox if prompted to continue.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF92400E),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-
-            // Main content remains in its own viewport between the pinned browser bars.
+            Box(modifier = Modifier.fillMaxSize()) {
+            // Full-screen web canvas: page content scrolls behind the floating browser controls.
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
+                    .fillMaxSize()
             ) {
                 // Interactive WebView (always instantiated for high-speed responsiveness)
                 AndroidView(
@@ -502,6 +450,47 @@ fun DirectBrowserView(
 
             }
 
+            val isChallengeActive = remember(pageTitle, currentUrl) {
+                BotDetectionMitigator.isBotChallenge(pageTitle, currentUrl)
+            }
+            AnimatedVisibility(
+                visible = isChallengeActive,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(top = 66.dp, start = 16.dp, end = 16.dp)
+            ) {
+                Surface(
+                    color = Color(0xFFFEF3C7),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("browser_bot_challenge_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = Color(0xFF92400E),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Security Verification: Tap captcha checkbox if prompted to continue.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF92400E),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -613,9 +602,8 @@ fun DirectBrowserView(
                 onOpenBrowserSettings = {
                     showSettingsSheet = true
                 },
-                isDark = isDark
-            )
-
+                isDark = isDark,
+                modifier = Modifier.align(Alignment.BottomCenter)
         }
     }
 
