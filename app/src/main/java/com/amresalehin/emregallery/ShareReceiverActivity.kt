@@ -20,6 +20,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.ui.DirectBrowserView
+import com.amresalehin.emregallery.ui.DownloaderViewMode
+import com.amresalehin.emregallery.ui.MediaInboxScreen
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 
 /**
@@ -108,7 +110,9 @@ private fun ShareReceiverScreen(
     onDismiss: () -> Unit,
     onDownloadComplete: () -> Unit
 ) {
-    BackHandler {
+    var showDiscoveredMedia by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = !showDiscoveredMedia) {
         onDismiss()
     }
 
@@ -117,13 +121,21 @@ private fun ShareReceiverScreen(
             .fillMaxSize()
             .testTag("share_receiver_root")
     ) {
-        DirectBrowserView(
-            initialUrl = url,
-            onClose = onDismiss,
-            onMediaExtracted = {},
-            onBatchExtracted = { _, _, _ -> },
-            onSwitchToMediaTab = onDownloadComplete,
-            modifier = Modifier.fillMaxSize()
-        )
+        if (showDiscoveredMedia) {
+            MediaInboxScreen(
+                onBack = { showDiscoveredMedia = false },
+                initialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            DirectBrowserView(
+                initialUrl = url,
+                onClose = onDismiss,
+                onMediaExtracted = {},
+                onBatchExtracted = { _, _, _ -> },
+                onSwitchToMediaTab = { showDiscoveredMedia = true },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }
