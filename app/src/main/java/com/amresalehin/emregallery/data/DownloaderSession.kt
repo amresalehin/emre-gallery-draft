@@ -42,6 +42,34 @@ object DownloaderSession {
     private val itemsLock = Any()
     private val canonicalMap = mutableMapOf<String, ScrapedMediaItem>()
 
+    /**
+     * Synchronizes the shared discovered-media review with the active browser page.
+     * Unlike startSession(), this does not mark an extraction job as running.
+     */
+    fun updateBrowserPage(url: String) {
+        val trimmed = url.trim()
+        val normalized = if (trimmed.isNotBlank() &&
+            !trimmed.startsWith("http://", true) &&
+            !trimmed.startsWith("https://", true)
+        ) {
+            "https://$trimmed"
+        } else trimmed
+        val domain = runCatching { URL(normalized).host }.getOrDefault("")
+
+        synchronized(itemsLock) {
+            if (normalized == _currentUrl.value) return
+            _currentUrl.value = normalized
+            _sourceDomain.value = domain
+            _pageTitle.value = domain
+            canonicalMap.clear()
+            _discoveredItems.value = emptyList()
+            _selectedItemIds.value = emptySet()
+            _isExtracting.value = false
+            _statusMessage.value = if (normalized.isBlank()) "Browser home" else "Browsing page"
+            _errorMessage.value = null
+        }
+    }
+
     fun startSession(url: String) {
         val trimmed = url.trim()
         val normalized = if (!trimmed.startsWith("http://", true) && !trimmed.startsWith("https://", true)) {
