@@ -7,12 +7,14 @@ on:
       - 'integration/**'
       - 'fix/**'
       - 'chore/**'
+      - 'task/**'
   pull_request:
     branches:
       - Develop
       - 'integration/**'
       - 'fix/**'
       - 'chore/**'
+      - 'task/**'
   workflow_dispatch:
 
 permissions:
