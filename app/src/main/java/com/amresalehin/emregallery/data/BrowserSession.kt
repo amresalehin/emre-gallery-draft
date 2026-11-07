@@ -53,13 +53,11 @@ class BrowserTabSession(
     fun updateNavigation(newUrl: String, newTitle: String? = null) {
         val cleanUrl = newUrl.trim()
         if (cleanUrl != _url.value) {
+            // Discovered candidates belong to the current page, not the previous URL.
+            // Capture the old URL before replacing it, then reset the per-tab registry.
+            clearMedia()
             _url.value = cleanUrl
-            // Reset candidates when navigating to a genuinely different web domain
-            val oldDomain = runCatching { URL(_url.value).host }.getOrDefault("")
-            val newDomain = runCatching { URL(cleanUrl).host }.getOrDefault("")
-            if (oldDomain.isNotBlank() && newDomain.isNotBlank() && oldDomain != newDomain) {
-                clearMedia()
-            }
+            _title.value = ""
         }
         if (!newTitle.isNullOrBlank()) {
             _title.value = newTitle
