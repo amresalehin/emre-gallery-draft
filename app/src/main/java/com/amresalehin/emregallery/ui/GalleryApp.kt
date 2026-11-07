@@ -801,7 +801,7 @@ fun GalleryApp() {
                         }
                         .pointerInput(destination, showSidePanel, albumFilter) {
                             // Inward swipe from left edge to open side panel on main screens without conflicting with list scrolling
-                            if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) {
+                            if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.MEDIA_INBOX, Destination.SETTINGS) && albumFilter == null) {
                                 val edgeWidth = 32.dp.toPx()
                                 val slop = viewConfiguration.touchSlop * 1.5f
                                 awaitEachGesture {
@@ -1534,7 +1534,7 @@ fun GalleryApp() {
         }
 
         // Floating Bottom Navigation Bar across Home, Albums, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER
+        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.MEDIA_INBOX, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier
@@ -1553,7 +1553,7 @@ fun GalleryApp() {
                             alpha = (1f - cp * 1.15f).coerceIn(0f, 1f)
                         }
                 ) {
-                    if (albumFilter == null && returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
+                    if (albumFilter == null && returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.MEDIA_INBOX, Destination.SETTINGS)) {
                         FloatingNavigationBar(
                             current = returnDestination,
                             onSelect = { dest ->
@@ -1567,7 +1567,18 @@ fun GalleryApp() {
                                     backStack.clear()
                                     albumFilter = null
                                     homeSelectedUris = emptySet()
-                                    navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)
+                                    if (dest == Destination.MEDIA_INBOX) {
+                                        previousDestination = Destination.HOME
+                                        navigateTo(
+                                            dest = Destination.MEDIA_INBOX,
+                                            rememberPrevious = false,
+                                            newSelectedMedia = null,
+                                            newMapFocusItem = null,
+                                            newInboxInitialViewMode = DownloaderViewMode.SAVED_LIBRARY
+                                        )
+                                    } else {
+                                        navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)
+                                    }
                                 }
                             }
                         )
