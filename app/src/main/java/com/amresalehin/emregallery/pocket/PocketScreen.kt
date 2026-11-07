@@ -1,9 +1,5 @@
 package com.amresalehin.emregallery.pocket
 
-import android.content.ClipDescription
-import android.content.ClipboardManager
-import android.content.Context
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -20,7 +16,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,7 +40,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.amresalehin.emregallery.data.MediaItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,21 +47,16 @@ fun PocketScreen(
     items: List<PocketItem>,
     onOpenItem: (PocketItem) -> Unit,
     onSaveUrl: (String) -> Unit,
-    onBack: () -> Unit,
+    onMenuClick: () -> Unit,
     topContentPadding: Dp,
-    bottomContentPadding: Dp,
-    availableMedia: List<MediaItem> = emptyList(),
-    onAddMediaToPocket: (MediaItem) -> Unit = {}
+    bottomContentPadding: Dp
 ) {
-    val context = LocalContext.current
     val focusManager = LocalFocusManager.current
 
     var searchQuery by remember { mutableStateOf("") }
     var showFilterSheet by remember { mutableStateOf(false) }
     var selectedDomainFilter by remember { mutableStateOf<String?>(null) }
     var selectedTagFilter by remember { mutableStateOf<String?>(null) }
-    var showAddDialog by remember { mutableStateOf(false) }
-    var showGalleryPickerSheet by remember { mutableStateOf(false) }
 
     val allDomains = remember(items) {
         items.map { it.domain }.distinct().sorted()
@@ -112,7 +101,7 @@ fun PocketScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(top = topContentPadding + 64.dp, bottom = bottomContentPadding, start = 24.dp, end = 24.dp),
+                    .padding(top = topContentPadding, bottom = bottomContentPadding, start = 24.dp, end = 24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -148,7 +137,7 @@ fun PocketScreen(
                         text = if (searchQuery.isNotBlank())
                             "Try searching with different keywords or paste a link to save it."
                         else
-                            "Paste web links or save bookmarks from Wikipedia, articles, and your gallery.",
+                            "Paste a webpage URL in the search bar to save it to your Pocket.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
@@ -174,8 +163,8 @@ fun PocketScreen(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 20.dp,
-                    top = topContentPadding + 68.dp,
-                    bottom = bottomContentPadding + 72.dp
+                    top = topContentPadding,
+                    bottom = bottomContentPadding
                 ),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -200,7 +189,8 @@ fun PocketScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(top = topContentPadding, start = 16.dp, end = 16.dp)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
                 .zIndex(20f)
         ) {
             Surface(
@@ -211,7 +201,7 @@ fun PocketScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
+                    .height(52.dp)
                     .testTag("pocket_search_pill")
             ) {
                 Row(
@@ -221,14 +211,14 @@ fun PocketScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
-                        onClick = onBack,
+                        onClick = onMenuClick,
                         modifier = Modifier
                             .size(42.dp)
                             .testTag("pocket_back_button")
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Open navigation menu",
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(22.dp)
                         )
@@ -346,93 +336,6 @@ fun PocketScreen(
             }
         }
 
-        // Floating Action Button to add links or gallery items
-        FloatingActionButton(
-            onClick = { showAddDialog = true },
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = bottomContentPadding + 12.dp)
-                .testTag("pocket_add_fab")
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Add to Pocket")
-        }
-
-        // Add Dialog (URL paste or import from Gallery)
-        if (showAddDialog) {
-            PocketAddDialog(
-                onDismiss = { showAddDialog = false },
-                onSaveUrl = { url ->
-                    showAddDialog = false
-                    onSaveUrl(url)
-                },
-                onPickFromGallery = {
-                    showAddDialog = false
-                    showGalleryPickerSheet = true
-                }
-            )
-        }
-
-        // Gallery Picker Bottom Sheet
-        if (showGalleryPickerSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showGalleryPickerSheet = false },
-                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = "Save photo to Pocket",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "Select a photo from your gallery to save as a pocket bookmark.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        contentPadding = PaddingValues(bottom = 24.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 380.dp)
-                    ) {
-                        items(availableMedia.take(30), key = { it.uri }) { mediaItem ->
-                            Box(
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        showGalleryPickerSheet = false
-                                        onAddMediaToPocket(mediaItem)
-                                    }
-                            ) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(mediaItem.uri)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = mediaItem.name,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // Filter Modal Bottom Sheet
         if (showFilterSheet) {
             ModalBottomSheet(
@@ -521,8 +424,7 @@ fun PocketScreen(
 }
 
 /**
- * Stacked Deck Card Component replicating the layered card design from image_84952544.png.
- * Displays offset colored layers behind the main white card.
+ * Stacked bookmark card using the active application color scheme.
  */
 @Composable
 fun PocketStackedCard(
@@ -531,7 +433,6 @@ fun PocketStackedCard(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val accent = item.accentColor
 
     Box(
         modifier = modifier
@@ -549,7 +450,7 @@ fun PocketStackedCard(
                 .matchParentSize()
                 .offset(x = 6.dp, y = 6.dp)
                 .clip(RoundedCornerShape(22.dp))
-                .background(accent.copy(alpha = 0.28f))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
         )
 
         // Middle Layer 1: Offset (4.dp, 4.dp)
@@ -558,13 +459,13 @@ fun PocketStackedCard(
                 .matchParentSize()
                 .offset(x = 3.dp, y = 3.dp)
                 .clip(RoundedCornerShape(22.dp))
-                .background(accent.copy(alpha = 0.55f))
+                .background(MaterialTheme.colorScheme.surfaceContainer)
         )
 
         // Front Main Card
         Surface(
             shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.surface,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
             tonalElevation = 3.dp,
             shadowElevation = 5.dp,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
@@ -580,8 +481,8 @@ fun PocketStackedCard(
                         .background(
                             Brush.linearGradient(
                                 listOf(
-                                    accent.copy(alpha = 0.25f),
-                                    accent.copy(alpha = 0.12f)
+                                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    MaterialTheme.colorScheme.surfaceVariant
                                 )
                             )
                         )
@@ -605,7 +506,7 @@ fun PocketStackedCard(
                             Icon(
                                 imageVector = Icons.Default.Bookmarks,
                                 contentDescription = null,
-                                tint = accent.copy(alpha = 0.6f),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(40.dp)
                             )
                         }
@@ -686,77 +587,4 @@ fun PocketStackedCard(
             }
         }
     }
-}
-
-@Composable
-fun PocketAddDialog(
-    onDismiss: () -> Unit,
-    onSaveUrl: (String) -> Unit,
-    onPickFromGallery: () -> Unit
-) {
-    val context = LocalContext.current
-    var inputUrl by remember { mutableStateOf("") }
-
-    // Auto-check clipboard for URLs
-    LaunchedEffect(Unit) {
-        runCatching {
-            val clipManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            val item = clipManager?.primaryClip?.getItemAt(0)
-            val text = item?.text?.toString()?.trim()
-            if (!text.isNullOrBlank() && (text.startsWith("http://") || text.startsWith("https://"))) {
-                inputUrl = text
-            }
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add to Pocket") },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "Save an article, web link, or photo to your Pocket library.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = inputUrl,
-                    onValueChange = { inputUrl = it },
-                    label = { Text("Paste Web URL") },
-                    placeholder = { Text("https://en.wikipedia.org/wiki/...") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(14.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(
-                    onClick = onPickFromGallery,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Select Photo from Gallery")
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (inputUrl.isNotBlank()) {
-                        onSaveUrl(inputUrl.trim())
-                    }
-                },
-                enabled = inputUrl.isNotBlank()
-            ) {
-                Text("Save Link")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
 }

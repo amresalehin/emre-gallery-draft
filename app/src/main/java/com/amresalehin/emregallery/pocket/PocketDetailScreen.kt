@@ -64,7 +64,7 @@ fun PocketDetailScreen(
     val pagerState = rememberPagerState(pageCount = { if (images.isNotEmpty()) images.size else 1 })
     val scrollState = rememberScrollState()
 
-    val accent = item.accentColor
+    val colorScheme = MaterialTheme.colorScheme
 
     Scaffold(
         topBar = {
@@ -200,7 +200,7 @@ fun PocketDetailScreen(
                         .fillMaxSize()
                         .offset(x = 8.dp, y = 8.dp)
                         .clip(RoundedCornerShape(32.dp))
-                        .background(accent.copy(alpha = 0.28f))
+                        .background(colorScheme.surfaceContainerHigh)
                 )
 
                 // Middle Layer (offset 4.dp)
@@ -209,7 +209,7 @@ fun PocketDetailScreen(
                         .fillMaxSize()
                         .offset(x = 4.dp, y = 4.dp)
                         .clip(RoundedCornerShape(32.dp))
-                        .background(accent.copy(alpha = 0.55f))
+                        .background(colorScheme.surfaceContainer)
                 )
 
                 // Front Hero Image Card
@@ -244,7 +244,7 @@ fun PocketDetailScreen(
                                 .fillMaxSize()
                                 .background(
                                     Brush.linearGradient(
-                                        listOf(accent.copy(alpha = 0.2f), accent.copy(alpha = 0.05f))
+                                        listOf(colorScheme.surfaceContainerHigh, colorScheme.surfaceVariant)
                                     )
                                 ),
                             contentAlignment = Alignment.Center
@@ -252,7 +252,7 @@ fun PocketDetailScreen(
                             Icon(
                                 imageVector = Icons.Default.Landscape,
                                 contentDescription = null,
-                                tint = accent.copy(alpha = 0.5f),
+                                tint = colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(80.dp)
                             )
                         }

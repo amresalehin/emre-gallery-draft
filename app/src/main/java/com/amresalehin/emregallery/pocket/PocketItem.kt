@@ -1,6 +1,5 @@
 package com.amresalehin.emregallery.pocket
 
-import androidx.compose.ui.graphics.Color
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -20,7 +19,6 @@ data class PocketItem(
     val note: String = "",
     val tags: List<String> = emptyList(),
     val description: String = "",
-    val themeColorHex: String = "#7986CB",
     val isFavorite: Boolean = false,
     val isRead: Boolean = false
 ) {
@@ -31,19 +29,6 @@ data class PocketItem(
         get() {
             val sdf = SimpleDateFormat("MMM dd, yyyy · h:mm a", Locale.US)
             return sdf.format(Date(timestamp))
-        }
-
-    val accentColor: Color
-        get() = try {
-            val hex = themeColorHex.removePrefix("#")
-            val colorInt = when (hex.length) {
-                6 -> 0xFF000000.toInt() or hex.toLong(16).toInt()
-                8 -> hex.toLong(16).toInt()
-                else -> 0xFF7986CB.toInt()
-            }
-            Color(colorInt)
-        } catch (_: Exception) {
-            Color(0xFF7986CB)
         }
 
     val faviconSymbol: String

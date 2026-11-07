@@ -906,13 +906,9 @@ fun GalleryApp() {
                                 onSaveUrl = { url ->
                                     scope.launch { pocketRepository.saveFromUrl(url) }
                                 },
-                                onBack = { performBackNavigation() },
+                                onMenuClick = { showSidePanel = true },
                                 topContentPadding = topContentPadding,
-                                bottomContentPadding = bottomContentPadding,
-                                availableMedia = visibleMedia.filterNot { it.isVideo },
-                                onAddMediaToPocket = { item ->
-                                    scope.launch { pocketRepository.saveFromGalleryMedia(item) }
-                                }
+                                bottomContentPadding = bottomContentPadding
                             )
                         }
                     }

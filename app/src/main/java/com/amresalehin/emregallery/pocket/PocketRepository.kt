@@ -32,13 +32,9 @@ class PocketRepository(private val context: Context) {
     val items: Flow<List<PocketItem>> = context.galleryDataStore.data.map { prefs ->
         val raw = prefs[pocketKey]
         if (raw.isNullOrBlank()) {
-            getDefaultSeedItems()
+            emptyList()
         } else {
-            try {
-                deserializeItems(raw).ifEmpty { getDefaultSeedItems() }
-            } catch (_: Exception) {
-                getDefaultSeedItems()
-            }
+            runCatching { deserializeItems(raw) }.getOrDefault(emptyList())
         }
     }.distinctUntilChanged()
 
@@ -133,9 +129,6 @@ class PocketRepository(private val context: Context) {
             listOf(domain.substringBefore(".").replaceFirstChar { it.uppercase() }, "Saved")
         }
 
-        val colorPresets = listOf("#7986CB", "#FF8A50", "#26A69A", "#BA68C8", "#42A5F5", "#AB47BC")
-        val chosenColor = colorPresets[(normalizedUrl.hashCode() and 0x7FFFFFFF) % colorPresets.size]
-
         val newItem = PocketItem(
             id = UUID.randomUUID().toString(),
             title = title,
@@ -145,8 +138,7 @@ class PocketRepository(private val context: Context) {
             timestamp = System.currentTimeMillis(),
             note = userNote,
             tags = tags,
-            description = description.ifBlank { "Article saved from $domain." },
-            themeColorHex = chosenColor
+            description = description.ifBlank { "Article saved from $domain." }
         )
         addItem(newItem)
         newItem
@@ -172,8 +164,7 @@ class PocketRepository(private val context: Context) {
             },
             note = note.ifBlank { "Saved from local device camera & gallery collection." },
             tags = tags,
-            description = "High resolution photo from device library (${mediaItem.width} × ${mediaItem.height} px, ${mediaItem.mimeType}).",
-            themeColorHex = "#7986CB"
+            description = "High resolution photo from device library (${mediaItem.width} × ${mediaItem.height} px, ${mediaItem.mimeType})."
         )
         addItem(item)
         return item
@@ -183,13 +174,9 @@ class PocketRepository(private val context: Context) {
         val prefs = context.galleryDataStore.data.first()
         val raw = prefs[pocketKey]
         return if (raw.isNullOrBlank()) {
-            getDefaultSeedItems()
+            emptyList()
         } else {
-            try {
-                deserializeItems(raw).ifEmpty { getDefaultSeedItems() }
-            } catch (_: Exception) {
-                getDefaultSeedItems()
-            }
+            runCatching { deserializeItems(raw) }.getOrDefault(emptyList())
         }
     }
 
@@ -204,7 +191,6 @@ class PocketRepository(private val context: Context) {
                 put("timestamp", item.timestamp)
                 put("note", item.note)
                 put("description", item.description)
-                put("themeColorHex", item.themeColorHex)
                 put("isFavorite", item.isFavorite)
                 put("isRead", item.isRead)
 
@@ -249,80 +235,11 @@ class PocketRepository(private val context: Context) {
                     note = obj.optString("note", ""),
                     tags = tags,
                     description = obj.optString("description", ""),
-                    themeColorHex = obj.optString("themeColorHex", "#7986CB"),
                     isFavorite = obj.optBoolean("isFavorite", false),
                     isRead = obj.optBoolean("isRead", false)
                 )
             )
         }
-        return list
-    }
-
-    companion object {
-        fun getDefaultSeedItems(): List<PocketItem> {
-            return listOf(
-                PocketItem(
-                    id = "seed-taj-mahal",
-                    title = "Taj Mahal",
-                    url = "https://en.wikipedia.org/wiki/Taj_Mahal",
-                    domain = "wikipedia.org",
-                    imageUrls = listOf(
-                        "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Taj_Mahal_%28Edited%29.jpeg/800px-Taj_Mahal_%28Edited%29.jpeg",
-                        "https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=1200&q=80",
-                        "https://images.unsplash.com/photo-1548013146-72479768bada?auto=format&fit=crop&w=1200&q=80"
-                    ),
-                    timestamp = 1793816640000L, // Nov 04, 2026 · 10:24 AM
-                    note = "Commissioned in 1631 by the fifth Mughal emperor Shah Jahan to house the tomb of his favourite wife, Mumtaz Mahal.",
-                    tags = listOf("Architecture", "UNESCO", "Monument", "India"),
-                    description = "The Taj Mahal is an ivory-white marble mausoleum on the south bank of the Yamuna river in the Indian city of Agra. It was commissioned in 1631 by Mughal emperor Shah Jahan to house the tomb of his favourite wife, Mumtaz Mahal; it also houses the tomb of Shah Jahan himself. The tomb is the centrepiece of a 17-hectare (42-acre) complex, which includes a mosque and a guest house, and is set in formal gardens bounded on three sides by a crenellated wall.",
-                    themeColorHex = "#7986CB"
-                ),
-                PocketItem(
-                    id = "seed-ancient-india",
-                    title = "Ancient India",
-                    url = "https://www.britannica.com/place/ancient-India",
-                    domain = "britannica.com",
-                    imageUrls = listOf(
-                        "https://images.unsplash.com/photo-1599661046289-e31897846e41?auto=format&fit=crop&w=1200&q=80",
-                        "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Mohenjo-daro.jpg/800px-Mohenjo-daro.jpg"
-                    ),
-                    timestamp = 1793226960000L, // Oct 28, 2026 · 5:16 PM
-                    note = "Study of the Bronze Age Indus Valley Civilization, urban drainage systems, brick kilns, and early trade routes.",
-                    tags = listOf("History", "Archaeology", "Civilization", "Harappa"),
-                    description = "Ancient India encompasses the prehistoric roots of the subcontinent through the urban maturity of the Indus Valley Civilization (c. 2500–1700 BCE), the composition of Vedic hymns, and the emergence of early state polities. Archaeological discoveries at Harappa and Mohenjo-daro illustrate grid-planned streets, sophisticated hydraulic sanitation, and flourishing artistic crafts.",
-                    themeColorHex = "#FF8A50"
-                ),
-                PocketItem(
-                    id = "seed-mughal-art",
-                    title = "Mughal Art",
-                    url = "https://artsandculture.google.com/story/mughal-art",
-                    domain = "google.com",
-                    imageUrls = listOf(
-                        "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=1200&q=80",
-                        "https://images.unsplash.com/photo-1461360370896-922624d12aa1?auto=format&fit=crop&w=1200&q=80"
-                    ),
-                    timestamp = 1791835680000L, // Oct 12, 2026 · 2:48 PM
-                    note = "Miniatures painted with ground lapis lazuli, gold leaf leafing, and fine squirrel-hair brushes illustrating dynastic histories.",
-                    tags = listOf("Art", "Manuscripts", "Calligraphy", "Heritage"),
-                    description = "Mughal art is a particular style of South Asian painting, generally confined to miniatures either as book illustrations or as single works to be kept in albums (muraqqa). It emerged from the Persian miniature painting tradition with additional Hindu, Buddhist, and Jain influences and developed largely in the court of the Mughal Empire of the 16th to 18th centuries.",
-                    themeColorHex = "#26A69A"
-                ),
-                PocketItem(
-                    id = "seed-indian-architecture",
-                    title = "Indian Architecture",
-                    url = "https://www.researchgate.net/publication/indian_architecture_evolution",
-                    domain = "researchgate.net",
-                    imageUrls = listOf(
-                        "https://images.unsplash.com/photo-1587474260584-136574528ed5?auto=format&fit=crop&w=1200&q=80",
-                        "https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Fatehpur_Sikri_Panch_Mahal.jpg/800px-Fatehpur_Sikri_Panch_Mahal.jpg"
-                    ),
-                    timestamp = 1790795220000L, // Sep 30, 2026 · 11:07 AM
-                    note = "Evolution of corbelled and true arches, geometric jali fretwork filters, chhatri pavilions, and courtyards.",
-                    tags = listOf("Architecture", "Arches", "Heritage", "Design"),
-                    description = "Indian architecture is rooted in its history, culture and religion. Among a number of architectural styles and traditions, the best-known include the many varieties of Hindu temple architecture and Indo-Islamic architecture, especially Rajput architecture, Mughal architecture, South Indian Dravidian architecture, and Indo-Saracenic architecture.",
-                    themeColorHex = "#BA68C8"
-                )
-            )
-        }
+        return list.filterNot { it.id.startsWith("seed-") }
     }
 }
