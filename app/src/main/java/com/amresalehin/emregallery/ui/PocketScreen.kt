@@ -158,6 +158,7 @@ fun PocketScreen(
     bottomContentPadding: Dp = 0.dp,
     onMenuClick: () -> Unit = {},
     onDetailViewerStateChange: ((Boolean) -> Unit)? = null,
+    onOpenDiscoveredMedia: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -501,7 +502,7 @@ fun PocketScreen(
                     onClose = { showFullScreenBrowser = false },
                     onMediaExtracted = {},
                     onBatchExtracted = { _, _, _ -> },
-                    onSwitchToMediaTab = { showFullScreenBrowser = false },
+                    onSwitchToMediaTab = onOpenDiscoveredMedia,
                     modifier = Modifier.fillMaxSize()
                 )
             }
