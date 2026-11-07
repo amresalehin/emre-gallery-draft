@@ -183,6 +183,7 @@ class PocketRepository(context: Context) {
             canonicalUrl = metadata.canonicalUrl ?: latestItem.canonicalUrl,
             siteName = metadata.siteName ?: latestItem.siteName,
             faviconUrl = metadata.faviconUrl ?: latestItem.faviconUrl,
+            readableContent = metadata.readableContent?.takeIf { it.isNotBlank() } ?: latestItem.readableContent,
             previewImagePath = metadata.previewImagePath ?: latestItem.previewImagePath
         )
 
@@ -262,6 +263,7 @@ class PocketRepository(context: Context) {
                 put("canonicalUrl", item.canonicalUrl)
                 put("siteName", item.siteName)
                 put("faviconUrl", item.faviconUrl)
+                put("readableContent", item.readableContent)
                 put("previewImagePath", item.previewImagePath)
 
                 val imgArr = JSONArray()
@@ -310,6 +312,7 @@ class PocketRepository(context: Context) {
                     canonicalUrl = obj.optNullableString("canonicalUrl"),
                     siteName = obj.optNullableString("siteName"),
                     faviconUrl = obj.optNullableString("faviconUrl"),
+                    readableContent = obj.optString("readableContent", ""),
                     previewImagePath = obj.optNullableString("previewImagePath")
                 )
             )
