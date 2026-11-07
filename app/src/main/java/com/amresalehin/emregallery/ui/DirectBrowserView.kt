@@ -54,7 +54,6 @@ fun DirectBrowserView(
     onClose: (() -> Unit)? = null,
     onUrlChange: ((String) -> Unit)? = null,
     onPageTitleChanged: ((String) -> Unit)? = null,
-    discoveredCount: Int = 0,
     onMediaExtracted: (ScrapedMediaItem) -> Unit,
     onBatchExtracted: (List<ScrapedMediaItem>, pageTitle: String?, domain: String?) -> Unit,
     onSwitchToMediaTab: () -> Unit,
