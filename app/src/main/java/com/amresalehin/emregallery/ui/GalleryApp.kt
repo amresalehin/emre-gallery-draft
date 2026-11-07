@@ -1306,7 +1306,6 @@ fun GalleryApp() {
                             customTagsMap = customTagsMap,
                             customPeopleMap = customPeopleMap,
                             favourites = favourites,
-                            themePref = themePref,
                             onQueryChange = { newQuery ->
                                 searchQuery = newQuery
                                 searchStage = if (newQuery.isBlank()) SearchStage.DISCOVERY else SearchStage.TYPING
