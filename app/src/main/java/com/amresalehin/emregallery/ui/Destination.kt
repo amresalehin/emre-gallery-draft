@@ -4,7 +4,6 @@ enum class Destination {
     HOME,
     ALBUMS,
     POCKET,
-    BROWSER,
     FAVOURITES,
     BIN,
     VIDEOS,

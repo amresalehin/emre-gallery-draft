@@ -319,7 +319,6 @@ fun SideNavigationDrawer(
                             Triple(Destination.HOME, "Home", Icons.Default.Home),
                             Triple(Destination.ALBUMS, "Albums", Icons.Default.PhotoLibrary),
                             Triple(Destination.POCKET, "Pocket", Icons.Default.Bookmarks),
-                            Triple(Destination.BROWSER, "Browser", Icons.Default.Language),
                             Triple(Destination.FAVOURITES, "Favourites", Icons.Default.Favorite)
                         ),
                         listOf(

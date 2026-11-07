@@ -60,7 +60,6 @@ import com.amresalehin.emregallery.pocket.PocketItem
 import com.amresalehin.emregallery.pocket.PocketRepository
 import com.amresalehin.emregallery.pocket.PocketScreen
 import com.amresalehin.emregallery.pocket.PocketDetailScreen
-import com.amresalehin.emregallery.ui.InAppBrowserScreen
 
 data class NavBackStackEntry(
     val destination: Destination,
@@ -913,13 +912,6 @@ fun GalleryApp() {
                             )
                         }
                     }
-                    Destination.BROWSER -> InAppBrowserScreen(
-                        onBack = { performBackNavigation() },
-                        onSavePage = { url, title ->
-                            pocketRepository.saveFromUrl(url, customTitle = title)
-                            snackbarHostState.showSnackbar("Saved to Pocket", duration = SnackbarDuration.Short)
-                        }
-                    )
                     Destination.FAVOURITES -> {
                         val favouriteItems = remember(media, favourites, hidden, inBin, archive) {
                             media.filter { it.uri in favourites && it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
