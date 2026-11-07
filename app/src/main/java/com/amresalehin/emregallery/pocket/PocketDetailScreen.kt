@@ -608,8 +608,17 @@ fun PocketDetailScreen(
                     Spacer(Modifier.height(16.dp))
                 }
 
+                if (item.readableContent.isNotBlank()) {
+                    Text(
+                        text = "Saved page",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 Text(
-                    text = item.description,
+                    text = item.readableContent.ifBlank { item.description },
                     style = MaterialTheme.typography.bodyLarge,
                     lineHeight = 26.sp,
                     fontFamily = FontFamily.Serif,
