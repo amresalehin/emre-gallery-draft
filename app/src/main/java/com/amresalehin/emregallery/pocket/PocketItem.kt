@@ -26,6 +26,8 @@ data class PocketItem(
     val canonicalUrl: String? = null,
     val siteName: String? = null,
     val faviconUrl: String? = null,
+    /** Bounded readable text extracted from the rendered page; used for offline reading and search. */
+    val readableContent: String = "",
     /** Absolute path to the locally generated WebView viewport preview. */
     val previewImagePath: String? = null
 ) {
