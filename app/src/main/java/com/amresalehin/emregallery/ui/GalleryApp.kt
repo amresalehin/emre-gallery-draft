@@ -638,7 +638,8 @@ fun GalleryApp() {
                 Destination.LOCKED_FOLDER,
                 Destination.ARCHIVE,
                 Destination.PEOPLE,
-                Destination.MAP
+                Destination.MAP,
+                Destination.BROWSER
             ) -> {
                 destination = Destination.ALBUMS
                 mapFocusItem = null
@@ -884,15 +885,13 @@ fun GalleryApp() {
                         onOpenBrowser = {
                             albumFilter = null
                             navigateTo(
-                                dest = Destination.MEDIA_INBOX,
-                                rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE,
-                                newInboxInitialOpenBrowser = true
+                                dest = Destination.BROWSER,
+                                rememberPrevious = true
                             )
                         },
                         onFilter = { when (it) { "Map" -> {
                             navigateTo(Destination.MAP, rememberPrevious = true, newMapFocusItem = null)
-                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Pocket", "Bookmarks" -> { albumFilter = null; navigateTo(Destination.POCKET, rememberPrevious = true) }; "Activity", "Activities", "Activity Page" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE, newInboxInitialOpenBrowser = false) }; "Browser" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.SEARCH_PAGE, newInboxInitialOpenBrowser = true) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
+                        }; "Folders" -> navigateTo(Destination.DEVICE_FOLDERS); "Albums" -> navigateTo(Destination.ALBUM_CATALOG); "Favourites" -> { albumFilter = null; navigateTo(Destination.FAVOURITES) }; "Bin" -> { albumFilter = null; navigateTo(Destination.BIN) }; "Videos" -> { albumFilter = null; navigateTo(Destination.VIDEOS) }; "Recently added" -> { albumFilter = null; navigateTo(Destination.RECENTLY_ADDED) }; "Hidden", "Locked folder" -> { albumFilter = null; navigateTo(Destination.LOCKED_FOLDER) }; "Archive" -> { albumFilter = null; navigateTo(Destination.ARCHIVE) }; "People" -> { albumFilter = null; activePersonId = null; navigateTo(Destination.PEOPLE) }; "Pocket", "Bookmarks" -> { albumFilter = null; navigateTo(Destination.POCKET, rememberPrevious = true) }; "Activity", "Activities", "Activity Page" -> { albumFilter = null; navigateTo(dest = Destination.MEDIA_INBOX, rememberPrevious = true, newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE, newInboxInitialOpenBrowser = false) }; "Browser" -> { albumFilter = null; navigateTo(dest = Destination.BROWSER, rememberPrevious = true) }; else -> { albumFilterReturnDestination = Destination.ALBUMS; albumFilter = it; navigateTo(Destination.HOME) } } },
                         onOpen = { openMediaInViewer(it, visibleMedia) },
                         onOpenPerson = { personId ->
                             activePersonId = personId
@@ -1217,6 +1216,12 @@ fun GalleryApp() {
                         initialStackForDetail = inboxInitialStack,
                         initialOpenBrowser = inboxInitialOpenBrowser,
                         onBack = { performBackNavigation() },
+                        onOpenBrowser = { _ ->
+                            navigateTo(
+                                dest = Destination.BROWSER,
+                                rememberPrevious = true
+                            )
+                        },
                         onOpenMediaItem = { uri ->
                             val match = media.firstOrNull { it.uri == uri || (it.name.isNotBlank() && uri.contains(it.name)) }
                             val targetItem = match ?: run {
@@ -1270,6 +1275,21 @@ fun GalleryApp() {
                             val target = viewerItems.firstOrNull { it.uri == uri } ?: viewerItems.first()
                             openMediaInViewer(target, viewerItems)
                         }
+                    )
+                    Destination.BROWSER -> DirectBrowserView(
+                        initialUrl = "",
+                        onClose = { performBackNavigation() },
+                        onMediaExtracted = { item -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItem(item) },
+                        onBatchExtracted = { batch, title, _ -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItems(batch, title) },
+                        onSwitchToMediaTab = {
+                            navigateTo(
+                                dest = Destination.MEDIA_INBOX,
+                                rememberPrevious = true,
+                                newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
+                                newInboxInitialOpenBrowser = false
+                            )
+                        },
+                        modifier = Modifier.fillMaxSize()
                     )
                     Destination.SEARCH -> {
                         val searchScopeMedia = remember(media, hidden, inBin, archive) {

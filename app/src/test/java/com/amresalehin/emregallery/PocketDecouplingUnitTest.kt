@@ -61,7 +61,7 @@ class PocketDecouplingUnitTest {
         fun filterDestination(label: String): Destination? {
             return when (label) {
                 "Pocket", "Bookmarks" -> Destination.POCKET
-                "Browser" -> Destination.MEDIA_INBOX
+                "Browser" -> Destination.BROWSER
                 "Activity", "Activities", "Activity Page" -> Destination.MEDIA_INBOX
                 "Favourites" -> Destination.FAVOURITES
                 "Bin" -> Destination.BIN
@@ -73,7 +73,7 @@ class PocketDecouplingUnitTest {
 
         assertEquals(Destination.POCKET, filterDestination("Pocket"))
         assertEquals(Destination.POCKET, filterDestination("Bookmarks"))
-        assertEquals(Destination.MEDIA_INBOX, filterDestination("Browser"))
+        assertEquals(Destination.BROWSER, filterDestination("Browser"))
         assertEquals(Destination.MEDIA_INBOX, filterDestination("Activity"))
 
         // Entry points to downloader outside browser/activity are removed

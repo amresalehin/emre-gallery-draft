@@ -19,7 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.PreferencesRepository
-import com.amresalehin.emregallery.ui.FullScreenBrowserView
+import com.amresalehin.emregallery.ui.DirectBrowserView
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
 
 /**
@@ -117,12 +117,12 @@ private fun ShareReceiverScreen(
             .fillMaxSize()
             .testTag("share_receiver_root")
     ) {
-        FullScreenBrowserView(
+        DirectBrowserView(
             initialUrl = url,
             onClose = onDismiss,
-            onDownloadComplete = {
-                onDownloadComplete()
-            },
+            onMediaExtracted = {},
+            onBatchExtracted = { _, _, _ -> },
+            onSwitchToMediaTab = onDownloadComplete,
             modifier = Modifier.fillMaxSize()
         )
     }

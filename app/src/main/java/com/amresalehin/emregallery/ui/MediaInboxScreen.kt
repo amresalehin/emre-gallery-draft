@@ -96,11 +96,12 @@ enum class DownloaderViewMode {
 @Composable
 fun MediaInboxScreen(
     onBack: () -> Unit,
-    initialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+    initialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
     initialStackForDetail: MediaInboxStack? = null,
-    initialOpenBrowser: Boolean = true,
+    initialOpenBrowser: Boolean = false,
     onOpenMediaItem: ((String) -> Unit)? = null,
     onOpenMediaWithList: ((String, List<String>) -> Unit)? = null,
+    onOpenBrowser: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -121,10 +122,6 @@ fun MediaInboxScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     var selectedStackForDetail by remember(initialStackForDetail) { mutableStateOf(initialStackForDetail) }
     var showFilterSheet by remember { mutableStateOf(false) }
-    var showFullScreenBrowser by remember(initialOpenBrowser, initialViewMode) {
-        mutableStateOf(if (initialViewMode == DownloaderViewMode.ACTIVITY_PAGE) false else initialOpenBrowser)
-    }
-    var browserInitialUrl by remember { mutableStateOf("") }
     var sortOrder by remember { mutableStateOf("Newest") }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -134,14 +131,14 @@ fun MediaInboxScreen(
     var showDeleteConfirmationDialog by remember { mutableStateOf(false) }
 
     var currentViewMode by remember(initialViewMode) {
-        mutableStateOf(if (initialViewMode == DownloaderViewMode.DOWNLOADER_PAGE) DownloaderViewMode.SEARCH_PAGE else initialViewMode)
+        mutableStateOf(if (initialViewMode == DownloaderViewMode.DOWNLOADER_PAGE || initialViewMode == DownloaderViewMode.SEARCH_PAGE) DownloaderViewMode.ACTIVITY_PAGE else initialViewMode)
     }
 
     LaunchedEffect(Unit) {
         GalleryApplication.warmupChromium(context)
     }
 
-    BackHandler(enabled = !showFullScreenBrowser) {
+    BackHandler {
         if (isSelectionMode) {
             selectedStackIds = emptySet()
         } else if (isSearchFocused || searchQuery.isNotEmpty()) {
@@ -151,22 +148,14 @@ fun MediaInboxScreen(
             keyboardController?.hide()
         } else if (selectedStackForDetail != null) {
             selectedStackForDetail = null
-        } else if (currentViewMode == DownloaderViewMode.DOWNLOADER_PAGE) {
-            currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
         } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
             if (initialViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
                 onBack()
             } else {
-                currentViewMode = if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) DownloaderViewMode.SAVED_LIBRARY else DownloaderViewMode.SEARCH_PAGE
+                currentViewMode = DownloaderViewMode.SAVED_LIBRARY
             }
         } else if (showFilterSheet) {
             showFilterSheet = false
-        } else if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY) {
-            if (initialViewMode == DownloaderViewMode.SAVED_LIBRARY) {
-                onBack()
-            } else {
-                currentViewMode = DownloaderViewMode.SEARCH_PAGE
-            }
         } else {
             onBack()
         }
@@ -341,7 +330,7 @@ fun MediaInboxScreen(
                                                     ) {
                                                         // Fetch icon only
                                                         Surface(
-                                                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                                                            onClick = { onOpenBrowser?.invoke("") ?: run { currentViewMode = DownloaderViewMode.SEARCH_PAGE } },
                                                             shape = RoundedCornerShape(14.dp),
                                                             color = if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) MaterialTheme.colorScheme.onSurface else Color.Transparent,
                                                             modifier = Modifier
@@ -482,7 +471,7 @@ fun MediaInboxScreen(
                 floatingActionButton = {
                     if (currentViewMode == DownloaderViewMode.SAVED_LIBRARY && !isSelectionMode) {
                         FloatingActionButton(
-                            onClick = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                            onClick = { onOpenBrowser?.invoke("") ?: run { currentViewMode = DownloaderViewMode.SEARCH_PAGE } },
                             shape = RoundedCornerShape(20.dp),
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                             contentColor = MaterialTheme.colorScheme.onSurface,
@@ -506,43 +495,17 @@ fun MediaInboxScreen(
                         .fillMaxSize()
                         .padding(innerPadding)
                 ) {
-                    if (currentViewMode == DownloaderViewMode.SEARCH_PAGE) {
-                        DownloaderSearchMainPage(
-                            onFetchUrl = { targetUrl ->
-                                browserInitialUrl = targetUrl
-                                showFullScreenBrowser = true
-                            },
-                            onOpenBrowser = { targetUrl ->
-                                browserInitialUrl = targetUrl
-                                showFullScreenBrowser = true
-                            },
-                            onViewSavedLibrary = {
-                                currentViewMode = DownloaderViewMode.SAVED_LIBRARY
-                            },
-                            onOpenActivity = {
-                                currentViewMode = DownloaderViewMode.ACTIVITY_PAGE
-                            },
-                            onBack = onBack,
-                            savedStacks = stacks,
-                            onSelectStack = { stack ->
-                                selectedStackForDetail = stack
-                            },
-                            activeDownloadsCount = workInfos.count { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED },
-                            savedStacksCount = stacks.size,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else if (currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
+                    if (currentViewMode == DownloaderViewMode.SEARCH_PAGE || currentViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
                         DownloaderActivityPage(
                             onBack = {
                                 if (initialViewMode == DownloaderViewMode.ACTIVITY_PAGE) {
                                     onBack()
                                 } else {
-                                    currentViewMode = DownloaderViewMode.SEARCH_PAGE
+                                    currentViewMode = DownloaderViewMode.SAVED_LIBRARY
                                 }
                             },
                             onAddNewDownload = {
-                                browserInitialUrl = ""
-                                showFullScreenBrowser = true
+                                onOpenBrowser?.invoke("")
                             },
                             onOpenMedia = { item ->
                                 item.localUri?.let { uriStr ->
@@ -751,8 +714,7 @@ fun MediaInboxScreen(
                     }
                 },
                 onOpenBrowser = { url ->
-                    browserInitialUrl = url
-                    showFullScreenBrowser = true
+                    onOpenBrowser?.invoke(url)
                 },
                 onDeleteStack = {
                     inboxRepo.deleteStack(stack.id)
@@ -766,30 +728,8 @@ fun MediaInboxScreen(
         }
     }
 
-
-    // Full Screen In-App Browser (opens when clicking browser button above plus FAB)
-    AnimatedVisibility(
-        visible = showFullScreenBrowser,
-        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-        modifier = Modifier.fillMaxSize().zIndex(25f)
-    ) {
-        FullScreenBrowserView(
-            initialUrl = browserInitialUrl,
-            onClose = {
-                showFullScreenBrowser = false
-                browserInitialUrl = ""
-                onBack()
-            },
-            onDownloadComplete = { count ->
-                scope.launch {
-                    snackbarHostState.showSnackbar("Downloaded $count media items to Inbox!")
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-    }
 }
+
 
 
 /**
@@ -1964,354 +1904,21 @@ fun DownloadingSkeletonCard(
 }
 
 /**
- * Full-screen in-app Chromium browser launched from the Media Downloader page.
- * Allows web browsing and auto-detects downloadable media on any visited site.
+ * In-app Chromium browser forwarding directly to DirectBrowserView.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullScreenBrowserView(
     initialUrl: String = "",
     onClose: () -> Unit,
-    onDownloadComplete: (Int) -> Unit,
+    onDownloadComplete: (Int) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
-    val scope = rememberCoroutineScope()
-
-    var currentUrl by remember(initialUrl) { mutableStateOf(initialUrl) }
-    var pageTitle by remember { mutableStateOf("") }
-    var discoveredItems by remember { mutableStateOf<List<ScrapedMediaItem>>(emptyList()) }
-    var showDiscoveredMediaSheet by remember { mutableStateOf(false) }
-
-    var selectedItemIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var selectedFilter by remember { mutableStateOf<String?>(null) }
-    var isDownloading by remember { mutableStateOf(false) }
-    var downloadProgress by remember { mutableFloatStateOf(0f) }
-
-    // Intercept back button when modal sheet is open or to close browser
-    BackHandler {
-        if (showDiscoveredMediaSheet) {
-            showDiscoveredMediaSheet = false
-        } else {
-            onClose()
-        }
-    }
-
-    // Auto-select newly discovered items if none explicitly selected
-    LaunchedEffect(discoveredItems.size) {
-        if (discoveredItems.isNotEmpty() && selectedItemIds.isEmpty()) {
-            selectedItemIds = discoveredItems.map { it.id }.toSet()
-        }
-    }
-
-    val filterOptions = listOf("Images", "Videos", "Audio", "Streams")
-    val filteredItems = remember(discoveredItems, selectedFilter) {
-        when (selectedFilter) {
-            "Images" -> discoveredItems.filter { it.category == MediaCategory.IMAGES }
-            "Videos" -> discoveredItems.filter { it.category == MediaCategory.VIDEOS }
-            "Audio" -> discoveredItems.filter { it.category == MediaCategory.AUDIO }
-            "Streams" -> discoveredItems.filter { it.category == MediaCategory.STREAMS }
-            else -> discoveredItems
-        }
-    }
-
-    Surface(
-        modifier = modifier.testTag("full_screen_browser_view"),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            // DirectBrowserView taking full screen with its unified, interactive toolbar
-            DirectBrowserView(
-                initialUrl = currentUrl,
-                onClose = onClose,
-                onUrlChange = { currentUrl = it },
-                onPageTitleChanged = { pageTitle = it },
-                onMediaExtracted = { item ->
-                    discoveredItems = MediaNormalizer.deduplicateList(discoveredItems + item)
-                },
-                onBatchExtracted = { batch, title, domain ->
-                    title?.let { if (it.isNotBlank()) pageTitle = it }
-                    discoveredItems = MediaNormalizer.deduplicateList(discoveredItems + batch)
-                },
-                onSwitchToMediaTab = {
-                    showDiscoveredMediaSheet = true
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-
-        // Modal Sheet for Discovered Media in Full Screen Browser
-        if (showDiscoveredMediaSheet) {
-            ModalBottomSheet(
-                onDismissRequest = { showDiscoveredMediaSheet = false },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    val isAllSelected = filteredItems.isNotEmpty() &&
-                            selectedItemIds.containsAll(filteredItems.map { it.id }.toSet())
-
-                    // Pinned Filter & Action Row: Category Chips with Icons + Pinned Select All
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 10.dp)
-                            .testTag("discovered_media_filters_row"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Category filter chips using icons instead of texts to save space
-                        LazyRow(
-                            modifier = Modifier.weight(1f),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            items(filterOptions) { filter ->
-                                val isSelected = selectedFilter == filter
-                                val count = when (filter) {
-                                    "Images" -> discoveredItems.count { it.category == MediaCategory.IMAGES }
-                                    "Videos" -> discoveredItems.count { it.category == MediaCategory.VIDEOS }
-                                    "Audio" -> discoveredItems.count { it.category == MediaCategory.AUDIO }
-                                    "Streams" -> discoveredItems.count { it.category == MediaCategory.STREAMS }
-                                    else -> 0
-                                }
-                                val icon = when (filter) {
-                                    "Images" -> Icons.Default.Image
-                                    "Videos" -> Icons.Default.Videocam
-                                    "Audio" -> Icons.Default.Audiotrack
-                                    "Streams" -> Icons.Default.LiveTv
-                                    else -> Icons.Default.PermMedia
-                                }
-
-                                Surface(
-                                    onClick = {
-                                        selectedFilter = if (selectedFilter == filter) null else filter
-                                    },
-                                    shape = CircleShape,
-                                    color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    border = BorderStroke(
-                                        1.dp,
-                                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                                    ),
-                                    modifier = Modifier
-                                        .height(34.dp)
-                                        .testTag("discovered_filter_chip_$filter")
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = icon,
-                                            contentDescription = "$filter ($count)",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            text = "$count",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontSize = 12.sp
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.width(8.dp))
-
-                        // Pinned Select All / Deselect Pill matching scraper drawer
-                        Surface(
-                            onClick = {
-                                val currentFilteredIds = filteredItems.map { it.id }.toSet()
-                                selectedItemIds = if (isAllSelected) {
-                                    selectedItemIds - currentFilteredIds
-                                } else {
-                                    selectedItemIds + currentFilteredIds
-                                }
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                            modifier = Modifier
-                                .height(34.dp)
-                                .testTag("discovered_select_all_button")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(3.dp),
-                                    color = if (isAllSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                    border = BorderStroke(
-                                        1.2.dp,
-                                        if (isAllSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    ),
-                                    modifier = Modifier.size(14.dp)
-                                ) {
-                                    if (isAllSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.size(10.dp)
-                                        )
-                                    }
-                                }
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    text = if (isAllSelected) "Deselect" else "Select All",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
-
-                    // Media items list
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 380.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(filteredItems) { item ->
-                            val isSelected = item.id in selectedItemIds
-                            Surface(
-                                onClick = {
-                                    selectedItemIds = if (isSelected) selectedItemIds - item.id else selectedItemIds + item.id
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    // Thumbnail / Icon preview
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        modifier = Modifier.size(48.dp)
-                                    ) {
-                                        if (item.category == MediaCategory.IMAGES) {
-                                            AsyncImage(
-                                                model = item.thumbnailUrl ?: item.url,
-                                                contentDescription = null,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        } else {
-                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                                Icon(
-                                                    imageVector = when {
-                                                        item.isStream -> Icons.Default.LiveTv
-                                                        item.isVideo -> Icons.Default.Videocam
-                                                        item.isAudio -> Icons.Default.Audiotrack
-                                                        else -> Icons.Default.Image
-                                                    },
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = item.title,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${item.category.label} • ${item.format}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-
-                                    Checkbox(
-                                        checked = isSelected,
-                                        onCheckedChange = { checked ->
-                                            selectedItemIds = if (checked) selectedItemIds + item.id else selectedItemIds - item.id
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(16.dp))
-
-                    // Download Button
-                    Button(
-                        onClick = {
-                            if (selectedItemIds.isEmpty() || isDownloading) return@Button
-                            isDownloading = true
-                            downloadProgress = 0.2f
-                            scope.launch {
-                                val toDownload = filteredItems.filter { it.id in selectedItemIds }
-                                val domain = runCatching { URL(currentUrl).host }.getOrDefault("Web")
-                                val stackId = "stack_${System.currentTimeMillis()}"
-                                val stackTitle = pageTitle.ifBlank { domain.ifBlank { "Browser Download" } }
-
-                                // Persistently download using WorkManager
-                                com.amresalehin.emregallery.data.DownloadQueueManager.enqueueBatch(
-                                    context = context,
-                                    items = toDownload,
-                                    referer = currentUrl,
-                                    stackId = stackId,
-                                    stackTitle = stackTitle,
-                                    sourceDomain = domain,
-                                    sourceUrl = currentUrl
-                                )
-
-                                downloadProgress = 1.0f
-                                kotlinx.coroutines.delay(300)
-                                isDownloading = false
-                                showDiscoveredMediaSheet = false
-                                onDownloadComplete(toDownload.size)
-                            }
-                        },
-                        enabled = selectedItemIds.isNotEmpty() && !isDownloading,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        if (isDownloading) {
-                            CircularProgressIndicator(
-                                progress = { downloadProgress },
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text("Downloading (${(downloadProgress * 100).toInt()}%)...")
-                        } else {
-                            Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Download (${selectedItemIds.size}) to Inbox")
-                        }
-                    }
-
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-        }
-    }
+    DirectBrowserView(
+        initialUrl = initialUrl,
+        onClose = onClose,
+        onMediaExtracted = {},
+        onBatchExtracted = { _, _, _ -> },
+        onSwitchToMediaTab = { onDownloadComplete(0) },
+        modifier = modifier
+    )
 }

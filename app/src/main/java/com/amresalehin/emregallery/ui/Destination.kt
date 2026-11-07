@@ -20,7 +20,8 @@ enum class Destination {
     ABOUT,
     SEARCH,
     VIEWER,
-    MEDIA_INBOX
+    MEDIA_INBOX,
+    BROWSER
 }
 
 enum class SearchStage {
