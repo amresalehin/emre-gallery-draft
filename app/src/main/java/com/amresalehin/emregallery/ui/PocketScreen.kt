@@ -48,6 +48,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -94,38 +95,38 @@ object PocketThemeColors {
         if (isDark) Color(0xFFEDEDED) else Color(0xFF141414)
 
     fun secondaryText(isDark: Boolean): Color =
-        if (isDark) Color(0xFFA0A0A0) else Color(0xFF666666)
+        if (isDark) Color(0xFFA0A0A0) else Color(0xFF6E6E6E)
 
     fun divider(isDark: Boolean): Color =
         if (isDark) Color(0xFF2C2C2C) else Color(0xFFE2E2E2)
 
     fun thumbnailBg(isDark: Boolean): Color =
-        if (isDark) Color(0xFF222222) else Color(0xFFECECEC)
+        if (isDark) Color(0xFF202020) else Color(0xFFF2F2F2)
 
     fun placeholderIcon(isDark: Boolean): Color =
-        if (isDark) Color(0xFF707070) else Color(0xFF9E9E9E)
+        if (isDark) Color(0xFF707070) else Color(0xFFA0A0A0)
 
     fun pillSurface(isDark: Boolean): Color =
-        if (isDark) Color(0xFF242424) else Color(0xFFF0F0F0)
+        if (isDark) Color(0xFF242424) else Color(0xFFF2F2F2)
 
     fun badgeBg(isDark: Boolean): Color =
-        if (isDark) Color(0xFF222222).copy(alpha = 0.9f) else Color(0xFF181818).copy(alpha = 0.8f)
+        if (isDark) Color(0xFF222222).copy(alpha = 0.9f) else Color(0xFF1A1A1A).copy(alpha = 0.85f)
 
     fun badgeText(isDark: Boolean): Color =
         if (isDark) Color(0xFFEDEDED) else Color(0xFFFFFFFF)
 
     fun stackLayer1(isDark: Boolean): Color =
-        if (isDark) Color(0xFF141414) else Color(0xFFDFDFDF)
+        if (isDark) Color(0xFF141414) else Color(0xFFE2E2E2)
 
     fun stackLayer2(isDark: Boolean): Color =
-        if (isDark) Color(0xFF1C1C1C) else Color(0xFFE8E8E8)
+        if (isDark) Color(0xFF1C1C1C) else Color(0xFFECECEC)
 
     fun stackFront(isDark: Boolean): Color =
         if (isDark) Color(0xFF242424) else Color(0xFFFFFFFF)
 
     fun webGradient(isDark: Boolean): List<Color> =
         if (isDark) listOf(Color(0xFF222222), Color(0xFF181818))
-        else listOf(Color(0xFFF5F5F5), Color(0xFFE8E8E8))
+        else listOf(Color(0xFFF7F7F7), Color(0xFFEAEAEA))
 
     fun faviconSurface(isDark: Boolean): Color =
         if (isDark) Color(0xFF282828) else Color(0xFFFFFFFF)
@@ -134,13 +135,13 @@ object PocketThemeColors {
         if (isDark) Color(0xFF181818) else Color(0xFFFFFFFF)
 
     fun drawerHandle(isDark: Boolean): Color =
-        if (isDark) Color(0xFF484848) else Color(0xFFCCCCCC)
+        if (isDark) Color(0xFF484848) else Color(0xFFBDBDBD)
 
     fun detailRowSurface(isDark: Boolean): Color =
         if (isDark) Color(0xFF202020) else Color(0xFFF7F7F7)
 
     fun tagChipBg(isDark: Boolean): Color =
-        if (isDark) Color(0xFF282828) else Color(0xFFEEEEEE)
+        if (isDark) Color(0xFF282828) else Color(0xFFECECEC)
 }
 
 /**
@@ -164,7 +165,7 @@ fun PocketScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val isDark = isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
     val stacks by inboxRepo.stacks.collectAsState()
 
@@ -448,10 +449,10 @@ fun PocketScreen(
                         }
                     }
                 } else {
-                    // Empty state
+                    // When no bookmark is there: full empty as requested
                     PocketEmptyState(
                         searchQuery = searchQuery,
-                        onAddBookmark = { showAddBookmarkDialog = true }
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
             }
@@ -527,7 +528,8 @@ fun PocketScreen(
                     scope.launch {
                         snackbarHostState.showSnackbar("Bookmark saved to Pocket")
                     }
-                }
+                },
+                isDark = isDark
             )
         }
 
@@ -549,7 +551,8 @@ fun PocketScreen(
                     scope.launch {
                         snackbarHostState.showSnackbar("Bookmark updated")
                     }
-                }
+                },
+                isDark = isDark
             )
         }
 
@@ -557,8 +560,22 @@ fun PocketScreen(
         if (showDeleteConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirmDialog = false },
-                title = { Text("Delete Bookmarks") },
-                text = { Text("Are you sure you want to remove ${selectedStackIds.size} bookmarks from Pocket?") },
+                containerColor = if (isDark) Color(0xFF1C1C1C) else Color(0xFFFFFFFF),
+                title = {
+                    Text(
+                        text = "Delete Bookmarks",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = PocketThemeColors.primaryText(isDark)
+                    )
+                },
+                text = {
+                    Text(
+                        text = "Are you sure you want to remove ${selectedStackIds.size} bookmarks from Pocket?",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = PocketThemeColors.secondaryText(isDark)
+                    )
+                },
                 confirmButton = {
                     Button(
                         onClick = {
@@ -569,13 +586,21 @@ fun PocketScreen(
                                 snackbarHostState.showSnackbar("Bookmarks deleted")
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020),
+                            contentColor = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF)
+                        )
                     ) {
                         Text("Delete")
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDeleteConfirmDialog = false }) {
+                    TextButton(
+                        onClick = { showDeleteConfirmDialog = false },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = PocketThemeColors.secondaryText(isDark)
+                        )
+                    ) {
                         Text("Cancel")
                     }
                 }
@@ -589,7 +614,8 @@ fun PocketScreen(
                 currentFilter = filterType,
                 onSelectSort = { sortOrder = it },
                 onSelectFilter = { filterType = it },
-                onDismiss = { showFilterSheet = false }
+                onDismiss = { showFilterSheet = false },
+                isDark = isDark
             )
         }
     }
@@ -628,9 +654,9 @@ fun PocketSearchPasteCapsule(
             .height(52.dp),
         shape = CircleShape,
         color = barColor,
-        border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.5f)),
-        tonalElevation = 2.dp,
-        shadowElevation = 2.dp
+        border = BorderStroke(1.dp, if (isDark) dividerCol else Color(0xFFDCDCDC)),
+        tonalElevation = if (isDark) 2.dp else 1.dp,
+        shadowElevation = if (isDark) 2.dp else 2.dp
     ) {
         Row(
             modifier = Modifier
@@ -668,7 +694,7 @@ fun PocketSearchPasteCapsule(
                     modifier = Modifier
                         .height(20.dp)
                         .width(1.dp)
-                        .background(dividerCol.copy(alpha = 0.8f))
+                        .background(if (isDark) dividerCol.copy(alpha = 0.8f) else Color(0xFFDCDCDC))
                 )
             }
 
@@ -742,7 +768,7 @@ fun PocketSearchPasteCapsule(
                         )
                     }
 
-                    // Bookmark icon button
+                    // Bookmark icon button (monochrome theme)
                     IconButton(
                         onClick = onBookmarkAction,
                         modifier = Modifier
@@ -752,7 +778,7 @@ fun PocketSearchPasteCapsule(
                         Icon(
                             imageVector = Icons.Default.BookmarkAdd,
                             contentDescription = "Save bookmark",
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = textColor,
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -763,7 +789,7 @@ fun PocketSearchPasteCapsule(
                     modifier = Modifier
                         .height(20.dp)
                         .width(1.dp)
-                        .background(dividerCol.copy(alpha = 0.8f))
+                        .background(if (isDark) dividerCol.copy(alpha = 0.8f) else Color(0xFFDCDCDC))
                 )
 
                 // Trailing Filter Sliders Action inside the search bar
@@ -777,7 +803,7 @@ fun PocketSearchPasteCapsule(
                         Icon(
                             imageVector = Icons.Default.Tune,
                             contentDescription = "Filter and sort bookmarks",
-                            tint = if (hasActiveFilters) MaterialTheme.colorScheme.primary else secondaryText,
+                            tint = if (hasActiveFilters) textColor else secondaryText,
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -787,7 +813,7 @@ fun PocketSearchPasteCapsule(
                                 .align(Alignment.TopEnd)
                                 .padding(top = 10.dp, end = 10.dp)
                                 .size(7.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                .background(textColor, CircleShape)
                         )
                     }
                 }
@@ -815,9 +841,9 @@ fun PocketSelectionToolbar(
     Surface(
         shape = CircleShape,
         color = barColor,
-        tonalElevation = 6.dp,
-        shadowElevation = 4.dp,
-        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+        tonalElevation = if (isDark) 4.dp else 2.dp,
+        shadowElevation = if (isDark) 4.dp else 2.dp,
+        border = BorderStroke(1.5.dp, textColor.copy(alpha = 0.5f)),
         modifier = Modifier
             .fillMaxWidth()
             .height(52.dp)
@@ -879,7 +905,7 @@ fun PocketSelectionToolbar(
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Delete selected",
-                    tint = MaterialTheme.colorScheme.error
+                    tint = textColor
                 )
             }
         }
@@ -948,11 +974,11 @@ fun PocketBookmarkStaggeredCard(
         Surface(
             shape = RoundedCornerShape(22.dp),
             color = cardSurface,
-            tonalElevation = if (isSelected) 8.dp else 2.dp,
-            shadowElevation = if (isSelected) 8.dp else 3.dp,
+            tonalElevation = if (isSelected) 4.dp else 1.dp,
+            shadowElevation = if (isSelected) 6.dp else 2.dp,
             border = BorderStroke(
                 width = if (isSelected) 2.dp else 1.dp,
-                color = if (isSelected) MaterialTheme.colorScheme.primary else dividerCol.copy(alpha = 0.5f)
+                color = if (isSelected) textColor else (if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol)
             ),
             modifier = Modifier
                 .fillMaxWidth()
@@ -1091,7 +1117,7 @@ fun PocketBookmarkStaggeredCard(
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = PocketThemeColors.pillSurface(isDark),
-                        border = BorderStroke(0.5.dp, dividerCol.copy(alpha = 0.4f)),
+                        border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                         modifier = Modifier.padding(top = 2.dp)
                     ) {
                         Row(
@@ -1122,7 +1148,7 @@ fun PocketBookmarkStaggeredCard(
                                 modifier = Modifier
                                     .width(1.dp)
                                     .height(10.dp)
-                                    .background(dividerCol.copy(alpha = 0.6f))
+                                    .background(if (isDark) dividerCol else Color(0xFFD0D0D0))
                             )
 
                             Spacer(Modifier.width(5.dp))
@@ -1147,8 +1173,11 @@ fun PocketBookmarkStaggeredCard(
         if (isSelectionMode) {
             Surface(
                 shape = CircleShape,
-                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface),
+                color = if (isSelected) (if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020)) else (if (isDark) Color(0xFF242424) else Color(0xFFF2F2F2)),
+                border = BorderStroke(
+                    1.5.dp,
+                    if (isSelected) (if (isDark) Color(0xFF101010) else Color(0xFFFFFFFF)) else (if (isDark) Color(0xFF666666) else Color(0xFFB0B0B0))
+                ),
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
@@ -1159,7 +1188,7 @@ fun PocketBookmarkStaggeredCard(
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = "Selected",
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            tint = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF),
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -1255,8 +1284,8 @@ fun PocketBookmarkViewerPage(
                 Surface(
                     shape = CircleShape,
                     color = barSurface,
-                    shadowElevation = 2.dp,
-                    border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.5f)),
+                    shadowElevation = if (isDark) 2.dp else 1.dp,
+                    border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                     modifier = Modifier
                         .size(44.dp)
                         .clickable(onClick = onBack)
@@ -1282,8 +1311,8 @@ fun PocketBookmarkViewerPage(
                         Surface(
                             shape = CircleShape,
                             color = barSurface,
-                            shadowElevation = 2.dp,
-                            border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.5f)),
+                            shadowElevation = if (isDark) 2.dp else 1.dp,
+                            border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                             modifier = Modifier
                                 .size(44.dp)
                                 .clickable { onOpenBrowser(stack.sourceUrl) }
@@ -1304,8 +1333,8 @@ fun PocketBookmarkViewerPage(
                     Surface(
                         shape = CircleShape,
                         color = barSurface,
-                        shadowElevation = 2.dp,
-                        border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.5f)),
+                        shadowElevation = if (isDark) 2.dp else 1.dp,
+                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                         modifier = Modifier
                             .size(44.dp)
                             .clickable {
@@ -1327,12 +1356,12 @@ fun PocketBookmarkViewerPage(
                         }
                     }
 
-                    // 3. Delete
+                    // 3. Delete (monochrome)
                     Surface(
                         shape = CircleShape,
                         color = barSurface,
-                        shadowElevation = 2.dp,
-                        border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.5f)),
+                        shadowElevation = if (isDark) 2.dp else 1.dp,
+                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                         modifier = Modifier
                             .size(44.dp)
                             .clickable(onClick = onDelete)
@@ -1342,7 +1371,7 @@ fun PocketBookmarkViewerPage(
                             Icon(
                                 imageVector = Icons.Default.DeleteOutline,
                                 contentDescription = "Delete bookmark",
-                                tint = MaterialTheme.colorScheme.error,
+                                tint = textColor,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -1388,8 +1417,8 @@ fun PocketBookmarkViewerPage(
                     Surface(
                         shape = RoundedCornerShape(26.dp),
                         color = PocketThemeColors.stackFront(isDark),
-                        shadowElevation = 8.dp,
-                        border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.6f)),
+                        shadowElevation = if (isDark) 8.dp else 4.dp,
+                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(195.dp)
@@ -1470,7 +1499,7 @@ fun PocketBookmarkViewerPage(
                                         Icon(
                                             imageVector = Icons.Default.Bookmark,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            tint = textColor,
                                             modifier = Modifier.size(44.dp)
                                         )
                                     }
@@ -1493,7 +1522,7 @@ fun PocketBookmarkViewerPage(
                 Surface(
                     shape = CircleShape,
                     color = barSurface,
-                    border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.5f)),
+                    border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                     modifier = Modifier.height(30.dp)
                 ) {
                     Row(
@@ -1526,7 +1555,7 @@ fun PocketBookmarkViewerPage(
                 color = PocketThemeColors.drawerSurface(isDark),
                 tonalElevation = 6.dp,
                 shadowElevation = 12.dp,
-                border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.5f)),
+                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -1606,7 +1635,7 @@ fun PocketBookmarkViewerPage(
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = barSurface,
-                        border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.4f)),
+                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
@@ -1637,6 +1666,7 @@ fun PocketBookmarkViewerPage(
                                     Surface(
                                         shape = CircleShape,
                                         color = PocketThemeColors.tagChipBg(isDark),
+                                        border = BorderStroke(0.5.dp, if (isDark) dividerCol else Color(0xFFDDDDDD)),
                                         modifier = Modifier.height(28.dp)
                                     ) {
                                         Box(
@@ -1670,7 +1700,7 @@ fun PocketBookmarkViewerPage(
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = barSurface,
-                        border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.4f)),
+                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -1727,7 +1757,7 @@ fun PocketDetailCardRow(
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = barSurface,
-        border = BorderStroke(1.dp, dividerCol.copy(alpha = 0.4f)),
+        border = BorderStroke(1.dp, if (textColor.luminance() > 0.5f) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
         modifier = modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
@@ -1774,80 +1804,20 @@ fun PocketDetailCardRow(
 
 /**
  * Empty state for Pocket
+ * Full empty as requested: remove everything on screen when no bookmark is there.
  */
 @Composable
 fun PocketEmptyState(
-    searchQuery: String,
-    onAddBookmark: () -> Unit,
+    searchQuery: String = "",
+    onAddBookmark: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    // When no bookmark is there: full empty as requested (clean empty background, no graphics/text/buttons)
     Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 32.dp)
-            .testTag("pocket_empty_state"),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            val isDark = isSystemInDarkTheme()
-            Surface(
-                shape = CircleShape,
-                color = if (isDark) Color(0xFF222222) else Color(0xFFF2F2F2),
-                modifier = Modifier.size(96.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.BookmarkBorder,
-                        contentDescription = null,
-                        tint = if (isDark) Color(0xFFD4D4D4) else Color(0xFF383838),
-                        modifier = Modifier.size(48.dp)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            Text(
-                text = if (searchQuery.isNotBlank()) "No bookmarks found" else "Your Pocket is empty",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                text = if (searchQuery.isNotBlank()) {
-                    "No bookmarks matching \"$searchQuery\". Try a different keyword."
-                } else {
-                    "Bookmark web links, articles, and saved pages to view and read anytime."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-
-            if (searchQuery.isBlank()) {
-                Spacer(Modifier.height(24.dp))
-                Button(
-                    onClick = onAddBookmark,
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020),
-                        contentColor = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF)
-                    ),
-                    modifier = Modifier.testTag("pocket_empty_add_button")
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Add Bookmark")
-                }
-            }
-        }
-    }
+            .testTag("pocket_empty_state")
+    )
 }
 
 /**
@@ -1856,9 +1826,15 @@ fun PocketEmptyState(
 @Composable
 fun AddBookmarkDialog(
     onDismiss: () -> Unit,
-    onSave: (title: String, url: String, description: String) -> Unit
+    onSave: (title: String, url: String, description: String) -> Unit,
+    isDark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 ) {
     val context = LocalContext.current
+    val textColor = PocketThemeColors.primaryText(isDark)
+    val secondaryText = PocketThemeColors.secondaryText(isDark)
+    val dialogSurface = if (isDark) Color(0xFF1E1E1E) else Color(0xFFFFFFFF)
+    val borderCol = if (isDark) Color(0xFF333333) else Color(0xFFE0E0E0)
+
     var urlText by remember { mutableStateOf("") }
     var titleText by remember { mutableStateOf("") }
     var descText by remember { mutableStateOf("") }
@@ -1874,11 +1850,23 @@ fun AddBookmarkDialog(
         } else null
     }
 
+    val textFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = textColor,
+        unfocusedBorderColor = if (isDark) Color(0xFF444444) else Color(0xFFD0D0D0),
+        focusedLabelColor = textColor,
+        unfocusedLabelColor = secondaryText,
+        cursorColor = textColor,
+        focusedTextColor = textColor,
+        unfocusedTextColor = textColor
+    )
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 8.dp,
+            color = dialogSurface,
+            tonalElevation = if (isDark) 4.dp else 2.dp,
+            shadowElevation = if (isDark) 6.dp else 3.dp,
+            border = BorderStroke(1.dp, borderCol),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
@@ -1892,7 +1880,7 @@ fun AddBookmarkDialog(
                     Icon(
                         imageVector = Icons.Default.BookmarkAdd,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = textColor,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(Modifier.width(8.dp))
@@ -1900,7 +1888,7 @@ fun AddBookmarkDialog(
                         text = "Add Bookmark to Pocket",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = textColor
                     )
                 }
 
@@ -1910,7 +1898,8 @@ fun AddBookmarkDialog(
                 if (clipboardUrl != null && urlText.isBlank()) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        color = if (isDark) Color(0xFF282828) else Color(0xFFF2F2F2),
+                        border = BorderStroke(0.5.dp, if (isDark) Color(0xFF404040) else Color(0xFFE0E0E0)),
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
@@ -1927,14 +1916,14 @@ fun AddBookmarkDialog(
                             Icon(
                                 imageVector = Icons.Default.ContentPaste,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                tint = textColor,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 text = "Paste: $clipboardUrl",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = textColor,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1955,6 +1944,7 @@ fun AddBookmarkDialog(
                     label = { Text("Web URL / Link *") },
                     placeholder = { Text("https://example.com") },
                     singleLine = true,
+                    colors = textFieldColors,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1967,6 +1957,7 @@ fun AddBookmarkDialog(
                     label = { Text("Title (optional)") },
                     placeholder = { Text("Article or page title") },
                     singleLine = true,
+                    colors = textFieldColors,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -1979,6 +1970,7 @@ fun AddBookmarkDialog(
                     label = { Text("Notes / Description (optional)") },
                     placeholder = { Text("Add notes or details") },
                     maxLines = 3,
+                    colors = textFieldColors,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1988,7 +1980,10 @@ fun AddBookmarkDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.textButtonColors(contentColor = secondaryText)
+                    ) {
                         Text("Cancel")
                     }
                     Spacer(Modifier.width(8.dp))
@@ -1998,7 +1993,13 @@ fun AddBookmarkDialog(
                                 onSave(titleText, urlText, descText)
                             }
                         },
-                        enabled = urlText.isNotBlank()
+                        enabled = urlText.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020),
+                            contentColor = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF),
+                            disabledContainerColor = if (isDark) Color(0xFF282828) else Color(0xFFE8E8E8),
+                            disabledContentColor = if (isDark) Color(0xFF666666) else Color(0xFFA0A0A0)
+                        )
                     ) {
                         Text("Save Bookmark")
                     }
@@ -2015,16 +2016,34 @@ fun AddBookmarkDialog(
 fun EditBookmarkDialog(
     stack: MediaInboxStack,
     onDismiss: () -> Unit,
-    onSave: (title: String, description: String) -> Unit
+    onSave: (title: String, description: String) -> Unit,
+    isDark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 ) {
+    val textColor = PocketThemeColors.primaryText(isDark)
+    val secondaryText = PocketThemeColors.secondaryText(isDark)
+    val dialogSurface = if (isDark) Color(0xFF1E1E1E) else Color(0xFFFFFFFF)
+    val borderCol = if (isDark) Color(0xFF333333) else Color(0xFFE0E0E0)
+
     var titleText by remember { mutableStateOf(stack.title) }
     var descText by remember { mutableStateOf(stack.description) }
+
+    val textFieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = textColor,
+        unfocusedBorderColor = if (isDark) Color(0xFF444444) else Color(0xFFD0D0D0),
+        focusedLabelColor = textColor,
+        unfocusedLabelColor = secondaryText,
+        cursorColor = textColor,
+        focusedTextColor = textColor,
+        unfocusedTextColor = textColor
+    )
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 8.dp,
+            color = dialogSurface,
+            tonalElevation = if (isDark) 4.dp else 2.dp,
+            shadowElevation = if (isDark) 6.dp else 3.dp,
+            border = BorderStroke(1.dp, borderCol),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
@@ -2038,7 +2057,7 @@ fun EditBookmarkDialog(
                     text = "Edit Bookmark",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = textColor
                 )
 
                 Spacer(Modifier.height(16.dp))
@@ -2048,6 +2067,7 @@ fun EditBookmarkDialog(
                     onValueChange = { titleText = it },
                     label = { Text("Title") },
                     singleLine = true,
+                    colors = textFieldColors,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -2058,6 +2078,7 @@ fun EditBookmarkDialog(
                     onValueChange = { descText = it },
                     label = { Text("Notes / Description") },
                     maxLines = 3,
+                    colors = textFieldColors,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -2067,13 +2088,22 @@ fun EditBookmarkDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) {
+                    TextButton(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.textButtonColors(contentColor = secondaryText)
+                    ) {
                         Text("Cancel")
                     }
                     Spacer(Modifier.width(8.dp))
                     Button(
                         onClick = { onSave(titleText, descText) },
-                        enabled = titleText.isNotBlank()
+                        enabled = titleText.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020),
+                            contentColor = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF),
+                            disabledContainerColor = if (isDark) Color(0xFF282828) else Color(0xFFE8E8E8),
+                            disabledContentColor = if (isDark) Color(0xFF666666) else Color(0xFFA0A0A0)
+                        )
                     ) {
                         Text("Update")
                     }
@@ -2093,12 +2123,17 @@ fun PocketFilterBottomSheet(
     currentFilter: String,
     onSelectSort: (String) -> Unit,
     onSelectFilter: (String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    isDark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 ) {
+    val textColor = PocketThemeColors.primaryText(isDark)
+    val secondaryText = PocketThemeColors.secondaryText(isDark)
+    val sheetSurface = if (isDark) Color(0xFF1C1C1C) else Color(0xFFFFFFFF)
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        containerColor = sheetSurface
     ) {
         Column(
             modifier = Modifier
@@ -2110,7 +2145,7 @@ fun PocketFilterBottomSheet(
                 text = "Sort & Filter Bookmarks",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface
+                color = textColor
             )
 
             Spacer(Modifier.height(16.dp))
@@ -2118,7 +2153,7 @@ fun PocketFilterBottomSheet(
             Text(
                 text = "Sort By",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = secondaryText
             )
 
             Spacer(Modifier.height(8.dp))
@@ -2133,7 +2168,17 @@ fun PocketFilterBottomSheet(
                     FilterChip(
                         selected = selected,
                         onClick = { onSelectSort(sort) },
-                        label = { Text(sort) }
+                        label = { Text(sort, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020),
+                            selectedLabelColor = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF),
+                            containerColor = if (isDark) Color(0xFF242424) else Color(0xFFF2F2F2),
+                            labelColor = if (isDark) Color(0xFFCCCCCC) else Color(0xFF444444)
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (selected) Color.Transparent else (if (isDark) Color(0xFF383838) else Color(0xFFE0E0E0))
+                        )
                     )
                 }
             }
@@ -2143,7 +2188,7 @@ fun PocketFilterBottomSheet(
             Text(
                 text = "Show",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = secondaryText
             )
 
             Spacer(Modifier.height(8.dp))
@@ -2158,7 +2203,17 @@ fun PocketFilterBottomSheet(
                     FilterChip(
                         selected = selected,
                         onClick = { onSelectFilter(filter) },
-                        label = { Text(filter) }
+                        label = { Text(filter, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020),
+                            selectedLabelColor = if (isDark) Color(0xFF161616) else Color(0xFFFFFFFF),
+                            containerColor = if (isDark) Color(0xFF242424) else Color(0xFFF2F2F2),
+                            labelColor = if (isDark) Color(0xFFCCCCCC) else Color(0xFF444444)
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (selected) Color.Transparent else (if (isDark) Color(0xFF383838) else Color(0xFFE0E0E0))
+                        )
                     )
                 }
             }
