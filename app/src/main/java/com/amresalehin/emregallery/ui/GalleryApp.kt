@@ -1269,7 +1269,6 @@ fun GalleryApp() {
                     }
                     Destination.MEDIA_INBOX -> MediaInboxScreen(
                         initialViewMode = inboxInitialViewMode,
-                        initialStackForDetail = inboxInitialStack,
                         initialOpenBrowser = inboxInitialOpenBrowser,
                         onBack = { performBackNavigation() },
                         onOpenMediaItem = { uri ->
