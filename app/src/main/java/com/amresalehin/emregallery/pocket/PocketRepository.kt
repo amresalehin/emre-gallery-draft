@@ -158,14 +158,18 @@ class PocketRepository(private val context: Context) {
         note: String = "",
         tags: List<String> = listOf("Gallery", "Photo")
     ): PocketItem {
-        val title = customTitle?.takeIf { it.isNotBlank() } ?: mediaItem.displayName.substringBeforeLast(".")
+        val title = customTitle?.takeIf { it.isNotBlank() } ?: mediaItem.name.substringBeforeLast(".")
         val item = PocketItem(
             id = UUID.randomUUID().toString(),
             title = title,
             url = mediaItem.uri,
             domain = "emregallery.local",
             imageUrls = listOf(mediaItem.uri),
-            timestamp = if (mediaItem.dateModifiedSeconds > 0) mediaItem.dateModifiedSeconds * 1000L else System.currentTimeMillis(),
+            timestamp = when {
+                mediaItem.dateTakenMillis > 0L -> mediaItem.dateTakenMillis
+                mediaItem.dateAddedSeconds > 0L -> mediaItem.dateAddedSeconds * 1000L
+                else -> System.currentTimeMillis()
+            },
             note = note.ifBlank { "Saved from local device camera & gallery collection." },
             tags = tags,
             description = "High resolution photo from device library (${mediaItem.width} × ${mediaItem.height} px, ${mediaItem.mimeType}).",

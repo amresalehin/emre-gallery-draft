@@ -786,7 +786,7 @@ fun GalleryApp() {
                         }
                         .pointerInput(destination, showSidePanel, albumFilter) {
                             // Inward swipe from left edge to open side panel on main screens without conflicting with list scrolling
-                            if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) {
+                            if (!showSidePanel && destination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS, Destination.POCKET) && albumFilter == null && (destination != Destination.POCKET || selectedPocketItem == null)) {
                                 val edgeWidth = 32.dp.toPx()
                                 val slop = viewConfiguration.touchSlop * 1.5f
                                 awaitEachGesture {
@@ -880,6 +880,42 @@ fun GalleryApp() {
                         onDeleteAlbum = { id -> scope.launch { prefs.deleteCustomAlbum(id) } },
                         onRenameAlbum = { id, newName -> scope.launch { prefs.renameCustomAlbum(id, newName) } }
                     )
+                    Destination.POCKET -> {
+                        val selectedItem = selectedPocketItem
+                        if (selectedItem != null) {
+                            PocketDetailScreen(
+                                item = selectedItem,
+                                onBack = { selectedPocketItem = null },
+                                onDelete = { item ->
+                                    scope.launch {
+                                        pocketRepository.deleteItem(item.id)
+                                        selectedPocketItem = null
+                                    }
+                                },
+                                onUpdate = { item ->
+                                    scope.launch {
+                                        pocketRepository.updateItem(item)
+                                        selectedPocketItem = item
+                                    }
+                                }
+                            )
+                        } else {
+                            PocketScreen(
+                                items = pocketItems,
+                                onOpenItem = { selectedPocketItem = it },
+                                onSaveUrl = { url ->
+                                    scope.launch { pocketRepository.saveFromUrl(url) }
+                                },
+                                onBack = { performBackNavigation() },
+                                topContentPadding = topContentPadding,
+                                bottomContentPadding = bottomContentPadding,
+                                availableMedia = visibleMedia.filterNot { it.isVideo },
+                                onAddMediaToPocket = { item ->
+                                    scope.launch { pocketRepository.saveFromGalleryMedia(item) }
+                                }
+                            )
+                        }
+                    }
                     Destination.FAVOURITES -> {
                         val favouriteItems = remember(media, favourites, hidden, inBin, archive) {
                             media.filter { it.uri in favourites && it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive }
@@ -1434,7 +1470,9 @@ fun GalleryApp() {
         }
 
         // Floating Bottom Navigation Bar across Home, Albums, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER
+        val showPocketHome = returnDestination == Destination.POCKET && selectedPocketItem == null
+        val showMainNavigationBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS) || showPocketHome
+        val showBottomBarContainer = ((showMainNavigationBar && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier
@@ -1453,7 +1491,7 @@ fun GalleryApp() {
                             alpha = (1f - cp * 1.15f).coerceIn(0f, 1f)
                         }
                 ) {
-                    if (albumFilter == null && returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
+                    if (albumFilter == null && showMainNavigationBar) {
                         FloatingNavigationBar(
                             current = returnDestination,
                             onSelect = { dest ->
@@ -1464,6 +1502,7 @@ fun GalleryApp() {
                                         }
                                     }
                                 } else {
+                                    selectedPocketItem = null
                                     backStack.clear()
                                     albumFilter = null
                                     homeSelectedUris = emptySet()
@@ -1523,7 +1562,8 @@ fun GalleryApp() {
             destination = destination,
             albumFilter = albumFilter,
             onNavigate = { dest ->
-                if (dest in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS)) {
+                if (dest in listOf(Destination.HOME, Destination.ALBUMS, Destination.SETTINGS, Destination.POCKET)) {
+                    selectedPocketItem = null
                     backStack.clear()
                     albumFilter = null
                     navigateTo(dest, rememberPrevious = false, newSelectedMedia = null, newMapFocusItem = null)

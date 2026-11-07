@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.MediaItem
@@ -421,7 +422,7 @@ fun PocketScreen(
                                         .data(mediaItem.uri)
                                         .crossfade(true)
                                         .build(),
-                                    contentDescription = mediaItem.displayName,
+                                    contentDescription = mediaItem.name,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
                                 )
