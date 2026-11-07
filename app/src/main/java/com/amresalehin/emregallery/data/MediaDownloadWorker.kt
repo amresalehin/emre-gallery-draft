@@ -232,12 +232,20 @@ class MediaDownloadWorker(
                     dateAddedMillis = System.currentTimeMillis()
                 )
 
-                MediaInboxRepository.getInstance(applicationContext).addItemToStack(
-                    stackId = stackId,
-                    item = inboxItem,
-                    stackTitle = stackTitle,
+                com.amresalehin.emregallery.data.PocketDownloadBridge.recordCompletedDownload(
+                    context = applicationContext,
+                    itemId = itemId,
+                    title = title,
+                    localUri = downloadedFile.absolutePath,
+                    mediaUrl = mediaUrl,
+                    sourceUrl = sourceUrl,
                     sourceDomain = sourceDomain,
-                    sourceUrl = sourceUrl
+                    isVideo = isVideo,
+                    isAudio = isAudio,
+                    isStream = isStream,
+                    format = format,
+                    sizeBytes = downloadedFile.length(),
+                    dateAddedMillis = System.currentTimeMillis()
                 )
 
                 DownloadActivityManager.markFinished(
