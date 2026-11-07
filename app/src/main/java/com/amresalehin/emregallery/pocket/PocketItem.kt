@@ -20,7 +20,9 @@ data class PocketItem(
     val tags: List<String> = emptyList(),
     val description: String = "",
     val isFavorite: Boolean = false,
-    val isRead: Boolean = false
+    val isRead: Boolean = false,
+    /** JSON-encoded downloaded media attachments; actual files remain in app storage. */
+    val attachments: List<String> = emptyList()
 ) {
     val primaryImage: String?
         get() = imageUrls.firstOrNull()
