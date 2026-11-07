@@ -71,6 +71,7 @@ import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxRepository
 import com.amresalehin.emregallery.data.MediaInboxStack
+import com.amresalehin.emregallery.data.PocketRepository
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -166,8 +167,8 @@ fun PocketScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-    val inboxRepo = remember { MediaInboxRepository.getInstance(context) }
-    val stacks by inboxRepo.stacks.collectAsState()
+    val pocketRepo = remember { PocketRepository.getInstance(context) }
+    val stacks by pocketRepo.bookmarks.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var isSearchFocused by remember { mutableStateOf(false) }
@@ -178,7 +179,7 @@ fun PocketScreen(
     val isSelectionMode = selectedStackIds.isNotEmpty()
 
     var sortOrder by remember { mutableStateOf("Newest") } // Newest, Oldest, Title, Domain
-    var filterType by remember { mutableStateOf("All") } // All, Web Links, Media
+    var filterType by remember { mutableStateOf("All") } // All, Web Links, Notes
     var showFilterSheet by remember { mutableStateOf(false) }
 
     var showAddBookmarkDialog by remember { mutableStateOf(false) }
@@ -220,13 +221,12 @@ fun PocketScreen(
                 stack.title.contains(searchQuery, ignoreCase = true) ||
                         stack.sourceDomain.contains(searchQuery, ignoreCase = true) ||
                         stack.sourceUrl.contains(searchQuery, ignoreCase = true) ||
-                        stack.description.contains(searchQuery, ignoreCase = true) ||
-                        stack.items.any { it.title.contains(searchQuery, ignoreCase = true) }
+                        stack.description.contains(searchQuery, ignoreCase = true)
             }
 
             val matchesFilter = when (filterType) {
-                "Web Links" -> stack.items.isEmpty() || stack.sourceUrl.isNotBlank()
-                "Media" -> stack.items.isNotEmpty()
+                "Web Links" -> stack.sourceUrl.isNotBlank()
+                "Notes" -> stack.description.isNotBlank()
                 else -> true
             }
 
@@ -340,7 +340,7 @@ fun PocketScreen(
                                     val trimmed = searchQuery.trim()
                                     if (trimmed.isNotBlank()) {
                                         val domain = MediaClassifier.cleanDomainFromUrl(trimmed)
-                                        val saved = inboxRepo.addBookmark(
+                                        val saved = pocketRepo.addBookmark(
                                             title = domain.ifBlank { trimmed },
                                             url = trimmed
                                         )
@@ -354,7 +354,7 @@ fun PocketScreen(
                                         }
                                     } else if (clipboardUrl != null) {
                                         val domain = MediaClassifier.cleanDomainFromUrl(clipboardUrl!!)
-                                        val saved = inboxRepo.addBookmark(
+                                        val saved = pocketRepo.addBookmark(
                                             title = domain.ifBlank { clipboardUrl!! },
                                             url = clipboardUrl!!
                                         )
@@ -375,7 +375,7 @@ fun PocketScreen(
                                     if (trimmed.isNotBlank()) {
                                         if (MediaClassifier.isValidWebUrl(trimmed) || trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
                                             val domain = MediaClassifier.cleanDomainFromUrl(trimmed)
-                                            val saved = inboxRepo.addBookmark(
+                                            val saved = pocketRepo.addBookmark(
                                                 title = domain.ifBlank { trimmed },
                                                 url = trimmed
                                             )
@@ -479,7 +479,7 @@ fun PocketScreen(
                         showFullScreenBrowser = true
                     },
                     onDelete = {
-                        inboxRepo.deleteStack(stack.id)
+                        pocketRepo.deleteBookmark(stack.id)
                         selectedStackForDetail = null
                         onDetailViewerStateChange?.invoke(false)
                         scope.launch {
@@ -518,7 +518,7 @@ fun PocketScreen(
             AddBookmarkDialog(
                 onDismiss = { showAddBookmarkDialog = false },
                 onSave = { title, url, description ->
-                    val added = inboxRepo.addBookmark(
+                    val added = pocketRepo.addBookmark(
                         title = title,
                         url = url,
                         description = description
@@ -543,7 +543,7 @@ fun PocketScreen(
                         title = updatedTitle,
                         description = updatedDesc
                     )
-                    inboxRepo.updateStack(updated)
+                    pocketRepo.updateBookmark(updated)
                     if (selectedStackForDetail?.id == stack.id) {
                         selectedStackForDetail = updated
                     }
@@ -579,7 +579,7 @@ fun PocketScreen(
                 confirmButton = {
                     Button(
                         onClick = {
-                            selectedStackIds.forEach { id -> inboxRepo.deleteStack(id) }
+                            pocketRepo.deleteBookmarks(selectedStackIds)
                             selectedStackIds = emptySet()
                             showDeleteConfirmDialog = false
                             scope.launch {
@@ -2193,7 +2193,7 @@ fun PocketFilterBottomSheet(
 
             Spacer(Modifier.height(8.dp))
 
-            val filterOptions = listOf("All", "Web Links", "Media")
+            val filterOptions = listOf("All", "Web Links", "Notes")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)

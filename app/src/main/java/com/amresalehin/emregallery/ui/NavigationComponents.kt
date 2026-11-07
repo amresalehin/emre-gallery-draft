@@ -331,7 +331,7 @@ fun SideNavigationDrawer(
                             Triple(Destination.BIN, "Bin", Icons.Default.Delete)
                         ),
                         listOf(
-                            Triple(Destination.MEDIA_INBOX, "Inbox", Icons.Default.Inbox),
+                            Triple(Destination.MEDIA_INBOX, "Browser", Icons.Default.TravelExplore),
                             Triple(Destination.SETTINGS, "Settings", Icons.Default.Settings)
                         )
                     )

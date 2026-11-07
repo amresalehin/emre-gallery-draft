@@ -98,7 +98,7 @@ fun MediaInboxScreen(
     onBack: () -> Unit,
     initialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
     initialStackForDetail: MediaInboxStack? = null,
-    initialOpenBrowser: Boolean = false,
+    initialOpenBrowser: Boolean = true,
     onOpenMediaItem: ((String) -> Unit)? = null,
     onOpenMediaWithList: ((String, List<String>) -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -121,7 +121,9 @@ fun MediaInboxScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     var selectedStackForDetail by remember(initialStackForDetail) { mutableStateOf(initialStackForDetail) }
     var showFilterSheet by remember { mutableStateOf(false) }
-    var showFullScreenBrowser by remember(initialOpenBrowser) { mutableStateOf(initialOpenBrowser) }
+    var showFullScreenBrowser by remember(initialOpenBrowser, initialViewMode) {
+        mutableStateOf(if (initialViewMode == DownloaderViewMode.ACTIVITY_PAGE) false else initialOpenBrowser)
+    }
     var browserInitialUrl by remember { mutableStateOf("") }
     var sortOrder by remember { mutableStateOf("Newest") }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -538,7 +540,10 @@ fun MediaInboxScreen(
                                     currentViewMode = DownloaderViewMode.SEARCH_PAGE
                                 }
                             },
-                            onAddNewDownload = { currentViewMode = DownloaderViewMode.SEARCH_PAGE },
+                            onAddNewDownload = {
+                                browserInitialUrl = ""
+                                showFullScreenBrowser = true
+                            },
                             onOpenMedia = { item ->
                                 item.localUri?.let { uriStr ->
                                     onOpenMediaItem?.invoke(uriStr)
@@ -774,6 +779,7 @@ fun MediaInboxScreen(
             onClose = {
                 showFullScreenBrowser = false
                 browserInitialUrl = ""
+                onBack()
             },
             onDownloadComplete = { count ->
                 scope.launch {
