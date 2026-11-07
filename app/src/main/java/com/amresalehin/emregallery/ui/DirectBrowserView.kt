@@ -14,7 +14,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,6 +32,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import android.app.Activity
 import android.os.Build
+import com.amresalehin.emregallery.ui.theme.isAppInDarkTheme
 import com.amresalehin.emregallery.data.BotDetectionMitigator
 import com.amresalehin.emregallery.data.BrowserHistoryManager
 import com.amresalehin.emregallery.data.BrowserSession
@@ -42,7 +42,6 @@ import com.amresalehin.emregallery.data.DownloaderSession
 import com.amresalehin.emregallery.data.ExtractionSource
 import com.amresalehin.emregallery.data.MediaCaptureEngine
 import com.amresalehin.emregallery.data.MediaClassifier
-import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 import kotlinx.coroutines.launch
 import java.net.URL
@@ -68,14 +67,7 @@ fun DirectBrowserView(
     val tabDetectedCount by tabSession.detectedCount.collectAsState()
     val totalDetectedCount = maxOf(discoveredCount, tabDetectedCount)
 
-    val prefsRepo = remember { PreferencesRepository(context) }
-    val themePref by prefsRepo.theme.collectAsState(initial = "system")
-    val systemInDark = isSystemInDarkTheme()
-    val isDark = when (themePref) {
-        "dark" -> true
-        "light" -> false
-        else -> systemInDark
-    }
+    val isDark = isAppInDarkTheme()
 
     val shortcutsList by historyManager.shortcuts.collectAsState(initial = historyManager.defaultShortcuts)
     val allHistorySites by historyManager.allSites.collectAsState(initial = historyManager.defaultRecentSites)
@@ -148,6 +140,19 @@ fun DirectBrowserView(
                 webViewInstance?.loadUrl("about:blank")
             }
             onClose != null -> onClose()
+        }
+    }
+
+    fun applyBrowserSurface(webView: WebView) {
+        webView.setBackgroundColor(
+            if (isDark) android.graphics.Color.parseColor("#151515") else android.graphics.Color.WHITE
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Keep Emre's browser chrome themed, but do not rewrite website colors.
+            webView.settings.forceDark = WebSettings.FORCE_DARK_OFF
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            webView.settings.algorithmicDarkeningAllowed = false
         }
     }
 
@@ -332,10 +337,7 @@ fun DirectBrowserView(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
                             )
 
-                            setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                settings.forceDark = if (isDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
-                            }
+                            applyBrowserSurface(this)
 
                             settings.apply {
                                 javaScriptEnabled = true
@@ -537,10 +539,7 @@ fun DirectBrowserView(
                     },
                     update = { wv ->
                         webViewInstance = wv
-                        wv.setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            wv.settings.forceDark = if (isDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
-                        }
+                        applyBrowserSurface(wv)
                     },
                     onRelease = { wv ->
                         wv.stopLoading()
