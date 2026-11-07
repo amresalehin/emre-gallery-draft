@@ -66,7 +66,7 @@ fun DirectBrowserView(
     val historyManager = remember { BrowserHistoryManager(context) }
     val tabSession = remember { BrowserSession.getTabSession("tab_main") }
     val tabDetectedCount by tabSession.detectedCount.collectAsState()
-    val totalDetectedCount = maxOf(discoveredCount, tabDetectedCount)
+    val totalDetectedCount = tabDetectedCount
 
     val prefsRepo = remember { PreferencesRepository(context) }
     val themePref by prefsRepo.theme.collectAsState(initial = "system")
@@ -475,6 +475,7 @@ fun DirectBrowserView(
 
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     if (url.isNullOrBlank() || url == "about:blank") {
+                                        tabSession.updateNavigation("")
                                         isLoading = false
                                         canGoBack = false
                                         canGoForward = false
@@ -493,6 +494,7 @@ fun DirectBrowserView(
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     isLoading = false
                                     if (url.isNullOrBlank() || url == "about:blank") {
+                                        tabSession.updateNavigation("")
                                         canGoBack = false
                                         canGoForward = false
                                         return
