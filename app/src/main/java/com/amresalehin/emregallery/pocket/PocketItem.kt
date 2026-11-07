@@ -1,5 +1,7 @@
 package com.amresalehin.emregallery.pocket
 
+import android.net.Uri
+import java.io.File
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -20,10 +22,20 @@ data class PocketItem(
     val tags: List<String> = emptyList(),
     val description: String = "",
     val isFavorite: Boolean = false,
-    val isRead: Boolean = false
+    val isRead: Boolean = false,
+    val canonicalUrl: String? = null,
+    val siteName: String? = null,
+    val faviconUrl: String? = null,
+    /** Absolute path to the locally generated WebView viewport preview. */
+    val previewImagePath: String? = null
 ) {
+    val previewImageUri: String?
+        get() = previewImagePath
+            ?.takeIf { it.isNotBlank() }
+            ?.let { Uri.fromFile(File(it)).toString() }
+
     val primaryImage: String?
-        get() = imageUrls.firstOrNull()
+        get() = previewImageUri ?: imageUrls.firstOrNull()
 
     val formattedDateTime: String
         get() {

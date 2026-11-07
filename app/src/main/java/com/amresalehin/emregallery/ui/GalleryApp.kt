@@ -137,7 +137,7 @@ fun GalleryApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
-    val pocketRepository = remember { PocketRepository(context.applicationContext) }
+    val pocketRepository = remember { PocketRepository(context) }
     val pocketItems by pocketRepository.items.collectAsStateWithLifecycle(initialValue = emptyList())
     var selectedPocketItem by remember { mutableStateOf<PocketItem?>(null) }
 

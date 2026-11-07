@@ -59,7 +59,7 @@ fun PocketDetailScreen(
     var showEditNoteDialog by remember { mutableStateOf(false) }
 
     val images = remember(item) {
-        item.imageUrls.ifEmpty { listOfNotNull(item.primaryImage) }
+        (listOfNotNull(item.previewImageUri) + item.imageUrls).distinct()
     }
     val pagerState = rememberPagerState(pageCount = { if (images.isNotEmpty()) images.size else 1 })
     val scrollState = rememberScrollState()

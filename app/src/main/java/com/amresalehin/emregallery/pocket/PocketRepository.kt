@@ -5,31 +5,26 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.galleryDataStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.net.URI
 import java.util.UUID
-import java.util.concurrent.TimeUnit
-import java.util.regex.Pattern
 
-class PocketRepository(private val context: Context) {
+class PocketRepository(context: Context) {
 
+    private val appContext = context.applicationContext
     private val pocketKey = stringPreferencesKey("pocket_items_data_v1")
+    private val browserBackend = PocketBrowserBackend(context)
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
-
-    val items: Flow<List<PocketItem>> = context.galleryDataStore.data.map { prefs ->
+    val items: Flow<List<PocketItem>> = appContext.galleryDataStore.data.map { prefs ->
         val raw = prefs[pocketKey]
         if (raw.isNullOrBlank()) {
             emptyList()
@@ -49,8 +44,20 @@ class PocketRepository(private val context: Context) {
         val current = getCurrentItemsList().toMutableList()
         val index = current.indexOfFirst { it.id == item.id }
         if (index != -1) {
-            current[index] = item
+            val previous = current[index]
+            val updated = item.copy(
+                previewImagePath = item.previewImagePath ?: previous.previewImagePath,
+                canonicalUrl = item.canonicalUrl ?: previous.canonicalUrl,
+                siteName = item.siteName ?: previous.siteName,
+                faviconUrl = item.faviconUrl ?: previous.faviconUrl
+            )
+            current[index] = updated
             saveItems(current)
+            if (previous.previewImagePath != updated.previewImagePath) {
+                previous.previewImagePath?.let { oldPath ->
+                    withContext(Dispatchers.IO) { runCatching { File(oldPath).delete() } }
+                }
+            }
         } else {
             addItem(item)
         }
@@ -62,86 +69,58 @@ class PocketRepository(private val context: Context) {
         return if (index != -1) {
             val removed = current.removeAt(index)
             saveItems(current)
+            removed.previewImagePath?.let { path ->
+                withContext(Dispatchers.IO) { runCatching { File(path).delete() } }
+            }
             removed
         } else {
             null
         }
     }
 
+    /**
+     * Persist the bookmark first with a safe fallback, then enrich it using a short-lived
+     * in-app WebView. A blocked, authenticated, or slow page never prevents bookmarking.
+     */
     suspend fun saveFromUrl(
         urlInput: String,
         customTitle: String? = null,
         userNote: String = "",
         customTags: List<String> = emptyList()
-    ): PocketItem = withContext(Dispatchers.IO) {
-        val normalizedUrl = if (!urlInput.startsWith("http://") && !urlInput.startsWith("https://")) {
-            "https://$urlInput"
-        } else {
-            urlInput
-        }
+    ): PocketItem {
+        val normalizedUrl = normalizeWebUrl(urlInput)
         val domain = PocketItem.extractDomain(normalizedUrl)
-
-        var title = customTitle.orEmpty()
-        var description = ""
-        val extractedImages = mutableListOf<String>()
-
-        // Try fetching lightweight web metadata
-        try {
-            val req = Request.Builder()
-                .url(normalizedUrl)
-                .header("User-Agent", "Mozilla/5.0 (Android; Mobile) EmreGallery/1.0")
-                .build()
-            val response = httpClient.newCall(req).execute()
-            if (response.isSuccessful) {
-                val body = response.body?.string().orEmpty()
-                if (title.isBlank()) {
-                    val titleMatcher = Pattern.compile("<title>(.*?)</title>", Pattern.CASE_INSENSITIVE or Pattern.DOTALL).matcher(body)
-                    if (titleMatcher.find()) {
-                        title = titleMatcher.group(1)?.trim()?.replace("&amp;", "&")?.replace("&#39;", "'") ?: ""
-                    }
-                }
-                val descMatcher = Pattern.compile("<meta\\s+(?:name|property)=[\"'](?:description|og:description)[\"']\\s+content=[\"'](.*?)[\"']", Pattern.CASE_INSENSITIVE).matcher(body)
-                if (descMatcher.find()) {
-                    description = descMatcher.group(1)?.trim() ?: ""
-                }
-                val imgMatcher = Pattern.compile("<meta\\s+property=[\"']og:image[\"']\\s+content=[\"'](.*?)[\"']", Pattern.CASE_INSENSITIVE).matcher(body)
-                if (imgMatcher.find()) {
-                    val img = imgMatcher.group(1)?.trim()
-                    if (!img.isNullOrBlank()) extractedImages.add(img)
-                }
-            }
-        } catch (_: Exception) {
-            // Network fallback or offline
-        }
-
-        if (title.isBlank()) {
-            title = normalizedUrl.substringAfter("://").substringAfter("/").substringBefore("?").replace("-", " ").replace("_", " ").trim()
-            if (title.isBlank() || title.length < 3) {
-                title = domain.replaceFirstChar { it.uppercase() }
-            } else {
-                title = title.replaceFirstChar { it.uppercase() }
-            }
-        }
-
+        val fallbackTitle = customTitle?.takeIf { it.isNotBlank() }
+            ?: deriveFallbackTitle(normalizedUrl, domain)
         val tags = if (customTags.isNotEmpty()) {
             customTags
         } else {
             listOf(domain.substringBefore(".").replaceFirstChar { it.uppercase() }, "Saved")
         }
 
-        val newItem = PocketItem(
+        val initialItem = PocketItem(
             id = UUID.randomUUID().toString(),
-            title = title,
+            title = fallbackTitle,
             url = normalizedUrl,
             domain = domain,
-            imageUrls = extractedImages,
             timestamp = System.currentTimeMillis(),
             note = userNote,
             tags = tags,
-            description = description.ifBlank { "Article saved from $domain." }
+            description = "Article saved from $domain."
         )
-        addItem(newItem)
-        newItem
+
+        // Save before crawling so the item appears immediately, even when the page is inaccessible.
+        addItem(initialItem)
+
+        val metadata = try {
+            browserBackend.extract(normalizedUrl, initialItem.id)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        } ?: return initialItem
+
+        return applyResolvedMetadata(initialItem, metadata, customTitle) ?: initialItem
     }
 
     suspend fun saveFromGalleryMedia(
@@ -170,8 +149,95 @@ class PocketRepository(private val context: Context) {
         return item
     }
 
+    private suspend fun applyResolvedMetadata(
+        fallbackItem: PocketItem,
+        metadata: PocketBrowserMetadata,
+        customTitle: String?
+    ): PocketItem? {
+        val current = getCurrentItemsList().toMutableList()
+        val index = current.indexOfFirst { it.id == fallbackItem.id }
+        if (index == -1) {
+            metadata.previewImagePath?.let { path ->
+                withContext(Dispatchers.IO) { runCatching { File(path).delete() } }
+            }
+            return null
+        }
+
+        val latestItem = current[index]
+        val enrichedItem = latestItem.copy(
+            title = if (customTitle.isNullOrBlank() && latestItem.title == fallbackItem.title) {
+                metadata.title?.takeIf { it.isNotBlank() } ?: latestItem.title
+            } else {
+                latestItem.title
+            },
+            description = if (latestItem.description == fallbackItem.description) {
+                metadata.description?.takeIf { it.isNotBlank() } ?: latestItem.description
+            } else {
+                latestItem.description
+            },
+            imageUrls = if (latestItem.imageUrls == fallbackItem.imageUrls) {
+                metadata.imageUrls.ifEmpty { latestItem.imageUrls }
+            } else {
+                latestItem.imageUrls
+            },
+            canonicalUrl = metadata.canonicalUrl ?: latestItem.canonicalUrl,
+            siteName = metadata.siteName ?: latestItem.siteName,
+            faviconUrl = metadata.faviconUrl ?: latestItem.faviconUrl,
+            previewImagePath = metadata.previewImagePath ?: latestItem.previewImagePath
+        )
+
+        if (enrichedItem != latestItem) {
+            current[index] = enrichedItem
+            saveItems(current)
+            if (latestItem.previewImagePath != enrichedItem.previewImagePath) {
+                latestItem.previewImagePath?.let { oldPath ->
+                    withContext(Dispatchers.IO) { runCatching { File(oldPath).delete() } }
+                }
+            }
+        }
+        return enrichedItem
+    }
+
+    private fun normalizeWebUrl(input: String): String {
+        val trimmed = input.trim()
+        require(trimmed.isNotEmpty()) { "URL cannot be empty" }
+        val candidate = if (
+            trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true)
+        ) {
+            trimmed
+        } else {
+            "https://$trimmed"
+        }
+        val uri = runCatching { URI(candidate) }.getOrNull()
+        require(
+            uri != null &&
+                (uri.scheme.equals("http", ignoreCase = true) ||
+                    uri.scheme.equals("https", ignoreCase = true)) &&
+                !uri.host.isNullOrBlank()
+        ) { "Enter a valid HTTP or HTTPS URL" }
+        return uri.toASCIIString()
+    }
+
+    private fun deriveFallbackTitle(url: String, domain: String): String {
+        val pathTitle = runCatching {
+            val lastSegment = URI(url).path?.trimEnd('/')?.substringAfterLast('/')
+            lastSegment
+                ?.takeIf { it.isNotBlank() }
+                ?.let { it.substringBeforeLast('.', missingDelimiterValue = it) }
+                ?.replace('-', ' ')
+                ?.replace('_', ' ')
+                ?.trim()
+        }.getOrNull()
+
+        return pathTitle
+            ?.takeIf { it.length >= 3 }
+            ?.replaceFirstChar { it.uppercase() }
+            ?: domain.replaceFirstChar { it.uppercase() }
+    }
+
     private suspend fun getCurrentItemsList(): List<PocketItem> {
-        val prefs = context.galleryDataStore.data.first()
+        val prefs = appContext.galleryDataStore.data.first()
         val raw = prefs[pocketKey]
         return if (raw.isNullOrBlank()) {
             emptyList()
@@ -193,6 +259,10 @@ class PocketRepository(private val context: Context) {
                 put("description", item.description)
                 put("isFavorite", item.isFavorite)
                 put("isRead", item.isRead)
+                put("canonicalUrl", item.canonicalUrl)
+                put("siteName", item.siteName)
+                put("faviconUrl", item.faviconUrl)
+                put("previewImagePath", item.previewImagePath)
 
                 val imgArr = JSONArray()
                 item.imageUrls.forEach { imgArr.put(it) }
@@ -204,7 +274,7 @@ class PocketRepository(private val context: Context) {
             }
             jsonArray.put(obj)
         }
-        context.galleryDataStore.edit { it[pocketKey] = jsonArray.toString() }
+        appContext.galleryDataStore.edit { it[pocketKey] = jsonArray.toString() }
     }
 
     private fun deserializeItems(rawJson: String): List<PocketItem> {
@@ -236,10 +306,17 @@ class PocketRepository(private val context: Context) {
                     tags = tags,
                     description = obj.optString("description", ""),
                     isFavorite = obj.optBoolean("isFavorite", false),
-                    isRead = obj.optBoolean("isRead", false)
+                    isRead = obj.optBoolean("isRead", false),
+                    canonicalUrl = obj.optNullableString("canonicalUrl"),
+                    siteName = obj.optNullableString("siteName"),
+                    faviconUrl = obj.optNullableString("faviconUrl"),
+                    previewImagePath = obj.optNullableString("previewImagePath")
                 )
             )
         }
         return list.filterNot { it.id.startsWith("seed-") }
     }
+
+    private fun JSONObject.optNullableString(key: String): String? =
+        optString(key).takeIf { it.isNotBlank() && it != "null" }
 }
