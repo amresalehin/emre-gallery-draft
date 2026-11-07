@@ -1,14 +1,10 @@
 package com.amresalehin.emregallery.data
 
 import android.content.Context
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.stringPreferencesKey
 import com.amresalehin.emregallery.pocket.PocketItem
 import com.amresalehin.emregallery.pocket.PocketRepository
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -20,8 +16,6 @@ import java.util.UUID
  * record is deleted by this bridge.
  */
 object PocketDownloadBridge {
-    private val attachmentKey = stringPreferencesKey("pocket_download_attachments_v1")
-
     suspend fun recordCompletedDownload(
         context: Context,
         itemId: String,
@@ -60,23 +54,22 @@ object PocketDownloadBridge {
             }
             repository.updateItem(existing.copy(attachments = updatedAttachments))
         } else {
-            val key = attachmentKey
-            val prefs = context.galleryDataStore.data.first()
-            val all = runCatching { JSONArray(prefs[key] ?: "[]") }.getOrDefault(JSONArray())
-            val record = JSONObject(attachment).apply {
-                put("sourceUrl", mediaUrl)
-            }
-            all.put(record)
-            context.galleryDataStore.edit { it[key] = all.toString() }
-
-            // Also expose externally requested downloads in Pocket as a source item.
             val source = normalizedSource.ifBlank { mediaUrl }
+            val safeUrl = source.takeIf { it.startsWith("http://") || it.startsWith("https://") }
             val domain = sourceDomain.ifBlank { PocketItem.extractDomain(source) }
-            repository.saveFromUrl(source, customTitle = title.ifBlank { domain })
-            val created = repository.items.first().firstOrNull { it.url.equals(source, ignoreCase = true) }
-            if (created != null) {
-                repository.updateItem(created.copy(attachments = created.attachments + attachment))
-            }
+            val generatedId = "download-source-${UUID.nameUUIDFromBytes(source.toByteArray()).toString()}"
+            val newItem = com.amresalehin.emregallery.pocket.PocketItem(
+                id = generatedId,
+                title = title.ifBlank { domain.ifBlank { "Downloaded media" } },
+                url = safeUrl.orEmpty(),
+                domain = domain,
+                timestamp = dateAddedMillis,
+                tags = listOf("Downloaded"),
+                description = "Downloaded from ${domain.ifBlank { "the web" }}.",
+                attachments = listOf(attachment)
+            )
+            repository.updateItem(newItem)
+        }
         }
     }
 }
