@@ -51,6 +51,8 @@ import com.amresalehin.emregallery.face.FaceClusterStore
 import com.amresalehin.emregallery.face.FaceProcessingCoordinator
 import com.amresalehin.emregallery.face.FaceThumbnailHelper
 import com.amresalehin.emregallery.ocr.TesseractOcr
+import com.amresalehin.emregallery.ffmpeg.FfmpegKitEngine
+import com.amresalehin.emregallery.ffmpeg.FfprobeMediaInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1401,8 +1403,9 @@ fun ActionsTabContent(
             }
         }
 
-        // 3. OCR Section
-        item(key = "actions_ocr") {
+        // 3. OCR Section (Images only)
+        if (!item.isVideo) {
+            item(key = "actions_ocr") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 // Plain Extract text heading without leading icon
                 Text(
@@ -1684,6 +1687,17 @@ fun ActionsTabContent(
             }
         }
     }
+
+    // 4. FFmpeg Video Tools (Videos only)
+        if (item.isVideo) {
+            item(key = "actions_video_ffmpeg") {
+                FfmpegVideoToolsSection(
+                    item = item,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -1840,3 +1854,314 @@ private fun buildMetadataRows(item: MediaItem, metadata: Map<String, String>): L
         value?.trim()?.takeIf { it.isNotEmpty() && it != "Not available" }?.let { label to it }
     }
 }
+
+/**
+ * FFmpeg Multimedia Tools section for videos in Viewer details actions tab.
+ */
+@Composable
+fun FfmpegVideoToolsSection(
+    item: MediaItem,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    var isProbing by remember { mutableStateOf(false) }
+    var mediaInfo by remember { mutableStateOf<FfprobeMediaInfo?>(null) }
+    var probeAttempted by remember { mutableStateOf(false) }
+
+    var isExtractingAudio by remember { mutableStateOf(false) }
+    var audioSuccessMsg by remember { mutableStateOf<String?>(null) }
+
+    var isCompressing by remember { mutableStateOf(false) }
+    var compressSuccessMsg by remember { mutableStateOf<String?>(null) }
+
+    var isExtractingFrame by remember { mutableStateOf(false) }
+    var frameSuccessMsg by remember { mutableStateOf<String?>(null) }
+
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    // Auto-probe media info once on mount
+    LaunchedEffect(item.uri) {
+        if (!probeAttempted) {
+            probeAttempted = true
+            isProbing = true
+            coroutineScope.launch {
+                val probed = FfmpegKitEngine.probeMedia(item.uri, context)
+                mediaInfo = probed
+                isProbing = false
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Section Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MovieFilter,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Text(
+                    text = "FFmpeg Video Tools",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+            ) {
+                Text(
+                    text = "FFmpegKit",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        // FFprobe Media Stream Inspector Card
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Stream Details (FFprobe)",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (isProbing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+
+                if (mediaInfo != null) {
+                    val info = mediaInfo!!
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Container Format", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(info.format.take(24), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                        }
+                        info.videoCodec?.let { codec ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Video Codec", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(codec + (info.resolution?.let { " ($it)" } ?: ""), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        info.audioCodec?.let { codec ->
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Audio Codec", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val channelsStr = if (info.audioChannels != null) " · ${info.audioChannels}ch" else ""
+                                val rateStr = if (info.sampleRateHz != null) " · ${info.sampleRateHz}Hz" else ""
+                                Text("$codec$channelsStr$rateStr", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        if (info.bitrateKbps > 0) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Bitrate", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${info.bitrateKbps} kbps", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                } else if (!isProbing) {
+                    Text(
+                        text = "Native FFmpeg probe ready. Tap actions below to process.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Action Buttons Row
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // 1. Extract Audio
+            OutlinedButton(
+                onClick = {
+                    if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    isExtractingAudio = true
+                    audioSuccessMsg = null
+                    errorMsg = null
+                    coroutineScope.launch {
+                        val file = FfmpegKitEngine.resolveUriToFile(context, item.uri, item.name)
+                        if (file != null && file.exists()) {
+                            val res = FfmpegKitEngine.extractAudio(file, outputFormat = "mp3", context = context)
+                            if (res.isSuccess && res.outputFile != null) {
+                                audioSuccessMsg = "Saved: ${res.outputFile.name}"
+                            } else {
+                                errorMsg = "Audio extraction failed (Code ${res.returnCode})"
+                            }
+                        } else {
+                            errorMsg = "Unable to read local video file"
+                        }
+                        isExtractingAudio = false
+                    }
+                },
+                enabled = !isExtractingAudio && !isCompressing && !isExtractingFrame,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isExtractingAudio) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Extracting MP3 Audio...")
+                } else {
+                    Icon(Icons.Default.Audiotrack, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Extract Audio Track (MP3)")
+                }
+            }
+
+            // 2. Compress Video
+            OutlinedButton(
+                onClick = {
+                    if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    isCompressing = true
+                    compressSuccessMsg = null
+                    errorMsg = null
+                    coroutineScope.launch {
+                        val file = FfmpegKitEngine.resolveUriToFile(context, item.uri, item.name)
+                        if (file != null && file.exists()) {
+                            val res = FfmpegKitEngine.compressVideo(file, targetHeight = 720, crf = 26, context = context)
+                            if (res.isSuccess && res.outputFile != null) {
+                                compressSuccessMsg = "Saved: ${res.outputFile.name} (${res.outputFile.length() / 1024} KB)"
+                            } else {
+                                errorMsg = "Video compression failed (Code ${res.returnCode})"
+                            }
+                        } else {
+                            errorMsg = "Unable to read local video file"
+                        }
+                        isCompressing = false
+                    }
+                },
+                enabled = !isExtractingAudio && !isCompressing && !isExtractingFrame,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isCompressing) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Compressing (720p H.264)...")
+                } else {
+                    Icon(Icons.Default.VideoSettings, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Compress Video (720p H.264)")
+                }
+            }
+
+            // 3. Save Poster Frame
+            OutlinedButton(
+                onClick = {
+                    if (isExtractingAudio || isCompressing || isExtractingFrame) return@OutlinedButton
+                    isExtractingFrame = true
+                    frameSuccessMsg = null
+                    errorMsg = null
+                    coroutineScope.launch {
+                        val file = FfmpegKitEngine.resolveUriToFile(context, item.uri, item.name)
+                        if (file != null && file.exists()) {
+                            val thumb = FfmpegKitEngine.extractThumbnail(file, positionSec = 1.0, context = context)
+                            if (thumb != null && thumb.exists()) {
+                                frameSuccessMsg = "Saved poster: ${thumb.name}"
+                            } else {
+                                errorMsg = "Frame extraction failed"
+                            }
+                        } else {
+                            errorMsg = "Unable to read local video file"
+                        }
+                        isExtractingFrame = false
+                    }
+                },
+                enabled = !isExtractingAudio && !isCompressing && !isExtractingFrame,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (isExtractingFrame) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Extracting Poster Frame...")
+                } else {
+                    Icon(Icons.Default.Image, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Save Video Poster Frame (JPEG)")
+                }
+            }
+        }
+
+        // Status messages
+        audioSuccessMsg?.let { msg ->
+            Text(
+                text = "✓ $msg",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF2E7D32),
+                fontWeight = FontWeight.Medium
+            )
+        }
+        compressSuccessMsg?.let { msg ->
+            Text(
+                text = "✓ $msg",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF2E7D32),
+                fontWeight = FontWeight.Medium
+            )
+        }
+        frameSuccessMsg?.let { msg ->
+            Text(
+                text = "✓ $msg",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF2E7D32),
+                fontWeight = FontWeight.Medium
+            )
+        }
+        errorMsg?.let { err ->
+            Text(
+                text = "✕ $err",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+

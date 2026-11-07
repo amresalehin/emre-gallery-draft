@@ -45,6 +45,9 @@ def get_engine_status():
         "gallery_dl_version": gdl_ver,
         "yt_dlp_available": YTDLP_AVAILABLE,
         "yt_dlp_version": ytdlp_ver,
+        "ffmpeg_available": True,
+        "ffmpeg_kit_installed": True,
+        "ffmpeg_version": "8.1.9",
         "python_version": sys.version.split()[0],
         "supported_categories_count": 287 if GALLERY_DL_AVAILABLE else 0,
         "popular_extractors": POPULAR_EXTRACTORS

@@ -34,6 +34,7 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = true
+            pickFirsts += listOf("**/libc++_shared.so")
         }
         resources {
             excludes += listOf(
@@ -94,6 +95,8 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Native FFmpeg and FFprobe multimedia processing kit
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.9")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
