@@ -74,6 +74,7 @@ fun PocketScreen(
                 item.title.contains(searchQuery, ignoreCase = true) ||
                         item.description.contains(searchQuery, ignoreCase = true) ||
                         item.note.contains(searchQuery, ignoreCase = true) ||
+                        item.readableContent.contains(searchQuery, ignoreCase = true) ||
                         item.domain.contains(searchQuery, ignoreCase = true) ||
                         item.tags.any { it.contains(searchQuery, ignoreCase = true) }
             }
