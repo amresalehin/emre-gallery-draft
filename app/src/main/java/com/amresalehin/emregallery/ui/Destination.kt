@@ -3,6 +3,7 @@ package com.amresalehin.emregallery.ui
 enum class Destination {
     HOME,
     ALBUMS,
+    POCKET,
     FAVOURITES,
     BIN,
     VIDEOS,

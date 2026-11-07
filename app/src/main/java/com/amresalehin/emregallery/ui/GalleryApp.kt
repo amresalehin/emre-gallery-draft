@@ -56,6 +56,10 @@ import com.amresalehin.emregallery.face.FaceEngineRegistry
 import com.amresalehin.emregallery.face.FaceIndexingRepository
 import com.amresalehin.emregallery.face.FaceRecognitionSettings
 import com.amresalehin.emregallery.data.StoryGroup
+import com.amresalehin.emregallery.pocket.PocketItem
+import com.amresalehin.emregallery.pocket.PocketRepository
+import com.amresalehin.emregallery.pocket.PocketScreen
+import com.amresalehin.emregallery.pocket.PocketDetailScreen
 
 data class NavBackStackEntry(
     val destination: Destination,
@@ -133,6 +137,9 @@ fun GalleryApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
+    val pocketRepository = remember { PocketRepository(context.applicationContext) }
+    val pocketItems by pocketRepository.items.collectAsStateWithLifecycle(initialValue = emptyList())
+    var selectedPocketItem by remember { mutableStateOf<PocketItem?>(null) }
 
     var isRefreshing by remember { mutableStateOf(false) }
 
