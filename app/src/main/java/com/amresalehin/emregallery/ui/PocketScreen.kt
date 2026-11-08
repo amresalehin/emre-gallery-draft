@@ -37,10 +37,21 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -1299,8 +1310,11 @@ fun PocketBookmarkViewerPage(
         }
     }
 
-    val totalPages = maxOf(1, effectiveMediaList.size)
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { totalPages })
+    var currentIndex by remember(stack.id) { mutableIntStateOf(0) }
+    val totalCards = effectiveMediaList.size
+    val safeIndex = if (totalCards > 0) currentIndex.coerceIn(0, totalCards - 1) else 0
+    val offsetX = remember { Animatable(0f) }
+    var isSwiping by remember { mutableStateOf(false) }
 
     // Auto-fetch site media on first open if bookmark has URL but no items yet
     LaunchedEffect(stack.id, stack.sourceUrl) {
@@ -1487,7 +1501,7 @@ fun PocketBookmarkViewerPage(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 4.dp),
+                        .padding(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     BoxWithConstraints(
@@ -1509,220 +1523,226 @@ fun PocketBookmarkViewerPage(
                             modifier = Modifier.size(width = deckWidth, height = deckHeight),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Deck Card Layer 1 (Bottom peeking card, offset y = -14.dp, scale 0.88f)
-                            val backIndex2 = if (totalPages > 2) (pagerState.currentPage + 2) % totalPages else null
-                            val backItem2 = backIndex2?.let { effectiveMediaList.getOrNull(it) }
-
-                            Surface(
-                                shape = RoundedCornerShape(26.dp),
-                                color = PocketThemeColors.stackLayer1(isDark),
-                                border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.3f) else Color(0xFFD6D6D6)),
-                                shadowElevation = if (isDark) 2.dp else 1.dp,
-                                modifier = Modifier
-                                    .fillMaxWidth(0.88f)
-                                    .fillMaxHeight(0.96f)
-                                    .offset(y = (-14).dp)
-                            ) {
-                                if (backItem2 != null) {
-                                    val mediaPath2 = remember(backItem2) {
-                                        if (backItem2.localUri.isNotBlank()) {
-                                            val f = File(backItem2.localUri.removePrefix("file://"))
-                                            if (f.exists()) f else backItem2.sourceUrl
-                                        } else backItem2.sourceUrl
-                                    }
-                                    Box(modifier = Modifier.fillMaxSize()) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context)
-                                                .data(mediaPath2)
-                                                .crossfade(true)
-                                                .build(),
-                                            contentDescription = null,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .blur(20.dp)
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.5f))
-                                        )
-                                    }
+                            // Layer 1 (Bottom peeking card: 2 cards ahead, offset y = -32.dp, scale 0.88f)
+                            if (totalCards > 2) {
+                                val backIndex2 = (safeIndex + 2) % totalCards
+                                val backItem2 = effectiveMediaList.getOrNull(backIndex2)
+                                val mediaPath2 = remember(backItem2) {
+                                    if (backItem2?.localUri?.isNotBlank() == true) {
+                                        val f = File(backItem2.localUri.removePrefix("file://"))
+                                        if (f.exists()) f.absolutePath else backItem2.sourceUrl
+                                    } else backItem2?.sourceUrl ?: ""
                                 }
-                            }
 
-                            // Deck Card Layer 2 (Middle peeking card, offset y = -7.dp, scale 0.94f)
-                            val backIndex1 = if (totalPages > 1) (pagerState.currentPage + 1) % totalPages else null
-                            val backItem1 = backIndex1?.let { effectiveMediaList.getOrNull(it) }
-
-                            Surface(
-                                shape = RoundedCornerShape(26.dp),
-                                color = PocketThemeColors.stackLayer2(isDark),
-                                border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFCECECE)),
-                                shadowElevation = if (isDark) 4.dp else 2.dp,
-                                modifier = Modifier
-                                    .fillMaxWidth(0.94f)
-                                    .fillMaxHeight(0.98f)
-                                    .offset(y = (-7).dp)
-                            ) {
-                                if (backItem1 != null) {
-                                    val mediaPath1 = remember(backItem1) {
-                                        if (backItem1.localUri.isNotBlank()) {
-                                            val f = File(backItem1.localUri.removePrefix("file://"))
-                                            if (f.exists()) f else backItem1.sourceUrl
-                                        } else backItem1.sourceUrl
-                                    }
-                                    Box(modifier = Modifier.fillMaxSize()) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context)
-                                                .data(mediaPath1)
-                                                .crossfade(true)
-                                                .build(),
-                                            contentDescription = null,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .blur(20.dp)
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(if (isDark) Color.Black.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.35f))
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Deck Card Layer 3 (Top Front Card in Deck - Exact 9:14 Container)
-                            Surface(
-                                shape = RoundedCornerShape(26.dp),
-                                color = PocketThemeColors.stackFront(isDark),
-                                shadowElevation = if (isDark) 12.dp else 6.dp,
-                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.8f) else dividerCol),
-                                modifier = Modifier.fillMaxSize()
-                            ) {
-                                if (effectiveMediaList.isNotEmpty()) {
-                                    HorizontalPager(
-                                        state = pagerState,
-                                        modifier = Modifier.fillMaxSize()
-                                    ) { page ->
-                                        val item = effectiveMediaList[page]
-                                        val mediaPath = remember(item) {
-                                            if (item.localUri.isNotBlank()) {
-                                                val f = File(item.localUri.removePrefix("file://"))
-                                                if (f.exists()) f else item.sourceUrl
-                                            } else item.sourceUrl
-                                        }
-
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clickable { fullScreenMediaItem = item }
-                                                .testTag("deck_front_card_$page"),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            // Blurred scrim area: media blurred at 24.dp fills the unfilled container areas
+                                Surface(
+                                    shape = RoundedCornerShape(26.dp),
+                                    color = PocketThemeColors.stackLayer1(isDark),
+                                    border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.3f) else Color(0xFFD6D6D6)),
+                                    shadowElevation = if (isDark) 2.dp else 1.dp,
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.88f)
+                                        .fillMaxHeight()
+                                        .offset(y = (-32).dp)
+                                ) {
+                                    if (mediaPath2.isNotBlank()) {
+                                        Box(modifier = Modifier.fillMaxSize()) {
                                             AsyncImage(
                                                 model = ImageRequest.Builder(context)
-                                                    .data(mediaPath)
+                                                    .data(mediaPath2)
                                                     .crossfade(true)
                                                     .build(),
                                                 contentDescription = null,
                                                 contentScale = ContentScale.Crop,
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .blur(24.dp)
+                                                    .blur(16.dp)
                                             )
-                                            // Soft translucent scrim tint for depth and focus
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .background(
-                                                        if (isDark) Color.Black.copy(alpha = 0.5f)
-                                                        else Color.Black.copy(alpha = 0.3f)
-                                                    )
+                                                    .background(if (isDark) Color.Black.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.45f))
                                             )
+                                        }
+                                    }
+                                }
+                            }
 
-                                            // Full media fits into deck container so entire media is completely visible
+                            // Layer 2 (Middle peeking card: next media, offset y = -16.dp, scale 0.94f)
+                            // "Show the next media a bit, just like stacked decks show"
+                            if (totalCards > 1) {
+                                val backIndex1 = (safeIndex + 1) % totalCards
+                                val backItem1 = effectiveMediaList.getOrNull(backIndex1)
+                                val mediaPath1 = remember(backItem1) {
+                                    if (backItem1?.localUri?.isNotBlank() == true) {
+                                        val f = File(backItem1.localUri.removePrefix("file://"))
+                                        if (f.exists()) f.absolutePath else backItem1.sourceUrl
+                                    } else backItem1?.sourceUrl ?: ""
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(26.dp),
+                                    color = PocketThemeColors.stackLayer2(isDark),
+                                    border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFCECECE)),
+                                    shadowElevation = if (isDark) 4.dp else 2.dp,
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.94f)
+                                        .fillMaxHeight()
+                                        .offset(y = (-16).dp)
+                                        .clickable {
+                                            // Tapping next card advances deck
+                                            scope.launch {
+                                                offsetX.animateTo(-600f, tween(180))
+                                                currentIndex = backIndex1
+                                                offsetX.snapTo(0f)
+                                            }
+                                        }
+                                ) {
+                                    if (mediaPath1.isNotBlank()) {
+                                        Box(modifier = Modifier.fillMaxSize()) {
+                                            // Blurred background reflection
                                             AsyncImage(
                                                 model = ImageRequest.Builder(context)
-                                                    .data(mediaPath)
+                                                    .data(mediaPath1)
                                                     .crossfade(true)
                                                     .build(),
-                                                contentDescription = item.title.ifBlank { "Media $page" },
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .blur(20.dp)
+                                            )
+                                            // Subtle scrim tint
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(if (isDark) Color.Black.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.2f))
+                                            )
+                                            // Next media visible so the peeking top displays the upcoming media
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(context)
+                                                    .data(mediaPath1)
+                                                    .crossfade(true)
+                                                    .build(),
+                                                contentDescription = backItem1?.title,
                                                 contentScale = ContentScale.Fit,
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .padding(8.dp)
                                             )
+                                        }
+                                    }
+                                }
+                            }
 
-                                            // Top gradient shade for contrast with overlay icons
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(56.dp)
-                                                    .align(Alignment.TopCenter)
-                                                    .background(
-                                                        Brush.verticalGradient(
-                                                            colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
+                            // Layer 3 (Top Front Card in Deck - Exact 9:14 Container, Interactive Swipe Gesture)
+                            val currentItem = effectiveMediaList.getOrNull(safeIndex)
+                            val currentMediaPath = remember(currentItem) {
+                                if (currentItem?.localUri?.isNotBlank() == true) {
+                                    val f = File(currentItem.localUri.removePrefix("file://"))
+                                    if (f.exists()) f.absolutePath else currentItem.sourceUrl
+                                } else currentItem?.sourceUrl ?: ""
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(26.dp),
+                                color = PocketThemeColors.stackFront(isDark),
+                                shadowElevation = if (isDark) 12.dp else 6.dp,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.8f) else dividerCol),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        translationX = offsetX.value
+                                        rotationZ = (offsetX.value / 32f).coerceIn(-12f, 12f)
+                                    }
+                                    .draggable(
+                                        orientation = Orientation.Horizontal,
+                                        enabled = totalCards > 1,
+                                        state = rememberDraggableState { delta ->
+                                            scope.launch {
+                                                offsetX.snapTo(offsetX.value + delta)
+                                            }
+                                        },
+                                        onDragStarted = { isSwiping = true },
+                                        onDragStopped = { velocity ->
+                                            isSwiping = false
+                                            val swipeThreshold = 160f
+                                            val shouldSwipeLeft = offsetX.value < -swipeThreshold || velocity < -500f
+                                            val shouldSwipeRight = offsetX.value > swipeThreshold || velocity > 500f
+                                            scope.launch {
+                                                if (totalCards > 1 && shouldSwipeLeft) {
+                                                    // Animate throw left
+                                                    offsetX.animateTo(
+                                                        targetValue = -1200f,
+                                                        animationSpec = tween(180)
+                                                    )
+                                                    currentIndex = (safeIndex + 1) % totalCards
+                                                    offsetX.snapTo(0f)
+                                                } else if (totalCards > 1 && shouldSwipeRight) {
+                                                    // Animate throw right
+                                                    offsetX.animateTo(
+                                                        targetValue = 1200f,
+                                                        animationSpec = tween(180)
+                                                    )
+                                                    currentIndex = if (safeIndex - 1 < 0) totalCards - 1 else safeIndex - 1
+                                                    offsetX.snapTo(0f)
+                                                } else {
+                                                    // Snap back with gentle spring
+                                                    offsetX.animateTo(
+                                                        targetValue = 0f,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessLow
                                                         )
                                                     )
-                                            )
-
-                                            // Media Badge (Image / Video & Page)
-                                            Row(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopStart)
-                                                    .padding(14.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Surface(
-                                                    shape = CircleShape,
-                                                    color = Color.Black.copy(alpha = 0.72f),
-                                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
-                                                    modifier = Modifier.height(26.dp)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                                        verticalAlignment = Alignment.CenterVertically
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = if (item.isVideo) Icons.Default.PlayArrow else Icons.Default.Image,
-                                                            contentDescription = null,
-                                                            tint = Color.White,
-                                                            modifier = Modifier.size(13.dp)
-                                                        )
-                                                        Spacer(Modifier.width(4.dp))
-                                                        Text(
-                                                            text = if (item.isVideo) "VIDEO ${page + 1}/$totalPages" else "${page + 1}/$totalPages",
-                                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                                fontSize = 11.sp,
-                                                                fontWeight = FontWeight.Bold
-                                                            ),
-                                                            color = Color.White
-                                                        )
-                                                    }
                                                 }
                                             }
-
-                                            // Fullscreen Expand Button at Top Right
-                                            IconButton(
-                                                onClick = { fullScreenMediaItem = item },
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(8.dp)
-                                                    .size(36.dp)
-                                                    .background(Color.Black.copy(alpha = 0.65f), CircleShape)
-                                                    .testTag("deck_fullscreen_button_$page")
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Fullscreen,
-                                                    contentDescription = "Expand fullscreen",
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                            }
                                         }
+                                    )
+                                    .clickable {
+                                        // Tap card to inspect fullscreen
+                                        currentItem?.let { fullScreenMediaItem = it }
+                                    }
+                                    .testTag("deck_front_card_$safeIndex")
+                            ) {
+                                if (currentItem != null && currentMediaPath.isNotBlank()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        // Blurred scrim area: media blurred at 24.dp fills the unfilled container areas
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(currentMediaPath)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .blur(24.dp)
+                                        )
+                                        // Soft translucent scrim tint for depth and focus
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    if (isDark) Color.Black.copy(alpha = 0.5f)
+                                                    else Color.Black.copy(alpha = 0.3f)
+                                                )
+                                        )
+
+                                        // Full media fits into deck container so entire media is completely visible
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(currentMediaPath)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = currentItem.title.ifBlank { "Media $safeIndex" },
+                                            contentScale = ContentScale.Fit,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(8.dp)
+                                        )
                                     }
                                 } else {
                                     // Fallback web illustration if no media
@@ -1777,84 +1797,6 @@ fun PocketBookmarkViewerPage(
                                     }
                                 }
                             }
-                        }
-                    }
-                }
-
-                // Interactive Pagination Pill with Deck Flipping Controls
-                Surface(
-                    shape = CircleShape,
-                    color = barSurface,
-                    border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
-                    shadowElevation = if (isDark) 2.dp else 1.dp,
-                    modifier = Modifier
-                        .height(34.dp)
-                        .padding(bottom = 2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Previous Card Button
-                        IconButton(
-                            onClick = {
-                                if (pagerState.currentPage > 0) {
-                                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-                                } else if (totalPages > 1) {
-                                    scope.launch { pagerState.animateScrollToPage(totalPages - 1) }
-                                }
-                            },
-                            enabled = totalPages > 1,
-                            modifier = Modifier
-                                .size(28.dp)
-                                .testTag("deck_prev_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Previous Card",
-                                tint = if (totalPages > 1) textColor else secondaryText.copy(alpha = 0.4f),
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-
-                        Spacer(Modifier.width(4.dp))
-
-                        Icon(
-                            imageVector = Icons.Default.Image,
-                            contentDescription = null,
-                            tint = secondaryText,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        val currentPage = pagerState.currentPage + 1
-                        Text(
-                            text = "$currentPage / $totalPages",
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = textColor
-                        )
-
-                        Spacer(Modifier.width(4.dp))
-
-                        // Next Card Button
-                        IconButton(
-                            onClick = {
-                                if (pagerState.currentPage < totalPages - 1) {
-                                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-                                } else if (totalPages > 1) {
-                                    scope.launch { pagerState.animateScrollToPage(0) }
-                                }
-                            },
-                            enabled = totalPages > 1,
-                            modifier = Modifier
-                                .size(28.dp)
-                                .testTag("deck_next_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "Next Card",
-                                tint = if (totalPages > 1) textColor else secondaryText.copy(alpha = 0.4f),
-                                modifier = Modifier.size(14.dp)
-                            )
                         }
                     }
                 }
@@ -2046,7 +1988,7 @@ fun PocketBookmarkViewerPage(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             itemsIndexed(effectiveMediaList) { index, item ->
-                                                val isSelected = (index == pagerState.currentPage)
+                                                val isSelected = (index == safeIndex)
                                                 val mediaPath = remember(item) {
                                                     if (item.localUri.isNotBlank()) {
                                                         val f = File(item.localUri.removePrefix("file://"))
@@ -2065,9 +2007,8 @@ fun PocketBookmarkViewerPage(
                                                     modifier = Modifier
                                                         .size(width = 80.dp, height = 66.dp)
                                                         .clickable {
-                                                            scope.launch {
-                                                                pagerState.animateScrollToPage(index)
-                                                            }
+                                                            currentIndex = index
+                                                            scope.launch { offsetX.snapTo(0f) }
                                                         }
                                                         .testTag("site_media_thumbnail_$index")
                                                 ) {
