@@ -1117,7 +1117,7 @@ fun GalleryApp() {
                             navigateTo(
                                 dest = Destination.MEDIA_INBOX,
                                 rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
+                                newInboxInitialViewMode = DownloaderViewMode.DISCOVERED_MEDIA,
                                 newInboxInitialOpenBrowser = false
                             )
                         }
@@ -1293,7 +1293,7 @@ fun GalleryApp() {
                             navigateTo(
                                 dest = Destination.MEDIA_INBOX,
                                 rememberPrevious = true,
-                                newInboxInitialViewMode = DownloaderViewMode.DISCOVERED_MEDIA,
+                                newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
                                 newInboxInitialOpenBrowser = false
                             )
                         },
