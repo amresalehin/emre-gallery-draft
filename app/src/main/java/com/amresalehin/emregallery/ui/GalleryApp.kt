@@ -1287,6 +1287,7 @@ fun GalleryApp() {
                     Destination.BROWSER -> DirectBrowserView(
                         initialUrl = "",
                         onClose = { performBackNavigation() },
+                        onMenuClick = { showSidePanel = true },
                         onMediaExtracted = { item -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItem(item) },
                         onBatchExtracted = { batch, title, _ -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItems(batch, title) },
                         onSwitchToMediaTab = {
