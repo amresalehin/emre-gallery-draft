@@ -324,8 +324,6 @@ fun DirectBrowserView(
                 }
             }
 
-            }
-
 
             // The browser viewport uses the remaining height beneath the toolbar.
             Box(
