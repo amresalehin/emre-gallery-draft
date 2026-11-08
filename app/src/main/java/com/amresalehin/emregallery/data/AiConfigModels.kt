@@ -31,14 +31,23 @@ data class CloudTestResult(
 )
 
 /**
- * Represents the current installation and readiness state of the local Florence-2 model.
+ * Represents the comprehensive installation, verification, and runtime readiness state
+ * of local on-device AI models.
  */
 enum class FlorenceStatus {
     NOT_INSTALLED,
+    QUEUED,
     DOWNLOADING,
+    PAUSED,
     VERIFYING,
-    INSTALLED,
-    ERROR
+    LOADING,
+    READY,
+    ASSETS_DOWNLOADED_RUNTIME_UNAVAILABLE,
+    INSTALLED, // Backwards-compatible alias for READY
+    ERROR,
+    UNINSTALLING;
+
+    val isUsable: Boolean get() = this == READY || this == INSTALLED
 }
 
 data class FlorenceModelState(
@@ -46,8 +55,15 @@ data class FlorenceModelState(
     val progress: Float = 0f,
     val bytesDownloaded: Long = 0L,
     val totalBytes: Long = 0L,
+    val speedBytesPerSec: Long = 0L,
+    val etaSeconds: Long = 0L,
+    val currentStage: String? = null,
+    val currentArtifact: String? = null,
     val errorMessage: String? = null,
     val installedSizeBytes: Long = 0L,
     val installedPath: String? = null,
-    val lastUpdated: Long = 0L
+    val lastUpdated: Long = 0L,
+    val validatedAt: Long = 0L,
+    val runtimeReady: Boolean = false,
+    val statusDetail: String? = null
 )

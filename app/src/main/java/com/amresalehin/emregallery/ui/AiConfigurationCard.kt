@@ -536,8 +536,13 @@ fun AiConfigurationCard(
                                             )
                                         }
 
-                                        // Progress bar when downloading or verifying
-                                        if (modelState.status == FlorenceStatus.DOWNLOADING || modelState.status == FlorenceStatus.VERIFYING) {
+                                        // Progress bar when queued, downloading, verifying, or validating runtime
+                                        val isBusy = modelState.status == FlorenceStatus.DOWNLOADING ||
+                                                modelState.status == FlorenceStatus.VERIFYING ||
+                                                modelState.status == FlorenceStatus.LOADING ||
+                                                modelState.status == FlorenceStatus.QUEUED
+
+                                        if (isBusy) {
                                             Spacer(Modifier.height(14.dp))
                                             Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                                 LinearProgressIndicator(
@@ -553,18 +558,35 @@ fun AiConfigurationCard(
                                                     modifier = Modifier.fillMaxWidth(),
                                                     horizontalArrangement = Arrangement.SpaceBetween
                                                 ) {
+                                                    val statusLabel = when (modelState.status) {
+                                                        FlorenceStatus.QUEUED -> "Queued..."
+                                                        FlorenceStatus.VERIFYING -> "Verifying integrity..."
+                                                        FlorenceStatus.LOADING -> "Validating ONNX runtime..."
+                                                        else -> {
+                                                            val downloaded = formatBytes(modelState.bytesDownloaded)
+                                                            val total = formatBytes(modelState.totalBytes)
+                                                            if (modelState.speedBytesPerSec > 0) {
+                                                                "$downloaded / $total • ${formatBytes(modelState.speedBytesPerSec)}/s"
+                                                            } else if (modelState.totalBytes > 0) {
+                                                                "$downloaded / $total"
+                                                            } else {
+                                                                "Connecting..."
+                                                            }
+                                                        }
+                                                    }
                                                     Text(
-                                                        text = if (modelState.totalBytes > 0) {
-                                                            "${formatBytes(modelState.bytesDownloaded)} / ${formatBytes(modelState.totalBytes)}"
-                                                        } else {
-                                                            "Downloading..."
-                                                        },
+                                                        text = statusLabel,
                                                         style = MaterialTheme.typography.labelSmall,
                                                         fontSize = 10.5.sp,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                                     )
+                                                    val percentOrEta = if (modelState.etaSeconds > 0 && modelState.status == FlorenceStatus.DOWNLOADING) {
+                                                        "${(modelState.progress * 100).toInt()}% • ETA ${modelState.etaSeconds}s"
+                                                    } else {
+                                                        "${(modelState.progress * 100).toInt()}%"
+                                                    }
                                                     Text(
-                                                        text = "${(modelState.progress * 100).toInt()}%",
+                                                        text = percentOrEta,
                                                         style = MaterialTheme.typography.labelSmall,
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 10.5.sp,
@@ -572,6 +594,21 @@ fun AiConfigurationCard(
                                                     )
                                                 }
                                             }
+                                        }
+
+                                        // Error text preview if in error state
+                                        if (modelState.status == FlorenceStatus.ERROR && !modelState.errorMessage.isNullOrBlank()) {
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                text = modelState.errorMessage,
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    color = MaterialTheme.colorScheme.error,
+                                                    fontSize = 11.sp
+                                                ),
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.clickable { selectedModelForDetails = model }
+                                            )
                                         }
                                     }
                                 }
@@ -592,33 +629,123 @@ fun AiConfigurationCard(
             onDismissRequest = { selectedModelForDetails = null },
             title = {
                 Text(
-                    "${model.displayName} Local Model",
+                    "${model.displayName}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Status Badge
+                    val statusText = when (state.status) {
+                        FlorenceStatus.READY, FlorenceStatus.INSTALLED ->
+                            if (model.hasRuntimeAdapter) "Ready — Validated & usable" else "Assets downloaded — runtime unavailable"
+                        FlorenceStatus.ASSETS_DOWNLOADED_RUNTIME_UNAVAILABLE ->
+                            "Assets downloaded — runtime unavailable"
+                        FlorenceStatus.DOWNLOADING, FlorenceStatus.VERIFYING, FlorenceStatus.LOADING ->
+                            "In progress: ${state.currentStage ?: "Downloading"} (${(state.progress * 100).toInt()}%)"
+                        FlorenceStatus.ERROR ->
+                            "Error: ${state.errorMessage ?: "Installation failed"}"
+                        FlorenceStatus.QUEUED ->
+                            "Queued for download"
+                        FlorenceStatus.PAUSED ->
+                            "Paused"
+                        FlorenceStatus.UNINSTALLING ->
+                            "Uninstalling..."
+                        FlorenceStatus.NOT_INSTALLED ->
+                            "Not installed"
+                    }
+
                     Text(
-                        "Status: ${if (state.status == FlorenceStatus.INSTALLED) "Installed & Validated" else "Not installed"}",
+                        text = "Status: $statusText",
                         style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        color = when (state.status) {
+                            FlorenceStatus.READY, FlorenceStatus.INSTALLED -> if (model.hasRuntimeAdapter) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                            FlorenceStatus.ASSETS_DOWNLOADED_RUNTIME_UNAVAILABLE -> MaterialTheme.colorScheme.tertiary
+                            FlorenceStatus.ERROR -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
                     )
+
+                    if (state.status == FlorenceStatus.ASSETS_DOWNLOADED_RUNTIME_UNAVAILABLE ||
+                        ((state.status == FlorenceStatus.READY || state.status == FlorenceStatus.INSTALLED) && !model.hasRuntimeAdapter)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Notice: All declared model artifacts and external weights were successfully downloaded and verified, but an on-device inference adapter has not yet been implemented for this architecture family.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
+                    if (state.status == FlorenceStatus.ERROR && !state.errorMessage.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = state.errorMessage,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
                     Text(
-                        "Model: ${model.description}",
+                        text = "Description: ${model.description}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (state.installedSizeBytes > 0) {
+
+                    Text(
+                        text = "Task: ${model.taskType}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (model.upstreamRepo.isNotBlank()) {
                         Text(
-                            "Storage footprint: ${formatBytes(state.installedSizeBytes)}",
+                            text = "Upstream: ${model.upstreamRepo}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
+                    if (model.upstreamRevision.isNotBlank()) {
+                        Text(
+                            text = "Revision: ${model.upstreamRevision.take(12)}...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    val requiredBytes = model.artifacts.sumOf { it.exactBytes ?: it.estimatedSize }
+                    Text(
+                        text = "Total package size: ${formatBytes(requiredBytes)} (${model.artifacts.size} files)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (state.installedSizeBytes > 0) {
+                        Text(
+                            text = "Storage on disk: ${formatBytes(state.installedSizeBytes)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     state.installedPath?.let { path ->
                         Text(
-                            "Path: $path",
+                            text = "Directory: $path",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                             fontSize = 11.sp
@@ -632,17 +759,35 @@ fun AiConfigurationCard(
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
-                            FlorenceModelManager.uninstallModel(context, model.id)
+                val isInstalledOrAssets = state.status == FlorenceStatus.READY ||
+                        state.status == FlorenceStatus.INSTALLED ||
+                        state.status == FlorenceStatus.ASSETS_DOWNLOADED_RUNTIME_UNAVAILABLE ||
+                        state.installedSizeBytes > 0
+
+                if (isInstalledOrAssets) {
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                FlorenceModelManager.uninstallModel(context, model.id)
+                                selectedModelForDetails = null
+                                onShowSnackbar?.invoke("${model.displayName} uninstalled")
+                            }
+                        },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Uninstall")
+                    }
+                } else if (state.status == FlorenceStatus.ERROR) {
+                    TextButton(
+                        onClick = {
                             selectedModelForDetails = null
-                            onShowSnackbar?.invoke("${model.displayName} uninstalled")
+                            scope.launch {
+                                FlorenceModelManager.downloadAndInstallModel(context, model.id)
+                            }
                         }
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Uninstall")
+                    ) {
+                        Text("Retry")
+                    }
                 }
             }
         )
@@ -997,7 +1142,7 @@ private fun DynamicFlorenceStatusButton(
             }
         }
 
-        FlorenceStatus.DOWNLOADING, FlorenceStatus.VERIFYING -> {
+        FlorenceStatus.DOWNLOADING, FlorenceStatus.VERIFYING, FlorenceStatus.LOADING, FlorenceStatus.QUEUED, FlorenceStatus.PAUSED, FlorenceStatus.UNINSTALLING -> {
             Surface(
                 shape = CircleShape,
                 color = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f) else Color(0x0F000000),
@@ -1020,10 +1165,17 @@ private fun DynamicFlorenceStatusButton(
                         strokeWidth = 1.8.dp,
                         color = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
                     )
+                    val label = when (state.status) {
+                        FlorenceStatus.QUEUED -> "Queued"
+                        FlorenceStatus.VERIFYING -> "Verifying"
+                        FlorenceStatus.LOADING -> "Checking"
+                        FlorenceStatus.UNINSTALLING -> "Removing"
+                        else -> "${(state.progress * 100).toInt()}%"
+                    }
                     Text(
-                        text = "${(state.progress * 100).toInt()}%",
+                        text = label,
                         style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
                         )
@@ -1043,7 +1195,7 @@ private fun DynamicFlorenceStatusButton(
             }
         }
 
-        FlorenceStatus.INSTALLED -> {
+        FlorenceStatus.READY, FlorenceStatus.INSTALLED -> {
             val bg = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
             val border = if (isDark) MaterialTheme.colorScheme.primary else Color(0xFF161A20)
             val contentColor = if (isDark) MaterialTheme.colorScheme.onPrimary else Color.White
@@ -1064,14 +1216,51 @@ private fun DynamicFlorenceStatusButton(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = "Installed",
+                        contentDescription = "Ready",
                         modifier = Modifier.size(14.dp),
                         tint = contentColor
                     )
                     Text(
-                        text = "Installed",
+                        text = if (state.runtimeReady) "Ready" else "Installed",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = contentColor
+                        )
+                    )
+                }
+            }
+        }
+
+        FlorenceStatus.ASSETS_DOWNLOADED_RUNTIME_UNAVAILABLE -> {
+            val bg = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f) else Color(0x14000000)
+            val border = if (isDark) MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f) else Color(0x26000000)
+            val contentColor = MaterialTheme.colorScheme.onSurface
+
+            Surface(
+                onClick = onDetails,
+                shape = CircleShape,
+                color = bg,
+                border = BorderStroke(1.dp, border),
+                modifier = Modifier
+                    .height(34.dp)
+                    .testTag("${testTagPrefix}_installed_button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Inventory2,
+                        contentDescription = "Assets downloaded",
+                        modifier = Modifier.size(14.dp),
+                        tint = contentColor
+                    )
+                    Text(
+                        text = "Downloaded",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = contentColor
                         )
