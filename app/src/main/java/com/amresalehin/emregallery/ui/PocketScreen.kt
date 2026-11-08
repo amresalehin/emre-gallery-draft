@@ -37,9 +37,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
@@ -1262,6 +1264,22 @@ fun PocketBookmarkViewerPage(
     // Fullscreen media inspection state
     var fullScreenMediaItem by remember { mutableStateOf<MediaInboxItem?>(null) }
 
+    // Drawer state: resizable, dismissable, occupies less place
+    var isDrawerDismissed by remember { mutableStateOf(false) }
+    var isDrawerExpanded by remember { mutableStateOf(false) }
+    var userDrawerHeightDp by remember { mutableStateOf<Dp?>(null) }
+
+    val compactDrawerHeight = 135.dp
+    val expandedDrawerHeight = 440.dp
+    val minDrawerHeight = 85.dp
+    val maxDrawerHeight = 520.dp
+
+    val currentTargetHeight = userDrawerHeightDp ?: if (isDrawerExpanded) expandedDrawerHeight else compactDrawerHeight
+    val animatedDrawerHeight by animateDpAsState(
+        targetValue = currentTargetHeight,
+        label = "pocket_drawer_height"
+    )
+
     // Effective media items discovered from the site
     val effectiveMediaList = remember(stack) {
         if (stack.items.isNotEmpty()) {
@@ -1325,47 +1343,73 @@ fun PocketBookmarkViewerPage(
             .background(PocketThemeColors.background(isDark)),
         color = PocketThemeColors.background(isDark)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-        ) {
-            // Top App Bar with Circular Buttons matching design system
-            Row(
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Main Screen Area: Top Bar, 9:14 Card Deck (Major Part of Screen), and Pagination Pill
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(bottom = if (!isDrawerDismissed) animatedDrawerHeight else 0.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Back Button (Circle)
-                Surface(
-                    shape = CircleShape,
-                    color = barSurface,
-                    shadowElevation = if (isDark) 2.dp else 1.dp,
-                    border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clickable(onClick = onBack)
-                        .testTag("bookmark_viewer_back_button")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = textColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                // Action Buttons on Right (Reader, Copy, Refresh, Delete)
+                // Top App Bar with Circular Buttons
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // 1. Open Reader / Browser
-                    if (stack.sourceUrl.isNotBlank()) {
+                    // Back Button (Circle)
+                    Surface(
+                        shape = CircleShape,
+                        color = barSurface,
+                        shadowElevation = if (isDark) 2.dp else 1.dp,
+                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clickable(onClick = onBack)
+                            .testTag("bookmark_viewer_back_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = textColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    // Action Buttons on Right (Reader, Copy, Refresh, Delete)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // 1. Open Reader / Browser
+                        if (stack.sourceUrl.isNotBlank()) {
+                            Surface(
+                                shape = CircleShape,
+                                color = barSurface,
+                                shadowElevation = if (isDark) 2.dp else 1.dp,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clickable { onOpenBrowser(stack.sourceUrl) }
+                                    .testTag("bookmark_viewer_reader_button")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.MenuBook,
+                                        contentDescription = "Open in Reader",
+                                        tint = textColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // 2. Copy Link
                         Surface(
                             shape = CircleShape,
                             color = barSurface,
@@ -1373,352 +1417,369 @@ fun PocketBookmarkViewerPage(
                             border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                             modifier = Modifier
                                 .size(44.dp)
-                                .clickable { onOpenBrowser(stack.sourceUrl) }
-                                .testTag("bookmark_viewer_reader_button")
+                                .clickable {
+                                    val textToCopy = stack.sourceUrl.ifBlank { stack.title }
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    val clip = ClipData.newPlainText("URL", textToCopy)
+                                    clipboard.setPrimaryClip(clip)
+                                    Toast.makeText(context, "Link copied to clipboard", Toast.LENGTH_SHORT).show()
+                                }
+                                .testTag("bookmark_viewer_copy_button")
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.Default.MenuBook,
-                                    contentDescription = "Open in Reader",
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Copy link",
+                                    tint = textColor,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
+
+                        // 3. Refresh Link Preview & Metadata
+                        if (stack.sourceUrl.isNotBlank()) {
+                            Surface(
+                                shape = CircleShape,
+                                color = barSurface,
+                                shadowElevation = if (isDark) 2.dp else 1.dp,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clickable { onRefreshMetadata?.invoke() }
+                                    .testTag("bookmark_viewer_refresh_button")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Refresh link preview and details",
+                                        tint = textColor,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // 4. Delete (monochrome)
+                        Surface(
+                            shape = CircleShape,
+                            color = barSurface,
+                            shadowElevation = if (isDark) 2.dp else 1.dp,
+                            border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clickable(onClick = onDelete)
+                                .testTag("bookmark_viewer_delete_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = "Delete bookmark",
                                     tint = textColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
                     }
-
-                    // 2. Copy Link
-                    Surface(
-                        shape = CircleShape,
-                        color = barSurface,
-                        shadowElevation = if (isDark) 2.dp else 1.dp,
-                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clickable {
-                                val textToCopy = stack.sourceUrl.ifBlank { stack.title }
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("URL", textToCopy)
-                                clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "Link copied to clipboard", Toast.LENGTH_SHORT).show()
-                            }
-                            .testTag("bookmark_viewer_copy_button")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = "Copy link",
-                                tint = textColor,
-                                modifier = Modifier.size(19.dp)
-                            )
-                        }
-                    }
-
-                    // 3. Refresh Link Preview & Metadata
-                    if (stack.sourceUrl.isNotBlank()) {
-                        Surface(
-                            shape = CircleShape,
-                            color = barSurface,
-                            shadowElevation = if (isDark) 2.dp else 1.dp,
-                            border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clickable { onRefreshMetadata?.invoke() }
-                                .testTag("bookmark_viewer_refresh_button")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Refresh,
-                                    contentDescription = "Refresh link preview and details",
-                                    tint = textColor,
-                                    modifier = Modifier.size(19.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // 4. Delete (monochrome)
-                    Surface(
-                        shape = CircleShape,
-                        color = barSurface,
-                        shadowElevation = if (isDark) 2.dp else 1.dp,
-                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clickable(onClick = onDelete)
-                            .testTag("bookmark_viewer_delete_button")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.DeleteOutline,
-                                contentDescription = "Delete bookmark",
-                                tint = textColor,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
                 }
-            }
 
-            // Upper Visual Area: Deck Card Stack & Interactive Controls
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp, bottom = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Deck Card Stack Container
+                // Major Screen Area: Deck Card Stack (Strict 9:14 Aspect Ratio, Taking Major Part of Screen)
                 Box(
                     modifier = Modifier
+                        .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .height(216.dp),
+                        .padding(horizontal = 20.dp, vertical = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Deck Card Layer 1 (Bottom peeking card)
-                    val backIndex2 = if (totalPages > 2) (pagerState.currentPage + 2) % totalPages else null
-                    val backItem2 = backIndex2?.let { effectiveMediaList.getOrNull(it) }
-
-                    Surface(
-                        shape = RoundedCornerShape(26.dp),
-                        color = PocketThemeColors.stackLayer1(isDark),
-                        border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.3f) else Color(0xFFD6D6D6)),
-                        shadowElevation = if (isDark) 2.dp else 1.dp,
-                        modifier = Modifier
-                            .fillMaxWidth(0.86f)
-                            .height(188.dp)
-                            .offset(y = (-14).dp)
+                    BoxWithConstraints(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        if (backItem2 != null) {
-                            val mediaPath2 = remember(backItem2) {
-                                if (backItem2.localUri.isNotBlank()) {
-                                    val f = File(backItem2.localUri.removePrefix("file://"))
-                                    if (f.exists()) f else backItem2.sourceUrl
-                                } else backItem2.sourceUrl
-                            }
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(mediaPath2)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.5f))
-                                )
-                            }
+                        val targetRatio = 9f / 14f // 0.642857 (narrower than poker)
+                        val maxDeckW = maxWidth
+                        val maxDeckH = maxHeight
+
+                        // Calculate deck container dimensions with exact 9:14 aspect ratio taking maximum screen area
+                        val (deckWidth, deckHeight) = if (maxDeckW / targetRatio <= maxDeckH) {
+                            maxDeckW to (maxDeckW / targetRatio)
+                        } else {
+                            (maxDeckH * targetRatio) to maxDeckH
                         }
-                    }
 
-                    // Deck Card Layer 2 (Middle peeking card)
-                    val backIndex1 = if (totalPages > 1) (pagerState.currentPage + 1) % totalPages else null
-                    val backItem1 = backIndex1?.let { effectiveMediaList.getOrNull(it) }
+                        Box(
+                            modifier = Modifier.size(width = deckWidth, height = deckHeight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Deck Card Layer 1 (Bottom peeking card, offset y = -14.dp, scale 0.88f)
+                            val backIndex2 = if (totalPages > 2) (pagerState.currentPage + 2) % totalPages else null
+                            val backItem2 = backIndex2?.let { effectiveMediaList.getOrNull(it) }
 
-                    Surface(
-                        shape = RoundedCornerShape(26.dp),
-                        color = PocketThemeColors.stackLayer2(isDark),
-                        border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFCECECE)),
-                        shadowElevation = if (isDark) 4.dp else 2.dp,
-                        modifier = Modifier
-                            .fillMaxWidth(0.93f)
-                            .height(196.dp)
-                            .offset(y = (-7).dp)
-                    ) {
-                        if (backItem1 != null) {
-                            val mediaPath1 = remember(backItem1) {
-                                if (backItem1.localUri.isNotBlank()) {
-                                    val f = File(backItem1.localUri.removePrefix("file://"))
-                                    if (f.exists()) f else backItem1.sourceUrl
-                                } else backItem1.sourceUrl
-                            }
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(mediaPath1)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(if (isDark) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.35f))
-                                )
-                            }
-                        }
-                    }
-
-                    // Deck Card Layer 3 (Top Front Card in Deck)
-                    Surface(
-                        shape = RoundedCornerShape(26.dp),
-                        color = PocketThemeColors.stackFront(isDark),
-                        shadowElevation = if (isDark) 10.dp else 6.dp,
-                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.8f) else dividerCol),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(205.dp)
-                    ) {
-                        if (effectiveMediaList.isNotEmpty()) {
-                            HorizontalPager(
-                                state = pagerState,
-                                modifier = Modifier.fillMaxSize()
-                            ) { page ->
-                                val item = effectiveMediaList[page]
-                                val mediaPath = remember(item) {
-                                    if (item.localUri.isNotBlank()) {
-                                        val f = File(item.localUri.removePrefix("file://"))
-                                        if (f.exists()) f else item.sourceUrl
-                                    } else item.sourceUrl
+                            Surface(
+                                shape = RoundedCornerShape(26.dp),
+                                color = PocketThemeColors.stackLayer1(isDark),
+                                border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.3f) else Color(0xFFD6D6D6)),
+                                shadowElevation = if (isDark) 2.dp else 1.dp,
+                                modifier = Modifier
+                                    .fillMaxWidth(0.88f)
+                                    .fillMaxHeight(0.96f)
+                                    .offset(y = (-14).dp)
+                            ) {
+                                if (backItem2 != null) {
+                                    val mediaPath2 = remember(backItem2) {
+                                        if (backItem2.localUri.isNotBlank()) {
+                                            val f = File(backItem2.localUri.removePrefix("file://"))
+                                            if (f.exists()) f else backItem2.sourceUrl
+                                        } else backItem2.sourceUrl
+                                    }
+                                    Box(modifier = Modifier.fillMaxSize()) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(mediaPath2)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .blur(20.dp)
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.5f))
+                                        )
+                                    }
                                 }
+                            }
 
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clickable { fullScreenMediaItem = item }
-                                        .testTag("deck_front_card_$page"),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    AsyncImage(
-                                        model = ImageRequest.Builder(context)
-                                            .data(mediaPath)
-                                            .crossfade(true)
-                                            .build(),
-                                        contentDescription = item.title.ifBlank { "Media $page" },
-                                        contentScale = ContentScale.Crop,
+                            // Deck Card Layer 2 (Middle peeking card, offset y = -7.dp, scale 0.94f)
+                            val backIndex1 = if (totalPages > 1) (pagerState.currentPage + 1) % totalPages else null
+                            val backItem1 = backIndex1?.let { effectiveMediaList.getOrNull(it) }
+
+                            Surface(
+                                shape = RoundedCornerShape(26.dp),
+                                color = PocketThemeColors.stackLayer2(isDark),
+                                border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFCECECE)),
+                                shadowElevation = if (isDark) 4.dp else 2.dp,
+                                modifier = Modifier
+                                    .fillMaxWidth(0.94f)
+                                    .fillMaxHeight(0.98f)
+                                    .offset(y = (-7).dp)
+                            ) {
+                                if (backItem1 != null) {
+                                    val mediaPath1 = remember(backItem1) {
+                                        if (backItem1.localUri.isNotBlank()) {
+                                            val f = File(backItem1.localUri.removePrefix("file://"))
+                                            if (f.exists()) f else backItem1.sourceUrl
+                                        } else backItem1.sourceUrl
+                                    }
+                                    Box(modifier = Modifier.fillMaxSize()) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(context)
+                                                .data(mediaPath1)
+                                                .crossfade(true)
+                                                .build(),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .blur(20.dp)
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(if (isDark) Color.Black.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.35f))
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Deck Card Layer 3 (Top Front Card in Deck - Exact 9:14 Container)
+                            Surface(
+                                shape = RoundedCornerShape(26.dp),
+                                color = PocketThemeColors.stackFront(isDark),
+                                shadowElevation = if (isDark) 12.dp else 6.dp,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.8f) else dividerCol),
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                if (effectiveMediaList.isNotEmpty()) {
+                                    HorizontalPager(
+                                        state = pagerState,
                                         modifier = Modifier.fillMaxSize()
-                                    )
+                                    ) { page ->
+                                        val item = effectiveMediaList[page]
+                                        val mediaPath = remember(item) {
+                                            if (item.localUri.isNotBlank()) {
+                                                val f = File(item.localUri.removePrefix("file://"))
+                                                if (f.exists()) f else item.sourceUrl
+                                            } else item.sourceUrl
+                                        }
 
-                                    // Top gradient shade for contrast with overlay icons
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(56.dp)
-                                            .align(Alignment.TopCenter)
-                                            .background(
-                                                Brush.verticalGradient(
-                                                    colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
-                                                )
-                                            )
-                                    )
-
-                                    // Media Badge (Image / Video & Page)
-                                    Row(
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .padding(14.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = Color.Black.copy(alpha = 0.72f),
-                                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
-                                            modifier = Modifier.height(26.dp)
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clickable { fullScreenMediaItem = item }
+                                                .testTag("deck_front_card_$page"),
+                                            contentAlignment = Alignment.Center
                                         ) {
+                                            // Blurred scrim area: media blurred at 24.dp fills the unfilled container areas
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(context)
+                                                    .data(mediaPath)
+                                                    .crossfade(true)
+                                                    .build(),
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .blur(24.dp)
+                                            )
+                                            // Soft translucent scrim tint for depth and focus
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(
+                                                        if (isDark) Color.Black.copy(alpha = 0.5f)
+                                                        else Color.Black.copy(alpha = 0.3f)
+                                                    )
+                                            )
+
+                                            // Full media fits into deck container so entire media is completely visible
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(context)
+                                                    .data(mediaPath)
+                                                    .crossfade(true)
+                                                    .build(),
+                                                contentDescription = item.title.ifBlank { "Media $page" },
+                                                contentScale = ContentScale.Fit,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(8.dp)
+                                            )
+
+                                            // Top gradient shade for contrast with overlay icons
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(56.dp)
+                                                    .align(Alignment.TopCenter)
+                                                    .background(
+                                                        Brush.verticalGradient(
+                                                            colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
+                                                        )
+                                                    )
+                                            )
+
+                                            // Media Badge (Image / Video & Page)
                                             Row(
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                modifier = Modifier
+                                                    .align(Alignment.TopStart)
+                                                    .padding(14.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Icon(
-                                                    imageVector = if (item.isVideo) Icons.Default.PlayArrow else Icons.Default.Image,
-                                                    contentDescription = null,
-                                                    tint = Color.White,
-                                                    modifier = Modifier.size(13.dp)
-                                                )
-                                                Spacer(Modifier.width(4.dp))
-                                                Text(
-                                                    text = if (item.isVideo) "VIDEO ${page + 1}/$totalPages" else "${page + 1}/$totalPages",
-                                                    style = MaterialTheme.typography.labelSmall.copy(
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    ),
-                                                    color = Color.White
-                                                )
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = Color.Black.copy(alpha = 0.72f),
+                                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                                                    modifier = Modifier.height(26.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = if (item.isVideo) Icons.Default.PlayArrow else Icons.Default.Image,
+                                                            contentDescription = null,
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(13.dp)
+                                                        )
+                                                        Spacer(Modifier.width(4.dp))
+                                                        Text(
+                                                            text = if (item.isVideo) "VIDEO ${page + 1}/$totalPages" else "${page + 1}/$totalPages",
+                                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            ),
+                                                            color = Color.White
+                                                        )
+                                                    }
+                                                }
                                             }
-                                        }
-                                    }
 
-                                    // Fullscreen Expand Button at Top Right
-                                    IconButton(
-                                        onClick = { fullScreenMediaItem = item },
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(8.dp)
-                                            .size(36.dp)
-                                            .background(Color.Black.copy(alpha = 0.65f), CircleShape)
-                                            .testTag("deck_fullscreen_button_$page")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Fullscreen,
-                                            contentDescription = "Expand fullscreen",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            // Fallback web illustration if no media
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.linearGradient(
-                                            colors = PocketThemeColors.webGradient(isDark)
-                                        )
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    if (faviconUrl.isNotBlank()) {
-                                        Surface(
-                                            shape = RoundedCornerShape(16.dp),
-                                            color = PocketThemeColors.faviconSurface(isDark),
-                                            shadowElevation = 3.dp,
-                                            modifier = Modifier.size(52.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                AsyncImage(
-                                                    model = ImageRequest.Builder(context)
-                                                        .data(faviconUrl)
-                                                        .crossfade(true)
-                                                        .build(),
-                                                    contentDescription = stack.sourceDomain,
-                                                    modifier = Modifier.size(34.dp)
+                                            // Fullscreen Expand Button at Top Right
+                                            IconButton(
+                                                onClick = { fullScreenMediaItem = item },
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(8.dp)
+                                                    .size(36.dp)
+                                                    .background(Color.Black.copy(alpha = 0.65f), CircleShape)
+                                                    .testTag("deck_fullscreen_button_$page")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Fullscreen,
+                                                    contentDescription = "Expand fullscreen",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(18.dp)
                                                 )
                                             }
                                         }
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Default.Bookmark,
-                                            contentDescription = null,
-                                            tint = textColor,
-                                            modifier = Modifier.size(44.dp)
-                                        )
                                     }
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(
-                                        text = stack.sourceDomain.ifBlank { "Bookmark Preview" },
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = textColor
-                                    )
+                                } else {
+                                    // Fallback web illustration if no media
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(
+                                                Brush.linearGradient(
+                                                    colors = PocketThemeColors.webGradient(isDark)
+                                                )
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            if (faviconUrl.isNotBlank()) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(16.dp),
+                                                    color = PocketThemeColors.faviconSurface(isDark),
+                                                    shadowElevation = 3.dp,
+                                                    modifier = Modifier.size(52.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        AsyncImage(
+                                                            model = ImageRequest.Builder(context)
+                                                                .data(faviconUrl)
+                                                                .crossfade(true)
+                                                                .build(),
+                                                            contentDescription = stack.sourceDomain,
+                                                            modifier = Modifier.size(34.dp)
+                                                        )
+                                                    }
+                                                }
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.Bookmark,
+                                                    contentDescription = null,
+                                                    tint = textColor,
+                                                    modifier = Modifier.size(44.dp)
+                                                )
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                text = stack.sourceDomain.ifBlank { "Bookmark Preview" },
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = textColor
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
-
-                Spacer(Modifier.height(10.dp))
 
                 // Interactive Pagination Pill with Deck Flipping Controls
                 Surface(
@@ -1726,7 +1787,9 @@ fun PocketBookmarkViewerPage(
                     color = barSurface,
                     border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                     shadowElevation = if (isDark) 2.dp else 1.dp,
-                    modifier = Modifier.height(34.dp)
+                    modifier = Modifier
+                        .height(34.dp)
+                        .padding(bottom = 2.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 6.dp),
@@ -1797,332 +1860,441 @@ fun PocketBookmarkViewerPage(
                 }
             }
 
-            Spacer(Modifier.height(4.dp))
-
-            // Bottom Drawer / Bottom Sheet: anchored to and starts from bottom, filling remaining height
-            Surface(
-                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                color = PocketThemeColors.drawerSurface(isDark),
-                tonalElevation = 6.dp,
-                shadowElevation = 12.dp,
-                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
+            // Resizable & Dismissable Drawer (Anchored from Bottom)
+            AnimatedVisibility(
+                visible = !isDrawerDismissed,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                Column(
+                Surface(
+                    shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp),
+                    color = PocketThemeColors.drawerSurface(isDark),
+                    tonalElevation = 6.dp,
+                    shadowElevation = 16.dp,
+                    border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
                     modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .fillMaxWidth()
+                        .height(animatedDrawerHeight)
                 ) {
-                    // Drag Handle Pill (with swipe down to dismiss drawer gesture)
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .padding(vertical = 2.dp)
-                            .size(width = 80.dp, height = 20.dp)
-                            .pointerInput(Unit) {
-                                detectVerticalDragGestures { _, dragAmount ->
-                                    if (dragAmount > 15f) {
-                                        onBack()
-                                    }
-                                }
-                            },
-                        contentAlignment = Alignment.Center
+                            .fillMaxSize()
+                            .navigationBarsPadding()
                     ) {
-                        Box(
+                        // Resizable Drag Header & Controls
+                        Row(
                             modifier = Modifier
-                                .width(44.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(PocketThemeColors.drawerHandle(isDark))
-                        )
-                    }
+                                .fillMaxWidth()
+                                .pointerInput(Unit) {
+                                    detectVerticalDragGestures(
+                                        onVerticalDrag = { change, dragAmount ->
+                                            change.consume()
+                                            val current = userDrawerHeightDp ?: if (isDrawerExpanded) expandedDrawerHeight else compactDrawerHeight
+                                            val newHeight = (current - dragAmount.dp).coerceIn(minDrawerHeight, maxDrawerHeight)
+                                            userDrawerHeightDp = newHeight
+                                        },
+                                        onDragEnd = {
+                                            val current = userDrawerHeightDp ?: compactDrawerHeight
+                                            if (current < 95.dp) {
+                                                isDrawerDismissed = true
+                                                userDrawerHeightDp = null
+                                                isDrawerExpanded = false
+                                            } else if (current > 240.dp) {
+                                                isDrawerExpanded = true
+                                                userDrawerHeightDp = null
+                                            } else {
+                                                isDrawerExpanded = false
+                                                userDrawerHeightDp = null
+                                            }
+                                        }
+                                    )
+                                }
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Expand / Collapse Resize Toggle
+                            IconButton(
+                                onClick = {
+                                    isDrawerExpanded = !isDrawerExpanded
+                                    userDrawerHeightDp = null
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("drawer_resize_toggle")
+                            ) {
+                                Icon(
+                                    imageVector = if (isDrawerExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                    contentDescription = if (isDrawerExpanded) "Collapse drawer" else "Expand drawer",
+                                    tint = textColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
 
-                    Spacer(Modifier.height(2.dp))
+                            // Centered Drag Handle
+                            Box(
+                                modifier = Modifier
+                                    .width(44.dp)
+                                    .height(4.dp)
+                                    .clip(CircleShape)
+                                    .background(PocketThemeColors.drawerHandle(isDark))
+                            )
 
-                    // 0. Site Media Collection Strip
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = barSurface,
-                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("site_media_collection_card")
-                    ) {
+                            // Dismiss Button [✕]
+                            IconButton(
+                                onClick = {
+                                    isDrawerDismissed = true
+                                    userDrawerHeightDp = null
+                                    isDrawerExpanded = false
+                                },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .testTag("drawer_dismiss_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Dismiss drawer",
+                                    tint = secondaryText,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        // Scrollable Drawer Content
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp)
+                                .weight(1f)
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 18.dp, vertical = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            // 0. Site Media Collection Strip
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = barSurface,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("site_media_collection_card")
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = Icons.Default.Collections,
-                                        contentDescription = null,
-                                        tint = textColor,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                    Text(
-                                        text = "Site Media",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = textColor
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = PocketThemeColors.tagChipBg(isDark),
-                                        modifier = Modifier.height(22.dp)
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Box(
-                                            contentAlignment = Alignment.Center,
-                                            modifier = Modifier.padding(horizontal = 8.dp)
-                                        ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = Icons.Default.Collections,
+                                                contentDescription = null,
+                                                tint = textColor,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(Modifier.width(8.dp))
                                             Text(
-                                                text = "${effectiveMediaList.size}",
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                text = "Site Media",
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                                 color = textColor
                                             )
+                                            Spacer(Modifier.width(8.dp))
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = PocketThemeColors.tagChipBg(isDark),
+                                                modifier = Modifier.height(20.dp)
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "${effectiveMediaList.size}",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = textColor
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        if (stack.sourceUrl.isNotBlank()) {
+                                            IconButton(
+                                                onClick = { onFetchSiteMedia?.invoke() },
+                                                modifier = Modifier
+                                                    .size(28.dp)
+                                                    .testTag("scan_site_media_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Sync,
+                                                    contentDescription = "Scan site for media",
+                                                    tint = secondaryText,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         }
                                     }
-                                }
 
-                                if (stack.sourceUrl.isNotBlank()) {
-                                    IconButton(
-                                        onClick = { onFetchSiteMedia?.invoke() },
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .testTag("scan_site_media_button")
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Sync,
-                                            contentDescription = "Scan site for media",
-                                            tint = secondaryText,
-                                            modifier = Modifier.size(18.dp)
+                                    Spacer(Modifier.height(8.dp))
+
+                                    if (effectiveMediaList.isNotEmpty()) {
+                                        LazyRow(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            itemsIndexed(effectiveMediaList) { index, item ->
+                                                val isSelected = (index == pagerState.currentPage)
+                                                val mediaPath = remember(item) {
+                                                    if (item.localUri.isNotBlank()) {
+                                                        val f = File(item.localUri.removePrefix("file://"))
+                                                        if (f.exists()) f else item.sourceUrl
+                                                    } else item.sourceUrl
+                                                }
+
+                                                Surface(
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = PocketThemeColors.thumbnailBg(isDark),
+                                                    border = BorderStroke(
+                                                        width = if (isSelected) 2.dp else 1.dp,
+                                                        color = if (isSelected) textColor else dividerCol
+                                                    ),
+                                                    shadowElevation = if (isSelected) 3.dp else 0.dp,
+                                                    modifier = Modifier
+                                                        .size(width = 80.dp, height = 66.dp)
+                                                        .clickable {
+                                                            scope.launch {
+                                                                pagerState.animateScrollToPage(index)
+                                                            }
+                                                        }
+                                                        .testTag("site_media_thumbnail_$index")
+                                                ) {
+                                                    Box(modifier = Modifier.fillMaxSize()) {
+                                                        AsyncImage(
+                                                            model = ImageRequest.Builder(context)
+                                                                .data(mediaPath)
+                                                                .crossfade(true)
+                                                                .build(),
+                                                            contentDescription = item.title,
+                                                            contentScale = ContentScale.Crop,
+                                                            modifier = Modifier.fillMaxSize()
+                                                        )
+
+                                                        // Pill tag
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.BottomEnd)
+                                                                .padding(3.dp)
+                                                                .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = if (item.isVideo) "VID" else "#${index + 1}",
+                                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                                color = Color.White
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "No site media detected yet. Tap refresh to inspect web page.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = secondaryText,
+                                            modifier = Modifier.padding(vertical = 4.dp)
                                         )
                                     }
                                 }
                             }
 
-                            Spacer(Modifier.height(10.dp))
+                            // 1. Time Row
+                            PocketDetailCardRow(
+                                icon = Icons.Default.CalendarToday,
+                                label = "Time",
+                                value = dateFormatted,
+                                textColor = textColor,
+                                secondaryText = secondaryText,
+                                barSurface = barSurface,
+                                dividerCol = dividerCol
+                            )
 
-                            if (effectiveMediaList.isNotEmpty()) {
-                                LazyRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            // 2. Source Row (Clickable to open link)
+                            PocketDetailCardRow(
+                                icon = Icons.Default.Link,
+                                label = "Source",
+                                value = stack.sourceUrl.ifBlank { stack.sourceDomain.ifBlank { "No source URL" } },
+                                trailingIcon = if (stack.sourceUrl.isNotBlank()) Icons.AutoMirrored.Filled.OpenInNew else null,
+                                onClick = if (stack.sourceUrl.isNotBlank()) { { onOpenBrowser(stack.sourceUrl) } } else null,
+                                textColor = textColor,
+                                secondaryText = secondaryText,
+                                barSurface = barSurface,
+                                dividerCol = dividerCol
+                            )
+
+                            // 3. Note Row (Clickable to edit note)
+                            PocketDetailCardRow(
+                                icon = Icons.Default.Description,
+                                label = "Note",
+                                value = stack.description.ifBlank { "Tap to add note" },
+                                trailingIcon = Icons.Default.Edit,
+                                onClick = onEditNote,
+                                textColor = textColor,
+                                secondaryText = secondaryText,
+                                barSurface = barSurface,
+                                dividerCol = dividerCol
+                            )
+
+                            // 4. Tags Row
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = barSurface,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    itemsIndexed(effectiveMediaList) { index, item ->
-                                        val isSelected = (index == pagerState.currentPage)
-                                        val mediaPath = remember(item) {
-                                            if (item.localUri.isNotBlank()) {
-                                                val f = File(item.localUri.removePrefix("file://"))
-                                                if (f.exists()) f else item.sourceUrl
-                                            } else item.sourceUrl
-                                        }
-
-                                        Surface(
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = PocketThemeColors.thumbnailBg(isDark),
-                                            border = BorderStroke(
-                                                width = if (isSelected) 2.dp else 1.dp,
-                                                color = if (isSelected) textColor else dividerCol
-                                            ),
-                                            shadowElevation = if (isSelected) 3.dp else 0.dp,
-                                            modifier = Modifier
-                                                .size(width = 86.dp, height = 72.dp)
-                                                .clickable {
-                                                    scope.launch {
-                                                        pagerState.animateScrollToPage(index)
-                                                    }
-                                                }
-                                                .testTag("site_media_thumbnail_$index")
-                                        ) {
-                                            Box(modifier = Modifier.fillMaxSize()) {
-                                                AsyncImage(
-                                                    model = ImageRequest.Builder(context)
-                                                        .data(mediaPath)
-                                                        .crossfade(true)
-                                                        .build(),
-                                                    contentDescription = item.title,
-                                                    contentScale = ContentScale.Crop,
-                                                    modifier = Modifier.fillMaxSize()
-                                                )
-
-                                                // Pill tag
+                                    Icon(
+                                        imageVector = Icons.Default.Sell,
+                                        contentDescription = null,
+                                        tint = textColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(
+                                        text = "Tags",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = textColor
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        derivedTags.forEach { tag ->
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = PocketThemeColors.tagChipBg(isDark),
+                                                border = BorderStroke(0.5.dp, if (isDark) dividerCol else Color(0xFFDDDDDD)),
+                                                modifier = Modifier.height(28.dp)
+                                            ) {
                                                 Box(
-                                                    modifier = Modifier
-                                                        .align(Alignment.BottomEnd)
-                                                        .padding(4.dp)
-                                                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
-                                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.padding(horizontal = 10.dp)
                                                 ) {
                                                     Text(
-                                                        text = if (item.isVideo) "VID" else "#${index + 1}",
-                                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
-                                                        color = Color.White
+                                                        text = tag,
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                                        color = textColor
                                                     )
                                                 }
                                             }
                                         }
                                     }
                                 }
-                            } else {
-                                Text(
-                                    text = "No site media detected yet. Tap refresh to inspect web page.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = secondaryText,
-                                    modifier = Modifier.padding(vertical = 4.dp)
-                                )
                             }
-                        }
-                    }
 
-                    // 1. Time Row
-                    PocketDetailCardRow(
-                        icon = Icons.Default.CalendarToday,
-                        label = "Time",
-                        value = dateFormatted,
-                        textColor = textColor,
-                        secondaryText = secondaryText,
-                        barSurface = barSurface,
-                        dividerCol = dividerCol
-                    )
-
-                    // 2. Source Row (Clickable to open link)
-                    PocketDetailCardRow(
-                        icon = Icons.Default.Link,
-                        label = "Source",
-                        value = stack.sourceUrl.ifBlank { stack.sourceDomain.ifBlank { "No source URL" } },
-                        trailingIcon = if (stack.sourceUrl.isNotBlank()) Icons.AutoMirrored.Filled.OpenInNew else null,
-                        onClick = if (stack.sourceUrl.isNotBlank()) { { onOpenBrowser(stack.sourceUrl) } } else null,
-                        textColor = textColor,
-                        secondaryText = secondaryText,
-                        barSurface = barSurface,
-                        dividerCol = dividerCol
-                    )
-
-                    // 3. Note Row (Clickable to edit note)
-                    PocketDetailCardRow(
-                        icon = Icons.Default.Description,
-                        label = "Note",
-                        value = stack.description.ifBlank { "Tap to add note" },
-                        trailingIcon = Icons.Default.Edit,
-                        onClick = onEditNote,
-                        textColor = textColor,
-                        secondaryText = secondaryText,
-                        barSurface = barSurface,
-                        dividerCol = dividerCol
-                    )
-
-                    // 4. Tags Row
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = barSurface,
-                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Sell,
-                                contentDescription = null,
-                                tint = textColor,
-                                modifier = Modifier.size(20.dp)
+                            // 5. Title Row
+                            PocketDetailCardRow(
+                                icon = Icons.Default.ShortText,
+                                label = "Title",
+                                value = stack.title.ifBlank { "Untitled Bookmark" },
+                                textColor = textColor,
+                                secondaryText = secondaryText,
+                                barSurface = barSurface,
+                                dividerCol = dividerCol
                             )
-                            Spacer(Modifier.width(12.dp))
-                            Text(
-                                text = "Tags",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                color = textColor
-                            )
-                            Spacer(Modifier.width(16.dp))
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
+
+                            // 6. Description Row
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = barSurface,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                derivedTags.forEach { tag ->
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = PocketThemeColors.tagChipBg(isDark),
-                                        border = BorderStroke(0.5.dp, if (isDark) dividerCol else Color(0xFFDDDDDD)),
-                                        modifier = Modifier.height(28.dp)
-                                    ) {
-                                        Box(
-                                            contentAlignment = Alignment.Center,
-                                            modifier = Modifier.padding(horizontal = 10.dp)
-                                        ) {
-                                            Text(
-                                                text = tag,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                                                color = textColor
-                                            )
-                                        }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Subject,
+                                            contentDescription = null,
+                                            tint = textColor,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(Modifier.width(12.dp))
+                                        Text(
+                                            text = "Description",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = textColor
+                                        )
                                     }
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = if (stack.description.isNotBlank()) stack.description else "No additional description provided.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (stack.description.isNotBlank()) textColor else secondaryText
+                                    )
                                 }
                             }
+
+                            Spacer(Modifier.height(20.dp))
                         }
                     }
+                }
+            }
 
-                    // 5. Title Row
-                    PocketDetailCardRow(
-                        icon = Icons.Default.ShortText,
-                        label = "Title",
-                        value = stack.title.ifBlank { "Untitled Bookmark" },
-                        textColor = textColor,
-                        secondaryText = secondaryText,
-                        barSurface = barSurface,
-                        dividerCol = dividerCol
-                    )
-
-                    // 6. Description Row
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = barSurface,
-                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
-                        modifier = Modifier.fillMaxWidth()
+            // Floating capsule to re-open drawer when dismissed
+            AnimatedVisibility(
+                visible = isDrawerDismissed,
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut() + slideOutVertically { it },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 14.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = barSurface,
+                    border = BorderStroke(1.dp, dividerCol),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier
+                        .height(42.dp)
+                        .clickable {
+                            isDrawerDismissed = false
+                            isDrawerExpanded = false
+                            userDrawerHeightDp = null
+                        }
+                        .testTag("reopen_drawer_button")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Subject,
-                                    contentDescription = null,
-                                    tint = textColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    text = "Description",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = textColor
-                                )
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = if (stack.description.isNotBlank()) stack.description else "No additional description provided.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (stack.description.isNotBlank()) textColor else secondaryText
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowUp,
+                            contentDescription = null,
+                            tint = textColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Details & Media (${effectiveMediaList.size})",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = textColor
+                        )
                     }
-
-                    Spacer(Modifier.height(20.dp))
                 }
             }
         }
