@@ -285,6 +285,47 @@ fun DirectBrowserView(
 
             }
 
+            val isChallengeActive = remember(pageTitle, currentUrl) {
+                BotDetectionMitigator.isBotChallenge(pageTitle, currentUrl)
+            }
+            AnimatedVisibility(
+                visible = isChallengeActive,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, start = 16.dp, end = 16.dp, bottom = 8.dp)
+            ) {
+                Surface(
+                    color = Color(0xFFFEF3C7),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("browser_bot_challenge_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = Color(0xFF92400E),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Security Verification: Tap captcha checkbox if prompted to continue.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF92400E),
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            }
+
 
             // The browser viewport uses the remaining height beneath the toolbar.
             Box(
@@ -544,45 +585,7 @@ fun DirectBrowserView(
                     )
                 }
 
-            val isChallengeActive = remember(pageTitle, currentUrl) {
-                BotDetectionMitigator.isBotChallenge(pageTitle, currentUrl)
-            }
-            AnimatedVisibility(
-                visible = isChallengeActive,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(top = 12.dp, start = 16.dp, end = 16.dp)
-            ) {
-                Surface(
-                    color = Color(0xFFFEF3C7),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("browser_bot_challenge_banner")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = null,
-                            tint = Color(0xFF92400E),
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "Security Verification: Tap captcha checkbox if prompted to continue.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF92400E),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
+
 
             }
 
