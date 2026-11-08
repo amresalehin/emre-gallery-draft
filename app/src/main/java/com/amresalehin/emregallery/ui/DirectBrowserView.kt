@@ -53,6 +53,7 @@ import java.net.URL
 fun DirectBrowserView(
     initialUrl: String = "",
     onClose: (() -> Unit)? = null,
+    onMenuClick: (() -> Unit)? = null,
     onUrlChange: ((String) -> Unit)? = null,
     onPageTitleChanged: ((String) -> Unit)? = null,
     onMediaExtracted: (ScrapedMediaItem) -> Unit,
@@ -203,7 +204,11 @@ fun DirectBrowserView(
                 onAddressChange = { addressInput = it },
                 onNavigate = { navigateToUrl(it) },
                 onHamburgerClick = {
-                    showTabsSheet = true
+                    if (onMenuClick != null) {
+                        onMenuClick.invoke()
+                    } else {
+                        showTabsSheet = true
+                    }
                 },
                 onDiscoveredMediaClick = {
                     onSwitchToMediaTab()
