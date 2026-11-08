@@ -163,6 +163,14 @@ fun SettingsScreen(
         "model".contains(query, ignoreCase = true) ||
         "provider".contains(query, ignoreCase = true)
 
+    val matchesTagging = query.isBlank() ||
+        "tag".contains(query, ignoreCase = true) ||
+        "tagging".contains(query, ignoreCase = true) ||
+        "ai tagging".contains(query, ignoreCase = true) ||
+        "labels".contains(query, ignoreCase = true) ||
+        "smart vision".contains(query, ignoreCase = true) ||
+        "keywords".contains(query, ignoreCase = true)
+
     val otherEntries = listOf(
         "About" to Icons.Default.Info
     ).filter { it.first.contains(query, ignoreCase = true) }
@@ -309,7 +317,30 @@ fun SettingsScreen(
                 }
             }
 
-            // 4. AI CONFIGURATION CARD
+            // 4. AI IMAGE TAGGING CARD (Separate card with Face card design & UX)
+            if (matchesTagging) {
+                item(key = "ai_tagging_card") {
+                    AiTaggingCard(
+                        totalPhotos = uiState.totalPhotos,
+                        taggingState = uiState.aiTagging,
+                        prefs = actualPrefs,
+                        countsReady = uiState.countsReady,
+                        cardBackground = cardBackground,
+                        cardBorder = cardBorder,
+                        numberFormat = numberFormat,
+                        onStartTagging = { rescanAll ->
+                            indexingViewModel.startAiTagging(rescanAll = rescanAll)
+                        },
+                        onStopTagging = {
+                            indexingViewModel.stopAiTagging()
+                        },
+                        initiallyExpanded = query.isNotBlank() && matchesTagging,
+                        onShowSnackbar = onShowSnackbar
+                    )
+                }
+            }
+
+            // 5. AI CONFIGURATION CARD
             if (matchesAi) {
                 item(key = "ai_configuration_card") {
                     AiConfigurationCard(
@@ -320,7 +351,7 @@ fun SettingsScreen(
                 }
             }
 
-            // 5. OTHER SETTINGS TILES ("About")
+            // 6. OTHER SETTINGS TILES ("About")
             items(otherEntries, key = { it.first }) { (label, icon) ->
                 AestheticSettingsTile(
                     label = label,
@@ -333,7 +364,7 @@ fun SettingsScreen(
             }
 
             // Empty search state
-            if (!matchesTheme && !matchesOcr && !matchesFace && !matchesAi && otherEntries.isEmpty() && query.isNotBlank()) {
+            if (!matchesTheme && !matchesOcr && !matchesFace && !matchesTagging && !matchesAi && otherEntries.isEmpty() && query.isNotBlank()) {
                 item {
                     Box(
                         modifier = Modifier

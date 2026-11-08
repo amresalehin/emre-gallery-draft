@@ -67,5 +67,25 @@ class SettingsScreenCardsTest {
         assertTrue(isCardExpanded("ocr", matches = true))
         assertFalse(isCardExpanded("ocr", matches = false))
         assertTrue(isCardExpanded("face", matches = true))
+        assertTrue(isCardExpanded("tag", matches = true))
+    }
+
+    @Test
+    fun testSettingsSearchQueryMatchingTagging() {
+        fun matchesTagging(query: String): Boolean {
+            return query.isBlank() ||
+                "tag".contains(query, ignoreCase = true) ||
+                "tagging".contains(query, ignoreCase = true) ||
+                "ai tagging".contains(query, ignoreCase = true) ||
+                "labels".contains(query, ignoreCase = true) ||
+                "smart vision".contains(query, ignoreCase = true) ||
+                "keywords".contains(query, ignoreCase = true)
+        }
+
+        assertTrue(matchesTagging(""))
+        assertTrue(matchesTagging("tag"))
+        assertTrue(matchesTagging("tagging"))
+        assertTrue(matchesTagging("smart vision"))
+        assertFalse(matchesTagging("theme"))
     }
 }
