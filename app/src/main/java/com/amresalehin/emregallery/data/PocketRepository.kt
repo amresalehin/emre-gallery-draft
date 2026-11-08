@@ -2,17 +2,26 @@ package com.amresalehin.emregallery.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
  * Dedicated, independent repository for Pocket bookmarks and saved web reading materials.
  * Decoupled completely from Downloader and MediaInbox functionality.
+ * Supports automatic background fetching of link titles, descriptions, and previews.
  */
-class PocketRepository(private val context: Context) {
+class PocketRepository(
+    private val context: Context,
+    private val coroutineScope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("pocket_bookmarks_prefs", Context.MODE_PRIVATE)
 
@@ -43,11 +52,14 @@ class PocketRepository(private val context: Context) {
                         sourceUrl = obj.optString("sourceUrl", ""),
                         items = emptyList(), // Pocket bookmarks are strictly decoupled from downloaded media files
                         timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis()),
-                        description = obj.optString("description", "")
+                        description = obj.optString("description", ""),
+                        previewImageUrl = obj.optString("previewImageUrl", "")
                     )
                 )
             }
             _bookmarks.value = list
+            // Automatically fetch missing metadata (titles, descriptions, previews) for bookmarks
+            autoFetchMissingMetadata()
         } catch (e: Exception) {
             _bookmarks.value = emptyList()
         }
@@ -74,7 +86,8 @@ class PocketRepository(private val context: Context) {
                                 sourceUrl = obj.optString("sourceUrl", ""),
                                 items = emptyList(),
                                 timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis()),
-                                description = obj.optString("description", "")
+                                description = obj.optString("description", ""),
+                                previewImageUrl = obj.optString("previewImageUrl", "")
                             )
                         )
                     }
@@ -82,6 +95,7 @@ class PocketRepository(private val context: Context) {
                 if (list.isNotEmpty()) {
                     _bookmarks.value = list
                     persist()
+                    autoFetchMissingMetadata()
                 }
             }
         } catch (_: Exception) {}
@@ -98,6 +112,7 @@ class PocketRepository(private val context: Context) {
                     put("sourceUrl", bookmark.sourceUrl)
                     put("timestampMillis", bookmark.timestampMillis)
                     put("description", bookmark.description)
+                    put("previewImageUrl", bookmark.previewImageUrl)
                 }
                 jsonArray.put(obj)
             }
@@ -105,11 +120,18 @@ class PocketRepository(private val context: Context) {
         } catch (_: Exception) {}
     }
 
+    /**
+     * Adds a bookmark to Pocket.
+     * When autoFetchMetadata is true, automatically queries the web page in the background
+     * for its title, description, and link preview image, then smoothly updates the bookmark.
+     */
     fun addBookmark(
         title: String,
         url: String,
         domain: String = "",
-        description: String = ""
+        description: String = "",
+        previewImageUrl: String = "",
+        autoFetchMetadata: Boolean = true
     ): MediaInboxStack {
         val cleanUrl = url.trim()
         val cleanDomain = domain.ifBlank { MediaClassifier.cleanDomainFromUrl(cleanUrl) }
@@ -120,14 +142,119 @@ class PocketRepository(private val context: Context) {
             sourceUrl = cleanUrl,
             items = emptyList(),
             timestampMillis = System.currentTimeMillis(),
-            description = description
+            description = description,
+            previewImageUrl = previewImageUrl
         )
         val updated = listOf(bookmark) + _bookmarks.value.filter {
             it.id != bookmark.id && (it.sourceUrl.isBlank() || it.sourceUrl != cleanUrl)
         }
         _bookmarks.value = updated
         persist()
+
+        if (autoFetchMetadata && cleanUrl.isNotBlank()) {
+            fetchAndApplyMetadata(bookmark.id, cleanUrl)
+        }
+
         return bookmark
+    }
+
+    /**
+     * Automatically fetches metadata (title, description, preview image) for a bookmark and updates it.
+     */
+    fun fetchAndApplyMetadata(bookmarkId: String, url: String = "") {
+        coroutineScope.launch {
+            try {
+                val current = _bookmarks.value.find { it.id == bookmarkId } ?: return@launch
+                val targetUrl = url.ifBlank { current.sourceUrl }
+                if (targetUrl.isBlank()) return@launch
+
+                val meta = LinkMetadataFetcher.fetch(targetUrl)
+                val latest = _bookmarks.value.find { it.id == bookmarkId } ?: return@launch
+
+                val cleanDomain = latest.sourceDomain.ifBlank { MediaClassifier.cleanDomainFromUrl(targetUrl) }
+                val isTitleDefault = latest.title.isBlank() ||
+                        latest.title.equals(cleanDomain, ignoreCase = true) ||
+                        latest.title.equals(targetUrl, ignoreCase = true) ||
+                        latest.title == "Untitled Bookmark"
+
+                val newTitle = if (isTitleDefault && meta.title.isNotBlank()) meta.title else latest.title
+                val newDesc = if (latest.description.isBlank() && meta.description.isNotBlank()) meta.description else latest.description
+                val newPreview = if (latest.previewImageUrl.isBlank() && meta.previewImageUrl.isNotBlank()) meta.previewImageUrl else latest.previewImageUrl
+                val newDomain = if (latest.sourceDomain.isBlank() && meta.domain.isNotBlank()) meta.domain else latest.sourceDomain
+
+                if (newTitle != latest.title || newDesc != latest.description || newPreview != latest.previewImageUrl || newDomain != latest.sourceDomain) {
+                    val updated = latest.copy(
+                        title = newTitle,
+                        description = newDesc,
+                        previewImageUrl = newPreview,
+                        sourceDomain = newDomain
+                    )
+                    updateBookmark(updated)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching metadata for bookmark $bookmarkId", e)
+            }
+        }
+    }
+
+    /**
+     * Re-fetches the latest title, description, and preview from the web for a given bookmark.
+     */
+    fun refreshMetadata(bookmarkId: String) {
+        coroutineScope.launch {
+            try {
+                val latest = _bookmarks.value.find { it.id == bookmarkId } ?: return@launch
+                if (latest.sourceUrl.isBlank()) return@launch
+
+                val meta = LinkMetadataFetcher.fetch(latest.sourceUrl)
+                val updated = latest.copy(
+                    title = meta.title.ifBlank { latest.title },
+                    description = meta.description.ifBlank { latest.description },
+                    previewImageUrl = meta.previewImageUrl.ifBlank { latest.previewImageUrl },
+                    sourceDomain = meta.domain.ifBlank { latest.sourceDomain }
+                )
+                updateBookmark(updated)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error refreshing metadata for bookmark $bookmarkId", e)
+            }
+        }
+    }
+
+    /**
+     * Checks all stored bookmarks and automatically fetches any missing previews or descriptions.
+     */
+    fun autoFetchMissingMetadata() {
+        coroutineScope.launch {
+            val missing = _bookmarks.value.filter {
+                it.sourceUrl.isNotBlank() && (it.previewImageUrl.isBlank() || it.description.isBlank())
+            }
+            for (bm in missing) {
+                try {
+                    val meta = LinkMetadataFetcher.fetch(bm.sourceUrl)
+                    val current = _bookmarks.value.find { it.id == bm.id } ?: continue
+
+                    val cleanDomain = current.sourceDomain.ifBlank { MediaClassifier.cleanDomainFromUrl(bm.sourceUrl) }
+                    val isTitleDefault = current.title.isBlank() ||
+                            current.title.equals(cleanDomain, ignoreCase = true) ||
+                            current.title.equals(bm.sourceUrl, ignoreCase = true) ||
+                            current.title == "Untitled Bookmark"
+
+                    val newTitle = if (isTitleDefault && meta.title.isNotBlank()) meta.title else current.title
+                    val newDesc = if (current.description.isBlank() && meta.description.isNotBlank()) meta.description else current.description
+                    val newPreview = if (current.previewImageUrl.isBlank() && meta.previewImageUrl.isNotBlank()) meta.previewImageUrl else current.previewImageUrl
+
+                    if (newTitle != current.title || newDesc != current.description || newPreview != current.previewImageUrl) {
+                        updateBookmark(
+                            current.copy(
+                                title = newTitle,
+                                description = newDesc,
+                                previewImageUrl = newPreview
+                            )
+                        )
+                    }
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     fun updateBookmark(updated: MediaInboxStack) {
@@ -151,6 +278,7 @@ class PocketRepository(private val context: Context) {
     }
 
     companion object {
+        private const val TAG = "PocketRepository"
         private const val KEY_BOOKMARKS_JSON = "pocket_bookmarks_json"
 
         @Volatile

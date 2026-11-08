@@ -416,6 +416,7 @@ fun BrowserTopBar(
     onNewTabClick: () -> Unit,
     onReloadClick: () -> Unit,
     onPinCurrentSite: () -> Unit,
+    onSaveToPocket: (() -> Unit)? = null,
     onShareClick: () -> Unit,
     onDesktopToggle: (Boolean) -> Unit,
     isDesktopMode: Boolean = false,
@@ -715,6 +716,16 @@ fun BrowserTopBar(
                             onPinCurrentSite()
                         }
                     )
+                    if (onSaveToPocket != null) {
+                        DropdownMenuItem(
+                            text = { Text("Save to Pocket", color = BrowserThemeColors.textPrimary(isDark), fontWeight = FontWeight.Medium) },
+                            leadingIcon = { Icon(Icons.Default.Bookmark, contentDescription = null, tint = BrowserThemeColors.iconTint(isDark)) },
+                            onClick = {
+                                showMenu = false
+                                onSaveToPocket()
+                            }
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Share link", color = BrowserThemeColors.textPrimary(isDark), fontWeight = FontWeight.Medium) },
                         leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = BrowserThemeColors.iconTint(isDark)) },

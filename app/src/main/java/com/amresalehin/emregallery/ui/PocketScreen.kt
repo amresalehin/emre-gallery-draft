@@ -67,6 +67,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.amresalehin.emregallery.data.LinkMetadataFetcher
 import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.PocketRepository
@@ -464,7 +465,8 @@ fun PocketScreen(
                 .fillMaxSize()
                 .zIndex(50f)
         ) {
-            selectedStackForDetail?.let { stack ->
+            val activeDetailStack = stacks.find { it.id == selectedStackForDetail?.id } ?: selectedStackForDetail
+            activeDetailStack?.let { stack ->
                 PocketBookmarkViewerPage(
                     stack = stack,
                     onBack = {
@@ -484,6 +486,12 @@ fun PocketScreen(
                         }
                     },
                     onEditNote = { editingStack = stack },
+                    onRefreshMetadata = {
+                        pocketRepo.refreshMetadata(stack.id)
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Refreshing link info & preview...")
+                        }
+                    },
                     isDark = isDark,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -513,11 +521,12 @@ fun PocketScreen(
         if (showAddBookmarkDialog) {
             AddBookmarkDialog(
                 onDismiss = { showAddBookmarkDialog = false },
-                onSave = { title, url, description ->
+                onSave = { title, url, description, previewUrl ->
                     val added = pocketRepo.addBookmark(
                         title = title,
                         url = url,
-                        description = description
+                        description = description,
+                        previewImageUrl = previewUrl
                     )
                     showAddBookmarkDialog = false
                     selectedStackForDetail = added
@@ -534,10 +543,11 @@ fun PocketScreen(
             EditBookmarkDialog(
                 stack = stack,
                 onDismiss = { editingStack = null },
-                onSave = { updatedTitle, updatedDesc ->
+                onSave = { updatedTitle, updatedDesc, updatedPreview ->
                     val updated = stack.copy(
                         title = updatedTitle,
-                        description = updatedDesc
+                        description = updatedDesc,
+                        previewImageUrl = updatedPreview
                     )
                     pocketRepo.updateBookmark(updated)
                     if (selectedStackForDetail?.id == stack.id) {
@@ -944,7 +954,7 @@ fun PocketBookmarkStaggeredCard(
     }
 
     val firstMedia = stack.items.firstOrNull()
-    val mediaModel = remember(firstMedia) {
+    val mediaModel = remember(firstMedia, stack.previewImageUrl) {
         firstMedia?.let {
             if (it.localUri.isNotBlank()) {
                 val f = File(it.localUri.removePrefix("file://"))
@@ -952,7 +962,7 @@ fun PocketBookmarkStaggeredCard(
             } else {
                 it.sourceUrl
             }
-        }
+        } ?: stack.previewImageUrl.takeIf { it.isNotBlank() }
     }
 
     val faviconUrl = remember(stack.sourceDomain) {
@@ -1094,6 +1104,20 @@ fun PocketBookmarkStaggeredCard(
                         overflow = TextOverflow.Ellipsis
                     )
 
+                    if (stack.description.isNotBlank()) {
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = stack.description,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            ),
+                            color = secondaryText,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
                     Spacer(Modifier.height(3.dp))
 
                     // Line 2: Date & Time (e.g. "Oct 29, 2026 · 4:06 AM")
@@ -1214,6 +1238,7 @@ fun PocketBookmarkViewerPage(
     onOpenBrowser: (String) -> Unit,
     onDelete: () -> Unit,
     onEditNote: () -> Unit,
+    onRefreshMetadata: (() -> Unit)? = null,
     isDark: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -1350,7 +1375,30 @@ fun PocketBookmarkViewerPage(
                         }
                     }
 
-                    // 3. Delete (monochrome)
+                    // 3. Refresh Link Preview & Metadata
+                    if (stack.sourceUrl.isNotBlank()) {
+                        Surface(
+                            shape = CircleShape,
+                            color = barSurface,
+                            shadowElevation = if (isDark) 2.dp else 1.dp,
+                            border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clickable { onRefreshMetadata?.invoke() }
+                                .testTag("bookmark_viewer_refresh_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Refresh link preview and details",
+                                    tint = textColor,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // 4. Delete (monochrome)
                     Surface(
                         shape = CircleShape,
                         color = barSurface,
@@ -1444,6 +1492,24 @@ fun PocketBookmarkViewerPage(
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 }
+                            }
+                        } else if (stack.previewImageUrl.isNotBlank()) {
+                            // High-res web link preview image presentation
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(PocketThemeColors.thumbnailBg(isDark)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(stack.previewImageUrl)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = stack.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
                         } else {
                             // Web link preview presentation with icon & artwork
@@ -1810,10 +1876,11 @@ fun PocketEmptyState(
 @Composable
 fun AddBookmarkDialog(
     onDismiss: () -> Unit,
-    onSave: (title: String, url: String, description: String) -> Unit,
+    onSave: (title: String, url: String, description: String, previewImageUrl: String) -> Unit,
     isDark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val textColor = PocketThemeColors.primaryText(isDark)
     val secondaryText = PocketThemeColors.secondaryText(isDark)
     val dialogSurface = if (isDark) Color(0xFF1E1E1E) else Color(0xFFFFFFFF)
@@ -1822,6 +1889,47 @@ fun AddBookmarkDialog(
     var urlText by remember { mutableStateOf("") }
     var titleText by remember { mutableStateOf("") }
     var descText by remember { mutableStateOf("") }
+    var previewImageUrl by remember { mutableStateOf("") }
+    var isFetchingMetadata by remember { mutableStateOf(false) }
+
+    fun triggerAutoFetch(urlToFetch: String) {
+        val trimmed = urlToFetch.trim()
+        if (trimmed.length < 4) return
+        val isValid = MediaClassifier.isValidWebUrl(trimmed) ||
+                trimmed.startsWith("http://", ignoreCase = true) ||
+                trimmed.startsWith("https://", ignoreCase = true)
+        if (!isValid) return
+
+        scope.launch {
+            isFetchingMetadata = true
+            try {
+                val meta = LinkMetadataFetcher.fetch(trimmed)
+                if (urlText.trim() == trimmed) {
+                    val domain = MediaClassifier.cleanDomainFromUrl(trimmed)
+                    if (titleText.isBlank() || titleText.equals(domain, ignoreCase = true)) {
+                        if (meta.title.isNotBlank()) titleText = meta.title
+                    }
+                    if (descText.isBlank() && meta.description.isNotBlank()) {
+                        descText = meta.description
+                    }
+                    if (meta.previewImageUrl.isNotBlank()) {
+                        previewImageUrl = meta.previewImageUrl
+                    }
+                }
+            } catch (_: Exception) {
+            } finally {
+                isFetchingMetadata = false
+            }
+        }
+    }
+
+    LaunchedEffect(urlText) {
+        val trimmed = urlText.trim()
+        if (trimmed.length > 7 && (MediaClassifier.isValidWebUrl(trimmed) || trimmed.startsWith("http://") || trimmed.startsWith("https://"))) {
+            kotlinx.coroutines.delay(500)
+            triggerAutoFetch(trimmed)
+        }
+    }
 
     val clipboard = remember {
         context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -1858,6 +1966,7 @@ fun AddBookmarkDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(20.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1891,6 +2000,7 @@ fun AddBookmarkDialog(
                                 if (titleText.isBlank()) {
                                     titleText = MediaClassifier.cleanDomainFromUrl(clipboardUrl)
                                 }
+                                triggerAutoFetch(clipboardUrl)
                             }
                     ) {
                         Row(
@@ -1929,16 +2039,88 @@ fun AddBookmarkDialog(
                     placeholder = { Text("https://example.com") },
                     singleLine = true,
                     colors = textFieldColors,
+                    trailingIcon = {
+                        if (isFetchingMetadata) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = textColor
+                            )
+                        } else if (urlText.isNotBlank()) {
+                            IconButton(onClick = { triggerAutoFetch(urlText) }) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Fetch link preview",
+                                    tint = secondaryText,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                // Fetching progress status
+                if (isFetchingMetadata) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    ) {
+                        Text(
+                            text = "Fetching link title, description & preview...",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                            color = secondaryText
+                        )
+                    }
+                }
+
+                // Live Preview Card
+                if (previewImageUrl.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = PocketThemeColors.thumbnailBg(isDark),
+                        border = BorderStroke(0.5.dp, borderCol),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(110.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(previewImageUrl)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Link Preview",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = PocketThemeColors.badgeBg(isDark),
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(6.dp)
+                            ) {
+                                Text(
+                                    text = "Preview Image",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = PocketThemeColors.badgeText(isDark),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Spacer(Modifier.height(10.dp))
 
                 OutlinedTextField(
                     value = titleText,
                     onValueChange = { titleText = it },
-                    label = { Text("Title (optional)") },
+                    label = { Text("Title (auto-fetched or custom)") },
                     placeholder = { Text("Article or page title") },
                     singleLine = true,
                     colors = textFieldColors,
@@ -1951,7 +2133,7 @@ fun AddBookmarkDialog(
                 OutlinedTextField(
                     value = descText,
                     onValueChange = { descText = it },
-                    label = { Text("Notes / Description (optional)") },
+                    label = { Text("Notes / Description (auto-fetched or custom)") },
                     placeholder = { Text("Add notes or details") },
                     maxLines = 3,
                     colors = textFieldColors,
@@ -1974,7 +2156,7 @@ fun AddBookmarkDialog(
                     Button(
                         onClick = {
                             if (urlText.isNotBlank()) {
-                                onSave(titleText, urlText, descText)
+                                onSave(titleText, urlText, descText, previewImageUrl)
                             }
                         },
                         enabled = urlText.isNotBlank(),
@@ -2000,9 +2182,11 @@ fun AddBookmarkDialog(
 fun EditBookmarkDialog(
     stack: MediaInboxStack,
     onDismiss: () -> Unit,
-    onSave: (title: String, description: String) -> Unit,
+    onSave: (title: String, description: String, previewImageUrl: String) -> Unit,
     isDark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val textColor = PocketThemeColors.primaryText(isDark)
     val secondaryText = PocketThemeColors.secondaryText(isDark)
     val dialogSurface = if (isDark) Color(0xFF1E1E1E) else Color(0xFFFFFFFF)
@@ -2010,6 +2194,8 @@ fun EditBookmarkDialog(
 
     var titleText by remember { mutableStateOf(stack.title) }
     var descText by remember { mutableStateOf(stack.description) }
+    var previewImageUrl by remember { mutableStateOf(stack.previewImageUrl) }
+    var isFetching by remember { mutableStateOf(false) }
 
     val textFieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = textColor,
@@ -2035,14 +2221,71 @@ fun EditBookmarkDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(20.dp)
             ) {
-                Text(
-                    text = "Edit Bookmark",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = textColor
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Edit Bookmark",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor
+                    )
+
+                    if (stack.sourceUrl.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    isFetching = true
+                                    try {
+                                        val meta = LinkMetadataFetcher.fetch(stack.sourceUrl)
+                                        if (meta.title.isNotBlank()) titleText = meta.title
+                                        if (meta.description.isNotBlank()) descText = meta.description
+                                        if (meta.previewImageUrl.isNotBlank()) previewImageUrl = meta.previewImageUrl
+                                    } catch (_: Exception) {
+                                    } finally {
+                                        isFetching = false
+                                    }
+                                }
+                            },
+                            enabled = !isFetching
+                        ) {
+                            if (isFetching) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp, color = textColor)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp), tint = textColor)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Re-fetch", style = MaterialTheme.typography.labelSmall, color = textColor)
+                            }
+                        }
+                    }
+                }
+
+                if (previewImageUrl.isNotBlank()) {
+                    Spacer(Modifier.height(10.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = PocketThemeColors.thumbnailBg(isDark),
+                        border = BorderStroke(0.5.dp, borderCol),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp)
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(previewImageUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Preview Image",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
 
                 Spacer(Modifier.height(16.dp))
 
@@ -2080,7 +2323,7 @@ fun EditBookmarkDialog(
                     }
                     Spacer(Modifier.width(8.dp))
                     Button(
-                        onClick = { onSave(titleText, descText) },
+                        onClick = { onSave(titleText, descText, previewImageUrl) },
                         enabled = titleText.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (isDark) Color(0xFFEEEEEE) else Color(0xFF202020),

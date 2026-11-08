@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
 import android.webkit.*
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -269,6 +270,16 @@ fun DirectBrowserView(
                         coroutineScope.launch {
                             historyManager.addShortcut(pageTitle.ifBlank { currentUrl }, currentUrl)
                         }
+                    }
+                },
+                onSaveToPocket = {
+                    if (currentUrl.isNotBlank()) {
+                        val pocketRepo = com.amresalehin.emregallery.data.PocketRepository.getInstance(context)
+                        pocketRepo.addBookmark(
+                            title = pageTitle.ifBlank { currentUrl },
+                            url = currentUrl
+                        )
+                        Toast.makeText(context, "Saved to Pocket", Toast.LENGTH_SHORT).show()
                     }
                 },
                 onShareClick = {
