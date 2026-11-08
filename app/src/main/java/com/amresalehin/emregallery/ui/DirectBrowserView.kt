@@ -13,6 +13,12 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.tween
+import android.view.MotionEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -127,6 +133,14 @@ fun DirectBrowserView(
         onDispose { }
     }
 
+    val scrollHandler = remember { BrowserToolbarScrollHandler() }
+
+    LaunchedEffect(currentUrl) {
+        if (currentUrl.isBlank()) {
+            scrollHandler.show()
+        }
+    }
+
     LaunchedEffect(Unit) {
         if (startUrl.isBlank()) {
             tabSession.clearMedia()
@@ -173,6 +187,7 @@ fun DirectBrowserView(
     fun navigateToUrl(target: String) {
         val trimmed = target.trim()
         if (trimmed.isBlank()) return
+        scrollHandler.show()
         val formatted = MediaClassifier.formatQueryOrUrl(trimmed)
         tabSession.clearMedia()
         DownloaderSession.clear()
@@ -243,6 +258,7 @@ fun DirectBrowserView(
                     tabSession.clearMedia()
                     tabSession.updateNavigation("")
                     DownloaderSession.clear()
+                    scrollHandler.show()
                     webViewInstance?.loadUrl("about:blank")
                 },
                 onReloadClick = {
@@ -296,6 +312,7 @@ fun DirectBrowserView(
                     tabSession.clearMedia()
                     tabSession.updateNavigation("")
                     DownloaderSession.clear()
+                    scrollHandler.show()
                     webViewInstance?.loadUrl("about:blank")
                 },
                 onCloseBrowser = onClose,
@@ -379,6 +396,53 @@ fun DirectBrowserView(
                             setBackgroundColor(if (isDark) android.graphics.Color.parseColor("#111111") else android.graphics.Color.WHITE)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 settings.forceDark = if (isDark) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
+                            }
+
+                            var startTouchY = 0f
+                            var startTouchX = 0f
+                            var accumulatedTouchDy = 0f
+
+                            setOnTouchListener { _, event ->
+                                when (event.actionMasked) {
+                                    MotionEvent.ACTION_DOWN -> {
+                                        startTouchY = event.rawY
+                                        startTouchX = event.rawX
+                                        accumulatedTouchDy = 0f
+                                    }
+                                    MotionEvent.ACTION_MOVE -> {
+                                        val dy = startTouchY - event.rawY
+                                        val dx = startTouchX - event.rawX
+                                        startTouchY = event.rawY
+                                        startTouchX = event.rawX
+
+                                        if (kotlin.math.abs(dy) > kotlin.math.abs(dx)) {
+                                            if (dy > 0f) {
+                                                if (accumulatedTouchDy < 0f) accumulatedTouchDy = 0f
+                                                accumulatedTouchDy += dy
+                                                if (accumulatedTouchDy >= scrollHandler.thresholdPx) {
+                                                    scrollHandler.hide()
+                                                }
+                                            } else if (dy < 0f) {
+                                                if (accumulatedTouchDy > 0f) accumulatedTouchDy = 0f
+                                                accumulatedTouchDy += dy
+                                                if (accumulatedTouchDy <= -scrollHandler.thresholdPx) {
+                                                    scrollHandler.show()
+                                                }
+                                            }
+                                        }
+                                    }
+                                    MotionEvent.ACTION_UP,
+                                    MotionEvent.ACTION_CANCEL -> {
+                                        accumulatedTouchDy = 0f
+                                        scrollHandler.onTouchEnd()
+                                    }
+                                }
+                                false
+                            }
+
+                            setOnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+                                val dy = scrollY - oldScrollY
+                                scrollHandler.onScroll(scrollY, dy)
                             }
 
                             settings.apply {
@@ -518,6 +582,7 @@ fun DirectBrowserView(
                                 }
 
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                    scrollHandler.show()
                                     if (url.isNullOrBlank() || url == "about:blank") {
                                         tabSession.clearMedia()
                                         tabSession.updateNavigation("")
@@ -623,27 +688,47 @@ fun DirectBrowserView(
                     )
                 }
 
-
-
+                // 3. Floating Bottom Action Bar with auto-hide slide-and-fade animation
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = scrollHandler.isVisible,
+                    enter = slideInVertically(
+                        initialOffsetY = { fullHeight -> fullHeight },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) + fadeIn(animationSpec = tween(durationMillis = 200)),
+                    exit = slideOutVertically(
+                        targetOffsetY = { fullHeight -> fullHeight },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) + fadeOut(animationSpec = tween(durationMillis = 200)),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .wrapContentHeight()
+                ) {
+                    BrowserBottomNavBar(
+                        tabCount = tabsList.size,
+                        onOpenDownloads = {
+                            onOpenDownloads?.invoke() ?: onSwitchToMediaTab()
+                        },
+                        onOpenHistory = {
+                            showHistorySheet = true
+                        },
+                        onOpenTabs = {
+                            showTabsSheet = true
+                        },
+                        onOpenBrowserSettings = {
+                            showSettingsSheet = true
+                        },
+                        isDark = isDark,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
-
-            BrowserBottomNavBar(
-                tabCount = tabsList.size,
-                onOpenDownloads = {
-                    onOpenDownloads?.invoke() ?: onSwitchToMediaTab()
-                },
-                onOpenHistory = {
-                    showHistorySheet = true
-                },
-                onOpenTabs = {
-                    showTabsSheet = true
-                },
-                onOpenBrowserSettings = {
-                    showSettingsSheet = true
-                },
-                isDark = isDark,
-                modifier = Modifier.fillMaxWidth()
-            )
         }
     }
 
