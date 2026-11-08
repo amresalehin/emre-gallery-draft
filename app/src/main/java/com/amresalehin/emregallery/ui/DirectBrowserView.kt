@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -192,6 +193,8 @@ fun DirectBrowserView(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .zIndex(1f)
+                    .background(BrowserThemeColors.background(isDark))
                     .testTag("browser_pinned_top_controls")
             ) {
             // 1. Minimalist Monochrome Top Bar (always visible)
