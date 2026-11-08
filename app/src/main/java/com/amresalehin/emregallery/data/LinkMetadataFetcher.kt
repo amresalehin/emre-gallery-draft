@@ -15,19 +15,20 @@ data class LinkMetadata(
     val previewImageUrl: String = "",
     val siteName: String = "",
     val domain: String = "",
-    val faviconUrl: String = ""
+    val faviconUrl: String = "",
+    val mediaItems: List<MediaInboxItem> = emptyList()
 )
 
 /**
- * High-performance parser and automatic fetcher for web link titles, descriptions, and previews.
- * Extracts standard Open Graph (og:title, og:description, og:image), Twitter Card metadata,
- * HTML title, meta description, high-resolution icons, and favicons.
+ * High-performance parser and automatic fetcher for web link titles, descriptions, previews,
+ * and all site media items (images, artwork, video posters).
+ * Extracts standard Open Graph, Twitter Cards, document metadata, and scans full DOM media collections.
  */
 object LinkMetadataFetcher {
     private const val TAG = "LinkMetadataFetcher"
 
     /**
-     * Fetches metadata from a web URL asynchronously.
+     * Fetches metadata and all media items from a web URL asynchronously.
      */
     suspend fun fetch(rawUrl: String): LinkMetadata = withContext(Dispatchers.IO) {
         val trimmed = rawUrl.trim()
@@ -54,6 +55,14 @@ object LinkMetadataFetcher {
             // Handle direct image responses
             if (response.contentType.startsWith("image/")) {
                 val imageName = finalUrl.substringAfterLast('/').substringBefore('?').ifBlank { finalDomain }
+                val singleItem = MediaInboxItem(
+                    id = "direct_${finalUrl.hashCode().toUInt().toString(16)}",
+                    title = imageName,
+                    localUri = "",
+                    sourceUrl = finalUrl,
+                    isVideo = false,
+                    format = response.contentType.substringAfter('/')
+                )
                 return@withContext LinkMetadata(
                     url = finalUrl,
                     title = imageName,
@@ -61,7 +70,8 @@ object LinkMetadataFetcher {
                     previewImageUrl = finalUrl,
                     siteName = finalDomain,
                     domain = finalDomain,
-                    faviconUrl = defaultFavicon
+                    faviconUrl = defaultFavicon,
+                    mediaItems = listOf(singleItem)
                 )
             }
 
@@ -73,7 +83,8 @@ object LinkMetadataFetcher {
                     previewImageUrl = "",
                     siteName = finalDomain,
                     domain = finalDomain,
-                    faviconUrl = defaultFavicon
+                    faviconUrl = defaultFavicon,
+                    mediaItems = emptyList()
                 )
             }
 
@@ -87,13 +98,15 @@ object LinkMetadataFetcher {
                 previewImageUrl = "",
                 siteName = domain,
                 domain = domain,
-                faviconUrl = defaultFavicon
+                faviconUrl = defaultFavicon,
+                mediaItems = emptyList()
             )
         }
     }
 
     /**
-     * Parses raw HTML string and extracts OpenGraph, Twitter, and document metadata.
+     * Parses raw HTML string and extracts OpenGraph, Twitter, document metadata,
+     * and all discovered site media items.
      * Pure and isolated for reliable testing.
      */
     fun parseHtml(html: String, targetUrl: String): LinkMetadata {
@@ -177,6 +190,9 @@ object LinkMetadataFetcher {
         val resolvedFavicon = resolveAbsoluteUrl(targetUrl, extractedFavicon)
         val finalFavicon = if (resolvedFavicon.isNotBlank()) resolvedFavicon else defaultFavicon
 
+        // 6. Extract all media items of the site
+        val mediaItems = extractSiteMedia(doc, targetUrl, cleanTitle, previewImageUrl)
+
         return LinkMetadata(
             url = targetUrl,
             title = cleanTitle,
@@ -184,8 +200,123 @@ object LinkMetadataFetcher {
             previewImageUrl = previewImageUrl,
             siteName = siteName,
             domain = domain,
-            faviconUrl = finalFavicon
+            faviconUrl = finalFavicon,
+            mediaItems = mediaItems
         )
+    }
+
+    /**
+     * Extracts all media items (images, photos, video posters) present across the site/document.
+     */
+    fun extractSiteMedia(
+        doc: Document,
+        baseUrl: String,
+        defaultTitle: String = "",
+        primaryPreviewUrl: String = ""
+    ): List<MediaInboxItem> {
+        val items = mutableListOf<MediaInboxItem>()
+        val seenUrls = mutableSetOf<String>()
+
+        fun addCandidate(rawUrl: String?, titleHint: String?, isVideo: Boolean = false) {
+            if (rawUrl.isNullOrBlank()) return
+            val resolved = resolveAbsoluteUrl(baseUrl, rawUrl).trim()
+            if (resolved.isBlank() || !resolved.startsWith("http", ignoreCase = true)) return
+            if (seenUrls.contains(resolved)) return
+
+            // Filter out tracking pixels, spacers, transparent gifs, tiny badges
+            val lower = resolved.lowercase()
+            if (lower.contains("1x1") || lower.contains("spacer") || lower.contains("tracking") ||
+                lower.contains("pixel.gif") || lower.contains("beacon") || lower.contains("empty.png") ||
+                lower.contains("magnifying-glass") || lower.contains("close-icon")
+            ) {
+                return
+            }
+
+            seenUrls.add(resolved)
+            val cleanTitle = titleHint?.takeIf { it.isNotBlank() }
+                ?: resolved.substringAfterLast('/').substringBefore('?').takeIf { it.isNotBlank() && it.length > 2 }
+                ?: defaultTitle.ifBlank { "Media ${items.size + 1}" }
+
+            val format = when {
+                isVideo -> "MP4"
+                lower.endsWith(".png") -> "PNG"
+                lower.endsWith(".gif") -> "GIF"
+                lower.endsWith(".webp") -> "WEBP"
+                lower.endsWith(".svg") -> "SVG"
+                lower.endsWith(".mp4") -> "MP4"
+                else -> "JPEG"
+            }
+
+            items.add(
+                MediaInboxItem(
+                    id = "site_media_${items.size}_${resolved.hashCode().toUInt().toString(16)}",
+                    title = cleanTitle,
+                    localUri = "",
+                    sourceUrl = resolved,
+                    isVideo = isVideo,
+                    format = format,
+                    dateAddedMillis = System.currentTimeMillis()
+                )
+            )
+        }
+
+        // 1. Primary preview image always gets position 1 in the deck
+        if (primaryPreviewUrl.isNotBlank()) {
+            addCandidate(primaryPreviewUrl, defaultTitle.ifBlank { "Cover Image" })
+        }
+
+        // 2. Additional OpenGraph & Twitter Images
+        doc.select("meta[property='og:image'], meta[name='og:image'], meta[property='og:image:secure_url']").forEach {
+            val u = it.absUrl("content").ifBlank { it.attr("content") }
+            addCandidate(u, defaultTitle)
+        }
+        doc.select("meta[name='twitter:image'], meta[name='twitter:image:src']").forEach {
+            val u = it.absUrl("content").ifBlank { it.attr("content") }
+            addCandidate(u, defaultTitle)
+        }
+
+        // 3. Videos & Posters
+        doc.select("video").forEach { vid ->
+            val poster = vid.absUrl("poster").ifBlank { vid.attr("poster") }
+            if (poster.isNotBlank()) addCandidate(poster, "Video Poster", isVideo = false)
+            val src = vid.absUrl("src").ifBlank { vid.attr("src") }
+            if (src.isNotBlank()) addCandidate(src, "Video", isVideo = true)
+            vid.select("source").forEach { s ->
+                val sSrc = s.absUrl("src").ifBlank { s.attr("src") }
+                if (sSrc.isNotBlank()) addCandidate(sSrc, "Video Stream", isVideo = true)
+            }
+        }
+
+        // 4. Content Images (articles, main content, figures, galleries, body)
+        val imageElements = doc.select("article img, main img, #content img, .content img, .post-content img, .entry-content img, figure img, .gallery img, img")
+        for (img in imageElements) {
+            // Check srcset for highest resolution candidate
+            val srcset = img.attr("srcset").ifBlank { img.attr("data-srcset") }
+            if (srcset.isNotBlank()) {
+                val candidate = srcset.split(",")
+                    .map { it.trim().split("\\s+".toRegex()).firstOrNull() ?: "" }
+                    .lastOrNull { it.isNotBlank() }
+                if (!candidate.isNullOrBlank()) {
+                    val alt = img.attr("alt").ifBlank { img.attr("title") }
+                    addCandidate(candidate, alt)
+                }
+            }
+
+            // Check high-res and lazy attributes
+            val srcCandidate = img.attr("data-hi-res-src")
+                .ifBlank { img.attr("data-large-file") }
+                .ifBlank { img.attr("data-original") }
+                .ifBlank { img.attr("data-src") }
+                .ifBlank { img.attr("data-lazy-src") }
+                .ifBlank { img.attr("src") }
+
+            val alt = img.attr("alt").ifBlank { img.attr("title") }
+            addCandidate(srcCandidate, alt)
+
+            if (items.size >= 40) break // limit to top 40 for optimal performance
+        }
+
+        return items
     }
 
     private fun extractAbsUrl(element: org.jsoup.nodes.Element, attributeKey: String): String {

@@ -16,7 +16,7 @@ import org.json.JSONObject
 /**
  * Dedicated, independent repository for Pocket bookmarks and saved web reading materials.
  * Decoupled completely from Downloader and MediaInbox functionality.
- * Supports automatic background fetching of link titles, descriptions, and previews.
+ * Supports automatic background fetching of link titles, descriptions, previews, and all site media.
  */
 class PocketRepository(
     private val context: Context,
@@ -44,13 +44,35 @@ class PocketRepository(
             val list = mutableListOf<MediaInboxStack>()
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
+                val itemsArr = obj.optJSONArray("items")
+                val itemsList = mutableListOf<MediaInboxItem>()
+                if (itemsArr != null) {
+                    for (j in 0 until itemsArr.length()) {
+                        val itmObj = itemsArr.getJSONObject(j)
+                        itemsList.add(
+                            MediaInboxItem(
+                                id = itmObj.getString("id"),
+                                title = itmObj.optString("title", "Media"),
+                                localUri = itmObj.optString("localUri", ""),
+                                sourceUrl = itmObj.optString("sourceUrl", ""),
+                                isVideo = itmObj.optBoolean("isVideo", false),
+                                isAudio = itmObj.optBoolean("isAudio", false),
+                                isStream = itmObj.optBoolean("isStream", false),
+                                format = itmObj.optString("format", ""),
+                                sizeBytes = itmObj.optLong("sizeBytes", 0L),
+                                dateAddedMillis = itmObj.optLong("dateAddedMillis", System.currentTimeMillis())
+                            )
+                        )
+                    }
+                }
+
                 list.add(
                     MediaInboxStack(
                         id = obj.getString("id"),
                         title = obj.optString("title", "Untitled Bookmark"),
                         sourceDomain = obj.optString("sourceDomain", ""),
                         sourceUrl = obj.optString("sourceUrl", ""),
-                        items = emptyList(), // Pocket bookmarks are strictly decoupled from downloaded media files
+                        items = itemsList,
                         timestampMillis = obj.optLong("timestampMillis", System.currentTimeMillis()),
                         description = obj.optString("description", ""),
                         previewImageUrl = obj.optString("previewImageUrl", "")
@@ -58,7 +80,7 @@ class PocketRepository(
                 )
             }
             _bookmarks.value = list
-            // Automatically fetch missing metadata (titles, descriptions, previews) for bookmarks
+            // Automatically fetch missing metadata (titles, descriptions, previews, media) for bookmarks
             autoFetchMissingMetadata()
         } catch (e: Exception) {
             _bookmarks.value = emptyList()
@@ -113,6 +135,24 @@ class PocketRepository(
                     put("timestampMillis", bookmark.timestampMillis)
                     put("description", bookmark.description)
                     put("previewImageUrl", bookmark.previewImageUrl)
+
+                    val itemsArr = JSONArray()
+                    bookmark.items.forEach { itm ->
+                        val itmObj = JSONObject().apply {
+                            put("id", itm.id)
+                            put("title", itm.title)
+                            put("localUri", itm.localUri)
+                            put("sourceUrl", itm.sourceUrl)
+                            put("isVideo", itm.isVideo)
+                            put("isAudio", itm.isAudio)
+                            put("isStream", itm.isStream)
+                            put("format", itm.format)
+                            put("sizeBytes", itm.sizeBytes)
+                            put("dateAddedMillis", itm.dateAddedMillis)
+                        }
+                        itemsArr.put(itmObj)
+                    }
+                    put("items", itemsArr)
                 }
                 jsonArray.put(obj)
             }
@@ -123,7 +163,7 @@ class PocketRepository(
     /**
      * Adds a bookmark to Pocket.
      * When autoFetchMetadata is true, automatically queries the web page in the background
-     * for its title, description, and link preview image, then smoothly updates the bookmark.
+     * for its title, description, link preview image, and site media items, then smoothly updates the bookmark.
      */
     fun addBookmark(
         title: String,
@@ -159,7 +199,7 @@ class PocketRepository(
     }
 
     /**
-     * Automatically fetches metadata (title, description, preview image) for a bookmark and updates it.
+     * Automatically fetches metadata (title, description, preview image, and site media) for a bookmark and updates it.
      */
     fun fetchAndApplyMetadata(bookmarkId: String, url: String = "") {
         coroutineScope.launch {
@@ -182,12 +222,32 @@ class PocketRepository(
                 val newPreview = if (latest.previewImageUrl.isBlank() && meta.previewImageUrl.isNotBlank()) meta.previewImageUrl else latest.previewImageUrl
                 val newDomain = if (latest.sourceDomain.isBlank() && meta.domain.isNotBlank()) meta.domain else latest.sourceDomain
 
-                if (newTitle != latest.title || newDesc != latest.description || newPreview != latest.previewImageUrl || newDomain != latest.sourceDomain) {
+                val newItems = if (latest.items.isEmpty() && meta.mediaItems.isNotEmpty()) {
+                    meta.mediaItems
+                } else if (latest.items.isNotEmpty()) {
+                    latest.items
+                } else if (newPreview.isNotBlank()) {
+                    listOf(
+                        MediaInboxItem(
+                            id = "media_preview_${latest.id}",
+                            title = newTitle,
+                            localUri = "",
+                            sourceUrl = newPreview,
+                            isVideo = false
+                        )
+                    )
+                } else {
+                    emptyList()
+                }
+
+                if (newTitle != latest.title || newDesc != latest.description || newPreview != latest.previewImageUrl ||
+                    newDomain != latest.sourceDomain || newItems.size != latest.items.size) {
                     val updated = latest.copy(
                         title = newTitle,
                         description = newDesc,
                         previewImageUrl = newPreview,
-                        sourceDomain = newDomain
+                        sourceDomain = newDomain,
+                        items = newItems
                     )
                     updateBookmark(updated)
                 }
@@ -198,7 +258,31 @@ class PocketRepository(
     }
 
     /**
-     * Re-fetches the latest title, description, and preview from the web for a given bookmark.
+     * Specifically extracts all media of the site for a bookmark.
+     */
+    fun fetchSiteMedia(bookmarkId: String) {
+        coroutineScope.launch {
+            try {
+                val latest = _bookmarks.value.find { it.id == bookmarkId } ?: return@launch
+                if (latest.sourceUrl.isBlank()) return@launch
+
+                val meta = LinkMetadataFetcher.fetch(latest.sourceUrl)
+                val current = _bookmarks.value.find { it.id == bookmarkId } ?: return@launch
+                if (meta.mediaItems.isNotEmpty()) {
+                    val updated = current.copy(
+                        items = meta.mediaItems,
+                        previewImageUrl = current.previewImageUrl.ifBlank { meta.previewImageUrl }
+                    )
+                    updateBookmark(updated)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching site media for bookmark $bookmarkId", e)
+            }
+        }
+    }
+
+    /**
+     * Re-fetches the latest title, description, preview, and all site media from the web for a given bookmark.
      */
     fun refreshMetadata(bookmarkId: String) {
         coroutineScope.launch {
@@ -211,7 +295,8 @@ class PocketRepository(
                     title = meta.title.ifBlank { latest.title },
                     description = meta.description.ifBlank { latest.description },
                     previewImageUrl = meta.previewImageUrl.ifBlank { latest.previewImageUrl },
-                    sourceDomain = meta.domain.ifBlank { latest.sourceDomain }
+                    sourceDomain = meta.domain.ifBlank { latest.sourceDomain },
+                    items = if (meta.mediaItems.isNotEmpty()) meta.mediaItems else latest.items
                 )
                 updateBookmark(updated)
             } catch (e: Exception) {
@@ -226,7 +311,7 @@ class PocketRepository(
     fun autoFetchMissingMetadata() {
         coroutineScope.launch {
             val missing = _bookmarks.value.filter {
-                it.sourceUrl.isNotBlank() && (it.previewImageUrl.isBlank() || it.description.isBlank())
+                it.sourceUrl.isNotBlank() && (it.previewImageUrl.isBlank() || it.description.isBlank() || it.items.isEmpty())
             }
             for (bm in missing) {
                 try {
@@ -242,13 +327,15 @@ class PocketRepository(
                     val newTitle = if (isTitleDefault && meta.title.isNotBlank()) meta.title else current.title
                     val newDesc = if (current.description.isBlank() && meta.description.isNotBlank()) meta.description else current.description
                     val newPreview = if (current.previewImageUrl.isBlank() && meta.previewImageUrl.isNotBlank()) meta.previewImageUrl else current.previewImageUrl
+                    val newItems = if (current.items.isEmpty() && meta.mediaItems.isNotEmpty()) meta.mediaItems else current.items
 
-                    if (newTitle != current.title || newDesc != current.description || newPreview != current.previewImageUrl) {
+                    if (newTitle != current.title || newDesc != current.description || newPreview != current.previewImageUrl || newItems.size != current.items.size) {
                         updateBookmark(
                             current.copy(
                                 title = newTitle,
                                 description = newDesc,
-                                previewImageUrl = newPreview
+                                previewImageUrl = newPreview,
+                                items = newItems
                             )
                         )
                     }

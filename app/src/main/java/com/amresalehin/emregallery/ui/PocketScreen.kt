@@ -63,12 +63,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.amresalehin.emregallery.data.LinkMetadataFetcher
 import com.amresalehin.emregallery.data.MediaClassifier
+import com.amresalehin.emregallery.data.MediaInboxItem
 import com.amresalehin.emregallery.data.MediaInboxStack
 import com.amresalehin.emregallery.data.PocketRepository
 import kotlinx.coroutines.launch
@@ -491,6 +496,9 @@ fun PocketScreen(
                         scope.launch {
                             snackbarHostState.showSnackbar("Refreshing link info & preview...")
                         }
+                    },
+                    onFetchSiteMedia = {
+                        pocketRepo.fetchSiteMedia(stack.id)
                     },
                     isDark = isDark,
                     modifier = Modifier.fillMaxSize()
@@ -1239,23 +1247,54 @@ fun PocketBookmarkViewerPage(
     onDelete: () -> Unit,
     onEditNote: () -> Unit,
     onRefreshMetadata: (() -> Unit)? = null,
+    onFetchSiteMedia: (() -> Unit)? = null,
     isDark: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val textColor = PocketThemeColors.primaryText(isDark)
     val secondaryText = PocketThemeColors.secondaryText(isDark)
     val cardSurface = PocketThemeColors.stackFront(isDark)
     val barSurface = PocketThemeColors.barSurface(isDark)
     val dividerCol = PocketThemeColors.divider(isDark)
 
+    // Fullscreen media inspection state
+    var fullScreenMediaItem by remember { mutableStateOf<MediaInboxItem?>(null) }
+
+    // Effective media items discovered from the site
+    val effectiveMediaList = remember(stack) {
+        if (stack.items.isNotEmpty()) {
+            stack.items
+        } else if (stack.previewImageUrl.isNotBlank()) {
+            listOf(
+                MediaInboxItem(
+                    id = "preview_${stack.id}",
+                    title = stack.title.ifBlank { "Preview" },
+                    localUri = "",
+                    sourceUrl = stack.previewImageUrl,
+                    isVideo = false
+                )
+            )
+        } else {
+            emptyList()
+        }
+    }
+
+    val totalPages = maxOf(1, effectiveMediaList.size)
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { totalPages })
+
+    // Auto-fetch site media on first open if bookmark has URL but no items yet
+    LaunchedEffect(stack.id, stack.sourceUrl) {
+        if (stack.items.isEmpty() && stack.sourceUrl.isNotBlank()) {
+            onFetchSiteMedia?.invoke()
+        }
+    }
+
     val dateFormatted = remember(stack.timestampMillis) {
         val sdf = SimpleDateFormat("MMM d, yyyy · h:mm a", Locale.getDefault())
         sdf.format(Date(stack.timestampMillis))
     }
-
-    val mediaItems = stack.items
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { maxOf(1, mediaItems.size) })
 
     val faviconUrl = remember(stack.sourceDomain) {
         if (stack.sourceDomain.isNotBlank()) {
@@ -1264,13 +1303,13 @@ fun PocketBookmarkViewerPage(
     }
 
     // Derive tags without fabricating any information
-    val derivedTags = remember(stack) {
+    val derivedTags = remember(stack, effectiveMediaList) {
         val tags = mutableListOf<String>()
         if (stack.sourceDomain.isNotBlank()) {
             tags.add(stack.sourceDomain.removePrefix("www."))
         }
-        if (stack.items.isNotEmpty()) {
-            tags.add("${stack.items.size} Media")
+        if (effectiveMediaList.isNotEmpty()) {
+            tags.add("${effectiveMediaList.size} Media")
         } else if (stack.sourceUrl.isNotBlank()) {
             tags.add("Web Link")
         }
@@ -1291,7 +1330,7 @@ fun PocketBookmarkViewerPage(
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // Top App Bar with Circular Buttons matching image_a086dfff.png
+            // Top App Bar with Circular Buttons matching design system
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1320,7 +1359,7 @@ fun PocketBookmarkViewerPage(
                     }
                 }
 
-                // Action Buttons on Right (Reader, Copy, Delete)
+                // Action Buttons on Right (Reader, Copy, Refresh, Delete)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -1421,56 +1460,117 @@ fun PocketBookmarkViewerPage(
                 }
             }
 
-            // Upper Visual Area: Card Deck & Pagination
+            // Upper Visual Area: Deck Card Stack & Interactive Controls
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp, bottom = 8.dp),
+                    .padding(top = 2.dp, bottom = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Layered Card Deck matching image_a086dfff.png
+                // Deck Card Stack Container
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp),
+                        .padding(horizontal = 24.dp)
+                        .height(216.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Layer 1 (Bottom stacked layer)
+                    // Deck Card Layer 1 (Bottom peeking card)
+                    val backIndex2 = if (totalPages > 2) (pagerState.currentPage + 2) % totalPages else null
+                    val backItem2 = backIndex2?.let { effectiveMediaList.getOrNull(it) }
+
                     Surface(
                         shape = RoundedCornerShape(26.dp),
                         color = PocketThemeColors.stackLayer1(isDark),
+                        border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.3f) else Color(0xFFD6D6D6)),
+                        shadowElevation = if (isDark) 2.dp else 1.dp,
                         modifier = Modifier
                             .fillMaxWidth(0.86f)
-                            .height(180.dp)
-                            .offset(y = (-10).dp)
-                    ) {}
+                            .height(188.dp)
+                            .offset(y = (-14).dp)
+                    ) {
+                        if (backItem2 != null) {
+                            val mediaPath2 = remember(backItem2) {
+                                if (backItem2.localUri.isNotBlank()) {
+                                    val f = File(backItem2.localUri.removePrefix("file://"))
+                                    if (f.exists()) f else backItem2.sourceUrl
+                                } else backItem2.sourceUrl
+                            }
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(mediaPath2)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.5f))
+                                )
+                            }
+                        }
+                    }
 
-                    // Layer 2 (Middle stacked layer)
+                    // Deck Card Layer 2 (Middle peeking card)
+                    val backIndex1 = if (totalPages > 1) (pagerState.currentPage + 1) % totalPages else null
+                    val backItem1 = backIndex1?.let { effectiveMediaList.getOrNull(it) }
+
                     Surface(
                         shape = RoundedCornerShape(26.dp),
                         color = PocketThemeColors.stackLayer2(isDark),
+                        border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFCECECE)),
+                        shadowElevation = if (isDark) 4.dp else 2.dp,
                         modifier = Modifier
                             .fillMaxWidth(0.93f)
-                            .height(185.dp)
-                            .offset(y = (-5).dp)
-                    ) {}
+                            .height(196.dp)
+                            .offset(y = (-7).dp)
+                    ) {
+                        if (backItem1 != null) {
+                            val mediaPath1 = remember(backItem1) {
+                                if (backItem1.localUri.isNotBlank()) {
+                                    val f = File(backItem1.localUri.removePrefix("file://"))
+                                    if (f.exists()) f else backItem1.sourceUrl
+                                } else backItem1.sourceUrl
+                            }
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(mediaPath1)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(if (isDark) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.35f))
+                                )
+                            }
+                        }
+                    }
 
-                    // Layer 3 (Top Front Card)
+                    // Deck Card Layer 3 (Top Front Card in Deck)
                     Surface(
                         shape = RoundedCornerShape(26.dp),
                         color = PocketThemeColors.stackFront(isDark),
-                        shadowElevation = if (isDark) 8.dp else 4.dp,
-                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
+                        shadowElevation = if (isDark) 10.dp else 6.dp,
+                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.8f) else dividerCol),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(195.dp)
+                            .height(205.dp)
                     ) {
-                        if (mediaItems.isNotEmpty()) {
+                        if (effectiveMediaList.isNotEmpty()) {
                             HorizontalPager(
                                 state = pagerState,
                                 modifier = Modifier.fillMaxSize()
                             ) { page ->
-                                val item = mediaItems[page]
+                                val item = effectiveMediaList[page]
                                 val mediaPath = remember(item) {
                                     if (item.localUri.isNotBlank()) {
                                         val f = File(item.localUri.removePrefix("file://"))
@@ -1479,7 +1579,10 @@ fun PocketBookmarkViewerPage(
                                 }
 
                                 Box(
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clickable { fullScreenMediaItem = item }
+                                        .testTag("deck_front_card_$page"),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     AsyncImage(
@@ -1487,32 +1590,81 @@ fun PocketBookmarkViewerPage(
                                             .data(mediaPath)
                                             .crossfade(true)
                                             .build(),
-                                        contentDescription = item.title,
+                                        contentDescription = item.title.ifBlank { "Media $page" },
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize()
                                     )
+
+                                    // Top gradient shade for contrast with overlay icons
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(56.dp)
+                                            .align(Alignment.TopCenter)
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)
+                                                )
+                                            )
+                                    )
+
+                                    // Media Badge (Image / Video & Page)
+                                    Row(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = Color.Black.copy(alpha = 0.72f),
+                                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                                            modifier = Modifier.height(26.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = if (item.isVideo) Icons.Default.PlayArrow else Icons.Default.Image,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (item.isVideo) "VIDEO ${page + 1}/$totalPages" else "${page + 1}/$totalPages",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    ),
+                                                    color = Color.White
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // Fullscreen Expand Button at Top Right
+                                    IconButton(
+                                        onClick = { fullScreenMediaItem = item },
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(8.dp)
+                                            .size(36.dp)
+                                            .background(Color.Black.copy(alpha = 0.65f), CircleShape)
+                                            .testTag("deck_fullscreen_button_$page")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Fullscreen,
+                                            contentDescription = "Expand fullscreen",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 }
                             }
-                        } else if (stack.previewImageUrl.isNotBlank()) {
-                            // High-res web link preview image presentation
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(PocketThemeColors.thumbnailBg(isDark)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(stack.previewImageUrl)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = stack.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
                         } else {
-                            // Web link preview presentation with icon & artwork
+                            // Fallback web illustration if no media
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1568,38 +1720,86 @@ fun PocketBookmarkViewerPage(
 
                 Spacer(Modifier.height(10.dp))
 
-                // Pagination pill indicator [🖼️ 1 / 1] matching image_a086dfff.png
+                // Interactive Pagination Pill with Deck Flipping Controls
                 Surface(
                     shape = CircleShape,
                     color = barSurface,
                     border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.7f) else dividerCol),
-                    modifier = Modifier.height(30.dp)
+                    shadowElevation = if (isDark) 2.dp else 1.dp,
+                    modifier = Modifier.height(34.dp)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Previous Card Button
+                        IconButton(
+                            onClick = {
+                                if (pagerState.currentPage > 0) {
+                                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+                                } else if (totalPages > 1) {
+                                    scope.launch { pagerState.animateScrollToPage(totalPages - 1) }
+                                }
+                            },
+                            enabled = totalPages > 1,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .testTag("deck_prev_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Previous Card",
+                                tint = if (totalPages > 1) textColor else secondaryText.copy(alpha = 0.4f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+
+                        Spacer(Modifier.width(4.dp))
+
                         Icon(
                             imageVector = Icons.Default.Image,
                             contentDescription = null,
                             tint = secondaryText,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                         Spacer(Modifier.width(6.dp))
-                        val currentPage = if (mediaItems.isNotEmpty()) pagerState.currentPage + 1 else 1
-                        val totalPages = maxOf(1, mediaItems.size)
+                        val currentPage = pagerState.currentPage + 1
                         Text(
                             text = "$currentPage / $totalPages",
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = textColor
                         )
+
+                        Spacer(Modifier.width(4.dp))
+
+                        // Next Card Button
+                        IconButton(
+                            onClick = {
+                                if (pagerState.currentPage < totalPages - 1) {
+                                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                                } else if (totalPages > 1) {
+                                    scope.launch { pagerState.animateScrollToPage(0) }
+                                }
+                            },
+                            enabled = totalPages > 1,
+                            modifier = Modifier
+                                .size(28.dp)
+                                .testTag("deck_next_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Next Card",
+                                tint = if (totalPages > 1) textColor else secondaryText.copy(alpha = 0.4f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }
 
             Spacer(Modifier.height(4.dp))
 
-            // Bottom Drawer / Bottom Sheet: anchored to and starts from bottom, filling remaining height!
+            // Bottom Drawer / Bottom Sheet: anchored to and starts from bottom, filling remaining height
             Surface(
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                 color = PocketThemeColors.drawerSurface(isDark),
@@ -1642,7 +1842,148 @@ fun PocketBookmarkViewerPage(
                         )
                     }
 
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(2.dp))
+
+                    // 0. Site Media Collection Strip
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = barSurface,
+                        border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("site_media_collection_card")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.Collections,
+                                        contentDescription = null,
+                                        tint = textColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        text = "Site Media",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = textColor
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = PocketThemeColors.tagChipBg(isDark),
+                                        modifier = Modifier.height(22.dp)
+                                    ) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.padding(horizontal = 8.dp)
+                                        ) {
+                                            Text(
+                                                text = "${effectiveMediaList.size}",
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                color = textColor
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (stack.sourceUrl.isNotBlank()) {
+                                    IconButton(
+                                        onClick = { onFetchSiteMedia?.invoke() },
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .testTag("scan_site_media_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Sync,
+                                            contentDescription = "Scan site for media",
+                                            tint = secondaryText,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(10.dp))
+
+                            if (effectiveMediaList.isNotEmpty()) {
+                                LazyRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    itemsIndexed(effectiveMediaList) { index, item ->
+                                        val isSelected = (index == pagerState.currentPage)
+                                        val mediaPath = remember(item) {
+                                            if (item.localUri.isNotBlank()) {
+                                                val f = File(item.localUri.removePrefix("file://"))
+                                                if (f.exists()) f else item.sourceUrl
+                                            } else item.sourceUrl
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = PocketThemeColors.thumbnailBg(isDark),
+                                            border = BorderStroke(
+                                                width = if (isSelected) 2.dp else 1.dp,
+                                                color = if (isSelected) textColor else dividerCol
+                                            ),
+                                            shadowElevation = if (isSelected) 3.dp else 0.dp,
+                                            modifier = Modifier
+                                                .size(width = 86.dp, height = 72.dp)
+                                                .clickable {
+                                                    scope.launch {
+                                                        pagerState.animateScrollToPage(index)
+                                                    }
+                                                }
+                                                .testTag("site_media_thumbnail_$index")
+                                        ) {
+                                            Box(modifier = Modifier.fillMaxSize()) {
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(context)
+                                                        .data(mediaPath)
+                                                        .crossfade(true)
+                                                        .build(),
+                                                    contentDescription = item.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+
+                                                // Pill tag
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.BottomEnd)
+                                                        .padding(4.dp)
+                                                        .background(Color.Black.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
+                                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (item.isVideo) "VID" else "#${index + 1}",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                        color = Color.White
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "No site media detected yet. Tap refresh to inspect web page.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = secondaryText,
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
 
                     // 1. Time Row
                     PocketDetailCardRow(
@@ -1782,6 +2123,116 @@ fun PocketBookmarkViewerPage(
                     }
 
                     Spacer(Modifier.height(20.dp))
+                }
+            }
+        }
+
+        // Fullscreen media inspection dialog
+        fullScreenMediaItem?.let { item ->
+            Dialog(
+                onDismissRequest = { fullScreenMediaItem = null },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                val mediaPath = remember(item) {
+                    if (item.localUri.isNotBlank()) {
+                        val f = File(item.localUri.removePrefix("file://"))
+                        if (f.exists()) f else item.sourceUrl
+                    } else item.sourceUrl
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.95f))
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                ) {
+                    // Fullscreen image display
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(mediaPath)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                    )
+
+                    // Top Action Bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.7f),
+                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clickable { fullScreenMediaItem = null }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Copy media link
+                            Surface(
+                                shape = CircleShape,
+                                color = Color.Black.copy(alpha = 0.7f),
+                                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clickable {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = ClipData.newPlainText("Media URL", item.sourceUrl)
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(context, "Media URL copied", Toast.LENGTH_SHORT).show()
+                                    }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy media URL",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
+
+                            // Open in Browser
+                            if (item.sourceUrl.isNotBlank()) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = Color.Black.copy(alpha = 0.7f),
+                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clickable { onOpenBrowser(item.sourceUrl) }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                            contentDescription = "Open in browser",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
