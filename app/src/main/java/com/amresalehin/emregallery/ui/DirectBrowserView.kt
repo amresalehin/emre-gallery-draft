@@ -187,13 +187,110 @@ fun DirectBrowserView(
             .testTag("direct_browser_view"),
         color = BrowserThemeColors.background(isDark)
     ) {
-        // The webpage fills the browser canvas. Native browser controls float above it.
-        Box(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.fillMaxSize()) {
-            // Full-screen web canvas: page content scrolls behind the floating browser controls.
+        // The toolbar is a fixed layout section; webpage content begins below it.
+        Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("browser_pinned_top_controls")
+            ) {
+            // 1. Minimalist Monochrome Top Bar (always visible)
+            BrowserTopBar(
+                addressInput = addressInput,
+                onAddressChange = { addressInput = it },
+                onNavigate = { navigateToUrl(it) },
+                onHamburgerClick = {
+                    showTabsSheet = true
+                },
+                onDiscoveredMediaClick = {
+                    onSwitchToMediaTab()
+                },
+                discoveredCount = totalDetectedCount,
+                onNewTabClick = {
+                    currentUrl = ""
+                    addressInput = ""
+                    pageTitle = ""
+                    onUrlChange?.invoke("")
+                    webViewInstance?.loadUrl("about:blank")
+                },
+                onReloadClick = {
+                    if (isLoading) webViewInstance?.stopLoading() else webViewInstance?.reload()
+                },
+                onPinCurrentSite = {
+                    if (currentUrl.isNotBlank()) {
+                        coroutineScope.launch {
+                            historyManager.addShortcut(pageTitle.ifBlank { currentUrl }, currentUrl)
+                        }
+                    }
+                },
+                onShareClick = {
+                    if (currentUrl.isNotBlank()) {
+                        val sendIntent = Intent().apply {
+                            action = Intent.ACTION_SEND
+                            putExtra(Intent.EXTRA_TEXT, currentUrl)
+                            type = "text/plain"
+                        }
+                        context.startActivity(Intent.createChooser(sendIntent, "Share link"))
+                    }
+                },
+                onDesktopToggle = { desktop ->
+                    isDesktopMode = desktop
+                    webViewInstance?.settings?.apply {
+                        userAgentString = if (desktop) {
+                            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        } else {
+                            BotDetectionMitigator.STEALTH_USER_AGENT
+                        }
+                        useWideViewPort = desktop
+                        loadWithOverviewMode = desktop
+                    }
+                    webViewInstance?.reload()
+                },
+                isDesktopMode = isDesktopMode,
+                onClearHistoryClick = {
+                    coroutineScope.launch {
+                        historyManager.clearHistory()
+                    }
+                },
+                onSettingsClick = {
+                    showSettingsSheet = true
+                },
+                isWebPage = currentUrl.isNotBlank(),
+                onHomeClick = {
+                    currentUrl = ""
+                    addressInput = ""
+                    pageTitle = ""
+                    onUrlChange?.invoke("")
+                    webViewInstance?.loadUrl("about:blank")
+                },
+                onCloseBrowser = onClose,
+                isDark = isDark,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+
+            // Loading Progress Bar
+            if (isLoading) {
+                LinearProgressIndicator(
+                    progress = { loadingProgress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.5.dp),
+                    color = BrowserThemeColors.textPrimary(isDark),
+                    trackColor = BrowserThemeColors.divider(isDark)
+                )
+            }
+
+            }
+
+
+            // The browser viewport uses the remaining height beneath the toolbar.
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxWidth()
             ) {
                 // Interactive WebView (always instantiated for high-speed responsiveness)
                 AndroidView(
@@ -446,9 +543,6 @@ fun DirectBrowserView(
                             .testTag("browser_empty_home_page")
                     )
                 }
-            }
-
-            }
 
             val isChallengeActive = remember(pageTitle, currentUrl) {
                 BotDetectionMitigator.isBotChallenge(pageTitle, currentUrl)
@@ -460,8 +554,7 @@ fun DirectBrowserView(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(top = 66.dp, start = 16.dp, end = 16.dp)
+                    .padding(top = 12.dp, start = 16.dp, end = 16.dp)
             ) {
                 Surface(
                     color = Color(0xFFFEF3C7),
@@ -491,103 +584,6 @@ fun DirectBrowserView(
                 }
             }
 
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .testTag("browser_pinned_top_controls")
-            ) {
-            // 1. Minimalist Monochrome Top Bar (always visible)
-            BrowserTopBar(
-                addressInput = addressInput,
-                onAddressChange = { addressInput = it },
-                onNavigate = { navigateToUrl(it) },
-                onHamburgerClick = {
-                    showTabsSheet = true
-                },
-                onDiscoveredMediaClick = {
-                    onSwitchToMediaTab()
-                },
-                discoveredCount = totalDetectedCount,
-                onNewTabClick = {
-                    currentUrl = ""
-                    addressInput = ""
-                    pageTitle = ""
-                    onUrlChange?.invoke("")
-                    webViewInstance?.loadUrl("about:blank")
-                },
-                onReloadClick = {
-                    if (isLoading) webViewInstance?.stopLoading() else webViewInstance?.reload()
-                },
-                onPinCurrentSite = {
-                    if (currentUrl.isNotBlank()) {
-                        coroutineScope.launch {
-                            historyManager.addShortcut(pageTitle.ifBlank { currentUrl }, currentUrl)
-                        }
-                    }
-                },
-                onShareClick = {
-                    if (currentUrl.isNotBlank()) {
-                        val sendIntent = Intent().apply {
-                            action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_TEXT, currentUrl)
-                            type = "text/plain"
-                        }
-                        context.startActivity(Intent.createChooser(sendIntent, "Share link"))
-                    }
-                },
-                onDesktopToggle = { desktop ->
-                    isDesktopMode = desktop
-                    webViewInstance?.settings?.apply {
-                        userAgentString = if (desktop) {
-                            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                        } else {
-                            BotDetectionMitigator.STEALTH_USER_AGENT
-                        }
-                        useWideViewPort = desktop
-                        loadWithOverviewMode = desktop
-                    }
-                    webViewInstance?.reload()
-                },
-                isDesktopMode = isDesktopMode,
-                onClearHistoryClick = {
-                    coroutineScope.launch {
-                        historyManager.clearHistory()
-                    }
-                },
-                onSettingsClick = {
-                    showSettingsSheet = true
-                },
-                isWebPage = currentUrl.isNotBlank(),
-                onHomeClick = {
-                    currentUrl = ""
-                    addressInput = ""
-                    pageTitle = ""
-                    onUrlChange?.invoke("")
-                    webViewInstance?.loadUrl("about:blank")
-                },
-                onCloseBrowser = onClose,
-                isDark = isDark,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-            )
-
-            // Loading Progress Bar
-            if (isLoading) {
-                LinearProgressIndicator(
-                    progress = { loadingProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.5.dp),
-                    color = BrowserThemeColors.textPrimary(isDark),
-                    trackColor = BrowserThemeColors.divider(isDark)
-                )
-            }
-
-            }
-
             BrowserBottomNavBar(
                 tabCount = tabsList.size,
                 onOpenDownloads = {
@@ -605,6 +601,8 @@ fun DirectBrowserView(
                 isDark = isDark,
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
+
+            }
         }
     }
 
