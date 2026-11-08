@@ -132,3 +132,97 @@ Keep Compose UI code independent of HTTP, filesystem, Hugging Face, and ONNX imp
 3. One complete model end-to-end, preferably Florence-2 only after its full export/runtime path is confirmed.
 4. Runtime integration and application feature wiring.
 5. Re-enable additional models one by one after each passes the same acceptance criteria.
+
+
+## Required reference pattern: existing face-model downloads
+
+**The AI model subsystem must follow the established face-model lifecycle and download UX. Do not invent a separate, weaker downloader.** Use the following existing implementations as concrete references:
+
+### Reference A — multi-artifact download: EnteFaceModelManager
+
+File: `app/src/main/java/com/amresalehin/emregallery/face/EnteFaceModelManager.kt`
+
+Reuse the design concepts from:
+
+- `EnteModelArtifact`: each required artifact declares a filename, minimum expected size, optional SHA-256, and source URL.
+- `REQUIRED_ARTIFACTS`: a model is a complete set of explicitly declared files, not one guessed URL.
+- `getModelState()` / `isInstalled()`: installed state is derived from every required artifact, not merely a manifest or directory.
+- `computeSha256()`: verify downloaded bytes against a trusted checksum when one is published.
+- `downloadOrInstallModel()`: handle storage checks, already-installed checks, bundled assets, multi-file downloads, progress stages, and final validation.
+- `downloadFile()`: handle redirects, HTTP errors, HTTP Range, buffered streaming, cancellation checks, and pause-aware callbacks.
+- `DetailedDownloadProgress`: report byte counts, speed, ETA, and current stage.
+
+**Apply these concepts to AI models:**
+
+- [ ] Define each AI model's required artifact set explicitly, including config, tokenizer, processor, ONNX graph(s), decoder/cache graph(s), vocabulary/merges where applicable, and external ONNX tensor-data files.
+- [ ] Store per-artifact path, URL, expected minimum or exact size, SHA-256, required/optional status, and role.
+- [ ] Use a model-specific private directory under app internal storage.
+- [ ] Check available storage before starting. Include download size, expanded/extracted size, the existing installation, and a safety margin in the estimate.
+- [ ] Stream to staging files; never expose incomplete files at final installation paths.
+- [ ] Support redirects, bounded retry policy, pause/resume checkpoints, cancellation, and detailed byte/speed/ETA progress.
+- [ ] Validate each artifact's size and checksum before installation.
+- [ ] Skip already verified artifacts when safe; do not skip solely because a file exists.
+- [ ] Verify the complete artifact set after installation and derive model state from that set.
+
+### Reference B — archive download and runtime loading: BuffaloLFaceEngine
+
+File: `app/src/main/java/com/amresalehin/emregallery/face/BuffaloLFaceEngine.kt`
+
+Use the model lifecycle from:
+
+- `downloadModel()`: download a model pack, preserve a partial archive where safe, expose progress stages, check cancellation/pause, and extract into a staging directory.
+- ZIP extraction: extract only the required model files and reject incomplete packs.
+- `isModelInstalled()`: require all named model files and minimum sizes.
+- `open()`: create actual ONNX Runtime sessions before constructing a usable engine.
+- `BuffaloLFaceEngineFactory`: expose model identity, installation check, runtime creation, and download through a dedicated factory.
+
+**Apply these concepts to AI models:**
+
+- [ ] Support both direct multi-file artifacts and archive-based model packs through an explicit download-source type.
+- [ ] For archives, extract only allowlisted manifest paths; reject absolute paths, traversal entries, unexpected files where relevant, and missing required files.
+- [ ] Validate the extracted artifact set before swapping it into the installed model directory.
+- [ ] Add a model-specific runtime factory/adapter. Its `isInstalled` must mean integrity-validated installation, and its `create/load` path must actually construct the required ONNX session(s) and model pipeline.
+- [ ] For models requiring multiple graphs (for example encoder + decoder + decoder-with-past), load and validate the complete graph set together.
+- [ ] A model must not become **READY** until its runtime opens successfully and a smoke inference passes.
+
+### Important: copy the proven pattern, not existing edge-case bugs
+
+The face implementation is a reference, not a requirement to reproduce its current limitations. Fix these while building the AI equivalent:
+
+- [ ] **True resume:** Ente's current manager deletes its staging directory in `finally`, so partial files do not reliably survive a failed/cancelled invocation. Retain safe partial files across recoverable failures and process restarts; delete them only on explicit cancellation/reset or when integrity metadata proves they are unusable.
+- [ ] **Range correctness:** validate status code and `Content-Range` against the existing partial length. If the server ignores Range, truncates the range, changes validators, or returns an inconsistent 416, restart or fail safely rather than appending blindly.
+- [ ] **Atomic replacement:** Ente currently promotes artifact files one-by-one. Install a complete staged model directory with an atomic directory swap where supported, retaining a backup of the last known-good version until the new model passes runtime validation.
+- [ ] **Exact progress:** do not hard-code the Ente 25 MiB estimate or Buffalo 288 MiB estimate. Use authoritative manifest totals where known, and explicitly mark progress as indeterminate when totals are unknown.
+- [ ] **Storage calculation:** do not copy fixed minimum free-space constants blindly. Calculate required space for partial downloads, extraction, staged installation, retained old version, and safety margin.
+- [ ] **Checksum policy:** Ente has per-artifact hashes; Buffalo currently relies mainly on archive/file minimum sizes. AI models must use trusted SHA-256 values where available and never invent checksums.
+- [ ] **Runtime check:** Buffalo opens ONNX sessions in `open()`; AI validation must do the equivalent during READY transition. File size alone is not runtime validation.
+- [ ] **Archive safety:** use safe extraction with path validation and size limits to prevent ZIP path traversal and decompression/resource-exhaustion issues.
+- [ ] **Concurrency:** enforce one active install/update per model ID and prevent cancel/uninstall races with downloads or runtime loading.
+- [ ] **Failure reporting:** preserve stage, artifact, HTTP status, and actionable error details in observable state rather than collapsing every failure into a generic message.
+
+### Required AI equivalents and boundaries
+
+Keep AI code out of the `face` package. Implement equivalent interfaces in a dedicated AI/model area, while reusing shared generic download utilities only if doing so does not couple AI runtime state to face-recognition state.
+
+Suggested boundaries:
+
+- `LocalModelRegistry`: typed, immutable model definitions and artifact manifests.
+- `LocalModelArtifact`: file path, URL/source, expected sizes, SHA-256, role, required flag, external-data relationship.
+- `LocalModelDownloadManager`: face-style streaming, redirects, verified Range resume, pause-aware progress, cancellation, speed and ETA.
+- `LocalModelInstaller`: staging, safe extraction, integrity validation, atomic promotion, rollback.
+- `LocalModelRuntimeFactory`: per-model `isInstalled`, `create/load`, runtime compatibility, and inference readiness.
+- `LocalModelRuntimeRegistry`: deterministic model-ID to runtime-factory registration.
+- `LocalModelStateStore`: observable and durable install/runtime lifecycle state for the UI.
+
+The Compose UI should consume the same quality of progress and stage feedback as the face-model workflow, but it must not implement network, file, hash, archive, or ONNX logic itself.
+
+### Definition of done for parity with face models
+
+- [ ] Each AI model has an explicit artifact manifest equivalent to `EnteModelArtifact`.
+- [ ] Each download has stage/progress reporting and pause/cancel support equivalent to the face workflow.
+- [ ] Recoverable partial downloads can resume correctly after interruption/restart.
+- [ ] Every artifact is size-checked and checksum-checked where a trusted checksum exists.
+- [ ] Installation is staged and rollback-safe.
+- [ ] The complete model pipeline loads successfully through a dedicated runtime factory, equivalent to `BuffaloLFaceEngine.open()`.
+- [ ] A real inference smoke test succeeds before the model is reported Ready.
+- [ ] Existing Ente and Buffalo_L face-model download, validation, and inference behaviour remains unchanged.
