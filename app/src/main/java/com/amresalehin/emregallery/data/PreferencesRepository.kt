@@ -101,6 +101,8 @@ class PreferencesRepository(context: Context) {
     suspend fun addRecentSearch(query: String) = mediaPrefs.addRecentSearch(query)
     suspend fun clearRecentSearches() = mediaPrefs.clearRecentSearches()
     suspend fun addTagForMedia(uri: String, tag: String) = mediaPrefs.addTagForMedia(uri, tag)
+    suspend fun addTagsForMedia(uri: String, tags: Collection<String>) = mediaPrefs.addTagsForMedia(uri, tags)
+    suspend fun removeTagForMedia(uri: String, tag: String) = mediaPrefs.removeTagForMedia(uri, tag)
     suspend fun addPersonForMedia(uri: String, person: String) = mediaPrefs.addPersonForMedia(uri, person)
 
     // --- AI Configuration & Models ---

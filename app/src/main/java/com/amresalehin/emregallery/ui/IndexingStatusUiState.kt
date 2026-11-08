@@ -49,6 +49,16 @@ data class LocationIndexingState(
     val itemsPerMinute: Int = 0
 )
 
+data class AiTaggingState(
+    val processed: Int = 0,
+    val taggedCount: Int = 0,
+    val isRunning: Boolean = false,
+    val isPaused: Boolean = false,
+    val itemsPerMinute: Int = 0,
+    val currentItemName: String = "",
+    val currentItemStatus: String = ""
+)
+
 data class ModelDownloadState(
     val isDownloading: Boolean = false,
     val isPaused: Boolean = false,
@@ -84,6 +94,7 @@ data class IndexingStatusUiState(
     val ocr: OcrState = OcrState(),
     val faceFinding: FaceFindingState = FaceFindingState(),
     val location: LocationIndexingState = LocationIndexingState(),
+    val aiTagging: AiTaggingState = AiTaggingState(),
     val modelDownload: ModelDownloadState = ModelDownloadState(),
     val clustering: FaceClusteringState = FaceClusteringState(),
     val enteFaceFinding: FaceFindingState = FaceFindingState(detectionConfidence = EnteFaceConstants.DEFAULT_DETECTION_CONFIDENCE),

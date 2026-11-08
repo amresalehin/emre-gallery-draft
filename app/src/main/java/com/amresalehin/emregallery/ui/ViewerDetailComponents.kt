@@ -736,6 +736,10 @@ fun OverviewTabContent(
     onFaceClick: ((DetectedMediaFace) -> Unit)? = null,
     selectedEngineId: String = BuffaloLFaceEngine.ENGINE_ID,
     onSelectEngine: (String) -> Unit = {},
+    onAutoTagAi: (() -> Unit)? = null,
+    isAiTagging: Boolean = false,
+    aiTaggingStatus: String? = null,
+    onRemoveTag: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -874,18 +878,84 @@ fun OverviewTabContent(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    IconButton(
-                        onClick = onAddTag,
-                        modifier = Modifier.size(32.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add tag",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Surface(
+                            onClick = { onAutoTagAi?.invoke() },
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("ai_auto_tag_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 11.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                if (isAiTagging) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(13.dp),
+                                        strokeWidth = 1.6.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "Tagging...",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "Auto-tag with AI",
+                                        modifier = Modifier.size(13.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "AI Tag",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        IconButton(
+                            onClick = onAddTag,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("add_tag_manual_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add tag manually",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
+
+                if (!aiTaggingStatus.isNullOrBlank()) {
+                    Text(
+                        text = aiTaggingStatus,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 11.sp
+                        ),
+                        modifier = Modifier.padding(horizontal = 2.dp)
+                    )
+                }
+
                 if (hasTags) {
                     Row(
                         modifier = Modifier
@@ -900,30 +970,76 @@ fun OverviewTabContent(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                             ) {
-                                Text(
-                                    text = tag,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
+                                Row(
+                                    modifier = Modifier.padding(
+                                        start = 12.dp,
+                                        end = if (onRemoveTag != null) 6.dp else 12.dp,
+                                        top = 6.dp,
+                                        bottom = 6.dp
+                                    ),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = tag,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (onRemoveTag != null) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Remove $tag",
+                                            modifier = Modifier
+                                                .size(15.dp)
+                                                .clickable { onRemoveTag(tag) }
+                                                .padding(2.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 } else {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
-                        modifier = Modifier.clickable { onAddTag() }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                            modifier = Modifier
+                                .clickable { onAutoTagAi?.invoke() }
+                                .testTag("empty_ai_tag_button")
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(6.dp))
-                            Text("Add tag", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (isAiTagging) "Tagging..." else "Auto-tag with AI", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                            modifier = Modifier
+                                .clickable { onAddTag() }
+                                .testTag("empty_manual_add_tag_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Add manually", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                 }
@@ -1322,7 +1438,7 @@ fun OverviewFacePortrait(
  * Stylized cartoon avatar portrait matching reference screenshot.
  */
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ActionsTabContent(
     item: MediaItem,
@@ -1336,6 +1452,10 @@ fun ActionsTabContent(
     onAddTagClick: (() -> Unit)? = null,
     onRescanPhoto: (() -> Unit)? = null,
     onAddPersonClick: (() -> Unit)? = null,
+    onAutoTagAi: (() -> Unit)? = null,
+    isAiTagging: Boolean = false,
+    aiTaggingStatus: String? = null,
+    onRemoveTag: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
 ) {
@@ -1397,6 +1517,155 @@ fun ActionsTabContent(
                                 enabled = !isBusy,
                                 onRename = { if (!FaceProcessingCoordinator.isBusy(context)) onRenameFaceClick(face) }
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. AI Image Tagging Card (Images only)
+        if (!item.isVideo) {
+            item(key = "actions_ai_tagging") {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.AutoAwesome,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                                Column {
+                                    Text(
+                                        text = "AI Image Tagging",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Detect objects, themes & scene attributes",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        if (!aiTaggingStatus.isNullOrBlank()) {
+                            Text(
+                                text = aiTaggingStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (aiTaggingStatus.startsWith("Error")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Existing tags if any
+                        if (customTags.isNotEmpty()) {
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                customTags.forEach { tag ->
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant,
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(start = 10.dp, end = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = tag,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            if (onRemoveTag != null) {
+                                                Spacer(Modifier.width(4.dp))
+                                                IconButton(
+                                                    onClick = { onRemoveTag(tag) },
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = "Remove tag $tag",
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(12.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = { onAutoTagAi?.invoke() },
+                                enabled = !isAiTagging,
+                                shape = RoundedCornerShape(20.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 44.dp)
+                                    .testTag("action_auto_tag_ai_button")
+                            ) {
+                                if (isAiTagging) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Analyzing...")
+                                } else {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Auto-Tag with AI")
+                                }
+                            }
+
+                            if (onAddTagClick != null) {
+                                OutlinedButton(
+                                    onClick = onAddTagClick,
+                                    shape = RoundedCornerShape(20.dp),
+                                    modifier = Modifier
+                                        .defaultMinSize(minHeight = 44.dp)
+                                        .testTag("action_add_tag_manual_button")
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Add Tag")
+                                }
+                            }
                         }
                     }
                 }

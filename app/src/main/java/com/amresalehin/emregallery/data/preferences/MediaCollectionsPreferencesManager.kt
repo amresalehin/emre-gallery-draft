@@ -308,19 +308,42 @@ class MediaCollectionsPreferencesManager(private val context: Context) {
     }
 
     suspend fun addTagForMedia(uri: String, tag: String) {
-        val trimmed = tag.trim()
-        if (trimmed.isEmpty()) return
+        addTagsForMedia(uri, listOf(tag))
+    }
+
+    suspend fun addTagsForMedia(uri: String, tags: Collection<String>) {
+        val validTags = tags.map { it.trim().removePrefix("#").lowercase() }.filter { it.isNotEmpty() }.toSet()
+        if (validTags.isEmpty()) return
         context.galleryDataStore.edit { prefs ->
             val raw = prefs[mediaTagsKey] ?: "{}"
             val obj = try { JSONObject(raw) } catch (e: Exception) { JSONObject() }
             val arr = obj.optJSONArray(uri) ?: JSONArray()
             val existing = mutableSetOf<String>()
             for (i in 0 until arr.length()) existing.add(arr.getString(i))
-            if (existing.add(trimmed)) {
+            if (existing.addAll(validTags)) {
                 val newArr = JSONArray(existing)
                 obj.put(uri, newArr)
                 prefs[mediaTagsKey] = obj.toString()
             }
+        }
+    }
+
+    suspend fun removeTagForMedia(uri: String, tag: String) {
+        val trimmed = tag.trim().removePrefix("#").lowercase()
+        if (trimmed.isEmpty()) return
+        context.galleryDataStore.edit { prefs ->
+            val raw = prefs[mediaTagsKey] ?: "{}"
+            val obj = try { JSONObject(raw) } catch (e: Exception) { JSONObject() }
+            val arr = obj.optJSONArray(uri) ?: return@edit
+            val existing = mutableSetOf<String>()
+            for (i in 0 until arr.length()) {
+                val t = arr.getString(i)
+                if (!t.equals(trimmed, ignoreCase = true)) {
+                    existing.add(t)
+                }
+            }
+            obj.put(uri, JSONArray(existing))
+            prefs[mediaTagsKey] = obj.toString()
         }
     }
 
