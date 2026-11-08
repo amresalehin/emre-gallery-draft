@@ -55,7 +55,8 @@ fun AiConfigurationCard(
     prefs: PreferencesRepository,
     cardBackground: Color? = null,
     cardBorder: BorderStroke? = null,
-    onShowSnackbar: ((String) -> Unit)? = null
+    onShowSnackbar: ((String) -> Unit)? = null,
+    initiallyExpanded: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -65,7 +66,12 @@ fun AiConfigurationCard(
     val florenceState by prefs.florenceModelState.collectAsState(initial = FlorenceModelState())
     val allModelStates by FlorenceModelManager.allModelStates.collectAsState()
 
-    var isExpanded by remember { mutableStateOf(true) }
+    var isExpanded by remember { mutableStateOf(initiallyExpanded) }
+    LaunchedEffect(initiallyExpanded) {
+        if (initiallyExpanded) {
+            isExpanded = true
+        }
+    }
     var selectedTab by remember { mutableStateOf(AiModeTab.CLOUD) }
 
     var providerName by remember { mutableStateOf("") }
@@ -170,9 +176,11 @@ fun AiConfigurationCard(
                 Spacer(Modifier.width(6.dp))
 
                 Icon(
-                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.ChevronRight,
+                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     contentDescription = if (isExpanded) "Collapse" else "Expand",
-                    modifier = Modifier.size(22.dp),
+                    modifier = Modifier
+                        .size(22.dp)
+                        .testTag("ai_expand_toggle"),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

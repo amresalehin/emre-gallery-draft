@@ -224,7 +224,8 @@ fun SettingsScreen(
                                     indexingViewModel.refreshCounts()
                                 }
                             }
-                        }
+                        },
+                        initiallyExpanded = query.isNotBlank() && matchesOcr
                     )
                 }
             }
@@ -302,7 +303,8 @@ fun SettingsScreen(
                                     }
                                 }
                             }
-                        }
+                        },
+                        initiallyExpanded = query.isNotBlank() && matchesFace
                     )
                 }
             }
@@ -312,7 +314,8 @@ fun SettingsScreen(
                 item(key = "ai_configuration_card") {
                     AiConfigurationCard(
                         prefs = actualPrefs,
-                        onShowSnackbar = onShowSnackbar
+                        onShowSnackbar = onShowSnackbar,
+                        initiallyExpanded = query.isNotBlank() && matchesAi
                     )
                 }
             }

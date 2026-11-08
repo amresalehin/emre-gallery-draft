@@ -160,4 +160,21 @@ class AiConfigurationTest {
         assertEquals("Florence-2 Base", florence.displayName)
         assertEquals("florence", florence.testTagPrefix)
     }
+
+    @Test
+    fun testRealModelArtifactsUrlsValid() {
+        val models = com.amresalehin.emregallery.data.FlorenceModelManager.SUPPORTED_MODELS
+        for (model in models) {
+            assertTrue("Model ${model.id} must have artifacts", model.artifacts.isNotEmpty())
+            for (artifact in model.artifacts) {
+                assertTrue("Artifact filename must not be blank", artifact.fileName.isNotBlank())
+                assertTrue("Artifact URL must start with https://", artifact.url.startsWith("https://"))
+                assertTrue("Artifact estimated size must be positive", artifact.estimatedSize > 0L)
+                assertTrue(
+                    "Artifact URL must point to onnx-community repository",
+                    artifact.url.contains("onnx-community")
+                )
+            }
+        }
+    }
 }

@@ -54,4 +54,18 @@ class SettingsScreenCardsTest {
         assertTrue(matchesOcr("recognition"))
         assertTrue(matchesFace("recognition"))
     }
+
+    @Test
+    fun testCollapsibleCardsExpansionQueryLogic() {
+        fun isCardExpanded(query: String, matches: Boolean): Boolean = query.isNotBlank() && matches
+
+        // By default with blank query, cards are collapsed for clean visual hierarchy
+        assertFalse(isCardExpanded("", matches = true))
+        assertFalse(isCardExpanded("   ", matches = true))
+
+        // When user specifically searches for card keyword, matching card expands automatically
+        assertTrue(isCardExpanded("ocr", matches = true))
+        assertFalse(isCardExpanded("ocr", matches = false))
+        assertTrue(isCardExpanded("face", matches = true))
+    }
 }

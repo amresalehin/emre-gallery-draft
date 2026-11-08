@@ -26,9 +26,10 @@ object FlorenceModelManager {
 
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
             .followRedirects(true)
+            .followSslRedirects(true)
             .build()
     }
 
@@ -59,23 +60,23 @@ object FlorenceModelManager {
     private val FLORENCE_ARTIFACTS = listOf(
         ModelArtifact(
             fileName = "config.json",
-            url = "https://huggingface.co/microsoft/Florence-2-base/raw/main/config.json",
-            estimatedSize = 2_800L
+            url = "https://huggingface.co/onnx-community/Florence-2-base/resolve/main/config.json",
+            estimatedSize = 5_447L
         ),
         ModelArtifact(
             fileName = "tokenizer_config.json",
-            url = "https://huggingface.co/microsoft/Florence-2-base/raw/main/tokenizer_config.json",
-            estimatedSize = 34_000L
+            url = "https://huggingface.co/onnx-community/Florence-2-base/resolve/main/tokenizer_config.json",
+            estimatedSize = 197_658L
         ),
         ModelArtifact(
             fileName = "tokenizer.json",
-            url = "https://huggingface.co/microsoft/Florence-2-base/raw/main/tokenizer.json",
-            estimatedSize = 2_100_000L
+            url = "https://huggingface.co/onnx-community/Florence-2-base/resolve/main/tokenizer.json",
+            estimatedSize = 2_297_961L
         ),
         ModelArtifact(
             fileName = "florence2_encoder.onnx",
-            url = "https://huggingface.co/onnx-community/Florence-2-base-ONNX/resolve/main/onnx/encoder_model.onnx",
-            estimatedSize = 35_000_000L
+            url = "https://huggingface.co/onnx-community/Florence-2-base/resolve/main/onnx/encoder_model_quantized.onnx",
+            estimatedSize = 43_651_493L
         )
     )
 
@@ -88,10 +89,10 @@ object FlorenceModelManager {
             manifestFileName = "gemma_manifest.json",
             testTagPrefix = "gemma",
             artifacts = listOf(
-                ModelArtifact("config.json", "https://huggingface.co/google/gemma-2b/raw/main/config.json", 1_400L),
-                ModelArtifact("tokenizer_config.json", "https://huggingface.co/google/gemma-2b/raw/main/tokenizer_config.json", 42_000L),
-                ModelArtifact("tokenizer.model", "https://huggingface.co/google/gemma-2b/raw/main/tokenizer.model", 4_200_000L),
-                ModelArtifact("gemma_weights.bin", "https://huggingface.co/google/gemma-2b/resolve/main/model.safetensors.index.json", 24_000_000L)
+                ModelArtifact("config.json", "https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX/resolve/main/config.json", 1_975L),
+                ModelArtifact("tokenizer_config.json", "https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX/resolve/main/tokenizer_config.json", 2_327L),
+                ModelArtifact("tokenizer.json", "https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX/resolve/main/tokenizer.json", 20_323_013L),
+                ModelArtifact("gemma_weights.onnx", "https://huggingface.co/onnx-community/gemma-3-1b-it-ONNX/resolve/main/onnx/model_q4.onnx", 347_363L)
             )
         ),
         LocalModelSpec(
@@ -102,9 +103,10 @@ object FlorenceModelManager {
             manifestFileName = "lfm_manifest.json",
             testTagPrefix = "lfm",
             artifacts = listOf(
-                ModelArtifact("config.json", "https://huggingface.co/liquid/lfm-vision/raw/main/config.json", 2_400L),
-                ModelArtifact("tokenizer.json", "https://huggingface.co/liquid/lfm-vision/raw/main/tokenizer.json", 1_800_000L),
-                ModelArtifact("lfm_encoder.onnx", "https://huggingface.co/liquid/lfm-vision/resolve/main/onnx/encoder.onnx", 28_000_000L)
+                ModelArtifact("config.json", "https://huggingface.co/onnx-community/LFM2-350M-ONNX/resolve/main/config.json", 1_384L),
+                ModelArtifact("tokenizer_config.json", "https://huggingface.co/onnx-community/LFM2-350M-ONNX/resolve/main/tokenizer_config.json", 93_557L),
+                ModelArtifact("tokenizer.json", "https://huggingface.co/onnx-community/LFM2-350M-ONNX/resolve/main/tokenizer.json", 3_296_940L),
+                ModelArtifact("lfm_encoder.onnx", "https://huggingface.co/onnx-community/LFM2-350M-ONNX/resolve/main/onnx/model_quantized.onnx", 185_941L)
             )
         ),
         LocalModelSpec(
@@ -115,9 +117,10 @@ object FlorenceModelManager {
             manifestFileName = "qwen_manifest.json",
             testTagPrefix = "qwen",
             artifacts = listOf(
-                ModelArtifact("config.json", "https://huggingface.co/Qwen/Qwen1.5-0.5B/raw/main/config.json", 1_500L),
-                ModelArtifact("tokenizer.json", "https://huggingface.co/Qwen/Qwen1.5-0.5B/raw/main/tokenizer.json", 2_800_000L),
-                ModelArtifact("qwen_model.onnx", "https://huggingface.co/Qwen/Qwen1.5-0.5B-ONNX/resolve/main/model.onnx", 30_000_000L)
+                ModelArtifact("config.json", "https://huggingface.co/onnx-community/Qwen2.5-0.5B/resolve/main/config.json", 691L),
+                ModelArtifact("tokenizer_config.json", "https://huggingface.co/onnx-community/Qwen2.5-0.5B/resolve/main/tokenizer_config.json", 7_229L),
+                ModelArtifact("tokenizer.json", "https://huggingface.co/onnx-community/Qwen2.5-0.5B/resolve/main/tokenizer.json", 7_031_673L),
+                ModelArtifact("qwen_model.onnx", "https://huggingface.co/onnx-community/Qwen2.5-0.5B/resolve/main/onnx/model_quantized.onnx", 512_096_557L)
             )
         ),
         LocalModelSpec(
@@ -147,8 +150,11 @@ object FlorenceModelManager {
         val manifest = File(dir, spec.manifestFileName)
         if (!manifest.exists() || manifest.length() == 0L) return false
 
-        // Check if any non-empty artifact exists
-        return dir.listFiles()?.any { it.isFile && it.length() > 0L && it.name != spec.manifestFileName } == true
+        // Check that all required artifacts exist and have non-zero size
+        return spec.artifacts.all { artifact ->
+            val file = File(dir, artifact.fileName)
+            file.isFile && file.length() > 0L
+        }
     }
 
     fun getInstalledSizeBytes(context: Context, modelId: String = "florence2"): Long {
@@ -205,6 +211,10 @@ object FlorenceModelManager {
         modelId: String,
         onProgress: ((progress: Float, downloaded: Long, total: Long) -> Unit)? = null
     ): Boolean = withContext(Dispatchers.IO) {
+        val currentJob = coroutineContext[Job]
+        if (currentJob != null) {
+            activeDownloadJobs[modelId] = currentJob
+        }
         val spec = getSpec(modelId)
         val dir = getModelDir(context, modelId)
         if (!dir.exists()) {
@@ -229,56 +239,43 @@ object FlorenceModelManager {
                 val tempFile = File(dir, "${artifact.fileName}.tmp")
 
                 var downloadedForArtifact = 0L
-                var downloadSucceeded = false
 
-                // Attempt real download
-                try {
-                    val request = Request.Builder()
-                        .url(artifact.url)
-                        .get()
-                        .build()
+                val request = Request.Builder()
+                    .url(artifact.url)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) EmreGallery/1.0")
+                    .get()
+                    .build()
 
-                    httpClient.newCall(request).execute().use { response ->
-                        if (response.isSuccessful && response.body != null) {
-                            val body = response.body!!
-                            val input: InputStream = body.byteStream()
-                            FileOutputStream(tempFile).use { output ->
-                                val buffer = ByteArray(32 * 1024)
-                                var read: Int
-                                while (input.read(buffer).also { read = it } != -1) {
-                                    output.write(buffer, 0, read)
-                                    downloadedForArtifact += read
-                                    val currentTotal = totalBytesDownloaded + downloadedForArtifact
-                                    val frac = (currentTotal.toFloat() / totalEstimated.toFloat()).coerceIn(0.05f, 0.95f)
-                                    val update = initialDownloadingState.copy(
-                                        progress = frac,
-                                        bytesDownloaded = currentTotal,
-                                        totalBytes = totalEstimated
-                                    )
-                                    updateModelState(modelId, update)
-                                    onProgress?.invoke(frac, currentTotal, totalEstimated)
-                                }
-                                output.flush()
-                            }
-                            if (tempFile.exists() && tempFile.length() > 0L) {
-                                if (destFile.exists()) destFile.delete()
-                                tempFile.renameTo(destFile)
-                                downloadSucceeded = true
-                            }
-                        }
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful || response.body == null) {
+                        throw IllegalStateException("HTTP ${response.code} downloading ${artifact.fileName}")
                     }
-                } catch (e: CancellationException) {
-                    tempFile.delete()
-                    throw e
-                } catch (e: Exception) {
-                    tempFile.delete()
-                    downloadSucceeded = false
-                }
-
-                // Fallback for sandboxed / offline environments to guarantee complete functional workflow
-                if (!downloadSucceeded) {
-                    createFallbackArtifact(destFile, artifact.fileName, spec)
-                    downloadedForArtifact = destFile.length()
+                    val body = response.body!!
+                    val input: InputStream = body.byteStream()
+                    FileOutputStream(tempFile).use { output ->
+                        val buffer = ByteArray(32 * 1024)
+                        var read: Int
+                        while (input.read(buffer).also { read = it } != -1) {
+                            output.write(buffer, 0, read)
+                            downloadedForArtifact += read
+                            val currentTotal = totalBytesDownloaded + downloadedForArtifact
+                            val frac = (currentTotal.toFloat() / totalEstimated.toFloat()).coerceIn(0.05f, 0.95f)
+                            val update = initialDownloadingState.copy(
+                                progress = frac,
+                                bytesDownloaded = currentTotal,
+                                totalBytes = totalEstimated
+                            )
+                            updateModelState(modelId, update)
+                            onProgress?.invoke(frac, currentTotal, totalEstimated)
+                        }
+                        output.flush()
+                    }
+                    if (tempFile.exists() && tempFile.length() > 0L) {
+                        if (destFile.exists()) destFile.delete()
+                        tempFile.renameTo(destFile)
+                    } else {
+                        throw IllegalStateException("Downloaded file ${artifact.fileName} is empty")
+                    }
                 }
 
                 totalBytesDownloaded += downloadedForArtifact
@@ -336,6 +333,8 @@ object FlorenceModelManager {
             )
             updateModelState(modelId, errState)
             return@withContext false
+        } finally {
+            activeDownloadJobs.remove(modelId)
         }
     }
 
@@ -350,29 +349,6 @@ object FlorenceModelManager {
         _allModelStates.value = current
         if (modelId == "florence2") {
             _modelState.value = state
-        }
-    }
-
-    private fun createFallbackArtifact(file: File, fileName: String, spec: LocalModelSpec) {
-        when {
-            fileName.endsWith(".json") -> {
-                val json = JSONObject().apply {
-                    put("model_id", spec.id)
-                    put("model_name", spec.displayName)
-                    put("status", "LOCAL_VERIFIED")
-                    put("vocab_size", 32000)
-                }
-                file.writeText(json.toString(2))
-            }
-            else -> {
-                file.outputStream().use { fos ->
-                    val header = "${spec.id.uppercase()}_MODEL_HEADER_V1".toByteArray()
-                    fos.write(header)
-                    val chunk = ByteArray(64 * 1024)
-                    fos.write(chunk)
-                    fos.flush()
-                }
-            }
         }
     }
 

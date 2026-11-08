@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -13,6 +14,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Folder
@@ -64,8 +67,15 @@ fun FaceRecognitionCard(
     availableFolders: List<FaceFolderInfo> = emptyList(),
     onToggleFolder: (String) -> Unit = {},
     onSelectAllFolders: () -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initiallyExpanded: Boolean = false
 ) {
+    var isExpanded by remember { mutableStateOf(initiallyExpanded) }
+    LaunchedEffect(initiallyExpanded) {
+        if (initiallyExpanded) {
+            isExpanded = true
+        }
+    }
     val context = LocalContext.current
     val activeEngineInSettings = FaceRecognitionSettings.getActiveEngine(context)
     val isFaceRecognitionEnabled = FaceRecognitionSettings.preferences(context)
@@ -167,38 +177,47 @@ fun FaceRecognitionCard(
         border = cardBorder,
         modifier = modifier
             .fillMaxWidth()
+            .animateContentSize()
             .testTag("face_recognition_card")
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Header Row: Face Icon, Title, Dynamic Corner Box
+            // Header Row: Face Icon, Title, Dynamic Corner Box, Expand Toggle
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp, vertical = 18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Circular Halo with FaceRecognitionIcon
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                    modifier = Modifier.size(46.dp)
+                // Clickable Left area (Icon + Title) to toggle expansion
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { isExpanded = !isExpanded },
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        FaceRecognitionIcon(tint = MaterialTheme.colorScheme.onSurface)
+                    // Circular Halo with FaceRecognitionIcon
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(46.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            FaceRecognitionIcon(tint = MaterialTheme.colorScheme.onSurface)
+                        }
                     }
+
+                    Spacer(Modifier.width(16.dp))
+
+                    Text(
+                        text = "Face Recognition",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
                 }
-
-                Spacer(Modifier.width(16.dp))
-
-                Text(
-                    text = "Face Recognition",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
 
                 // Stop action button when actively scanning
                 if (currentFindingState.isRunning) {
@@ -421,6 +440,22 @@ fun FaceRecognitionCard(
                         }
                     }
                 }
+
+                Spacer(Modifier.width(6.dp))
+
+                IconButton(
+                    onClick = { isExpanded = !isExpanded },
+                    modifier = Modifier
+                        .size(34.dp)
+                        .testTag("face_expand_toggle")
+                ) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Collapse Face Recognition" else "Expand Face Recognition",
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             // Minimalist Divider with integrated Progress Indicator
@@ -429,11 +464,13 @@ fun FaceRecognitionCard(
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp)
             ) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                    thickness = 1.dp,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (isExpanded) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                        thickness = 1.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 if (isDownloading) {
                     LinearProgressIndicator(
                         progress = { (downloadPercent / 100f).coerceIn(0f, 1f) },
@@ -455,160 +492,162 @@ fun FaceRecognitionCard(
                 }
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp)
-            ) {
-                // Engine Label (No explanatory text)
-                Text(
-                    text = "Engine",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                // Engine Segmented Buttons: Disable | Yolo V5 | Buffalo L
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            if (isExpanded) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(44.dp)
+                        .padding(horizontal = 18.dp, vertical = 14.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(3.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FaceSegmentOption(
-                            text = "Disable",
-                            isSelected = selectedOption == "disable",
-                            onClick = { selectOption("disable") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("face_engine_segment_disable")
+                    // Engine Label (No explanatory text)
+                    Text(
+                        text = "Engine",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-
-                        VerticalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            modifier = Modifier.fillMaxHeight(0.6f).width(1.dp)
-                        )
-
-                        FaceSegmentOption(
-                            text = "Yolo V5",
-                            isSelected = selectedOption == "yolo",
-                            onClick = { selectOption("yolo") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("face_engine_segment_yolo")
-                        )
-
-                        VerticalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            modifier = Modifier.fillMaxHeight(0.6f).width(1.dp)
-                        )
-
-                        FaceSegmentOption(
-                            text = "Buffalo L",
-                            isSelected = selectedOption == "buffalo",
-                            onClick = { selectOption("buffalo") },
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("face_engine_segment_buffalo")
-                        )
-                    }
-                }
-
-                if (selectedOption != "disable") {
-                    Spacer(Modifier.height(16.dp))
-
-                    // Folders Header Row: Icon + "Folders" on left, "All folders" pill on right
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.Folder,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "Folders",
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            )
-                        }
-
-                        // "All folders" toggle pill
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (currentFindingState.isAllFolders) Color(0xFF161A20) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                            border = BorderStroke(
-                                1.dp,
-                                if (currentFindingState.isAllFolders) Color(0xFF161A20) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                            ),
-                            modifier = Modifier
-                                .height(36.dp)
-                                .clickable(onClick = onSelectAllFolders)
-                                .testTag("face_folders_all_pill")
-                        ) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier.padding(horizontal = 14.dp)
-                            ) {
-                                Text(
-                                    text = "All folders",
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontSize = 13.sp,
-                                        fontWeight = if (currentFindingState.isAllFolders) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (currentFindingState.isAllFolders) Color.White else MaterialTheme.colorScheme.onSurface
-                                    )
-                                )
-                            }
-                        }
-                    }
+                    )
 
                     Spacer(Modifier.height(8.dp))
 
-                    // Horizontally scrollable row of real device folders
-                    if (availableFolders.isNotEmpty()) {
+                    // Engine Segmented Buttons: Disable | Yolo V5 | Buffalo L
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                    ) {
                         Row(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .testTag("face_folders_horizontal_row"),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                .fillMaxSize()
+                                .padding(3.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            availableFolders.forEach { folder ->
-                                val isSelected = !currentFindingState.isAllFolders && folder.path in currentFindingState.selectedFolders
-                                FolderChip(
-                                    label = folder.name,
-                                    isSelected = isSelected,
-                                    onClick = { onToggleFolder(folder.path) },
-                                    testTag = "face_folder_chip_${folder.name}"
+                            FaceSegmentOption(
+                                text = "Disable",
+                                isSelected = selectedOption == "disable",
+                                onClick = { selectOption("disable") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("face_engine_segment_disable")
+                            )
+
+                            VerticalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.fillMaxHeight(0.6f).width(1.dp)
+                            )
+
+                            FaceSegmentOption(
+                                text = "Yolo V5",
+                                isSelected = selectedOption == "yolo",
+                                onClick = { selectOption("yolo") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("face_engine_segment_yolo")
+                            )
+
+                            VerticalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.fillMaxHeight(0.6f).width(1.dp)
+                            )
+
+                            FaceSegmentOption(
+                                text = "Buffalo L",
+                                isSelected = selectedOption == "buffalo",
+                                onClick = { selectOption("buffalo") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("face_engine_segment_buffalo")
+                            )
+                        }
+                    }
+
+                    if (selectedOption != "disable") {
+                        Spacer(Modifier.height(16.dp))
+
+                        // Folders Header Row: Icon + "Folders" on left, "All folders" pill on right
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Folder,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(20.dp)
                                 )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Folders",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                )
+                            }
+
+                            // "All folders" toggle pill
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (currentFindingState.isAllFolders) Color(0xFF161A20) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (currentFindingState.isAllFolders) Color(0xFF161A20) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                ),
+                                modifier = Modifier
+                                    .height(36.dp)
+                                    .clickable(onClick = onSelectAllFolders)
+                                    .testTag("face_folders_all_pill")
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.padding(horizontal = 14.dp)
+                                ) {
+                                    Text(
+                                        text = "All folders",
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontSize = 13.sp,
+                                            fontWeight = if (currentFindingState.isAllFolders) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (currentFindingState.isAllFolders) Color.White else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // Horizontally scrollable row of real device folders
+                        if (availableFolders.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .testTag("face_folders_horizontal_row"),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                availableFolders.forEach { folder ->
+                                    val isSelected = !currentFindingState.isAllFolders && folder.path in currentFindingState.selectedFolders
+                                    FolderChip(
+                                        label = folder.name,
+                                        isSelected = isSelected,
+                                        onClick = { onToggleFolder(folder.path) },
+                                        testTag = "face_folder_chip_${folder.name}"
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(6.dp))
+                }
             }
         }
     }

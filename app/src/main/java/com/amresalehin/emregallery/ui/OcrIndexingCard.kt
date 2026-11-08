@@ -1,5 +1,6 @@
 package com.amresalehin.emregallery.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -11,6 +12,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -50,8 +53,15 @@ fun OcrIndexingCard(
     onToggleLanguage: (String) -> Unit,
     onToggleMlKitLanguage: (String) -> Unit = {},
     onClearCache: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initiallyExpanded: Boolean = false
 ) {
+    var isExpanded by remember { mutableStateOf(initiallyExpanded) }
+    LaunchedEffect(initiallyExpanded) {
+        if (initiallyExpanded) {
+            isExpanded = true
+        }
+    }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val ocrProgress = if (totalPhotos > 0) (ocrState.processed.toFloat() / totalPhotos).coerceIn(0f, 1f) else 0f
@@ -97,38 +107,47 @@ fun OcrIndexingCard(
         border = cardBorder,
         modifier = modifier
             .fillMaxWidth()
+            .animateContentSize()
             .testTag("ocr_indexing_card")
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Header Row: OCR icon, OCR Title, Dynamic Corner Box
+            // Header Row: OCR icon, OCR Title, Dynamic Corner Box, Expand Toggle
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp, vertical = 18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Circle with OCR Icon matching WelcomeScreen
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                    modifier = Modifier.size(46.dp)
+                // Clickable Left area (Icon + Title) to toggle expansion
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { isExpanded = !isExpanded },
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        OcrIcon(tint = MaterialTheme.colorScheme.onSurface)
+                    // Circle with OCR Icon matching WelcomeScreen
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(46.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            OcrIcon(tint = MaterialTheme.colorScheme.onSurface)
+                        }
                     }
+
+                    Spacer(Modifier.width(16.dp))
+
+                    Text(
+                        text = "OCR",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
                 }
-
-                Spacer(Modifier.width(16.dp))
-
-                Text(
-                    text = "OCR",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
 
                 // Optional Stop button when running/paused
                 if (ocrState.isRunning) {
@@ -273,6 +292,22 @@ fun OcrIndexingCard(
                         )
                     }
                 }
+
+                Spacer(Modifier.width(6.dp))
+
+                IconButton(
+                    onClick = { isExpanded = !isExpanded },
+                    modifier = Modifier
+                        .size(34.dp)
+                        .testTag("ocr_expand_toggle")
+                ) {
+                    Icon(
+                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = if (isExpanded) "Collapse OCR" else "Expand OCR",
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             // Minimalist Divider with integrated Progress Indicator
@@ -281,11 +316,13 @@ fun OcrIndexingCard(
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp)
             ) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                    thickness = 1.dp,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (isExpanded) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                        thickness = 1.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
                 if (ocrProgress > 0f) {
                     LinearProgressIndicator(
                         progress = { animatedProgress },
@@ -298,151 +335,153 @@ fun OcrIndexingCard(
                 }
             }
 
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp)
-            ) {
-                // Engine Label (No explanatory text)
-                Text(
-                    text = "Engine",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                )
-
-                Spacer(Modifier.height(8.dp))
-
-                // Engine Segmented Buttons: ML Kit | Tess-Best | Tess-Fast
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+            if (isExpanded) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(44.dp)
+                        .padding(horizontal = 18.dp, vertical = 14.dp)
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(3.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        SegmentOption(
-                            text = "ML Kit",
-                            isSelected = selectedEngineOption == "mlkit",
-                            onClick = {
-                                if (!ocrState.isRunning) onEngineChange("google_mlkit")
-                            },
-                            modifier = Modifier.weight(1f)
+                    // Engine Label (No explanatory text)
+                    Text(
+                        text = "Engine",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-
-                        VerticalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            modifier = Modifier.fillMaxHeight(0.6f).width(1.dp)
-                        )
-
-                        SegmentOption(
-                            text = "Tess-Best",
-                            isSelected = selectedEngineOption == "tess_best",
-                            onClick = {
-                                if (!ocrState.isRunning) {
-                                    onEngineChange("tesseract")
-                                    onModelChange("best")
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        VerticalDivider(
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                            modifier = Modifier.fillMaxHeight(0.6f).width(1.dp)
-                        )
-
-                        SegmentOption(
-                            text = "Tess-Fast",
-                            isSelected = selectedEngineOption == "tess_fast",
-                            onClick = {
-                                if (!ocrState.isRunning) {
-                                    onEngineChange("tesseract")
-                                    onModelChange("fast")
-                                }
-                            },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-
-                // Language(s) Label (No explanatory text)
-                Text(
-                    text = "Language(s)",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
                     )
-                )
 
-                Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(8.dp))
 
-                // Language Chips Row (Horizontally scrollable with all supported languages)
-                if (isMlKit) {
-                    val mlKitOptions = remember {
-                        MlKitLanguage.entries.map { it.code to it.title }
-                    }
-                    Row(
+                    // Engine Segmented Buttons: ML Kit | Tess-Best | Tess-Fast
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .testTag("ocr_languages_mlkit_row"),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            .height(44.dp)
                     ) {
-                        mlKitOptions.forEach { (code, label) ->
-                            val isSelected = code in ocrState.mlKitLanguages
-                            LanguageChip(
-                                label = label,
-                                isSelected = isSelected,
-                                onClick = { onToggleMlKitLanguage(code) },
-                                testTag = "ocr_lang_$code"
-                            )
-                        }
-                    }
-                } else {
-                    val tesseractOptions = remember {
-                        TesseractOcr.supportedLanguages.entries.map { it.value to it.key }
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .testTag("ocr_languages_tesseract_row"),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        tesseractOptions.forEach { (code, label) ->
-                            val isSelected = code in ocrLanguages
-                            LanguageChip(
-                                label = label,
-                                isSelected = isSelected,
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            SegmentOption(
+                                text = "ML Kit",
+                                isSelected = selectedEngineOption == "mlkit",
                                 onClick = {
-                                    val isInstalled = TesseractOcr.isLanguageInstalled(context, code, activeTesseractModel) ||
-                                        TesseractOcr.isLanguageBundledInAssets(context, code, activeTesseractModel)
-                                    if (!isInstalled) {
-                                        downloadAndSelectLanguage(code)
-                                    } else {
-                                        onToggleLanguage(code)
+                                    if (!ocrState.isRunning) onEngineChange("google_mlkit")
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            VerticalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.fillMaxHeight(0.6f).width(1.dp)
+                            )
+
+                            SegmentOption(
+                                text = "Tess-Best",
+                                isSelected = selectedEngineOption == "tess_best",
+                                onClick = {
+                                    if (!ocrState.isRunning) {
+                                        onEngineChange("tesseract")
+                                        onModelChange("best")
                                     }
                                 },
-                                testTag = "ocr_lang_$code"
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            VerticalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                                modifier = Modifier.fillMaxHeight(0.6f).width(1.dp)
+                            )
+
+                            SegmentOption(
+                                text = "Tess-Fast",
+                                isSelected = selectedEngineOption == "tess_fast",
+                                onClick = {
+                                    if (!ocrState.isRunning) {
+                                        onEngineChange("tesseract")
+                                        onModelChange("fast")
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
-                }
 
-                Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(16.dp))
+
+                    // Language(s) Label (No explanatory text)
+                    Text(
+                        text = "Language(s)",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    // Language Chips Row (Horizontally scrollable with all supported languages)
+                    if (isMlKit) {
+                        val mlKitOptions = remember {
+                            MlKitLanguage.entries.map { it.code to it.title }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .testTag("ocr_languages_mlkit_row"),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            mlKitOptions.forEach { (code, label) ->
+                                val isSelected = code in ocrState.mlKitLanguages
+                                LanguageChip(
+                                    label = label,
+                                    isSelected = isSelected,
+                                    onClick = { onToggleMlKitLanguage(code) },
+                                    testTag = "ocr_lang_$code"
+                                )
+                            }
+                        }
+                    } else {
+                        val tesseractOptions = remember {
+                            TesseractOcr.supportedLanguages.entries.map { it.value to it.key }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .testTag("ocr_languages_tesseract_row"),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            tesseractOptions.forEach { (code, label) ->
+                                val isSelected = code in ocrLanguages
+                                LanguageChip(
+                                    label = label,
+                                    isSelected = isSelected,
+                                    onClick = {
+                                        val isInstalled = TesseractOcr.isLanguageInstalled(context, code, activeTesseractModel) ||
+                                            TesseractOcr.isLanguageBundledInAssets(context, code, activeTesseractModel)
+                                        if (!isInstalled) {
+                                            downloadAndSelectLanguage(code)
+                                        } else {
+                                            onToggleLanguage(code)
+                                        }
+                                    },
+                                    testTag = "ocr_lang_$code"
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+                }
             }
         }
     }
