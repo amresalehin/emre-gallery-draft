@@ -584,6 +584,8 @@ fun DirectBrowserView(
                 }
             }
 
+            }
+
             BrowserBottomNavBar(
                 tabCount = tabsList.size,
                 onOpenDownloads = {
@@ -599,10 +601,8 @@ fun DirectBrowserView(
                     showSettingsSheet = true
                 },
                 isDark = isDark,
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier.fillMaxWidth()
             )
-
-            }
         }
     }
 
