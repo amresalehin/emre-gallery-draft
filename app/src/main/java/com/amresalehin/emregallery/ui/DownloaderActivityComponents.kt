@@ -455,6 +455,7 @@ fun DownloaderActivityPage(
     val context = LocalContext.current
     LaunchedEffect(Unit) {
         DownloadActivityManager.initialize(context)
+        DownloadActivityManager.syncWithStorageDir(context)
         DownloadActivityManager.syncWithInboxRepository()
     }
 

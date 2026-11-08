@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery.ui
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -23,12 +24,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -425,13 +428,29 @@ fun BrowserTopBar(
     modifier: Modifier = Modifier
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var isInputFocused by remember { mutableStateOf(false) }
+
+    val barBorderColor by animateColorAsState(
+        targetValue = if (isInputFocused) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+        } else {
+            BrowserThemeColors.barOutline(isDark)
+        },
+        animationSpec = tween(200),
+        label = "top_bar_border_color"
+    )
+    val barBorderWidth by animateDpAsState(
+        targetValue = if (isInputFocused) 1.8.dp else 1.2.dp,
+        animationSpec = tween(200),
+        label = "top_bar_border_width"
+    )
 
     Surface(
         shape = CircleShape,
         color = BrowserThemeColors.barSurface(isDark),
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp,
-        border = BorderStroke(1.2.dp, BrowserThemeColors.barOutline(isDark)),
+        tonalElevation = if (isInputFocused) 8.dp else 6.dp,
+        shadowElevation = if (isInputFocused) 10.dp else 8.dp,
+        border = BorderStroke(barBorderWidth, barBorderColor),
         modifier = modifier
             .fillMaxWidth()
             .height(54.dp)
@@ -464,17 +483,38 @@ fun BrowserTopBar(
                 )
             }
 
-            Spacer(Modifier.width(2.dp))
+            // Dynamic Search Icon (Shown only when focused)
+            AnimatedVisibility(
+                visible = isInputFocused,
+                enter = fadeIn(animationSpec = tween(180)) + expandHorizontally(animationSpec = tween(180)),
+                exit = fadeOut(animationSpec = tween(150)) + shrinkHorizontally(animationSpec = tween(150))
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .padding(start = 2.dp, end = 6.dp)
+                            .size(20.dp)
+                            .testTag("top_bar_search_icon")
+                    )
+                }
+            }
 
-            // Search Icon
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "Search",
-                tint = BrowserThemeColors.iconTint(isDark),
-                modifier = Modifier.size(22.dp)
-            )
-
-            Spacer(Modifier.width(8.dp))
+            // Site Security Indicator when not focused on web page
+            if (!isInputFocused && isWebPage) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = "Secure site",
+                    tint = BrowserThemeColors.secondaryIconTint(isDark),
+                    modifier = Modifier
+                        .padding(start = 2.dp, end = 6.dp)
+                        .size(16.dp)
+                )
+            } else if (!isInputFocused) {
+                Spacer(Modifier.width(4.dp))
+            }
 
             // Address / Search Input
             Box(
@@ -515,9 +555,12 @@ fun BrowserTopBar(
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Normal
                     ),
-                    cursorBrush = SolidColor(BrowserThemeColors.textPrimary(isDark)),
+                    cursorBrush = SolidColor(if (isInputFocused) MaterialTheme.colorScheme.primary else BrowserThemeColors.textPrimary(isDark)),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onFocusChanged { focusState ->
+                            isInputFocused = focusState.isFocused
+                        }
                         .testTag("top_bar_address_input")
                 )
             }
@@ -526,7 +569,9 @@ fun BrowserTopBar(
             if (addressInput.isNotEmpty()) {
                 IconButton(
                     onClick = { onAddressChange("") },
-                    modifier = Modifier.size(30.dp)
+                    modifier = Modifier
+                        .size(30.dp)
+                        .testTag("top_bar_clear_input_btn")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -537,36 +582,79 @@ fun BrowserTopBar(
                 }
             }
 
-            // Discovered Media Download Icon (real data: badge only shown if > 0)
+            // Dynamic Submit Query Button (revealed when search bar is focused with query)
+            AnimatedVisibility(
+                visible = isInputFocused && addressInput.isNotBlank(),
+                enter = fadeIn(animationSpec = tween(150)) + expandHorizontally(animationSpec = tween(150)),
+                exit = fadeOut(animationSpec = tween(120)) + shrinkHorizontally(animationSpec = tween(120))
+            ) {
+                IconButton(
+                    onClick = {
+                        if (addressInput.isNotBlank()) {
+                            onNavigate(addressInput)
+                        }
+                    },
+                    modifier = Modifier
+                        .padding(horizontal = 2.dp)
+                        .size(36.dp)
+                        .testTag("top_bar_submit_query_btn")
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "Submit query",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Discovered Media Download Icon (dynamically shows number of available scrapped media options)
             Box(
                 modifier = Modifier
                     .size(42.dp)
+                    .clip(CircleShape)
                     .clickable(onClick = onDiscoveredMediaClick)
                     .testTag("top_bar_download_media_btn"),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.PhotoLibrary,
+                    imageVector = Icons.Default.DownloadForOffline,
                     contentDescription = "View discovered media",
-                    tint = BrowserThemeColors.iconTint(isDark),
+                    tint = if (discoveredCount > 0) MaterialTheme.colorScheme.primary else BrowserThemeColors.iconTint(isDark),
                     modifier = Modifier.size(24.dp)
                 )
                 if (discoveredCount > 0) {
-                    Box(
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        shadowElevation = 2.dp,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .offset(x = (-3).dp, y = 3.dp)
-                            .size(17.dp)
-                            .background(BrowserThemeColors.badgeBg(isDark), shape = CircleShape),
-                        contentAlignment = Alignment.Center
+                            .offset(x = (-1).dp, y = 1.dp)
+                            .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
+                            .testTag("top_bar_media_count_badge")
                     ) {
-                        Text(
-                            text = "$discoveredCount",
-                            color = BrowserThemeColors.badgeText(isDark),
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            lineHeight = 10.sp
-                        )
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = if (discoveredCount > 99) "99+" else "$discoveredCount",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 12.sp,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
             }

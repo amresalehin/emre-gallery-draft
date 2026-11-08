@@ -67,7 +67,7 @@ data class NavBackStackEntry(
     val mapFocusItem: MediaItem? = null,
     val albumFilter: String? = null,
     val albumFilterReturnDestination: Destination = Destination.ALBUMS,
-    val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+    val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
     val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
     val inboxInitialOpenBrowser: Boolean = false
 )
@@ -136,7 +136,7 @@ fun GalleryApp() {
     val snackbarHostState = remember { SnackbarHostState() }
     var showLockedFolderSetupPrompt by remember { mutableStateOf(false) }
     var activePersonId by remember { mutableStateOf<String?>(null) }
-    var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.SEARCH_PAGE) }
+    var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.ACTIVITY_PAGE) }
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
     var inboxInitialOpenBrowser by remember { mutableStateOf(false) }
     var isPocketDetailOpen by remember { mutableStateOf(false) }
@@ -503,7 +503,7 @@ fun GalleryApp() {
         newViewerStoryTitle: String? = if (dest == Destination.VIEWER) viewerStoryTitle else null,
         newViewerStories: List<StoryGroup> = if (dest == Destination.VIEWER) viewerStories else emptyList(),
         newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0,
-        newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.SEARCH_PAGE,
+        newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
         newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
         newInboxInitialOpenBrowser: Boolean = false
     ) {
@@ -1287,8 +1287,25 @@ fun GalleryApp() {
                     Destination.BROWSER -> DirectBrowserView(
                         initialUrl = "",
                         onClose = { performBackNavigation() },
+                        onMenuClick = { showSidePanel = true },
                         onMediaExtracted = { item -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItem(item) },
                         onBatchExtracted = { batch, title, _ -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItems(batch, title) },
+                        onOpenDownloads = {
+                            navigateTo(
+                                dest = Destination.MEDIA_INBOX,
+                                rememberPrevious = true,
+                                newInboxInitialViewMode = DownloaderViewMode.ACTIVITY_PAGE,
+                                newInboxInitialOpenBrowser = false
+                            )
+                        },
+                        onOpenDiscoveredMedia = {
+                            navigateTo(
+                                dest = Destination.MEDIA_INBOX,
+                                rememberPrevious = true,
+                                newInboxInitialViewMode = DownloaderViewMode.DISCOVERED_MEDIA,
+                                newInboxInitialOpenBrowser = false
+                            )
+                        },
                         onSwitchToMediaTab = {
                             navigateTo(
                                 dest = Destination.MEDIA_INBOX,

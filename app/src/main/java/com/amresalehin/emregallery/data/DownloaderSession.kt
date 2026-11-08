@@ -9,7 +9,6 @@ import java.net.URL
  * Single source of truth for downloader sessions across:
  * - FullScreenBrowserView
  * - DownloaderSearchMainPage
- * - ShareReceiverActivity
  *
  * Ensures discoveries made in the live browser automatically merge across sessions.
  */
@@ -42,14 +41,31 @@ object DownloaderSession {
     private val itemsLock = Any()
     private val canonicalMap = mutableMapOf<String, ScrapedMediaItem>()
 
+    fun clear() {
+        synchronized(itemsLock) {
+            _currentUrl.value = ""
+            _sourceDomain.value = ""
+            _pageTitle.value = ""
+            canonicalMap.clear()
+            _discoveredItems.value = emptyList()
+            _selectedItemIds.value = emptySet()
+            _isExtracting.value = false
+            _statusMessage.value = "Browser home"
+            _errorMessage.value = null
+        }
+    }
+
     /**
      * Synchronizes the shared discovered-media review with the active browser page.
      * Unlike startSession(), this does not mark an extraction job as running.
      */
     fun updateBrowserPage(url: String) {
         val trimmed = url.trim()
-        val normalized = if (trimmed.isNotBlank() &&
-            !trimmed.startsWith("http://", true) &&
+        if (trimmed.isBlank() || trimmed == "about:blank") {
+            clear()
+            return
+        }
+        val normalized = if (!trimmed.startsWith("http://", true) &&
             !trimmed.startsWith("https://", true)
         ) {
             "https://$trimmed"

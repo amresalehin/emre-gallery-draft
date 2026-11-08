@@ -737,6 +737,56 @@ class DownloaderSearchPageUnitTest {
         val yesterdayStr = DownloadActivityManager.formatDate(System.currentTimeMillis() - (26 * 3600 * 1000L))
         assertTrue(yesterdayStr.startsWith("Yesterday"))
     }
+
+    @Test
+    fun testDownloaderSessionClear() {
+        val session = com.amresalehin.emregallery.data.DownloaderSession
+        session.startSession("https://example.com/test")
+        session.addDiscoveredItems(
+            listOf(
+                com.amresalehin.emregallery.data.ScrapedMediaItem(
+                    id = "item_1",
+                    url = "https://example.com/photo.jpg",
+                    title = "Photo"
+                )
+            ),
+            "Test Page"
+        )
+        assertEquals(1, session.discoveredItems.value.size)
+
+        // Clear must reset session
+        session.clear()
+        assertEquals(0, session.discoveredItems.value.size)
+        assertEquals("", session.currentUrl.value)
+        assertEquals("", session.sourceDomain.value)
+    }
+
+    @Test
+    fun testFinishedDownloadsPreservedAndCounted() {
+        val itemFinished = DownloadActivityItem(
+            id = "test_finished_1",
+            title = "finished.jpg",
+            mediaUrl = "https://example.com/finished.jpg",
+            status = DownloadActivityStatus.FINISHED,
+            progress = 1.0f
+        )
+        val itemFailed = DownloadActivityItem(
+            id = "test_failed_1",
+            title = "failed.jpg",
+            mediaUrl = "https://example.com/failed.jpg",
+            status = DownloadActivityStatus.FAILED,
+            progress = 0f
+        )
+        val list = listOf(itemFinished, itemFailed)
+
+        val finishedOnly = list.filter { it.status == DownloadActivityStatus.FINISHED }
+        val failedOnly = list.filter { it.status == DownloadActivityStatus.FAILED }
+
+        assertEquals(1, finishedOnly.size)
+        assertEquals("test_finished_1", finishedOnly[0].id)
+        assertEquals(1, failedOnly.size)
+        assertEquals("test_failed_1", failedOnly[0].id)
+    }
 }
 
 

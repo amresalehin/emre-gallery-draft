@@ -66,7 +66,7 @@ class GalleryApplication : Application() {
 
         // Initialize Chaquopy Python SDK and gallery-dl media engine asynchronously in the background.
         // Running this off the UI thread eliminates the 2-4s main thread blockage on cold start,
-        // allowing share sheets and activities to launch instantly.
+        // allowing activities to launch instantly.
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
             com.amresalehin.emregallery.data.GalleryDlEngine.init(this@GalleryApplication)
         }

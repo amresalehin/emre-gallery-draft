@@ -53,11 +53,14 @@ import java.net.URL
 fun DirectBrowserView(
     initialUrl: String = "",
     onClose: (() -> Unit)? = null,
+    onMenuClick: (() -> Unit)? = null,
     onUrlChange: ((String) -> Unit)? = null,
     onPageTitleChanged: ((String) -> Unit)? = null,
     onMediaExtracted: (ScrapedMediaItem) -> Unit,
     onBatchExtracted: (List<ScrapedMediaItem>, pageTitle: String?, domain: String?) -> Unit,
-    onSwitchToMediaTab: () -> Unit,
+    onSwitchToMediaTab: () -> Unit = {},
+    onOpenDownloads: (() -> Unit)? = null,
+    onOpenDiscoveredMedia: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
@@ -66,7 +69,7 @@ fun DirectBrowserView(
     val historyManager = remember { BrowserHistoryManager(context) }
     val tabSession = remember { BrowserSession.getTabSession("tab_main") }
     val tabDetectedCount by tabSession.detectedCount.collectAsState()
-    val totalDetectedCount = tabDetectedCount
+    val sessionDiscoveredItems by DownloaderSession.discoveredItems.collectAsState()
 
     val prefsRepo = remember { PreferencesRepository(context) }
     val themePref by prefsRepo.theme.collectAsState(initial = "system")
@@ -91,6 +94,11 @@ fun DirectBrowserView(
     }
 
     var currentUrl by remember { mutableStateOf(startUrl) }
+    val totalDetectedCount = if (currentUrl.isBlank() || currentUrl == "about:blank") {
+        0
+    } else {
+        maxOf(tabDetectedCount, sessionDiscoveredItems.size)
+    }
     var addressInput by remember { mutableStateOf(startUrl) }
     var pageTitle by remember { mutableStateOf("") }
     var canGoBack by remember { mutableStateOf(false) }
@@ -119,6 +127,14 @@ fun DirectBrowserView(
         onDispose { }
     }
 
+    LaunchedEffect(Unit) {
+        if (startUrl.isBlank()) {
+            tabSession.clearMedia()
+            tabSession.updateNavigation("")
+            DownloaderSession.clear()
+        }
+    }
+
     DisposableEffect(Unit) {
         onDispose {
             webViewInstance?.let { wv ->
@@ -145,6 +161,9 @@ fun DirectBrowserView(
                 addressInput = ""
                 pageTitle = ""
                 onUrlChange?.invoke("")
+                tabSession.clearMedia()
+                tabSession.updateNavigation("")
+                DownloaderSession.clear()
                 webViewInstance?.loadUrl("about:blank")
             }
             onClose != null -> onClose()
@@ -155,10 +174,13 @@ fun DirectBrowserView(
         val trimmed = target.trim()
         if (trimmed.isBlank()) return
         val formatted = MediaClassifier.formatQueryOrUrl(trimmed)
+        tabSession.clearMedia()
+        DownloaderSession.clear()
         addressInput = formatted
         currentUrl = formatted
         onUrlChange?.invoke(formatted)
         tabSession.updateNavigation(formatted, pageTitle)
+        DownloaderSession.updateBrowserPage(formatted)
         coroutineScope.launch {
             historyManager.recordVisit(formatted)
         }
@@ -203,10 +225,14 @@ fun DirectBrowserView(
                 onAddressChange = { addressInput = it },
                 onNavigate = { navigateToUrl(it) },
                 onHamburgerClick = {
-                    showTabsSheet = true
+                    if (onMenuClick != null) {
+                        onMenuClick.invoke()
+                    } else {
+                        showTabsSheet = true
+                    }
                 },
                 onDiscoveredMediaClick = {
-                    onSwitchToMediaTab()
+                    onOpenDiscoveredMedia?.invoke() ?: onSwitchToMediaTab()
                 },
                 discoveredCount = totalDetectedCount,
                 onNewTabClick = {
@@ -214,6 +240,9 @@ fun DirectBrowserView(
                     addressInput = ""
                     pageTitle = ""
                     onUrlChange?.invoke("")
+                    tabSession.clearMedia()
+                    tabSession.updateNavigation("")
+                    DownloaderSession.clear()
                     webViewInstance?.loadUrl("about:blank")
                 },
                 onReloadClick = {
@@ -264,6 +293,9 @@ fun DirectBrowserView(
                     addressInput = ""
                     pageTitle = ""
                     onUrlChange?.invoke("")
+                    tabSession.clearMedia()
+                    tabSession.updateNavigation("")
+                    DownloaderSession.clear()
                     webViewInstance?.loadUrl("about:blank")
                 },
                 onCloseBrowser = onClose,
@@ -487,18 +519,23 @@ fun DirectBrowserView(
 
                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     if (url.isNullOrBlank() || url == "about:blank") {
+                                        tabSession.clearMedia()
                                         tabSession.updateNavigation("")
+                                        DownloaderSession.clear()
                                         isLoading = false
                                         canGoBack = false
                                         canGoForward = false
                                         return
                                     }
+                                    tabSession.clearMedia()
+                                    DownloaderSession.clear()
                                     isLoading = true
                                     BotDetectionMitigator.injectStealth(view)
                                     currentUrl = url
                                     addressInput = url
                                     onUrlChange?.invoke(url)
                                     tabSession.updateNavigation(url, pageTitle)
+                                    DownloaderSession.updateBrowserPage(url)
                                     canGoBack = view?.canGoBack() == true
                                     canGoForward = view?.canGoForward() == true
                                 }
@@ -593,7 +630,7 @@ fun DirectBrowserView(
             BrowserBottomNavBar(
                 tabCount = tabsList.size,
                 onOpenDownloads = {
-                    onSwitchToMediaTab()
+                    onOpenDownloads?.invoke() ?: onSwitchToMediaTab()
                 },
                 onOpenHistory = {
                     showHistorySheet = true
