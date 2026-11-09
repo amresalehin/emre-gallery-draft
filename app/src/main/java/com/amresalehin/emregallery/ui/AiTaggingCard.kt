@@ -79,6 +79,9 @@ fun AiTaggingCard(
     var selectedModelId by remember {
         mutableStateOf(AiTaggingSettings.getSelectedModel(context))
     }
+    var allowCloudFallback by remember {
+        mutableStateOf(AiTaggingSettings.isCloudFallbackEnabled(context))
+    }
 
     // Folder selection state
     var isAllFolders by remember {
@@ -461,6 +464,39 @@ fun AiTaggingCard(
                                     AiTaggingSettings.setSelectedModel(context, model.id)
                                 },
                                 testTag = "tagging_model_pill_${model.id}"
+                            )
+                        }
+                    }
+
+                    // Cloud fallback is deliberately opt-in because it uploads images.
+                    if (selectedModelId != AiTaggingSettings.MODEL_SMART_VISION &&
+                        selectedModelId != AiTaggingSettings.MODEL_CLOUD
+                    ) {
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Allow Cloud AI fallback",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "When the selected local model cannot run, the photo may be sent to your active cloud provider.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = allowCloudFallback,
+                                onCheckedChange = { enabled ->
+                                    allowCloudFallback = enabled
+                                    AiTaggingSettings.setCloudFallbackEnabled(context, enabled)
+                                }
                             )
                         }
                     }
