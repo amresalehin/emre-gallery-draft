@@ -36,6 +36,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -69,7 +71,8 @@ data class NavBackStackEntry(
     val albumFilterReturnDestination: Destination = Destination.ALBUMS,
     val inboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
     val inboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-    val inboxInitialOpenBrowser: Boolean = false
+    val inboxInitialOpenBrowser: Boolean = false,
+    val selectedBookmarkDetailStack: com.amresalehin.emregallery.data.MediaInboxStack? = null
 )
 
 val LocalViewerCoordinatedProgress = compositionLocalOf<() -> Float> { { 0f } }
@@ -139,6 +142,8 @@ fun GalleryApp() {
     var inboxInitialViewMode by remember { mutableStateOf(DownloaderViewMode.ACTIVITY_PAGE) }
     var inboxInitialStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
     var inboxInitialOpenBrowser by remember { mutableStateOf(false) }
+    var selectedBookmarkDetailStack by remember { mutableStateOf<com.amresalehin.emregallery.data.MediaInboxStack?>(null) }
+    var browserInitialUrl by remember { mutableStateOf("") }
     var isPocketDetailOpen by remember { mutableStateOf(false) }
 
     var isRefreshing by remember { mutableStateOf(false) }
@@ -505,7 +510,9 @@ fun GalleryApp() {
         newCurrentStoryIndex: Int = if (dest == Destination.VIEWER) currentStoryIndex else 0,
         newInboxInitialViewMode: DownloaderViewMode = DownloaderViewMode.ACTIVITY_PAGE,
         newInboxInitialStack: com.amresalehin.emregallery.data.MediaInboxStack? = null,
-        newInboxInitialOpenBrowser: Boolean = false
+        newInboxInitialOpenBrowser: Boolean = false,
+        newSelectedBookmarkDetailStack: com.amresalehin.emregallery.data.MediaInboxStack? = selectedBookmarkDetailStack,
+        newBrowserInitialUrl: String = browserInitialUrl
     ) {
         if (dest != Destination.LOCKED_FOLDER && dest != Destination.VIEWER) {
             isLockedFolderUnlocked = false
@@ -526,7 +533,8 @@ fun GalleryApp() {
                     albumFilterReturnDestination = albumFilterReturnDestination,
                     inboxInitialViewMode = inboxInitialViewMode,
                     inboxInitialStack = inboxInitialStack,
-                    inboxInitialOpenBrowser = inboxInitialOpenBrowser
+                    inboxInitialOpenBrowser = inboxInitialOpenBrowser,
+                    selectedBookmarkDetailStack = selectedBookmarkDetailStack
                 )
             )
             previousDestination = destination
@@ -541,6 +549,8 @@ fun GalleryApp() {
         inboxInitialViewMode = newInboxInitialViewMode
         inboxInitialStack = newInboxInitialStack
         inboxInitialOpenBrowser = newInboxInitialOpenBrowser
+        selectedBookmarkDetailStack = newSelectedBookmarkDetailStack
+        browserInitialUrl = newBrowserInitialUrl
         isPocketDetailOpen = false
     }
 
@@ -621,7 +631,13 @@ fun GalleryApp() {
                 inboxInitialViewMode = entry.inboxInitialViewMode
                 inboxInitialStack = entry.inboxInitialStack
                 inboxInitialOpenBrowser = entry.inboxInitialOpenBrowser
+                selectedBookmarkDetailStack = entry.selectedBookmarkDetailStack
                 previousDestination = backStack.lastOrNull()?.destination ?: Destination.HOME
+            }
+            destination == Destination.BOOKMARK_DETAIL -> {
+                destination = Destination.POCKET
+                selectedBookmarkDetailStack = null
+                viewerStoryTitle = null
             }
             albumFilter != null -> {
                 albumFilter = null
@@ -1123,8 +1139,58 @@ fun GalleryApp() {
                                 newInboxInitialViewMode = DownloaderViewMode.DISCOVERED_MEDIA,
                                 newInboxInitialOpenBrowser = false
                             )
+                        },
+                        onOpenBookmarkDetail = { stack ->
+                            navigateTo(
+                                dest = Destination.BOOKMARK_DETAIL,
+                                rememberPrevious = true,
+                                newSelectedBookmarkDetailStack = stack
+                            )
                         }
                     )
+                    Destination.BOOKMARK_DETAIL -> {
+                        val pocketRepo = remember { com.amresalehin.emregallery.data.PocketRepository.getInstance(context) }
+                        val allBookmarks by pocketRepo.bookmarks.collectAsState()
+                        val activeStack = selectedBookmarkDetailStack?.let { cur ->
+                            allBookmarks.find { it.id == cur.id } ?: cur
+                        } ?: selectedBookmarkDetailStack
+
+                        if (activeStack != null) {
+                            BookmarkDetailScreen(
+                                stack = activeStack,
+                                onBack = { performBackNavigation() },
+                                onOpenBrowser = { url ->
+                                    browserInitialUrl = url
+                                    navigateTo(
+                                        dest = Destination.BROWSER,
+                                        rememberPrevious = true
+                                    )
+                                },
+                                onDelete = {
+                                    pocketRepo.deleteBookmark(activeStack.id)
+                                    performBackNavigation()
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Bookmark deleted")
+                                    }
+                                },
+                                onRefreshMetadata = {
+                                    pocketRepo.refreshMetadata(activeStack.id, context)
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Refreshing link info & preview...")
+                                    }
+                                },
+                                onFetchSiteMedia = {
+                                    pocketRepo.fetchSiteMedia(activeStack.id, context)
+                                },
+                                isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            LaunchedEffect(Unit) {
+                                performBackNavigation()
+                            }
+                        }
+                    }
                     Destination.SETTINGS -> SettingsScreen(
                         media = media.filter { it.uri !in hidden && !it.isTrashed && it.uri !in inBin && it.uri !in archive },
                         total = media.size,
@@ -1288,8 +1354,11 @@ fun GalleryApp() {
                         }
                     )
                     Destination.BROWSER -> DirectBrowserView(
-                        initialUrl = "",
-                        onClose = { performBackNavigation() },
+                        initialUrl = browserInitialUrl,
+                        onClose = {
+                            browserInitialUrl = ""
+                            performBackNavigation()
+                        },
                         onMenuClick = { showSidePanel = true },
                         onMediaExtracted = { item -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItem(item) },
                         onBatchExtracted = { batch, title, _ -> com.amresalehin.emregallery.data.DownloaderSession.addDiscoveredItems(batch, title) },
@@ -1527,7 +1596,7 @@ fun GalleryApp() {
         }
 
         // Floating search bar across Home and Albums - coordinated entrance downward from above screen edge
-        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && destination != Destination.BROWSER
+        val showSearchBar = returnDestination in listOf(Destination.HOME, Destination.ALBUMS) && destination != Destination.VIEWER && destination != Destination.BROWSER && destination != Destination.BOOKMARK_DETAIL
         if (showSearchBar) {
             Box(
                 modifier = Modifier
@@ -1565,7 +1634,7 @@ fun GalleryApp() {
         }
 
         // Floating Bottom Navigation Bar across Home, Albums, Pocket, Settings - coordinated entrance upward from below screen edge
-        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.POCKET, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && destination != Destination.BROWSER && !isPocketDetailOpen
+        val showBottomBarContainer = ((returnDestination in listOf(Destination.HOME, Destination.ALBUMS, Destination.POCKET, Destination.SETTINGS) && albumFilter == null) || homeSelectedUris.isNotEmpty()) && destination != Destination.VIEWER && destination != Destination.BROWSER && destination != Destination.BOOKMARK_DETAIL && !isPocketDetailOpen
         if (showBottomBarContainer) {
             Box(
                 modifier = Modifier

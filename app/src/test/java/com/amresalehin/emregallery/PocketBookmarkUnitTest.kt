@@ -241,5 +241,47 @@ class PocketBookmarkUnitTest {
         val faviconUrl = "https://www.google.com/s2/favicons?domain=${stack.sourceDomain}&sz=128"
         assertTrue(faviconUrl.contains("britannica.com"))
     }
+
+    @Test
+    fun testDestinationEnumContainsBookmarkDetailAsSeparatePage() {
+        val destNames = Destination.values().map { it.name }
+        assertTrue("Destination enum must contain BOOKMARK_DETAIL as a separate page destination", destNames.contains("BOOKMARK_DETAIL"))
+        assertEquals("BOOKMARK_DETAIL", Destination.BOOKMARK_DETAIL.name)
+    }
+
+    @Test
+    fun testBookmarkMediaViewerItemsState() {
+        val mediaItems = listOf(
+            MediaInboxItem(
+                id = "item_0",
+                title = "Photo 1",
+                localUri = "file:///storage/photo1.jpg",
+                sourceUrl = "https://example.com/photo1.jpg",
+                isVideo = false
+            ),
+            MediaInboxItem(
+                id = "item_1",
+                title = "Video 1",
+                localUri = "file:///storage/video1.mp4",
+                sourceUrl = "https://example.com/video1.mp4",
+                isVideo = true
+            )
+        )
+        val stack = MediaInboxStack(
+            id = "bm_deck",
+            title = "Bookmark with media",
+            sourceDomain = "example.com",
+            sourceUrl = "https://example.com",
+            items = mediaItems,
+            description = "Test bookmark with media items"
+        )
+        assertEquals(2, stack.items.size)
+        val initialIndex = 1
+        val coercedIndex = initialIndex.coerceIn(0, stack.items.size - 1)
+        assertEquals(1, coercedIndex)
+        val activeItem = stack.items[coercedIndex]
+        assertTrue(activeItem.isVideo)
+        assertEquals("Video 1", activeItem.title)
+    }
 }
 

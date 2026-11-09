@@ -8,6 +8,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.view.ViewConfiguration
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -71,9 +72,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.content.ContextWrapper
 import android.view.WindowManager
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -135,12 +133,10 @@ fun PocketMediaViewerScreen(
 ) {
     if (items.isEmpty()) return
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("pocket_media_viewer_screen")
     ) {
         PocketMediaViewerContent(
             items = items,
@@ -179,35 +175,32 @@ private fun PocketMediaViewerContent(
     val subtitleTextColor = if (isDark) Color.White.copy(alpha = 0.75f) else Color(0xFF6E6E6E)
     val rippleColor = if (isDark) Color.White else Color.Black
 
-    val view = LocalView.current
-    val dialogWindow = remember(view) { (view.parent as? DialogWindowProvider)?.window }
+    val activity = remember(context) { context.findActivity() }
 
-    DisposableEffect(dialogWindow) {
-        dialogWindow?.let { window ->
-            // The media viewer owns its dialog window; never change the Activity behind it.
-            window.setLayout(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT
-            )
+    // Real full-screen edge-to-edge window configuration:
+    // Ensures the media and container cleanly underlay the status bar without any black dead zone or letterboxing.
+    DisposableEffect(activity, isDark) {
+        val window = activity?.window
+        if (window != null) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
             window.statusBarColor = android.graphics.Color.TRANSPARENT
             window.navigationBarColor = android.graphics.Color.TRANSPARENT
-            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-            window.setBackgroundDrawable(
-                android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK)
-            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                window.attributes.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
             val controller = WindowCompat.getInsetsController(window, window.decorView)
-            controller.hide(WindowInsetsCompat.Type.statusBars())
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            // Ensure status bar is shown and not blocking screen area
+            controller.show(WindowInsetsCompat.Type.statusBars())
+            controller.isAppearanceLightStatusBars = !isDark
+            controller.isAppearanceLightNavigationBars = !isDark
         }
         onDispose {
-            dialogWindow?.let { window ->
-                window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-                WindowCompat.setDecorFitsSystemWindows(window, true)
+            val window = activity?.window
+            if (window != null) {
                 val controller = WindowCompat.getInsetsController(window, window.decorView)
-                controller.show(WindowInsetsCompat.Type.statusBars())
-                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+                controller.isAppearanceLightStatusBars = !isDark
+                controller.isAppearanceLightNavigationBars = !isDark
             }
         }
     }
@@ -383,22 +376,9 @@ private fun PocketMediaViewerContent(
             // Top and bottom edge gradient shading (theme-aware)
             PocketViewerEdgeShading(visible = showControls && !isClosing, isDark = isDark)
 
-            // Read the safe top inset from the viewer dialog itself; the Activity window is untouched.
-            val systemStatusBarHeightDp = with(density) {
-                val insets = dialogWindow?.decorView?.let { ViewCompat.getRootWindowInsets(it) }
-                    ?: ViewCompat.getRootWindowInsets(view)
-                val topInsetPx = insets
-                    ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: 0
-                val fallbackResId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-                val fallbackPx = if (fallbackResId > 0) {
-                    context.resources.getDimensionPixelSize(fallbackResId)
-                } else {
-                    0
-                }
-                (if (topInsetPx > 0) topInsetPx else fallbackPx).toDp()
-            }
-            // Home screen search bar uses statusBarsPadding() + vertical = 8.dp
-            val topBarTopMargin = systemStatusBarHeightDp + 8.dp
+            // Safe top inset for interactive buttons: container & media underlay status bar from y=0
+            val statusBarTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            val topBarTopMargin = statusBarTopPadding + 8.dp
 
             AnimatedVisibility(
                 visible = showControls && !isClosing,
@@ -410,7 +390,6 @@ private fun PocketMediaViewerContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(topBarTopMargin + 64.dp)
-                        .blur(16.dp)
                         .background(
                             Brush.verticalGradient(
                                 colors = if (isDark) listOf(

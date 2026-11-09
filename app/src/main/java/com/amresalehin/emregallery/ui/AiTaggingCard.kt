@@ -245,7 +245,7 @@ fun AiTaggingCard(
                                 else -> triggerTagging(false)
                             }
                         },
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(16.dp),
                         color = when {
                             isModelDownloading -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
                             isRunning -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
@@ -265,12 +265,12 @@ fun AiTaggingCard(
                             }
                         ),
                         modifier = Modifier
-                            .height(36.dp)
-                            .defaultMinSize(minWidth = 84.dp)
+                            .height(38.dp)
+                            .defaultMinSize(minWidth = if (!isModelInstalled && !isModelDownloading) 50.dp else 84.dp)
                             .testTag("tagging_corner_box_action")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
+                            modifier = Modifier.padding(horizontal = if (!isModelInstalled && !isModelDownloading) 12.dp else 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center
                         ) {
@@ -296,7 +296,7 @@ fun AiTaggingCard(
                                         imageVector = Icons.Outlined.CloudDownload,
                                         contentDescription = "Download model",
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(15.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                                 isRunning -> {

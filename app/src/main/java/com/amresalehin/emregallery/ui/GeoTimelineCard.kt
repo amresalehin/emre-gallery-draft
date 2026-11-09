@@ -231,104 +231,97 @@ fun GeoTimelineCard(
             .fillMaxWidth()
             .animateContentSize()
             .testTag("geo_timeline_card"),
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = cardBackground),
         border = cardBorder
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Header follows the same geometry as AI Tagging, OCR, and Face Recognition cards.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+        ) {
+            // Header Row: [Icon] Geo Timeline     [Pill] [v]
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 18.dp),
+                    .clickable { isExpanded = !isExpanded },
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { isExpanded = !isExpanded },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.size(46.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            GeoTimelineViewfinderIcon(
-                                tint = MaterialTheme.colorScheme.onSurface,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
+                GeoTimelineViewfinderIcon(
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(28.dp)
+                )
 
-                    Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(16.dp))
 
-                    Text(
-                        text = "Geo Timeline",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Surface(
-                    onClick = {
-                        if (timelinePoints.isEmpty()) {
-                            jsonPicker.launch(arrayOf("application/json", "text/*", "*/*"))
-                        } else {
-                            startGeotag()
-                        }
-                    },
-                    enabled = !isParsingJson && !isRunning,
-                    shape = RoundedCornerShape(14.dp),
-                    color = if (isRunning) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-                    else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = BorderStroke(
-                        1.dp,
-                        if (isRunning) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                Text(
+                    text = "Geo Timeline",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Normal
                     ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+
+                // Status / Action Capsule Pill in Header
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = if (isRunning) MaterialTheme.colorScheme.primaryContainer
+                    else if (timelinePoints.isNotEmpty()) MaterialTheme.colorScheme.surfaceContainerHighest
+                    else MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier
-                        .height(36.dp)
-                        .defaultMinSize(minWidth = 84.dp)
+                        .clickable(enabled = !isParsingJson && !isRunning) {
+                            if (timelinePoints.isEmpty()) {
+                                jsonPicker.launch(arrayOf("application/json", "text/*", "*/*"))
+                            } else {
+                                startGeotag()
+                            }
+                        }
                         .testTag("geo_timeline_header_pill")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         when {
                             isRunning -> {
                                 CircularProgressIndicator(
                                     progress = { progressFraction },
-                                    modifier = Modifier.size(13.dp),
-                                    strokeWidth = 2.dp
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-                                Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(7.dp))
                                 Text(
                                     text = "${(progressFraction * 100).toInt()}%",
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold)
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                             isParsingJson -> {
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(13.dp),
-                                    strokeWidth = 2.dp
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
-                                Spacer(Modifier.width(6.dp))
-                                Text("Loading", style = MaterialTheme.typography.labelMedium)
+                                Spacer(Modifier.width(7.dp))
+                                Text("Loading timeline", style = MaterialTheme.typography.labelSmall)
                             }
                             else -> {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (timelinePoints.isNotEmpty()) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.outline
+                                        )
+                                )
+                                Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = statusSummary?.let { summary -> if (summary.contains("tagged")) "Done" else summary }
-                                        ?: if (timelinePoints.isEmpty()) "Select" else "Ready",
-                                    style = MaterialTheme.typography.labelMedium,
+                                    text = statusSummary ?: if (timelinePoints.isEmpty()) "Select timeline" else "Ready",
+                                    style = MaterialTheme.typography.labelSmall,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -337,54 +330,41 @@ fun GeoTimelineCard(
                     }
                 }
 
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
 
-                IconButton(
-                    onClick = { isExpanded = !isExpanded },
-                    modifier = Modifier
-                        .size(34.dp)
-                        .testTag("geo_timeline_expand_toggle")
-                ) {
-                    Icon(
-                        imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = if (isExpanded) "Collapse" else "Expand",
-                        modifier = Modifier.size(22.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            if (isExpanded) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                    thickness = 1.dp,
-                    modifier = Modifier.padding(horizontal = 18.dp)
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
             // Expanded content
             AnimatedVisibility(visible = isExpanded) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 14.dp)
+                        .padding(top = 22.dp)
                 ) {
+                    // Timezone is handled automatically by the device.
+
                     // 1. Folder Section
                     Text(
                         text = "Folder",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Normal
                         ),
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         detectedFolders.forEach { folder ->
                             val isSelected = selectedFolder == folder
@@ -403,7 +383,7 @@ fun GeoTimelineCard(
                         }
                     }
 
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(24.dp))
 
                     // 2. Write to Exif Row
                     Row(
@@ -412,9 +392,9 @@ fun GeoTimelineCard(
                     ) {
                         Text(
                             text = "Write to Exif",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Normal
                             ),
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f)
@@ -427,7 +407,7 @@ fun GeoTimelineCard(
                         )
                     }
 
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(14.dp))
 
                     // Minimal Action Pill Bar at the bottom
                     Row(
@@ -477,31 +457,35 @@ private fun CapsulePill(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
+    val isDark = MaterialTheme.colorScheme.background.let {
+        (it.red * 0.299f + it.green * 0.587f + it.blue * 0.114f) < 0.5f
+    }
+
+    val selectedBg = if (isDark) Color(0xFFE5E7EB) else Color(0xFF1F1F1F)
+    val selectedText = if (isDark) Color(0xFF1F1F1F) else Color(0xFFFFFFFF)
+
+    val unselectedBg = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E7EB)
+    val unselectedText = if (isDark) Color(0xFFD1D5DB) else Color(0xFF4B5563)
+
     Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = if (isSelected) Color(0xFF161A20) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = BorderStroke(
-            1.dp,
-            if (isSelected) Color(0xFF161A20) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-        ),
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (isSelected) selectedBg else unselectedBg,
         modifier = Modifier
             .height(38.dp)
-            .defaultMinSize(minWidth = 72.dp)
-            .clickable(onClick = onClick)
+            .widthIn(min = 68.dp)
     ) {
         Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 14.dp)
+            modifier = Modifier.padding(horizontal = 18.dp),
+            contentAlignment = Alignment.Center
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodySmall.copy(
+                style = MaterialTheme.typography.labelMedium.copy(
                     fontSize = 13.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                 ),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                color = if (isSelected) selectedText else unselectedText
             )
         }
     }

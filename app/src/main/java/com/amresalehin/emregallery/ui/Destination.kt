@@ -4,6 +4,7 @@ enum class Destination {
     HOME,
     ALBUMS,
     POCKET,
+    BOOKMARK_DETAIL,
     FAVOURITES,
     BIN,
     VIDEOS,
