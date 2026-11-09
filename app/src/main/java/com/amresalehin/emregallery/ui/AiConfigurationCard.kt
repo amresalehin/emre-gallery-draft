@@ -1011,29 +1011,30 @@ private fun DynamicCloudStatusIndicator(
 
     Surface(
         onClick = onClick,
-        shape = CircleShape,
+        shape = RoundedCornerShape(14.dp),
         color = bg,
         border = BorderStroke(1.dp, border),
         modifier = Modifier
-            .height(32.dp)
+            .height(36.dp)
+            .defaultMinSize(minWidth = 84.dp)
             .testTag("ai_cloud_status_button")
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 11.dp),
+            modifier = Modifier.padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             when (status) {
                 CloudProviderStatus.CONNECTED -> {
                     Icon(
                         imageVector = Icons.Default.CheckCircle,
                         contentDescription = "Cloud Connected",
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(15.dp),
                         tint = contentColor
                     )
                     Text(
                         text = activeProvider?.name?.ifBlank { "Connected" } ?: "Connected",
-                        style = MaterialTheme.typography.labelSmall.copy(
+                        style = MaterialTheme.typography.labelMedium.copy(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
@@ -1042,13 +1043,13 @@ private fun DynamicCloudStatusIndicator(
                 }
                 CloudProviderStatus.CHECKING -> {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(11.dp),
+                        modifier = Modifier.size(13.dp),
                         strokeWidth = 1.8.dp,
                         color = contentColor
                     )
                     Text(
                         text = "Testing...",
-                        style = MaterialTheme.typography.labelSmall.copy(
+                        style = MaterialTheme.typography.labelMedium.copy(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         ),
@@ -1059,12 +1060,12 @@ private fun DynamicCloudStatusIndicator(
                     Icon(
                         imageVector = Icons.Default.ErrorOutline,
                         contentDescription = "Cloud Error",
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(15.dp),
                         tint = contentColor
                     )
                     Text(
                         text = "Offline",
-                        style = MaterialTheme.typography.labelSmall.copy(
+                        style = MaterialTheme.typography.labelMedium.copy(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
@@ -1075,12 +1076,12 @@ private fun DynamicCloudStatusIndicator(
                     Icon(
                         imageVector = Icons.Outlined.CloudOff,
                         contentDescription = "Cloud Not Configured",
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(15.dp),
                         tint = contentColor
                     )
                     Text(
                         text = "Not set",
-                        style = MaterialTheme.typography.labelSmall.copy(
+                        style = MaterialTheme.typography.labelMedium.copy(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         ),
