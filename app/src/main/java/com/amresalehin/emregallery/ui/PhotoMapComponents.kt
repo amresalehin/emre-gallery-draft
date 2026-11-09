@@ -49,6 +49,7 @@ import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.amresalehin.emregallery.R
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.geotag.TimelineMatchProvenance
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
@@ -176,6 +177,7 @@ fun PhotoMapTopBar(
 @Composable
 private fun SelectedPlaceBar(
     placeName: String?,
+    provenance: TimelineMatchProvenance?,
     onOpen: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -275,20 +277,30 @@ private fun SelectedPlaceBar(
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp)
                 )
-                Text(
-                    text = placeName ?: PLACE_NAME_PLACEHOLDER,
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    fontStyle = if (placeName == null) FontStyle.Italic else FontStyle.Normal,
-                    color = if (placeName == null) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = placeName ?: PLACE_NAME_PLACEHOLDER,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        fontStyle = if (placeName == null) FontStyle.Italic else FontStyle.Normal,
+                        color = if (placeName == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (provenance != null) {
+                        Text(
+                            text = buildString {
+                                append(provenance.methodLabel)
+                                provenance.timestampSource?.let { append(" · $it") }
+                                if (provenance.timestampEstimated) append(" · estimated time")
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -323,6 +335,7 @@ fun PhotoMapViewContainer(
     scanTotal: Int,
     selectedMedia: Pair<MediaItem, GeoPoint>? = null,
     selectedPlaceName: String? = null,
+    selectedProvenance: TimelineMatchProvenance? = null,
     onOpenSelected: () -> Unit = {},
     onDismissSelected: () -> Unit = {},
     onMapReady: (MapView) -> Unit,
@@ -503,6 +516,7 @@ fun PhotoMapViewContainer(
                 key(selectedMedia.first.uri) {
                     SelectedPlaceBar(
                         placeName = selectedPlaceName,
+                        provenance = selectedProvenance,
                         onOpen = onOpenSelected,
                         onDismiss = onDismissSelected,
                         modifier = Modifier.align(Alignment.BottomCenter)

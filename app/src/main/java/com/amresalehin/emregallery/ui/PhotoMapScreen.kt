@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.geotag.TimelineMatchProvenance
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
@@ -240,6 +241,7 @@ fun PhotoMapScreen(
 
     var mapRef by remember { mutableStateOf<MapView?>(null) }
     var selectedMapMedia by remember { mutableStateOf<Pair<MediaItem, GeoPoint>?>(null) }
+    var selectedMapProvenance by remember { mutableStateOf<TimelineMatchProvenance?>(null) }
     // null means "still resolving"; the bar shows its placeholder text until this is set.
     var selectedPlaceName by remember { mutableStateOf<String?>(null) }
     var lastFocusedUri by remember { mutableStateOf<String?>(null) }
@@ -252,6 +254,7 @@ fun PhotoMapScreen(
         val selected = selectedMapMedia
         selectedPlaceName = null
         if (selected != null) {
+            selectedMapProvenance = viewModel.getLocationProvenanceForMedia(selected.first)
             selectedPlaceName = viewModel.getPlaceName(selected.second) ?: "Place name unavailable"
         }
     }
@@ -290,6 +293,7 @@ fun PhotoMapScreen(
 
     val onFitAllPhotos: () -> Unit = {
         selectedMapMedia = null
+        selectedMapProvenance = null
         mapRef?.let { map ->
             fitPointsToMap(map, uiState.locatedMedia.map { it.second }, animated = true)
         }
@@ -330,6 +334,7 @@ fun PhotoMapScreen(
                 scanTotal = uiState.scanTotal,
                 selectedMedia = selectedMapMedia,
                 selectedPlaceName = selectedPlaceName,
+                selectedProvenance = selectedMapProvenance,
                 onOpenSelected = { selectedMapMedia?.first?.let(onOpen) },
                 // Swiping the bar away clears the selection, which also removes the pin.
                 onDismissSelected = { selectedMapMedia = null },

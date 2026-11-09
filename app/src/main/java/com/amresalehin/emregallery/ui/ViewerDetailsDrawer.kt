@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PhotoMapLocationCache
+import com.amresalehin.emregallery.geotag.TimelineMatchProvenance
 import com.amresalehin.emregallery.face.*
 import com.amresalehin.emregallery.ocr.TesseractOcr
 import kotlinx.coroutines.CancellationException
@@ -46,6 +47,7 @@ class ViewerDetailsState(
     defaultMlKitLanguages: Set<String> = setOf("latin")
 ) {
     var metadata by mutableStateOf<Map<String, String>>(emptyMap())
+    var locationProvenance by mutableStateOf<TimelineMatchProvenance?>(null)
     var ocrText by mutableStateOf("")
     var ocrError by mutableStateOf<String?>(null)
     var ocrBusy by mutableStateOf(false)
@@ -60,9 +62,22 @@ class ViewerDetailsState(
     }
 
     suspend fun loadData() {
-        metadata = withContext(Dispatchers.IO) {
-            runCatching { readMediaMetadata(context, item) }.getOrDefault(emptyMap())
+        val locationData = withContext(Dispatchers.IO) {
+            val extracted = runCatching { readMediaMetadata(context, item) }.getOrDefault(emptyMap())
+            val cached = runCatching { PhotoMapLocationCache(context).load(item.uri) }.getOrNull()
+            val merged = extracted.toMutableMap()
+            if (cached?.point != null && !merged.containsKey("latitude")) {
+                merged["latitude"] = cached.point.latitude.toString()
+                merged["longitude"] = cached.point.longitude.toString()
+                merged.putIfAbsent(
+                    "location",
+                    "%.5f°, %.5f°".format(Locale.US, cached.point.latitude, cached.point.longitude)
+                )
+            }
+            merged to cached?.provenance
         }
+        metadata = locationData.first
+        locationProvenance = locationData.second
         ocrText = withContext(Dispatchers.IO) {
             TesseractOcr.readCachedResult(context, Uri.parse(item.uri)).orEmpty()
         }
@@ -498,6 +513,7 @@ fun ViewerDetailsDrawer(
                             customTags = customTags,
                             detectedFaces = detectedFaces,
                             metadata = detailsState.metadata,
+                            locationProvenance = detailsState.locationProvenance,
                             onOpenMap = onOpenMap,
                             onAddToAlbum = onAddTo,
                             onAddTag = { showAddTagDialog = true },

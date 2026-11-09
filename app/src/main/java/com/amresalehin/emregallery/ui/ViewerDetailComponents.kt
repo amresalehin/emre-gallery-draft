@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.amresalehin.emregallery.data.CustomAlbum
 import com.amresalehin.emregallery.data.MediaItem
+import com.amresalehin.emregallery.geotag.TimelineMatchProvenance
 import com.amresalehin.emregallery.face.BuffaloLFaceEngine
 import com.amresalehin.emregallery.face.DetectedMediaFace
 import com.amresalehin.emregallery.face.EnteFaceConstants
@@ -710,6 +711,7 @@ fun OverviewTabContent(
     detectedFaces: List<DetectedMediaFace>,
     metadata: Map<String, String>,
     onOpenMap: () -> Unit,
+    locationProvenance: TimelineMatchProvenance? = null,
     onAddToAlbum: () -> Unit,
     onAddTag: () -> Unit,
     onEditLocation: () -> Unit,
@@ -1211,6 +1213,32 @@ fun OverviewTabContent(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+                if (locationProvenance != null) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = locationProvenance.shortLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        val details = listOfNotNull(
+                            locationProvenance.timestampSource?.let { "Time: $it" },
+                            locationProvenance.sampleGapSeconds?.let { "Sample gap: ${it / 60}m ${it % 60}s" },
+                            if (locationProvenance.timestampEstimated) "Timeline time estimated" else null,
+                            if (locationProvenance.exifWritten) "Saved to image EXIF" else "Stored in Emre only"
+                        ).joinToString(" · ")
+                        if (details.isNotBlank()) {
+                            Text(
+                                text = details,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 } else {

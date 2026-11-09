@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PhotoMapLocationCache
+import com.amresalehin.emregallery.geotag.TimelineMatchProvenance
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,15 +36,16 @@ class PhotoMapViewModel(application: Application) : AndroidViewModel(application
 
     suspend fun getLocationForMedia(context: Context, item: MediaItem): GeoPoint? {
         return withContext(Dispatchers.IO) {
-            val cached = locationCache.loadAll()[item.uri]?.point
+            val cached = locationCache.load(item.uri)?.point
             if (cached != null) return@withContext cached
             val extracted = PhotoMapLocationCache.extractLocation(context, item.uri, isVideo = item.isVideo)
-            if (extracted != null) {
-                locationCache.save(item.uri, extracted)
-            }
+            if (extracted != null) locationCache.save(item.uri, extracted)
             extracted
         }
     }
+
+    suspend fun getLocationProvenanceForMedia(item: MediaItem): TimelineMatchProvenance? =
+        withContext(Dispatchers.IO) { locationCache.load(item.uri)?.provenance }
 
     /**
      * Resolves a human-readable place name for a selected map coordinate.
