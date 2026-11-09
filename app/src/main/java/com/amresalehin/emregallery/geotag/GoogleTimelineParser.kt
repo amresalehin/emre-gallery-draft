@@ -286,7 +286,10 @@ object GoogleTimelineParser {
                         timestampMillis = ts,
                         latitude = lat,
                         longitude = lng,
-                        source = "place_visit"
+                        source = "place_visit",
+                        segmentId = "visit:${ts}:${endTs ?: ts}",
+                        interpolationEligible = false,
+                        intervalEndMillis = endTs
                     )
                 )
                 // If there's an end time separated from start time, add the end point as well
@@ -296,7 +299,9 @@ object GoogleTimelineParser {
                             timestampMillis = endTs,
                             latitude = lat,
                             longitude = lng,
-                            source = "place_visit_end"
+                            source = "place_visit_end",
+                            segmentId = "visit:${ts}:${endTs}",
+                            interpolationEligible = false
                         )
                     )
                 }
@@ -412,7 +417,8 @@ object GoogleTimelineParser {
         }
         reader.endObject()
 
-        // Distribute timestamps linearly between startTs and endTs if known
+        val segmentId = "activity:${startTs ?: -1L}:${endTs ?: -1L}"
+        // KML-style waypoint timestamps are estimates spread over the activity duration.
         if (startTs != null && endTs != null && coords.isNotEmpty() && endTs > startTs) {
             val totalDuration = endTs - startTs
             coords.forEachIndexed { index, pair ->
@@ -424,7 +430,9 @@ object GoogleTimelineParser {
                             timestampMillis = ts,
                             latitude = pair.first,
                             longitude = pair.second,
-                            source = "waypoint"
+                            source = "waypoint",
+                            segmentId = segmentId,
+                            timestampEstimated = true
                         )
                     )
                 }
@@ -438,6 +446,7 @@ object GoogleTimelineParser {
         minTimestampMillis: Long?,
         maxTimestampMillis: Long?
     ) {
+        val segmentId = "raw_path:${points.size}"
         reader.beginObject()
         while (reader.hasNext()) {
             if (reader.nextName() == "points") {
@@ -467,7 +476,8 @@ object GoogleTimelineParser {
                                         timestampMillis = ts,
                                         latitude = lat,
                                         longitude = lng,
-                                        source = "raw_path"
+                                        source = "raw_path",
+                                        segmentId = segmentId
                                     )
                                 )
                             }
@@ -493,6 +503,7 @@ object GoogleTimelineParser {
         maxTimestampMillis: Long?
     ) {
         reader.beginArray()
+        val segmentId = "activity:${startTs ?: -1L}:${endTs ?: -1L}"
         val pathCoords = mutableListOf<Pair<Double, Double>>()
         while (reader.hasNext()) {
             if (reader.peek() == JsonToken.BEGIN_OBJECT) {
@@ -526,7 +537,9 @@ object GoogleTimelineParser {
                             timestampMillis = ts,
                             latitude = pair.first,
                             longitude = pair.second,
-                            source = "timeline_path"
+                            source = "timeline_path",
+                            segmentId = segmentId,
+                            timestampEstimated = true
                         )
                     )
                 }
@@ -673,6 +686,7 @@ object GoogleTimelineParser {
         reader.endObject()
 
         val pointTimestamp = timestamp ?: startTimestamp
+        val segmentId = "semantic:${startTimestamp ?: endTimestamp ?: pointTimestamp ?: points.size}"
         if (pointTimestamp != null && latitude != null && longitude != null &&
             isValidCoordinate(latitude, longitude) &&
             isWithinRange(pointTimestamp, minTimestampMillis, maxTimestampMillis)
@@ -682,7 +696,9 @@ object GoogleTimelineParser {
                     timestampMillis = pointTimestamp,
                     latitude = latitude,
                     longitude = longitude,
-                    source = "generic"
+                    source = "generic",
+                    segmentId = segmentId,
+                    interpolationEligible = false
                 )
             )
         }
@@ -696,7 +712,10 @@ object GoogleTimelineParser {
                     timestampMillis = startTimestamp,
                     latitude = visitCoordinate.first,
                     longitude = visitCoordinate.second,
-                    source = "visit"
+                    source = "visit",
+                    segmentId = segmentId,
+                    interpolationEligible = false,
+                    intervalEndMillis = endTimestamp
                 )
             )
         }
@@ -710,7 +729,9 @@ object GoogleTimelineParser {
                     timestampMillis = startTimestamp,
                     latitude = activityStart.first,
                     longitude = activityStart.second,
-                    source = "activity_start"
+                    source = "activity_start",
+                    segmentId = segmentId,
+                    interpolationEligible = false
                 )
             )
         }
@@ -723,7 +744,9 @@ object GoogleTimelineParser {
                     timestampMillis = endTimestamp,
                     latitude = activityEnd.first,
                     longitude = activityEnd.second,
-                    source = "activity_end"
+                    source = "activity_end",
+                    segmentId = segmentId,
+                    interpolationEligible = false
                 )
             )
         }
@@ -750,7 +773,9 @@ object GoogleTimelineParser {
                         timestampMillis = pathTimestamp,
                         latitude = entry.latitude,
                         longitude = entry.longitude,
-                        source = "timeline_path"
+                        source = "timeline_path",
+                        segmentId = segmentId,
+                        timestampEstimated = entry.timestampMillis == null && entry.offsetMinutes == null
                     )
                 )
             }

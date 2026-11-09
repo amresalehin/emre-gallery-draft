@@ -46,6 +46,7 @@ object TimelineGeotagEngine {
         var existingLng: Double? = null
         var dateTimeMillis: Long? = null
         var offsetStr: String? = null
+        var timestampSource: String? = null
 
         val exif = readExifInterface(context, uri, fallbackPath)
         if (exif != null) {
@@ -65,23 +66,43 @@ object TimelineGeotagEngine {
                 }
             }
 
-            offsetStr = exif.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL)
+            val originalOffset = exif.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL)
                 ?: exif.getAttribute(ExifInterface.TAG_OFFSET_TIME)
+            val originalMillis = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
+                ?.let { parseExifDateTime(it, originalOffset) }
 
-            val rawDate = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
-                ?: exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED)
-                ?: exif.getAttribute(ExifInterface.TAG_DATETIME)
-
-            if (!rawDate.isNullOrBlank()) {
-                dateTimeMillis = parseExifDateTime(rawDate, offsetStr)
+            if (originalMillis != null) {
+                dateTimeMillis = originalMillis
+                offsetStr = originalOffset
+                timestampSource = "DateTimeOriginal"
+            } else {
+                val alternatives = listOf(
+                    Triple("DateTimeDigitized", exif.getAttribute(ExifInterface.TAG_DATETIME_DIGITIZED),
+                        exif.getAttribute("OffsetTimeDigitized") ?: exif.getAttribute(ExifInterface.TAG_OFFSET_TIME)),
+                    Triple("DateTime", exif.getAttribute(ExifInterface.TAG_DATETIME),
+                        exif.getAttribute(ExifInterface.TAG_OFFSET_TIME))
+                ).mapNotNull { (source, raw, offset) ->
+                    raw?.takeIf { it.isNotBlank() }?.let { value ->
+                        parseExifDateTime(value, offset)?.let { millis -> Triple(source, millis, offset) }
+                    }
+                }
+                val earliest = alternatives.minByOrNull { it.second }
+                if (earliest != null) {
+                    timestampSource = earliest.first
+                    dateTimeMillis = earliest.second
+                    offsetStr = earliest.third
+                }
             }
         }
 
-        // Fallback to local file timestamp if EXIF missing
+        // Filesystem time is a last-resort estimate, never preferred over EXIF.
+        var timestampEstimated = false
         if (dateTimeMillis == null && fallbackPath != null) {
             val f = File(fallbackPath)
             if (f.exists() && f.lastModified() > 0) {
                 dateTimeMillis = f.lastModified()
+                timestampSource = "FileLastModified"
+                timestampEstimated = true
             }
         }
 
@@ -94,7 +115,9 @@ object TimelineGeotagEngine {
             existingLatitude = existingLat,
             existingLongitude = existingLng,
             isVideo = isVideo,
-            timezoneOffsetString = offsetStr
+            timezoneOffsetString = offsetStr,
+            resolvedTimestampSource = timestampSource,
+            timestampEstimated = timestampEstimated
         )
     }
 
@@ -143,17 +166,18 @@ object TimelineGeotagEngine {
             )
         }
 
-        // Binary search for position
         val idx = sortedPoints.binarySearch { it.timestampMillis.compareTo(adjustedPhotoTime) }
         if (idx >= 0) {
-            // Exact match
             val exact = sortedPoints[idx]
             return GeotagResultItem(
                 candidate = candidate,
                 status = GeotagStatus.MATCHED,
                 matchedPoint = exact,
                 timeDifferenceSeconds = 0L,
-                isInterpolated = false
+                matchMethod = "EXACT",
+                beforePoint = exact,
+                afterPoint = exact,
+                sampleGapSeconds = 0L
             )
         }
 
@@ -161,56 +185,86 @@ object TimelineGeotagEngine {
         val before = if (insertionPoint > 0) sortedPoints[insertionPoint - 1] else null
         val after = if (insertionPoint < sortedPoints.size) sortedPoints[insertionPoint] else null
 
-        // Try linear interpolation between surrounding points if within allowed gap
+        // Place visits are stationary intervals, not route segments.
+        if (before != null && before.intervalEndMillis != null &&
+            adjustedPhotoTime in before.timestampMillis..before.intervalEndMillis
+        ) {
+            return GeotagResultItem(
+                candidate = candidate,
+                status = GeotagStatus.MATCHED,
+                matchedPoint = before.copy(timestampMillis = adjustedPhotoTime),
+                timeDifferenceSeconds = 0L,
+                matchMethod = "VISIT",
+                beforePoint = before,
+                afterPoint = before,
+                sampleGapSeconds = 0L
+            )
+        }
+
+        // Interpolate only inside one path segment. Endpoints and unrelated record
+        // streams are not treated as a continuous route.
         if (config.interpolateBetweenPoints && before != null && after != null) {
+            val sameSegment = if (before.segmentId != null || after.segmentId != null) {
+                before.segmentId == after.segmentId &&
+                    before.interpolationEligible && after.interpolationEligible
+            } else {
+                before.source == after.source &&
+                    before.interpolationEligible && after.interpolationEligible
+            }
             val gapMillis = after.timestampMillis - before.timestampMillis
-            val maxGapMillis = config.maxInterpolationGapSeconds * 1000L
-            if (gapMillis in 1..maxGapMillis) {
+            val maxGapMillis = config.maxInterpolationGapSeconds.coerceAtLeast(0L) * 1000L
+            if (sameSegment && gapMillis in 1..maxGapMillis) {
                 val fraction = (adjustedPhotoTime - before.timestampMillis).toDouble() / gapMillis.toDouble()
-                val interpLat = before.latitude + fraction * (after.latitude - before.latitude)
-                val interpLng = before.longitude + fraction * (after.longitude - before.longitude)
-                val interpAlt = when {
+                val latitude = before.latitude + fraction * (after.latitude - before.latitude)
+                val longitudeDelta = ((after.longitude - before.longitude + 540.0) % 360.0) - 180.0
+                val longitude = ((before.longitude + fraction * longitudeDelta + 540.0) % 360.0) - 180.0
+                val altitude = when {
                     before.altitudeMeters != null && after.altitudeMeters != null ->
                         before.altitudeMeters + fraction * (after.altitudeMeters - before.altitudeMeters)
                     before.altitudeMeters != null -> before.altitudeMeters
                     after.altitudeMeters != null -> after.altitudeMeters
                     else -> null
                 }
-                val minDeltaSec = (minOf(
-                    adjustedPhotoTime - before.timestampMillis,
-                    after.timestampMillis - adjustedPhotoTime
-                ) / 1000L)
 
-                if (GoogleTimelineParser.isValidCoordinate(interpLat, interpLng)) {
+                if (GoogleTimelineParser.isValidCoordinate(latitude, longitude)) {
+                    val pathSources = setOf("timeline_path", "waypoint", "raw_path")
+                    val method = if (before.source in pathSources && after.source in pathSources) {
+                        "PATH_INTERPOLATION"
+                    } else "INTERPOLATION"
                     val point = TimelineLocationPoint(
                         timestampMillis = adjustedPhotoTime,
-                        latitude = interpLat,
-                        longitude = interpLng,
-                        altitudeMeters = interpAlt,
-                        source = "timeline_interpolated"
+                        latitude = latitude,
+                        longitude = longitude,
+                        altitudeMeters = altitude,
+                        accuracyMeters = listOfNotNull(before.accuracyMeters, after.accuracyMeters).maxOrNull(),
+                        source = "timeline_interpolated",
+                        segmentId = before.segmentId,
+                        timestampEstimated = before.timestampEstimated || after.timestampEstimated
                     )
                     return GeotagResultItem(
                         candidate = candidate,
                         status = GeotagStatus.MATCHED,
                         matchedPoint = point,
-                        timeDifferenceSeconds = minDeltaSec,
-                        isInterpolated = true
+                        timeDifferenceSeconds = minOf(
+                            adjustedPhotoTime - before.timestampMillis,
+                            after.timestampMillis - adjustedPhotoTime
+                        ) / 1000L,
+                        isInterpolated = true,
+                        matchMethod = method,
+                        beforePoint = before,
+                        afterPoint = after,
+                        sampleGapSeconds = gapMillis / 1000L
                     )
                 }
             }
         }
 
-        // Nearest neighbor check
         val nearest = when {
             before == null -> after
             after == null -> before
-            else -> {
-                val diffBefore = abs(adjustedPhotoTime - before.timestampMillis)
-                val diffAfter = abs(adjustedPhotoTime - after.timestampMillis)
-                if (diffBefore <= diffAfter) before else after
-            }
+            abs(adjustedPhotoTime - before.timestampMillis) <= abs(after.timestampMillis - adjustedPhotoTime) -> before
+            else -> after
         }
-
         if (nearest != null) {
             val diffSeconds = abs(adjustedPhotoTime - nearest.timestampMillis) / 1000L
             if (diffSeconds <= config.maxTimeDeltaSeconds) {
@@ -219,18 +273,17 @@ object TimelineGeotagEngine {
                     status = GeotagStatus.MATCHED,
                     matchedPoint = nearest,
                     timeDifferenceSeconds = diffSeconds,
-                    isInterpolated = false
-                )
-            } else {
-                val diffMin = diffSeconds / 60
-                val maxMin = config.maxTimeDeltaSeconds / 60
-                return GeotagResultItem(
-                    candidate = candidate,
-                    status = GeotagStatus.UNMATCHED,
-                    timeDifferenceSeconds = diffSeconds,
-                    errorMessage = "Nearest timeline point is ${diffMin}m away (max allowed: ${maxMin}m)"
+                    matchMethod = "NEAREST",
+                    beforePoint = nearest,
+                    afterPoint = nearest
                 )
             }
+            return GeotagResultItem(
+                candidate = candidate,
+                status = GeotagStatus.UNMATCHED,
+                timeDifferenceSeconds = diffSeconds,
+                errorMessage = "Nearest timeline point is ${diffSeconds / 60L}m away (max allowed: ${config.maxTimeDeltaSeconds / 60L}m)"
+            )
         }
 
         return GeotagResultItem(
@@ -299,9 +352,8 @@ object TimelineGeotagEngine {
                 }
             }
 
-            // Always update PhotoMapLocationCache so the photo is immediately visible on the Photo Map
-            val cache = PhotoMapLocationCache(context)
-            cache.save(result.candidate.uriString, GeoPoint(point.latitude, point.longitude))
+            // Cache the matched coordinate and its interpretation even if file writing fails.
+            cacheMatchedLocation(context, result, exifWritten = written)
 
             // Trigger MediaScanner notification if filePath is available
             if (filePath != null) {
@@ -312,6 +364,16 @@ object TimelineGeotagEngine {
 
             written
         }
+    }
+
+    /** Persist an app-only match without changing the media file. */
+    fun cacheMatchedLocation(context: Context, result: GeotagResultItem, exifWritten: Boolean = false) {
+        val point = result.matchedPoint ?: return
+        PhotoMapLocationCache(context).save(
+            result.candidate.uriString,
+            GeoPoint(point.latitude, point.longitude),
+            result.toProvenance(exifWritten)
+        )
     }
 
     private fun setExifGps(exif: ExifInterface, point: TimelineLocationPoint) {

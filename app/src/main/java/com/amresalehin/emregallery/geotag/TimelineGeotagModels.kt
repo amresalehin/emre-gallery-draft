@@ -1,63 +1,86 @@
 package com.amresalehin.emregallery.geotag
 
-/**
- * Single spatial-temporal location point parsed from Google Maps Timeline / Location History.
- */
+/** A timestamped Timeline observation with its originating segment retained. */
 data class TimelineLocationPoint(
     val timestampMillis: Long,
     val latitude: Double,
     val longitude: Double,
     val altitudeMeters: Double? = null,
     val accuracyMeters: Float? = null,
-    val source: String = "timeline"
+    val source: String = "timeline",
+    val segmentId: String? = null,
+    val timestampEstimated: Boolean = false,
+    val interpolationEligible: Boolean = true,
+    val intervalEndMillis: Long? = null
 )
 
-/**
- * Candidate image to be evaluated for geotagging.
- */
 data class ImageGeotagCandidate(
     val uriString: String,
     val displayName: String,
     val filePath: String? = null,
+    /** Resolved capture time; retained as this property name for call-site compatibility. */
     val dateTimeOriginalMillis: Long? = null,
     val hasExistingGeotag: Boolean = false,
     val existingLatitude: Double? = null,
     val existingLongitude: Double? = null,
     val isVideo: Boolean = false,
-    val timezoneOffsetString: String? = null
+    val timezoneOffsetString: String? = null,
+    val resolvedTimestampSource: String? = null,
+    val timestampEstimated: Boolean = false
 )
 
-/**
- * Status of an individual image after geotag processing.
- */
-enum class GeotagStatus {
-    /** The image already contains valid GPS metadata and was skipped. */
-    ALREADY_GEOTAGGED,
-    /** Successfully matched to a Google Timeline coordinate and geotagged. */
-    MATCHED,
-    /** No timeline location point found within the allowed time delta window. */
-    UNMATCHED,
-    /** No valid capture timestamp could be found in EXIF or metadata. */
-    NO_TIMESTAMP,
-    /** Error occurred while reading or writing image EXIF. */
-    ERROR
+enum class GeotagStatus { ALREADY_GEOTAGGED, MATCHED, UNMATCHED, NO_TIMESTAMP, ERROR }
+
+/** Provenance stored alongside app-cached Timeline-derived coordinates. */
+data class TimelineMatchProvenance(
+    val source: String = "Google Maps Timeline",
+    val matchMethod: String,
+    val timestampSource: String? = null,
+    val captureTimestampMillis: Long? = null,
+    val beforeTimestampMillis: Long? = null,
+    val afterTimestampMillis: Long? = null,
+    val sampleGapSeconds: Long? = null,
+    val timestampEstimated: Boolean = false,
+    val exifWritten: Boolean = false
+) {
+    val methodLabel: String
+        get() = when (matchMethod) {
+            "EXACT" -> "Exact timestamp"
+            "VISIT" -> "Stationary visit"
+            "PATH_INTERPOLATION" -> "Path interpolation"
+            "INTERPOLATION" -> "Point interpolation"
+            "NEAREST" -> "Nearest observation"
+            else -> matchMethod.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
+        }
+    val shortLabel: String get() = "$source · $methodLabel"
 }
 
-/**
- * Result record for a processed image.
- */
 data class GeotagResultItem(
     val candidate: ImageGeotagCandidate,
     val status: GeotagStatus,
     val matchedPoint: TimelineLocationPoint? = null,
     val timeDifferenceSeconds: Long? = null,
     val isInterpolated: Boolean = false,
-    val errorMessage: String? = null
-)
+    val errorMessage: String? = null,
+    val matchMethod: String? = null,
+    val beforePoint: TimelineLocationPoint? = null,
+    val afterPoint: TimelineLocationPoint? = null,
+    val sampleGapSeconds: Long? = null
+) {
+    fun toProvenance(exifWritten: Boolean = false): TimelineMatchProvenance =
+        TimelineMatchProvenance(
+            matchMethod = matchMethod ?: if (isInterpolated) "INTERPOLATION" else "NEAREST",
+            timestampSource = candidate.resolvedTimestampSource,
+            captureTimestampMillis = candidate.dateTimeOriginalMillis,
+            beforeTimestampMillis = beforePoint?.timestampMillis,
+            afterTimestampMillis = afterPoint?.timestampMillis,
+            sampleGapSeconds = sampleGapSeconds,
+            timestampEstimated = candidate.timestampEstimated ||
+                beforePoint?.timestampEstimated == true || afterPoint?.timestampEstimated == true,
+            exifWritten = exifWritten
+        )
+}
 
-/**
- * Summary of a parsed Google Maps Timeline JSON file.
- */
 data class TimelineParseSummary(
     val fileName: String,
     val totalPoints: Int,
@@ -66,9 +89,6 @@ data class TimelineParseSummary(
     val formatDetected: String = "Google Takeout"
 )
 
-/**
- * Progress of an active geotagging operation.
- */
 data class GeotagJobProgress(
     val totalImages: Int = 0,
     val processedCount: Int = 0,
@@ -82,18 +102,13 @@ data class GeotagJobProgress(
     val isRunning: Boolean = false
 )
 
-/**
- * User configuration for matching images against Google Timeline.
- */
 data class GeotagConfig(
-    /** Manual camera clock adjustment in seconds (if camera clock was fast or slow). */
     val cameraClockOffsetSeconds: Long = 0L,
-    /** Maximum allowed time difference in seconds between photo and nearest timeline point. Default 900s (15 min). */
     val maxTimeDeltaSeconds: Long = 900L,
-    /** Whether to linearly interpolate coordinates if photo time falls between two nearby track points. */
     val interpolateBetweenPoints: Boolean = true,
-    /** Maximum allowed gap between two track points to perform interpolation. Default 1800s (30 min). */
+    /** Maximum gap between samples in a single path segment; default 30 minutes. */
     val maxInterpolationGapSeconds: Long = 1800L,
-    /** Always skip images that already have GPS coordinates (per user specification). */
-    val skipAlreadyGeotagged: Boolean = true
+    val skipAlreadyGeotagged: Boolean = true,
+    /** Embedded media metadata is only changed when explicitly enabled. */
+    val writeToExif: Boolean = false
 )

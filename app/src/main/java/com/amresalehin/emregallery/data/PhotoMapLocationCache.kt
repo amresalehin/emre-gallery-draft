@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import androidx.exifinterface.media.ExifInterface
+import com.amresalehin.emregallery.geotag.TimelineMatchProvenance
 import org.osmdroid.util.GeoPoint
 import java.io.File
 
@@ -17,19 +18,84 @@ import java.io.File
  * Persistent SQLite cache for image and video GPS metadata, including media with no GPS coordinates.
  */
 class PhotoMapLocationCache(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "photo_map_locations.db", null, 3) {
+    SQLiteOpenHelper(context.applicationContext, "photo_map_locations.db", null, 4) {
 
-    data class CachedLocation(val point: GeoPoint?)
+    data class CachedLocation(val point: GeoPoint?, val provenance: TimelineMatchProvenance? = null)
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
-            "CREATE TABLE IF NOT EXISTS photo_locations (uri TEXT PRIMARY KEY NOT NULL, latitude REAL, longitude REAL)"
+            """CREATE TABLE IF NOT EXISTS photo_locations (
+                uri TEXT PRIMARY KEY NOT NULL, latitude REAL, longitude REAL,
+                match_method TEXT, match_source TEXT, captured_at INTEGER, timestamp_source TEXT,
+                before_at INTEGER, after_at INTEGER, sample_gap_seconds INTEGER,
+                timestamp_estimated INTEGER NOT NULL DEFAULT 0, exif_written INTEGER NOT NULL DEFAULT 0
+            )""".trimIndent()
         )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS photo_locations")
+        // Preserve all previously indexed coordinates. Add provenance columns in place.
         onCreate(db)
+        if (oldVersion < 4) {
+            addColumnIfMissing(db, "match_method", "TEXT")
+            addColumnIfMissing(db, "match_source", "TEXT")
+            addColumnIfMissing(db, "captured_at", "INTEGER")
+            addColumnIfMissing(db, "timestamp_source", "TEXT")
+            addColumnIfMissing(db, "before_at", "INTEGER")
+            addColumnIfMissing(db, "after_at", "INTEGER")
+            addColumnIfMissing(db, "sample_gap_seconds", "INTEGER")
+            addColumnIfMissing(db, "timestamp_estimated", "INTEGER NOT NULL DEFAULT 0")
+            addColumnIfMissing(db, "exif_written", "INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    private fun addColumnIfMissing(db: SQLiteDatabase, name: String, definition: String) {
+        val exists = db.rawQuery("PRAGMA table_info(photo_locations)", null).use { cursor ->
+            val nameIndex = cursor.getColumnIndex("name")
+            var found = false
+            while (cursor.moveToNext()) {
+                if (nameIndex >= 0 && cursor.getString(nameIndex) == name) {
+                    found = true
+                    break
+                }
+            }
+            found
+        }
+        if (!exists) db.execSQL("ALTER TABLE photo_locations ADD COLUMN $name $definition")
+    }
+
+    @Synchronized
+    fun load(uri: String): CachedLocation? = readableDatabase.query(
+        "photo_locations",
+        arrayOf("latitude", "longitude", "match_method", "match_source", "captured_at",
+            "timestamp_source", "before_at", "after_at", "sample_gap_seconds",
+            "timestamp_estimated", "exif_written"),
+        "uri = ?", arrayOf(uri), null, null, null
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        val point = if (!cursor.isNull(0) && !cursor.isNull(1)) {
+            val lat = cursor.getDouble(0)
+            val lon = cursor.getDouble(1)
+            if (lat.isFinite() && lon.isFinite() && lat in -90.0..90.0 &&
+                lon in -180.0..180.0 && !(lat == 0.0 && lon == 0.0)
+            ) GeoPoint(lat, lon) else null
+        } else null
+        CachedLocation(point, readProvenance(cursor, 2))
+    }
+
+    private fun readProvenance(cursor: android.database.Cursor, offset: Int): TimelineMatchProvenance? {
+        val method = cursor.getString(offset) ?: return null
+        return TimelineMatchProvenance(
+            source = cursor.getString(offset + 1) ?: "Google Maps Timeline",
+            matchMethod = method,
+            captureTimestampMillis = if (cursor.isNull(offset + 2)) null else cursor.getLong(offset + 2),
+            timestampSource = cursor.getString(offset + 3),
+            beforeTimestampMillis = if (cursor.isNull(offset + 4)) null else cursor.getLong(offset + 4),
+            afterTimestampMillis = if (cursor.isNull(offset + 5)) null else cursor.getLong(offset + 5),
+            sampleGapSeconds = if (cursor.isNull(offset + 6)) null else cursor.getLong(offset + 6),
+            timestampEstimated = cursor.getInt(offset + 7) != 0,
+            exifWritten = cursor.getInt(offset + 8) != 0
+        )
     }
 
     @Synchronized
@@ -41,7 +107,9 @@ class PhotoMapLocationCache(context: Context) :
     fun loadAll(): Map<String, CachedLocation> {
         val result = mutableMapOf<String, CachedLocation>()
         readableDatabase.query(
-            "photo_locations", arrayOf("uri", "latitude", "longitude"),
+            "photo_locations", arrayOf("uri", "latitude", "longitude", "match_method", "match_source",
+                "captured_at", "timestamp_source", "before_at", "after_at", "sample_gap_seconds",
+                "timestamp_estimated", "exif_written"),
             null, null, null, null, null
         ).use { cursor ->
             val uriColumn = cursor.getColumnIndexOrThrow("uri")
@@ -70,14 +138,14 @@ class PhotoMapLocationCache(context: Context) :
                 // an invalid coordinate into a permanent "no GPS" cache entry: omit it
                 // so the next scan re-reads the source metadata.
                 if (hasCoordinates && point == null) continue
-                result[uri] = CachedLocation(point)
+                result[uri] = CachedLocation(point, readProvenance(cursor, 3))
             }
         }
         return result
     }
 
     @Synchronized
-    fun save(uri: String, point: GeoPoint?) {
+    fun save(uri: String, point: GeoPoint?, provenance: TimelineMatchProvenance? = null) {
         val values = ContentValues().apply {
             put("uri", uri)
             if (point == null) {
@@ -86,6 +154,21 @@ class PhotoMapLocationCache(context: Context) :
             } else {
                 put("latitude", point.latitude)
                 put("longitude", point.longitude)
+            }
+            if (provenance == null) {
+                putNull("match_method"); putNull("match_source"); putNull("captured_at")
+                putNull("timestamp_source"); putNull("before_at"); putNull("after_at")
+                putNull("sample_gap_seconds"); put("timestamp_estimated", 0); put("exif_written", 0)
+            } else {
+                put("match_method", provenance.matchMethod)
+                put("match_source", provenance.source)
+                if (provenance.captureTimestampMillis == null) putNull("captured_at") else put("captured_at", provenance.captureTimestampMillis)
+                if (provenance.timestampSource == null) putNull("timestamp_source") else put("timestamp_source", provenance.timestampSource)
+                if (provenance.beforeTimestampMillis == null) putNull("before_at") else put("before_at", provenance.beforeTimestampMillis)
+                if (provenance.afterTimestampMillis == null) putNull("after_at") else put("after_at", provenance.afterTimestampMillis)
+                if (provenance.sampleGapSeconds == null) putNull("sample_gap_seconds") else put("sample_gap_seconds", provenance.sampleGapSeconds)
+                put("timestamp_estimated", if (provenance.timestampEstimated) 1 else 0)
+                put("exif_written", if (provenance.exifWritten) 1 else 0)
             }
         }
         writableDatabase.insertWithOnConflict(
