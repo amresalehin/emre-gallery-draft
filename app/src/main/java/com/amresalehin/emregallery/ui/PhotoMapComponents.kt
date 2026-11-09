@@ -290,9 +290,12 @@ private fun SelectedPlaceBar(
                     if (provenance != null) {
                         Text(
                             text = buildString {
+                                append("Timeline · ")
                                 append(provenance.methodLabel)
                                 provenance.timestampSource?.let { append(" · $it") }
+                                provenance.sampleGapSeconds?.let { append(" · gap ${it / 60}m") }
                                 if (provenance.timestampEstimated) append(" · estimated time")
+                                append(if (provenance.exifWritten) " · EXIF" else " · app-only")
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

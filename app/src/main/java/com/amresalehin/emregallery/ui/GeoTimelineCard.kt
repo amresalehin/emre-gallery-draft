@@ -71,6 +71,10 @@ fun GeoTimelineCard(
     val writeToExif = geotagConfig.writeToExif
     val interpolationGapMinutes = geotagConfig.maxInterpolationGapSeconds / 60L
 
+    LaunchedEffect(isExpanded) {
+        if (isExpanded) geotagConfig = TimelineGeotagPreferences.read(context)
+    }
+
     // Timeline data state
     var timelineFileName by remember { mutableStateOf<String?>(null) }
     var timelinePoints by remember { mutableStateOf<List<TimelineLocationPoint>>(emptyList()) }
