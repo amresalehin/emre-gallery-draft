@@ -1285,7 +1285,8 @@ fun PocketBookmarkViewerPage(
     val dividerCol = PocketThemeColors.divider(isDark)
 
     // Fullscreen media inspection state
-    var fullScreenMediaItem by remember { mutableStateOf<MediaInboxItem?>(null) }
+    var fullScreenMediaIndex by remember { mutableStateOf<Int?>(null) }
+    var isDeckVideoMuted by remember { mutableStateOf(false) }
 
     // Drawer state: resizable, dismissable, occupies less place
     var isDrawerDismissed by remember { mutableStateOf(false) }
@@ -1711,12 +1712,20 @@ fun PocketBookmarkViewerPage(
                                         }
                                     )
                                     .clickable {
-                                        // Tap card to inspect fullscreen
-                                        currentItem?.let { fullScreenMediaItem = it }
+                                        // Tap card to inspect fullscreen with Native Gallery Media Viewer
+                                        fullScreenMediaIndex = safeIndex
                                     }
                                     .testTag("deck_front_card_$safeIndex")
                             ) {
                                 if (currentItem != null && currentMediaPath.isNotBlank()) {
+                                    val isCurrentVideo = remember(currentItem, currentMediaPath) {
+                                        currentItem.isVideo ||
+                                                currentMediaPath.endsWith(".mp4", ignoreCase = true) ||
+                                                currentMediaPath.endsWith(".webm", ignoreCase = true) ||
+                                                currentMediaPath.endsWith(".mov", ignoreCase = true) ||
+                                                currentMediaPath.contains(".m3u8", ignoreCase = true)
+                                    }
+
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
@@ -1743,18 +1752,32 @@ fun PocketBookmarkViewerPage(
                                                 )
                                         )
 
-                                        // Full media fits into deck container so entire media is completely visible
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context)
-                                                .data(currentMediaPath)
-                                                .crossfade(true)
-                                                .build(),
-                                            contentDescription = currentItem.title.ifBlank { "Media $safeIndex" },
-                                            contentScale = ContentScale.Fit,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .padding(8.dp)
-                                        )
+                                        if (isCurrentVideo) {
+                                            // Auto-play videos in Bookmark deck container
+                                            BookmarkDeckVideoPlayer(
+                                                uri = currentMediaPath,
+                                                isPlaying = !isSwiping && fullScreenMediaIndex == null,
+                                                isMuted = isDeckVideoMuted,
+                                                onToggleMute = { isDeckVideoMuted = !isDeckVideoMuted },
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(8.dp)
+                                                    .clip(RoundedCornerShape(20.dp))
+                                            )
+                                        } else {
+                                            // Full media fits into deck container so entire media is completely visible
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(context)
+                                                    .data(currentMediaPath)
+                                                    .crossfade(true)
+                                                    .build(),
+                                                contentDescription = currentItem.title.ifBlank { "Media $safeIndex" },
+                                                contentScale = ContentScale.Fit,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(8.dp)
+                                            )
+                                        }
                                     }
                                 } else {
                                     // Fallback web illustration if no media
@@ -1924,7 +1947,96 @@ fun PocketBookmarkViewerPage(
                                 .padding(horizontal = 18.dp, vertical = 4.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            // 0. Site Media Collection Strip
+                            // 1. Time Row
+                            PocketDetailCardRow(
+                                icon = Icons.Default.CalendarToday,
+                                label = "Time",
+                                value = dateFormatted,
+                                textColor = textColor,
+                                secondaryText = secondaryText,
+                                barSurface = barSurface,
+                                dividerCol = dividerCol
+                            )
+
+                            // 2. Source Row (Clickable to open link)
+                            PocketDetailCardRow(
+                                icon = Icons.Default.Link,
+                                label = "Source",
+                                value = stack.sourceUrl.ifBlank { stack.sourceDomain.ifBlank { "No source URL" } },
+                                trailingIcon = if (stack.sourceUrl.isNotBlank()) Icons.AutoMirrored.Filled.OpenInNew else null,
+                                onClick = if (stack.sourceUrl.isNotBlank()) { { onOpenBrowser(stack.sourceUrl) } } else null,
+                                textColor = textColor,
+                                secondaryText = secondaryText,
+                                barSurface = barSurface,
+                                dividerCol = dividerCol
+                            )
+
+                            // 3. Title Row
+                            PocketDetailCardRow(
+                                icon = Icons.Default.ShortText,
+                                label = "Title",
+                                value = stack.title.ifBlank { "Untitled Bookmark" },
+                                textColor = textColor,
+                                secondaryText = secondaryText,
+                                barSurface = barSurface,
+                                dividerCol = dividerCol
+                            )
+
+                            // 4. Tags Row
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = barSurface,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Sell,
+                                        contentDescription = null,
+                                        tint = textColor,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(12.dp))
+                                    Text(
+                                        text = "Tags",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = textColor
+                                    )
+                                    Spacer(Modifier.width(16.dp))
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        derivedTags.forEach { tag ->
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = PocketThemeColors.tagChipBg(isDark),
+                                                border = BorderStroke(0.5.dp, if (isDark) dividerCol else Color(0xFFDDDDDD)),
+                                                modifier = Modifier.height(28.dp)
+                                            ) {
+                                                Box(
+                                                    contentAlignment = Alignment.Center,
+                                                    modifier = Modifier.padding(horizontal = 10.dp)
+                                                ) {
+                                                    Text(
+                                                        text = tag,
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                                                        color = textColor
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 5. Site Media Collection Strip
                             Surface(
                                 shape = RoundedCornerShape(18.dp),
                                 color = barSurface,
@@ -2019,8 +2131,12 @@ fun PocketBookmarkViewerPage(
                                                     modifier = Modifier
                                                         .size(width = 80.dp, height = 66.dp)
                                                         .clickable {
-                                                            currentIndex = index
-                                                            scope.launch { offsetX.snapTo(0f) }
+                                                            if (isSelected) {
+                                                                fullScreenMediaIndex = index
+                                                            } else {
+                                                                currentIndex = index
+                                                                scope.launch { offsetX.snapTo(0f) }
+                                                            }
                                                         }
                                                         .testTag("site_media_thumbnail_$index")
                                                 ) {
@@ -2064,108 +2180,6 @@ fun PocketBookmarkViewerPage(
                                 }
                             }
 
-                            // 1. Time Row
-                            PocketDetailCardRow(
-                                icon = Icons.Default.CalendarToday,
-                                label = "Time",
-                                value = dateFormatted,
-                                textColor = textColor,
-                                secondaryText = secondaryText,
-                                barSurface = barSurface,
-                                dividerCol = dividerCol
-                            )
-
-                            // 2. Source Row (Clickable to open link)
-                            PocketDetailCardRow(
-                                icon = Icons.Default.Link,
-                                label = "Source",
-                                value = stack.sourceUrl.ifBlank { stack.sourceDomain.ifBlank { "No source URL" } },
-                                trailingIcon = if (stack.sourceUrl.isNotBlank()) Icons.AutoMirrored.Filled.OpenInNew else null,
-                                onClick = if (stack.sourceUrl.isNotBlank()) { { onOpenBrowser(stack.sourceUrl) } } else null,
-                                textColor = textColor,
-                                secondaryText = secondaryText,
-                                barSurface = barSurface,
-                                dividerCol = dividerCol
-                            )
-
-                            // 3. Note Row (Clickable to edit note)
-                            PocketDetailCardRow(
-                                icon = Icons.Default.Description,
-                                label = "Note",
-                                value = stack.description.ifBlank { "Tap to add note" },
-                                trailingIcon = Icons.Default.Edit,
-                                onClick = onEditNote,
-                                textColor = textColor,
-                                secondaryText = secondaryText,
-                                barSurface = barSurface,
-                                dividerCol = dividerCol
-                            )
-
-                            // 4. Tags Row
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = barSurface,
-                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFE6E6E6)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Sell,
-                                        contentDescription = null,
-                                        tint = textColor,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(Modifier.width(12.dp))
-                                    Text(
-                                        text = "Tags",
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = textColor
-                                    )
-                                    Spacer(Modifier.width(16.dp))
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        derivedTags.forEach { tag ->
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = PocketThemeColors.tagChipBg(isDark),
-                                                border = BorderStroke(0.5.dp, if (isDark) dividerCol else Color(0xFFDDDDDD)),
-                                                modifier = Modifier.height(28.dp)
-                                            ) {
-                                                Box(
-                                                    contentAlignment = Alignment.Center,
-                                                    modifier = Modifier.padding(horizontal = 10.dp)
-                                                ) {
-                                                    Text(
-                                                        text = tag,
-                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                                                        color = textColor
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 5. Title Row
-                            PocketDetailCardRow(
-                                icon = Icons.Default.ShortText,
-                                label = "Title",
-                                value = stack.title.ifBlank { "Untitled Bookmark" },
-                                textColor = textColor,
-                                secondaryText = secondaryText,
-                                barSurface = barSurface,
-                                dividerCol = dividerCol
-                            )
-
                             // 6. Description Row
                             Surface(
                                 shape = RoundedCornerShape(16.dp),
@@ -2200,6 +2214,19 @@ fun PocketBookmarkViewerPage(
                                     )
                                 }
                             }
+
+                            // 7. Note Row (Clickable to edit note)
+                            PocketDetailCardRow(
+                                icon = Icons.Default.Description,
+                                label = "Note",
+                                value = stack.description.ifBlank { "Tap to add note" },
+                                trailingIcon = Icons.Default.Edit,
+                                onClick = onEditNote,
+                                textColor = textColor,
+                                secondaryText = secondaryText,
+                                barSurface = barSurface,
+                                dividerCol = dividerCol
+                            )
 
                             Spacer(Modifier.height(20.dp))
                         }
@@ -2252,114 +2279,15 @@ fun PocketBookmarkViewerPage(
             }
         }
 
-        // Fullscreen media inspection dialog
-        fullScreenMediaItem?.let { item ->
-            Dialog(
-                onDismissRequest = { fullScreenMediaItem = null },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
-            ) {
-                val mediaPath = remember(item) {
-                    if (item.localUri.isNotBlank()) {
-                        val f = File(item.localUri.removePrefix("file://"))
-                        if (f.exists()) f else item.sourceUrl
-                    } else item.sourceUrl
-                }
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.95f))
-                        .statusBarsPadding()
-                        .navigationBarsPadding()
-                ) {
-                    // Fullscreen image display
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(mediaPath)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = item.title,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp)
-                    )
-
-                    // Top Action Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.7f),
-                            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clickable { fullScreenMediaItem = null }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Copy media link
-                            Surface(
-                                shape = CircleShape,
-                                color = Color.Black.copy(alpha = 0.7f),
-                                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clickable {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val clip = ClipData.newPlainText("Media URL", item.sourceUrl)
-                                        clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Media URL copied", Toast.LENGTH_SHORT).show()
-                                    }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCopy,
-                                        contentDescription = "Copy media URL",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(19.dp)
-                                    )
-                                }
-                            }
-
-                            // Open in Browser
-                            if (item.sourceUrl.isNotBlank()) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = Color.Black.copy(alpha = 0.7f),
-                                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f)),
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clickable { onOpenBrowser(item.sourceUrl) }
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                                            contentDescription = "Open in browser",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(19.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        // Fullscreen media inspection with Native Gallery Media Viewer canvas styling, UI, UX, swipe, scrim
+        fullScreenMediaIndex?.let { initialIndex ->
+            PocketMediaViewerScreen(
+                items = effectiveMediaList,
+                initialIndex = initialIndex,
+                stack = stack,
+                onDismiss = { fullScreenMediaIndex = null },
+                onOpenBrowser = onOpenBrowser
+            )
         }
     }
 }
