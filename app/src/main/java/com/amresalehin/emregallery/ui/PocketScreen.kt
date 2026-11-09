@@ -516,13 +516,13 @@ fun PocketScreen(
                     },
                     onEditNote = { editingStack = stack },
                     onRefreshMetadata = {
-                        pocketRepo.refreshMetadata(stack.id)
+                        pocketRepo.refreshMetadata(stack.id, context)
                         scope.launch {
                             snackbarHostState.showSnackbar("Refreshing link info & preview...")
                         }
                     },
                     onFetchSiteMedia = {
-                        pocketRepo.fetchSiteMedia(stack.id)
+                        pocketRepo.fetchSiteMedia(stack.id, context)
                     },
                     isDark = isDark,
                     modifier = Modifier.fillMaxSize()
@@ -1339,9 +1339,12 @@ fun PocketBookmarkViewerPage(
     val offsetX = remember { Animatable(0f) }
     var isSwiping by remember { mutableStateOf(false) }
 
-    // Auto-fetch site media on first open if bookmark has URL but no items yet
+    // Inspect the live page on every detail-page entry. A static OG image may be only a site logo;
+    // it must not suppress JavaScript discovery of the actual page media.
     LaunchedEffect(stack.id, stack.sourceUrl) {
-        if (stack.items.isEmpty() && stack.sourceUrl.isNotBlank()) {
+        if (stack.sourceUrl.startsWith("http://", ignoreCase = true) ||
+            stack.sourceUrl.startsWith("https://", ignoreCase = true)
+        ) {
             onFetchSiteMedia?.invoke()
         }
     }

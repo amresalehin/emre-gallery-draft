@@ -158,7 +158,8 @@ object BrowserSession {
         context: Context,
         targetUrl: String,
         onStatusUpdate: (String) -> Unit = {},
-        onMediaDiscovered: (ScrapedMediaItem) -> Unit = {}
+        onMediaDiscovered: (ScrapedMediaItem) -> Unit = {},
+        publishToDownloader: Boolean = true
     ): MediaExtractionResult = suspendCancellableCoroutine { continuation ->
         mainHandler.post {
             val normalizedUrl = if (!targetUrl.startsWith("http://", ignoreCase = true) && !targetUrl.startsWith("https://", ignoreCase = true)) {
@@ -168,6 +169,7 @@ object BrowserSession {
             val domain = runCatching { URL(normalizedUrl).host }.getOrDefault("")
             var webView: WebView? = null
             var isCompleted = false
+            var hydrationScanScheduled = false
 
             fun cleanup() {
                 try {
@@ -234,7 +236,9 @@ object BrowserSession {
                     if (modified) {
                         for (it in items) {
                             onMediaDiscovered(it)
-                            DownloaderSession.addDiscoveredItem(it)
+                            if (publishToDownloader) {
+                                DownloaderSession.addDiscoveredItem(it)
+                            }
                         }
                     }
                 }
@@ -287,42 +291,61 @@ object BrowserSession {
                     }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
-                        if (isCompleted) return
+                        if (isCompleted || hydrationScanScheduled) return
+                        hydrationScanScheduled = true
                         BotDetectionMitigator.injectStealth(view)
                         BotDetectionMitigator.syncCookiesFromWebView(url)
                         if (BotDetectionMitigator.isBotChallenge(view?.title, url)) {
                             onStatusUpdate("Bypassing anti-bot verification...")
                         } else {
-                            onStatusUpdate("Scanning dynamic page content...")
+                            onStatusUpdate("Waiting for dynamic page media...")
                         }
+
+                        // Keep observing mutations while client-side frameworks hydrate the page.
                         wv.evaluateJavascript(MediaCaptureEngine.getMutationObserverScript(), null)
-                        wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { scanJson ->
-                            val entries = MediaCaptureEngine.parseJsDomScanResult(scanJson, normalizedUrl)
-                            ingest(entries)
-                            if (seenMap.isNotEmpty()) {
-                                finish(null)
-                            } else {
-                                // Wait 2s for client-side JS / hydration
-                                mainHandler.postDelayed({
-                                    if (!isCompleted) {
-                                        wv.evaluateJavascript(MediaCaptureEngine.getJsDomScanScript()) { secondJson ->
-                                            val postEntries = MediaCaptureEngine.parseJsDomScanResult(secondJson, normalizedUrl)
-                                            ingest(postEntries)
-                                            finish(if (seenMap.isEmpty()) "No media discovered" else null)
+                        val scanScript = MediaCaptureEngine.getJsDomScanScript()
+                        wv.evaluateJavascript(scanScript) { initialJson ->
+                            ingest(MediaCaptureEngine.parseJsDomScanResult(initialJson, normalizedUrl))
+
+                            // Do not stop at the first image: it is often just a logo or a placeholder.
+                            mainHandler.postDelayed({
+                                if (!isCompleted) {
+                                    onStatusUpdate("Scanning hydrated page content...")
+                                    // Trigger lazy-loaded images and infinite-scroll media.
+                                    wv.evaluateJavascript(
+                                        "(function(){var h=Math.max(document.body?document.body.scrollHeight:0,document.documentElement?document.documentElement.scrollHeight:0);window.scrollTo(0,h);return true;})()",
+                                        null
+                                    )
+                                    mainHandler.postDelayed({
+                                        if (!isCompleted) {
+                                            wv.evaluateJavascript(scanScript) { postScrollJson ->
+                                                ingest(MediaCaptureEngine.parseJsDomScanResult(postScrollJson, normalizedUrl))
+                                                wv.evaluateJavascript("window.scrollTo(0,0);true;", null)
+
+                                                // One final pass catches media attached after the scroll-triggered load.
+                                                mainHandler.postDelayed({
+                                                    if (!isCompleted) {
+                                                        wv.evaluateJavascript(scanScript) { settledJson ->
+                                                            ingest(MediaCaptureEngine.parseJsDomScanResult(settledJson, normalizedUrl))
+                                                            finish(if (seenMap.isEmpty()) "No media discovered" else null)
+                                                        }
+                                                    }
+                                                }, 800L)
+                                            }
                                         }
-                                    }
-                                }, 2000L)
-                            }
+                                    }, 1800L)
+                                }
+                            }, 2400L)
                         }
                     }
                 }
 
-                // 12-second watchdog timer
+                // Allow time for SPA hydration, lazy loading, and the final DOM scan.
                 mainHandler.postDelayed({
                     if (!isCompleted) {
                         finish(if (seenMap.isEmpty()) "Page scan timed out" else null)
                     }
-                }, 12000L)
+                }, 16000L)
 
                 wv.loadUrl(normalizedUrl)
             } catch (e: Exception) {

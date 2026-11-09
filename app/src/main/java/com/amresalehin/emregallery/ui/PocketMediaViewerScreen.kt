@@ -180,25 +180,34 @@ private fun PocketMediaViewerContent(
     val rippleColor = if (isDark) Color.White else Color.Black
 
     val view = LocalView.current
-    val activity = remember(context) { context.findActivity() }
+    val dialogWindow = remember(view) { (view.parent as? DialogWindowProvider)?.window }
 
-    DisposableEffect(view, activity) {
-        val dialogWindow = (view.parent as? DialogWindowProvider)?.window
-        val targetWindows = listOfNotNull(dialogWindow, activity?.window)
-        targetWindows.forEach { w ->
-            WindowCompat.setDecorFitsSystemWindows(w, false)
-            w.statusBarColor = android.graphics.Color.TRANSPARENT
-            w.navigationBarColor = android.graphics.Color.TRANSPARENT
-            w.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-            val controller = WindowCompat.getInsetsController(w, w.decorView)
+    DisposableEffect(dialogWindow) {
+        dialogWindow?.let { window ->
+            // The media viewer owns its dialog window; never change the Activity behind it.
+            window.setLayout(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT
+            )
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            window.setBackgroundDrawable(
+                android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK)
+            )
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
             controller.hide(WindowInsetsCompat.Type.statusBars())
-            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
         onDispose {
-            activity?.window?.let { actWindow ->
-                actWindow.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
-                val controller = WindowCompat.getInsetsController(actWindow, actWindow.decorView)
+            dialogWindow?.let { window ->
+                window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
                 controller.show(WindowInsetsCompat.Type.statusBars())
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
             }
         }
     }
@@ -374,18 +383,19 @@ private fun PocketMediaViewerContent(
             // Top and bottom edge gradient shading (theme-aware)
             PocketViewerEdgeShading(visible = showControls && !isClosing, isDark = isDark)
 
-            // Calculate system status bar height ignoring visibility to match home screen search bar position
+            // Read the safe top inset from the viewer dialog itself; the Activity window is untouched.
             val systemStatusBarHeightDp = with(density) {
-                val insets = ViewCompat.getRootWindowInsets(view)
-                    ?: activity?.window?.decorView?.let { ViewCompat.getRootWindowInsets(it) }
-                val ignoringVis = insets?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: 0
-                val rawPx = if (ignoringVis > 0) {
-                    ignoringVis
+                val insets = dialogWindow?.decorView?.let { ViewCompat.getRootWindowInsets(it) }
+                    ?: ViewCompat.getRootWindowInsets(view)
+                val topInsetPx = insets
+                    ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: 0
+                val fallbackResId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+                val fallbackPx = if (fallbackResId > 0) {
+                    context.resources.getDimensionPixelSize(fallbackResId)
                 } else {
-                    val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-                    if (resId > 0) context.resources.getDimensionPixelSize(resId) else 0
+                    0
                 }
-                if (rawPx > 0) rawPx.toDp() else 28.dp
+                (if (topInsetPx > 0) topInsetPx else fallbackPx).toDp()
             }
             // Home screen search bar uses statusBarsPadding() + vertical = 8.dp
             val topBarTopMargin = systemStatusBarHeightDp + 8.dp
