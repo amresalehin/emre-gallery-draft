@@ -526,15 +526,29 @@ class IndexingForegroundService : Service() {
         updateState(task = TASK_AI_TAGGING, running = true, paused = initialPaused, processed = doneCount, total = photos.size, error = null)
         postProgress("AI image tagging", "Scanning ${pending.size} photos with AI vision", doneCount, photos.size)
         var completed = doneCount
+        var failed = 0
         val effectiveModel = modelId ?: com.amresalehin.emregallery.ai.tagging.AiTaggingSettings.getSelectedModel(applicationContext)
         for (item in pending) {
             awaitResume()
-            val result = com.amresalehin.emregallery.ai.tagging.AiImageTagger.tagAndSave(
-                context = this@IndexingForegroundService,
-                item = item,
-                prefs = prefsRepo,
-                preferredModel = effectiveModel
-            )
+            val result = try {
+                com.amresalehin.emregallery.ai.tagging.AiImageTagger.tagAndSave(
+                    context = this@IndexingForegroundService,
+                    item = item,
+                    prefs = prefsRepo,
+                    preferredModel = effectiveModel
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                com.amresalehin.emregallery.ai.tagging.AiTaggingResult(
+                    tags = emptyList(),
+                    engineName = effectiveModel,
+                    durationMs = 0L,
+                    isSuccess = false,
+                    errorMessage = error.localizedMessage ?: "Tagging failed."
+                )
+            }
+            if (!result.isSuccess || result.tags.isEmpty()) failed++
             completed++
             updateState(
                 task = TASK_AI_TAGGING,
@@ -542,11 +556,16 @@ class IndexingForegroundService : Service() {
                 paused = false,
                 processed = completed,
                 total = photos.size,
+                failed = failed,
                 currentItemName = item.name,
-                currentItemStatus = if (result.tags.isNotEmpty()) result.tags.joinToString(", ") else "No tags"
+                currentItemStatus = when {
+                    !result.isSuccess -> "Failed: ${result.errorMessage ?: "Inference failed"}"
+                    result.tags.isNotEmpty() -> result.tags.joinToString(", ")
+                    else -> "No tags returned"
+                }
             )
             if (completed % 5 == 0 || completed == photos.size) {
-                postProgress("AI image tagging", "${item.name} ($completed/${photos.size})", completed, photos.size)
+                postProgress("AI image tagging", "${item.name} ($completed/${photos.size}) · $failed failed", completed, photos.size)
             }
             kotlinx.coroutines.yield()
         }
