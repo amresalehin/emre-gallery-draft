@@ -9,11 +9,12 @@ import android.util.Base64
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import com.amresalehin.emregallery.data.CloudAiProvider
-import com.amresalehin.emregallery.data.FlorenceModelManager
+import com.amresalehin.emregallery.ai.local.LocalModelRegistry
 import com.amresalehin.emregallery.data.MediaItem
 import com.amresalehin.emregallery.data.PreferencesRepository
 import com.amresalehin.emregallery.data.preferences.AiPreferencesManager
 import com.amresalehin.emregallery.ocr.TesseractOcr
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -24,11 +25,23 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+
+/**
+ * The route is determined only by the user's explicit model selection.
+ * A local model selection must never implicitly become a cloud request.
+ */
+enum class AiTaggingRoute {
+    SMART_VISION,
+    CLOUD,
+    LOCAL_MODEL,
+    UNKNOWN
+}
 
 /**
  * Result of an AI image tagging operation.
@@ -81,7 +94,25 @@ object AiImageTagger {
     }
 
     /**
-     * Generates a list of descriptive tags for the specified image item.
+     * Resolve model selection without consulting provider availability. This function is
+     * intentionally pure so the routing contract can be regression-tested.
+     */
+    fun resolveModelRoute(modelId: String): AiTaggingRoute {
+        val normalized = modelId.trim().lowercase()
+        return when (normalized) {
+            AiTaggingSettings.MODEL_SMART_VISION, "smart vision" -> AiTaggingRoute.SMART_VISION
+            AiTaggingSettings.MODEL_CLOUD, "cloud" -> AiTaggingRoute.CLOUD
+            else -> if (LocalModelRegistry.findSpec(normalized) != null) {
+                AiTaggingRoute.LOCAL_MODEL
+            } else {
+                AiTaggingRoute.UNKNOWN
+            }
+        }
+    }
+
+    /**
+     * Generates tags using exactly the selected engine. Cloud fallback for local models
+     * is permitted only through the explicit opt-in preference.
      */
     suspend fun generateTags(
         context: Context,
@@ -90,77 +121,91 @@ object AiImageTagger {
         preferredModel: String? = null
     ): AiTaggingResult = withContext(Dispatchers.IO) {
         val startNs = System.nanoTime()
-        val targetModel = (preferredModel ?: AiTaggingSettings.getSelectedModel(context)).lowercase()
+        val targetModel = (preferredModel ?: AiTaggingSettings.getSelectedModel(context)).trim().lowercase()
 
-        // 1. If explicit Smart Vision requested, analyze immediately
-        if (targetModel == AiTaggingSettings.MODEL_SMART_VISION || targetModel == "smart vision") {
-            val smartTags = analyzeImageWithSmartVision(context, item)
-            val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
-            return@withContext AiTaggingResult(
-                tags = smartTags,
-                engineName = "Smart Vision",
-                durationMs = durationMs
+        fun result(
+            tags: List<String>,
+            engineName: String,
+            isSuccess: Boolean = true,
+            errorMessage: String? = null
+        ) = AiTaggingResult(
+            tags = tags,
+            engineName = engineName,
+            durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs),
+            isSuccess = isSuccess,
+            errorMessage = errorMessage
+        )
+
+        suspend fun runCloud(engineLabel: String): AiTaggingResult {
+            val provider = cloudProvider?.takeIf {
+                it.isActive && it.baseUrl.isNotBlank()
+            } ?: return result(
+                tags = emptyList(),
+                engineName = engineLabel,
+                isSuccess = false,
+                errorMessage = if (engineLabel == "Cloud Vision") {
+                    "Cloud AI is selected, but no active cloud provider is configured. Configure a provider in AI settings."
+                } else {
+                    "Cloud fallback is enabled, but no active cloud provider is configured."
+                }
+            )
+
+            return try {
+                val tags = tagWithCloudVision(context, item, provider)
+                if (tags.isEmpty()) {
+                    result(
+                        tags = emptyList(),
+                        engineName = engineLabel,
+                        isSuccess = false,
+                        errorMessage = "Cloud provider ${provider.name} returned no usable tags. Check its endpoint, model and response format."
+                    )
+                } else {
+                    result(
+                        tags = tags,
+                        engineName = "$engineLabel (${provider.name})"
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                result(
+                    tags = emptyList(),
+                    engineName = engineLabel,
+                    isSuccess = false,
+                    errorMessage = error.localizedMessage ?: "Cloud inference failed."
+                )
+            }
+        }
+
+        when (resolveModelRoute(targetModel)) {
+            AiTaggingRoute.SMART_VISION -> {
+                val smartTags = analyzeImageWithSmartVision(context, item)
+                result(smartTags, "Smart Vision")
+            }
+
+            AiTaggingRoute.CLOUD -> runCloud("Cloud Vision")
+
+            AiTaggingRoute.LOCAL_MODEL -> {
+                val allowCloudFallback = AiTaggingSettings.isCloudFallbackEnabled(context)
+                if (allowCloudFallback) {
+                    runCloud("Cloud Vision fallback")
+                } else {
+                    result(
+                        tags = emptyList(),
+                        engineName = targetModel,
+                        isSuccess = false,
+                        errorMessage = "The selected local model does not have an executable image-tagging runtime yet. Choose Smart Vision or Cloud AI, or explicitly enable cloud fallback."
+                    )
+                }
+            }
+
+            AiTaggingRoute.UNKNOWN -> result(
+                tags = emptyList(),
+                engineName = targetModel,
+                isSuccess = false,
+                errorMessage = "Unknown AI tagging model '$targetModel'. Select a supported model."
             )
         }
-
-        // 2. If Florence-2 requested and installed, run local inference
-        if ((targetModel == AiTaggingSettings.MODEL_FLORENCE_2 || targetModel == "florence-2" || targetModel == "florence-2-base") &&
-            FlorenceModelManager.isInstalled(context, "florence2")
-        ) {
-            val localResult = runCatching {
-                tagWithLocalFlorence(context, item)
-            }.getOrNull()
-
-            if (localResult != null && localResult.isNotEmpty()) {
-                val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
-                return@withContext AiTaggingResult(
-                    tags = localResult,
-                    engineName = "Florence-2 On-Device",
-                    durationMs = durationMs
-                )
-            }
-        }
-
-        // 3. Try Cloud Vision AI if requested or active provider is configured with an API key / endpoint
-        if (cloudProvider != null && cloudProvider.baseUrl.isNotBlank() && cloudProvider.isActive) {
-            val cloudResult = runCatching {
-                tagWithCloudVision(context, item, cloudProvider)
-            }.getOrNull()
-
-            if (cloudResult != null && cloudResult.isNotEmpty()) {
-                val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
-                return@withContext AiTaggingResult(
-                    tags = cloudResult,
-                    engineName = "Cloud Vision (${cloudProvider.name})",
-                    durationMs = durationMs
-                )
-            }
-        }
-
-        // 4. Try Local Model (Florence-2) if ready and installed
-        if (FlorenceModelManager.isInstalled(context, "florence2")) {
-            val localResult = runCatching {
-                tagWithLocalFlorence(context, item)
-            }.getOrNull()
-
-            if (localResult != null && localResult.isNotEmpty()) {
-                val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
-                return@withContext AiTaggingResult(
-                    tags = localResult,
-                    engineName = "Florence-2 On-Device",
-                    durationMs = durationMs
-                )
-            }
-        }
-
-        // 5. High-Speed, Zero-Dependency Smart Vision & Content Analyzer
-        val smartTags = analyzeImageWithSmartVision(context, item)
-        val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
-        return@withContext AiTaggingResult(
-            tags = smartTags,
-            engineName = "Smart Vision Engine",
-            durationMs = durationMs
-        )
     }
 
     /**
@@ -172,7 +217,7 @@ object AiImageTagger {
         provider: CloudAiProvider
     ): List<String> = withContext(Dispatchers.IO) {
         val bitmap = loadSampledBitmap(context, Uri.parse(item.uri), maxDimension = 512)
-            ?: return@withContext emptyList()
+            ?: throw IOException("Could not decode image for cloud tagging: ${item.name}")
 
         val outputStream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 80, outputStream)
@@ -246,15 +291,6 @@ object AiImageTagger {
         val content = message?.optString("content").orEmpty()
 
         return@withContext cleanTagsList(content)
-    }
-
-    /**
-     * Florence-2 local vision tagging.
-     */
-    private fun tagWithLocalFlorence(context: Context, item: MediaItem): List<String> {
-        // Florence-2 inference adapter hook
-        val smartFallback = analyzeImageWithSmartVision(context, item)
-        return (smartFallback + listOf("florence2")).distinct()
     }
 
     /**
