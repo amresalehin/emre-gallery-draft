@@ -239,6 +239,8 @@ fun AiTaggingCard(
                                     FlorenceModelManager.cancelDownload(context, selectedModelId)
                                     onShowSnackbar?.invoke("Download cancelled")
                                 }
+                                isRunning -> onStopTagging()
+                                isCompleted -> showActionMenu = true
                                 isLocalModelSelection && !canTagWithSelectedModel -> {
                                     onShowSnackbar?.invoke(
                                         if (allowCloudFallback) {
@@ -265,8 +267,6 @@ fun AiTaggingCard(
                                         }
                                     }
                                 }
-                                isRunning -> onStopTagging()
-                                isCompleted -> showActionMenu = true
                                 else -> triggerTagging(false)
                             }
                         },
@@ -317,33 +317,6 @@ fun AiTaggingCard(
                                         )
                                     )
                                 }
-                                !canTagWithSelectedModel -> {
-                                    Text(
-                                        text = "Unavailable",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    )
-                                }
-                                isLocalModelSelection && canTagWithSelectedModel -> {
-                                    Text(
-                                        text = "Cloud",
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    )
-                                }
-                                !isModelInstalled -> {
-                                    // Cloud download icon as shown in skeleton
-                                    Icon(
-                                        imageVector = Icons.Outlined.CloudDownload,
-                                        contentDescription = "Download model",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                }
                                 isRunning -> {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(13.dp),
@@ -373,6 +346,33 @@ fun AiTaggingCard(
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
+                                    )
+                                }
+                                !canTagWithSelectedModel -> {
+                                    Text(
+                                        text = "Unavailable",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    )
+                                }
+                                isLocalModelSelection && canTagWithSelectedModel -> {
+                                    Text(
+                                        text = "Cloud",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    )
+                                }
+                                !isModelInstalled -> {
+                                    // Cloud download icon as shown in skeleton
+                                    Icon(
+                                        imageVector = Icons.Outlined.CloudDownload,
+                                        contentDescription = "Download model",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(15.dp)
                                     )
                                 }
                                 else -> {
