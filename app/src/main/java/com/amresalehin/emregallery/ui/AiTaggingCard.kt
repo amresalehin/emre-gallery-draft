@@ -114,6 +114,15 @@ fun AiTaggingCard(
     // Selected model state inspection
     val isSmartVision = selectedModelId == AiTaggingSettings.MODEL_SMART_VISION
     val isCloud = selectedModelId == AiTaggingSettings.MODEL_CLOUD
+    val isLocalModelSelection = !isSmartVision && !isCloud
+    val hasActiveCloudProvider = activeCloudProvider?.let {
+        it.isActive && it.baseUrl.isNotBlank()
+    } == true
+    val canTagWithSelectedModel = when {
+        isSmartVision -> true
+        isCloud -> hasActiveCloudProvider
+        else -> allowCloudFallback && hasActiveCloudProvider
+    }
     val currentModelState = allModelStates[selectedModelId] ?: FlorenceModelManager.getModelState(selectedModelId)
 
     val isModelInstalled = when {
@@ -230,6 +239,19 @@ fun AiTaggingCard(
                                     FlorenceModelManager.cancelDownload(context, selectedModelId)
                                     onShowSnackbar?.invoke("Download cancelled")
                                 }
+                                isLocalModelSelection && !canTagWithSelectedModel -> {
+                                    onShowSnackbar?.invoke(
+                                        if (allowCloudFallback) {
+                                            "Cloud fallback is enabled, but no active cloud provider is configured."
+                                        } else {
+                                            "This local model has no executable tagging runtime yet. Choose Smart Vision or Cloud AI, or enable cloud fallback."
+                                        }
+                                    )
+                                }
+                                isLocalModelSelection && canTagWithSelectedModel -> triggerTagging(false)
+                                isCloud && !hasActiveCloudProvider -> {
+                                    onShowSnackbar?.invoke("Configure and activate a Cloud AI provider in AI settings.")
+                                }
                                 !isModelInstalled -> {
                                     scope.launch {
                                         val modelName = availableModels.firstOrNull { it.id == selectedModelId }?.displayName ?: selectedModelId
@@ -251,6 +273,7 @@ fun AiTaggingCard(
                         shape = RoundedCornerShape(14.dp),
                         color = when {
                             isModelDownloading -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.85f)
+                            !canTagWithSelectedModel -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
                             isRunning -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                             isPaused -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
                             !isModelInstalled -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
@@ -261,6 +284,7 @@ fun AiTaggingCard(
                             1.dp,
                             when {
                                 isModelDownloading -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
+                                !canTagWithSelectedModel -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
                                 isRunning -> MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
                                 isPaused -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
                                 !isModelInstalled -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
@@ -290,6 +314,24 @@ fun AiTaggingCard(
                                         style = MaterialTheme.typography.labelMedium.copy(
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.secondary
+                                        )
+                                    )
+                                }
+                                !canTagWithSelectedModel -> {
+                                    Text(
+                                        text = "Unavailable",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    )
+                                }
+                                isLocalModelSelection && canTagWithSelectedModel -> {
+                                    Text(
+                                        text = "Cloud",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                     )
                                 }
@@ -501,6 +543,19 @@ fun AiTaggingCard(
                         }
                     }
 
+                    if (!canTagWithSelectedModel) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = when {
+                                isCloud -> "No active Cloud AI provider is configured. Configure one in AI settings."
+                                allowCloudFallback -> "Cloud fallback is enabled, but there is no active cloud provider."
+                                else -> "This local model does not have an executable tagging runtime yet. Select Smart Vision or Cloud AI, or enable cloud fallback."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
                     Spacer(Modifier.height(16.dp))
 
                     // SECTION 2: Folder (Title only, no explanatory text)
@@ -628,7 +683,7 @@ fun AiTaggingCard(
                                 triggerTagging(false)
                                 onShowSnackbar?.invoke("Started AI tagging for untagged photos")
                             },
-                            enabled = !isRunning && !isModelDownloading,
+                            enabled = !isRunning && !isModelDownloading && canTagWithSelectedModel,
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
                                 .weight(1f)
