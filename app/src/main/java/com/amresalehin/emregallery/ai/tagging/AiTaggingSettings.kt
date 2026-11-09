@@ -13,6 +13,7 @@ object AiTaggingSettings {
     const val KEY_SELECTED_MODEL = "selected_model"
     const val KEY_ALL_FOLDERS = "all_folders"
     const val KEY_SELECTED_FOLDERS = "selected_folders"
+    const val KEY_ALLOW_CLOUD_FALLBACK = "allow_cloud_fallback"
 
     const val MODEL_SMART_VISION = "smart_vision"
     const val MODEL_FLORENCE_2 = "florence2"
@@ -25,11 +26,18 @@ object AiTaggingSettings {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun getSelectedModel(context: Context): String {
-        return preferences(context).getString(KEY_SELECTED_MODEL, MODEL_FLORENCE_2) ?: MODEL_FLORENCE_2
+        return preferences(context).getString(KEY_SELECTED_MODEL, MODEL_SMART_VISION) ?: MODEL_SMART_VISION
     }
 
     fun setSelectedModel(context: Context, modelId: String) {
         preferences(context).edit().putString(KEY_SELECTED_MODEL, modelId).apply()
+    }
+
+    fun isCloudFallbackEnabled(context: Context): Boolean =
+        preferences(context).getBoolean(KEY_ALLOW_CLOUD_FALLBACK, false)
+
+    fun setCloudFallbackEnabled(context: Context, enabled: Boolean) {
+        preferences(context).edit().putBoolean(KEY_ALLOW_CLOUD_FALLBACK, enabled).apply()
     }
 
     fun isAllFolders(context: Context): Boolean {
