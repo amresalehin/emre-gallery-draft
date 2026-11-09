@@ -43,12 +43,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.amresalehin.emregallery.data.MediaItem
-import com.amresalehin.emregallery.data.PhotoMapLocationCache
 import com.amresalehin.emregallery.geotag.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.osmdroid.util.GeoPoint
 import java.util.Locale
 
 @Composable
@@ -67,7 +65,11 @@ fun GeoTimelineCard(
     // Minimal state
     var selectedFolder by remember { mutableStateOf("All") }
     var customTreeUri by remember { mutableStateOf<Uri?>(null) }
-    var writeToExif by remember { mutableStateOf(true) }
+    var geotagConfig by remember(context) {
+        mutableStateOf(TimelineGeotagPreferences.read(context))
+    }
+    val writeToExif = geotagConfig.writeToExif
+    val interpolationGapMinutes = geotagConfig.maxInterpolationGapSeconds / 60L
 
     // Timeline data state
     var timelineFileName by remember { mutableStateOf<String?>(null) }
@@ -183,7 +185,7 @@ fun GeoTimelineCard(
                 return@launch
             }
 
-            val config = GeotagConfig(skipAlreadyGeotagged = true)
+            val config = geotagConfig.copy(skipAlreadyGeotagged = true)
 
             var tagged = 0
             var skipped = 0
@@ -204,10 +206,7 @@ fun GeoTimelineCard(
                         if (ok) tagged++
                     } else {
                         // Cache to in-app photo map only
-                        PhotoMapLocationCache(context).save(
-                            candidate.uriString,
-                            GeoPoint(match.matchedPoint.latitude, match.matchedPoint.longitude)
-                        )
+                        TimelineGeotagEngine.cacheMatchedLocation(context, match, exifWritten = false)
                         tagged++
                     }
                 }
@@ -422,7 +421,40 @@ fun GeoTimelineCard(
 
                     Spacer(Modifier.height(16.dp))
 
-                    // 2. Write to Exif Row
+                    // 2. Maximum permitted gap between adjacent path samples.
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "Maximum gap between path samples: ${interpolationGapMinutes} min",
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Slider(
+                            value = interpolationGapMinutes.toFloat(),
+                            onValueChange = { minutes ->
+                                val updated = geotagConfig.copy(
+                                    maxInterpolationGapSeconds = (minutes.toLong() * 60L).coerceIn(60L, 3600L)
+                                )
+                                geotagConfig = updated
+                                TimelineGeotagPreferences.write(context, updated)
+                            },
+                            valueRange = 1f..60f,
+                            steps = 58,
+                            enabled = !isRunning,
+                            modifier = Modifier.testTag("geo_timeline_interpolation_gap_slider")
+                        )
+                        Text(
+                            text = "Only interpolate when both samples belong to the same Timeline path.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // 3. Write to Exif Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -439,7 +471,11 @@ fun GeoTimelineCard(
 
                         Switch(
                             checked = writeToExif,
-                            onCheckedChange = { writeToExif = it },
+                            onCheckedChange = {
+                                val updated = geotagConfig.copy(writeToExif = it)
+                                geotagConfig = updated
+                                TimelineGeotagPreferences.write(context, updated)
+                            },
                             modifier = Modifier.testTag("write_to_exif_switch")
                         )
                     }

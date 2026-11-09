@@ -1083,6 +1083,8 @@ private fun GeotagSettingsDialog(
     var maxDeltaMin by remember { mutableStateOf((config.maxTimeDeltaSeconds / 60).toFloat()) }
     var cameraDriftSec by remember { mutableStateOf(config.cameraClockOffsetSeconds.toFloat()) }
     var interpolate by remember { mutableStateOf(config.interpolateBetweenPoints) }
+    var interpolationGapMin by remember { mutableStateOf((config.maxInterpolationGapSeconds / 60L).toFloat()) }
+    var writeToExif by remember { mutableStateOf(config.writeToExif) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1118,6 +1120,18 @@ private fun GeotagSettingsDialog(
                     steps = 19
                 )
 
+                Text(
+                    text = "Maximum gap between path samples: ${interpolationGapMin.toInt()} minutes",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Slider(
+                    value = interpolationGapMin,
+                    onValueChange = { interpolationGapMin = it },
+                    valueRange = 1f..60f,
+                    steps = 58
+                )
+
                 // Interpolation toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1129,6 +1143,17 @@ private fun GeotagSettingsDialog(
                     }
                     Switch(checked = interpolate, onCheckedChange = { interpolate = it })
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Write GPS into image EXIF", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                        Text("Off by default; matched coordinates remain available in Emre.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = writeToExif, onCheckedChange = { writeToExif = it })
+                }
             }
         },
         confirmButton = {
@@ -1138,7 +1163,9 @@ private fun GeotagSettingsDialog(
                         config.copy(
                             maxTimeDeltaSeconds = (maxDeltaMin * 60).toLong(),
                             cameraClockOffsetSeconds = cameraDriftSec.toLong(),
-                            interpolateBetweenPoints = interpolate
+                            interpolateBetweenPoints = interpolate,
+                            maxInterpolationGapSeconds = (interpolationGapMin.toLong() * 60L).coerceIn(60L, 3600L),
+                            writeToExif = writeToExif
                         )
                     )
                 }

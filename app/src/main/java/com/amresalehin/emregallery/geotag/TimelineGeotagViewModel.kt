@@ -57,7 +57,9 @@ data class TimelineGeotagUiState(
 
 class TimelineGeotagViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _uiState = MutableStateFlow(TimelineGeotagUiState())
+    private val _uiState = MutableStateFlow(
+        TimelineGeotagUiState(config = TimelineGeotagPreferences.read(application.applicationContext))
+    )
     val uiState: StateFlow<TimelineGeotagUiState> = _uiState.asStateFlow()
 
     private var parsedPoints: List<TimelineLocationPoint> = emptyList()
@@ -72,7 +74,11 @@ class TimelineGeotagViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun updateConfig(update: (GeotagConfig) -> GeotagConfig) {
-        _uiState.update { it.copy(config = update(it.config)) }
+        _uiState.update { state ->
+            val updated = update(state.config)
+            TimelineGeotagPreferences.write(getApplication(), updated)
+            state.copy(config = updated)
+        }
     }
 
     fun setFilter(filter: GeotagResultFilter) {
@@ -361,19 +367,24 @@ class TimelineGeotagViewModel(application: Application) : AndroidViewModel(appli
                         matchResult
                     }
                     GeotagStatus.MATCHED -> {
-                        // Apply geotag into EXIF
-                        val writeOutcome = TimelineGeotagEngine.applyGeotag(context, matchResult)
-                        if (writeOutcome.isSuccess && writeOutcome.getOrNull() == true) {
+                        val config = _uiState.value.config
+                        if (config.writeToExif) {
+                            val writeOutcome = TimelineGeotagEngine.applyGeotag(context, matchResult)
+                            if (writeOutcome.isSuccess && writeOutcome.getOrNull() == true) {
+                                successfullyTagged++
+                                matchResult
+                            } else {
+                                errors++
+                                matchResult.copy(
+                                    status = GeotagStatus.ERROR,
+                                    errorMessage = writeOutcome.exceptionOrNull()?.localizedMessage
+                                        ?: "EXIF writing is unavailable for this item"
+                                )
+                            }
+                        } else {
+                            TimelineGeotagEngine.cacheMatchedLocation(context, matchResult, exifWritten = false)
                             successfullyTagged++
                             matchResult
-                        } else {
-                            // If write failed, mark as error or retain matched status
-                            errors++
-                            matchResult.copy(
-                                status = GeotagStatus.ERROR,
-                                errorMessage = writeOutcome.exceptionOrNull()?.localizedMessage
-                                    ?: "Failed to write EXIF attributes"
-                            )
                         }
                     }
                     GeotagStatus.ERROR -> {
