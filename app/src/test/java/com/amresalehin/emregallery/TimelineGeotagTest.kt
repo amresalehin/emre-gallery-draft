@@ -121,6 +121,122 @@ class TimelineGeotagTest {
     }
 
     @Test
+    fun `test modern Android Timeline semantic segments`() {
+        val json = """
+            {
+              "semanticSegments": [
+                {
+                  "startTime": "2025-03-14T09:02:00.000+01:00",
+                  "endTime": "2025-03-14T11:40:00.000+01:00",
+                  "visit": {
+                    "topCandidate": {
+                      "placeLocation": {
+                        "latLng": "48.8566°, 2.3522°"
+                      }
+                    }
+                  }
+                },
+                {
+                  "startTime": "2025-03-14T11:40:00.000+01:00",
+                  "endTime": "2025-03-14T12:10:00.000+01:00",
+                  "activity": {
+                    "start": { "latLng": "48.8566°, 2.3522°" },
+                    "end": { "latLng": "48.8600°, 2.3500°" }
+                  },
+                  "timelinePath": [
+                    {
+                      "point": "48.8570°, 2.3520°",
+                      "time": "2025-03-14T11:45:00.000+01:00"
+                    },
+                    {
+                      "point": "48.8580°, 2.3510°",
+                      "time": "2025-03-14T11:55:00.000+01:00"
+                    }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val points = GoogleTimelineParser.parseTimeline(ByteArrayInputStream(json.toByteArray()))
+        assertEquals(5, points.size)
+        assertTrue(points.any { it.source == "visit" && it.latitude == 48.8566 })
+        assertTrue(points.any { it.source == "activity_start" && it.longitude == 2.3522 })
+        assertTrue(points.any { it.source == "activity_end" && it.longitude == 2.3500 })
+        assertTrue(points.any { it.source == "timeline_path" && it.latitude == 48.8570 })
+        assertTrue(points.zipWithNext().all { (a, b) -> a.timestampMillis <= b.timestampMillis })
+    }
+
+    @Test
+    fun `test modern Timeline raw signal reads nested position timestamp`() {
+        val json = """
+            {
+              "rawSignals": [
+                {
+                  "position": {
+                    "LatLng": "22.5726°, 88.3639°",
+                    "accuracyMeters": 12.5,
+                    "altitudeMeters": 9.0,
+                    "timestamp": "2025-04-01T10:30:00+05:30"
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val points = GoogleTimelineParser.parseTimeline(ByteArrayInputStream(json.toByteArray()))
+        assertEquals(1, points.size)
+        assertEquals(22.5726, points[0].latitude, 0.0001)
+        assertEquals(88.3639, points[0].longitude, 0.0001)
+        assertEquals(12.5f, points[0].accuracyMeters ?: 0f, 0.01f)
+        assertEquals(9.0, points[0].altitudeMeters ?: 0.0, 0.01)
+        assertEquals("raw_signal", points[0].source)
+    }
+
+    @Test
+    fun `test iOS bare array Timeline visits and route offsets`() {
+        val json = """
+            [
+              {
+                "startTime": "2025-05-01T08:00:00Z",
+                "endTime": "2025-05-01T09:00:00Z",
+                "visit": {
+                  "topCandidate": {
+                    "placeLocation": "geo:51.5074,-0.1278"
+                  }
+                }
+              },
+              {
+                "startTime": "2025-05-01T09:00:00Z",
+                "endTime": "2025-05-01T10:00:00Z",
+                "timelinePath": [
+                  {
+                    "point": "geo:51.5080,-0.1280",
+                    "durationMinutesOffsetFromStartTime": "15"
+                  }
+                ]
+              }
+            ]
+        """.trimIndent()
+
+        val points = GoogleTimelineParser.parseTimeline(ByteArrayInputStream(json.toByteArray()))
+        assertEquals(2, points.size)
+        assertEquals(51.5074, points[0].latitude, 0.0001)
+        assertEquals(-0.1278, points[0].longitude, 0.0001)
+        assertEquals(51.5080, points[1].latitude, 0.0001)
+        assertEquals(
+            GoogleTimelineParser.parseTimestampToMillis("2025-05-01T09:15:00Z"),
+            points[1].timestampMillis
+        )
+    }
+
+    @Test
+    fun `test numeric Unix seconds are normalized to milliseconds`() {
+        val millis = GoogleTimelineParser.parseTimestampToMillis("1718460089")
+        assertEquals(1718460089000L, millis)
+    }
+
+    @Test
     fun `test already geotagged images are skipped`() {
         val existingLat = 48.8566
         val existingLng = 2.3522

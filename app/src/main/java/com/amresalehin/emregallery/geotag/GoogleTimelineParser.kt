@@ -14,7 +14,7 @@ import kotlin.math.abs
  * Handles:
  * 1. Classic Google Takeout "Records.json" / "Location History.json" (with locations array and latitudeE7 / longitudeE7)
  * 2. Semantic Location History monthly files (with timelineObjects: placeVisit and activitySegment)
- * 3. Modern on-device Timeline exports (Timeline.json with rawSignals, waypoints, or geo: coordinates)
+ * 3. Modern Android/iOS on-device Timeline exports (semanticSegments, rawSignals, and bare segment arrays)
  */
 object GoogleTimelineParser {
 
@@ -74,6 +74,9 @@ object GoogleTimelineParser {
                 }
                 "timelineObjects" -> {
                     parseTimelineObjectsArray(reader, points, minTimestampMillis, maxTimestampMillis, onProgress)
+                }
+                "semanticSegments" -> {
+                    parseArrayOfObjects(reader, points, minTimestampMillis, maxTimestampMillis, onProgress)
                 }
                 "rawSignals" -> {
                     parseRawSignalsArray(reader, points, minTimestampMillis, maxTimestampMillis, onProgress)
@@ -170,12 +173,12 @@ object GoogleTimelineParser {
             reader.endObject()
 
             val finalLat = when {
-                latE7 != null -> latE7 / 1e7
+                latE7 != null -> e7ToDegrees(latE7, 900_000_000L)
                 latDirect != null -> latDirect
                 else -> null
             }
             val finalLng = when {
-                lngE7 != null -> lngE7 / 1e7
+                lngE7 != null -> e7ToDegrees(lngE7, 1_800_000_000L)
                 lngDirect != null -> lngDirect
                 else -> null
             }
@@ -265,10 +268,10 @@ object GoogleTimelineParser {
                     endTs = dur.second
                 }
                 "centerLatE7" -> {
-                    lat = reader.nextLong() / 1e7
+                    lat = e7ToDegrees(reader.nextLong(), 900_000_000L)
                 }
                 "centerLngE7" -> {
-                    lng = reader.nextLong() / 1e7
+                    lng = e7ToDegrees(reader.nextLong(), 1_800_000_000L)
                 }
                 else -> reader.skipValue()
             }
@@ -387,8 +390,8 @@ object GoogleTimelineParser {
                         var lng: Double? = null
                         while (reader.hasNext()) {
                             when (reader.nextName()) {
-                                "latE7" -> lat = reader.nextLong() / 1e7
-                                "lngE7" -> lng = reader.nextLong() / 1e7
+                                "latE7" -> lat = e7ToDegrees(reader.nextLong(), 900_000_000L)
+                                "lngE7" -> lng = e7ToDegrees(reader.nextLong(), 1_800_000_000L)
                                 "latitude" -> lat = reader.nextDouble()
                                 "longitude" -> lng = reader.nextDouble()
                                 else -> reader.skipValue()
@@ -447,8 +450,8 @@ object GoogleTimelineParser {
                         var ts: Long? = null
                         while (reader.hasNext()) {
                             when (reader.nextName()) {
-                                "latE7" -> lat = reader.nextLong() / 1e7
-                                "lngE7" -> lng = reader.nextLong() / 1e7
+                                "latE7" -> lat = e7ToDegrees(reader.nextLong(), 900_000_000L)
+                                "lngE7" -> lng = e7ToDegrees(reader.nextLong(), 1_800_000_000L)
                                 "latitude" -> lat = reader.nextDouble()
                                 "longitude" -> lng = reader.nextDouble()
                                 "timestamp" -> ts = parseTimestampToMillis(reader.nextString())
@@ -546,40 +549,71 @@ object GoogleTimelineParser {
                 continue
             }
             reader.beginObject()
-            var ts: Long? = null
-            var coord: Pair<Double, Double>? = null
+            var timestamp: Long? = null
+            var coordinate: Pair<Double, Double>? = null
+            var accuracy: Float? = null
+            var altitude: Double? = null
+
             while (reader.hasNext()) {
                 when (reader.nextName()) {
                     "position" -> {
-                        coord = parseLocationSubObject(reader)
+                        if (reader.peek() == JsonToken.STRING) {
+                            coordinate = parseGeoUriString(reader.nextString())
+                        } else if (reader.peek() == JsonToken.BEGIN_OBJECT) {
+                            reader.beginObject()
+                            var lat: Double? = null
+                            var lng: Double? = null
+                            while (reader.hasNext()) {
+                                when (reader.nextName()) {
+                                    "LatLng", "latLng", "point" -> {
+                                        val parsed = parseGeoUriString(reader.nextString())
+                                        lat = parsed?.first
+                                        lng = parsed?.second
+                                    }
+                                    "latitudeE7", "latE7" -> lat = e7ToDegrees(reader.nextLong(), 900_000_000L)
+                                    "longitudeE7", "lngE7" -> lng = e7ToDegrees(reader.nextLong(), 1_800_000_000L)
+                                    "latitude", "lat" -> lat = reader.nextDouble()
+                                    "longitude", "lng" -> lng = reader.nextDouble()
+                                    "timestamp", "time" -> timestamp = parseTimestampToMillis(reader.nextString())
+                                    "accuracyMeters", "accuracy" -> accuracy = reader.nextDouble().toFloat()
+                                    "altitudeMeters", "altitude" -> altitude = reader.nextDouble()
+                                    else -> reader.skipValue()
+                                }
+                            }
+                            reader.endObject()
+                            if (lat != null && lng != null && isValidCoordinate(lat, lng)) {
+                                coordinate = Pair(lat, lng)
+                            }
+                        } else {
+                            reader.skipValue()
+                        }
                     }
-                    "timestamp" -> {
-                        ts = parseTimestampToMillis(reader.nextString())
-                    }
-                    "timestampMs" -> {
-                        ts = reader.nextString().toLongOrNull()
-                    }
+                    "timestamp", "time" -> timestamp = parseTimestampToMillis(reader.nextString())
+                    "timestampMs" -> timestamp = reader.nextString().toLongOrNull()
+                    "accuracyMeters", "accuracy" -> accuracy = reader.nextDouble().toFloat()
+                    "altitudeMeters", "altitude" -> altitude = reader.nextDouble()
                     else -> reader.skipValue()
                 }
             }
             reader.endObject()
 
-            if (ts != null && coord != null && isValidCoordinate(coord.first, coord.second)) {
-                if (isWithinRange(ts, minTimestampMillis, maxTimestampMillis)) {
-                    points.add(
-                        TimelineLocationPoint(
-                            timestampMillis = ts,
-                            latitude = coord.first,
-                            longitude = coord.second,
-                            source = "raw_signal"
-                        )
+            if (timestamp != null && coordinate != null &&
+                isValidCoordinate(coordinate.first, coordinate.second) &&
+                isWithinRange(timestamp, minTimestampMillis, maxTimestampMillis)
+            ) {
+                points.add(
+                    TimelineLocationPoint(
+                        timestampMillis = timestamp,
+                        latitude = coordinate.first,
+                        longitude = coordinate.second,
+                        accuracyMeters = accuracy,
+                        altitudeMeters = altitude,
+                        source = "raw_signal"
                     )
-                }
+                )
             }
             scanned++
-            if (scanned % 2000 == 0) {
-                onProgress?.invoke(points.size)
-            }
+            if (scanned % 2000 == 0) onProgress?.invoke(points.size)
         }
         reader.endArray()
         onProgress?.invoke(points.size)
@@ -592,61 +626,238 @@ object GoogleTimelineParser {
         maxTimestampMillis: Long?
     ) {
         reader.beginObject()
-        var ts: Long? = null
-        var lat: Double? = null
-        var lng: Double? = null
+        var timestamp: Long? = null
+        var startTimestamp: Long? = null
+        var endTimestamp: Long? = null
+        var latitude: Double? = null
+        var longitude: Double? = null
+        var visitCoordinate: Pair<Double, Double>? = null
+        var activityStart: Pair<Double, Double>? = null
+        var activityEnd: Pair<Double, Double>? = null
+        val pathEntries = mutableListOf<ParsedTimelinePathPoint>()
 
         while (reader.hasNext()) {
-            when (val key = reader.nextName()) {
-                "timestamp", "time", "startTime" -> {
-                    ts = parseTimestampToMillis(reader.nextString())
-                }
-                "timestampMs" -> {
-                    ts = reader.nextString().toLongOrNull()
-                }
-                "latitudeE7", "latE7" -> {
-                    lat = reader.nextLong() / 1e7
-                }
-                "longitudeE7", "lngE7" -> {
-                    lng = reader.nextLong() / 1e7
-                }
-                "latitude", "lat" -> {
-                    lat = reader.nextDouble()
-                }
-                "longitude", "lng" -> {
-                    lng = reader.nextDouble()
-                }
-                "point", "placeLocation" -> {
-                    val p = parseGeoUriString(reader.nextString())
-                    if (p != null) {
-                        lat = p.first
-                        lng = p.second
+            when (reader.nextName()) {
+                "timestamp", "time" -> timestamp = parseTimestampToMillis(reader.nextString())
+                "timestampMs" -> timestamp = reader.nextString().toLongOrNull()
+                "startTime", "startTimestamp" -> startTimestamp = parseTimestampToMillis(reader.nextString())
+                "endTime", "endTimestamp" -> endTimestamp = parseTimestampToMillis(reader.nextString())
+                "latitudeE7", "latE7" -> latitude = e7ToDegrees(reader.nextLong(), 900_000_000L)
+                "longitudeE7", "lngE7" -> longitude = e7ToDegrees(reader.nextLong(), 1_800_000_000L)
+                "latitude", "lat" -> latitude = reader.nextDouble()
+                "longitude", "lng" -> longitude = reader.nextDouble()
+                "point" -> {
+                    val parsed = parseGeoUriString(reader.nextString())
+                    if (parsed != null) {
+                        latitude = parsed.first
+                        longitude = parsed.second
                     }
                 }
-                "location", "position" -> {
-                    val p = parseLocationSubObject(reader)
-                    if (p != null) {
-                        lat = p.first
-                        lng = p.second
+                "placeLocation", "location", "position" -> {
+                    val parsed = parseLocationSubObject(reader)
+                    if (parsed != null) {
+                        latitude = parsed.first
+                        longitude = parsed.second
                     }
                 }
+                "visit" -> visitCoordinate = parseModernVisit(reader)
+                "activity" -> {
+                    val endpoints = parseModernActivity(reader)
+                    activityStart = endpoints.first
+                    activityEnd = endpoints.second
+                }
+                "timelinePath" -> pathEntries.addAll(parseTimelinePathEntries(reader))
                 else -> reader.skipValue()
             }
         }
         reader.endObject()
 
-        if (ts != null && lat != null && lng != null && isValidCoordinate(lat, lng)) {
-            if (isWithinRange(ts, minTimestampMillis, maxTimestampMillis)) {
+        val pointTimestamp = timestamp ?: startTimestamp
+        if (pointTimestamp != null && latitude != null && longitude != null &&
+            isValidCoordinate(latitude, longitude) &&
+            isWithinRange(pointTimestamp, minTimestampMillis, maxTimestampMillis)
+        ) {
+            points.add(
+                TimelineLocationPoint(
+                    timestampMillis = pointTimestamp,
+                    latitude = latitude,
+                    longitude = longitude,
+                    source = "generic"
+                )
+            )
+        }
+
+        if (startTimestamp != null && visitCoordinate != null &&
+            isValidCoordinate(visitCoordinate.first, visitCoordinate.second) &&
+            isWithinRange(startTimestamp, minTimestampMillis, maxTimestampMillis)
+        ) {
+            points.add(
+                TimelineLocationPoint(
+                    timestampMillis = startTimestamp,
+                    latitude = visitCoordinate.first,
+                    longitude = visitCoordinate.second,
+                    source = "visit"
+                )
+            )
+        }
+
+        if (startTimestamp != null && activityStart != null &&
+            isValidCoordinate(activityStart.first, activityStart.second) &&
+            isWithinRange(startTimestamp, minTimestampMillis, maxTimestampMillis)
+        ) {
+            points.add(
+                TimelineLocationPoint(
+                    timestampMillis = startTimestamp,
+                    latitude = activityStart.first,
+                    longitude = activityStart.second,
+                    source = "activity_start"
+                )
+            )
+        }
+        if (endTimestamp != null && activityEnd != null &&
+            isValidCoordinate(activityEnd.first, activityEnd.second) &&
+            isWithinRange(endTimestamp, minTimestampMillis, maxTimestampMillis)
+        ) {
+            points.add(
+                TimelineLocationPoint(
+                    timestampMillis = endTimestamp,
+                    latitude = activityEnd.first,
+                    longitude = activityEnd.second,
+                    source = "activity_end"
+                )
+            )
+        }
+
+        val segmentStartTimestamp = startTimestamp
+        val segmentEndTimestamp = endTimestamp
+        pathEntries.forEachIndexed { index, entry ->
+            val pathTimestamp = entry.timestampMillis
+                ?: entry.offsetMinutes?.let { offset ->
+                    segmentStartTimestamp?.plus((offset * 60_000.0).toLong())
+                }
+                ?: if (segmentStartTimestamp != null && segmentEndTimestamp != null &&
+                    segmentEndTimestamp > segmentStartTimestamp && pathEntries.size > 1
+                ) {
+                    val fraction = index.toDouble() / (pathEntries.size - 1).toDouble()
+                    (segmentStartTimestamp + ((segmentEndTimestamp - segmentStartTimestamp) * fraction)).toLong()
+                } else {
+                    segmentStartTimestamp ?: pointTimestamp
+                }
+
+            if (pathTimestamp != null && isWithinRange(pathTimestamp, minTimestampMillis, maxTimestampMillis)) {
                 points.add(
                     TimelineLocationPoint(
-                        timestampMillis = ts,
-                        latitude = lat,
-                        longitude = lng,
-                        source = "generic"
+                        timestampMillis = pathTimestamp,
+                        latitude = entry.latitude,
+                        longitude = entry.longitude,
+                        source = "timeline_path"
                     )
                 )
             }
         }
+    }
+
+    private data class ParsedTimelinePathPoint(
+        val latitude: Double,
+        val longitude: Double,
+        val timestampMillis: Long? = null,
+        val offsetMinutes: Double? = null
+    )
+
+    private fun parseModernVisit(reader: JsonReader): Pair<Double, Double>? {
+        if (reader.peek() != JsonToken.BEGIN_OBJECT) {
+            reader.skipValue()
+            return null
+        }
+        reader.beginObject()
+        var coordinate: Pair<Double, Double>? = null
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "topCandidate" -> {
+                    if (reader.peek() == JsonToken.BEGIN_OBJECT) {
+                        reader.beginObject()
+                        while (reader.hasNext()) {
+                            when (reader.nextName()) {
+                                "placeLocation", "location" -> coordinate = parseLocationSubObject(reader)
+                                else -> reader.skipValue()
+                            }
+                        }
+                        reader.endObject()
+                    } else reader.skipValue()
+                }
+                "placeLocation", "location" -> coordinate = parseLocationSubObject(reader)
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return coordinate
+    }
+
+    private fun parseModernActivity(reader: JsonReader): Pair<Pair<Double, Double>?, Pair<Double, Double>?> {
+        if (reader.peek() != JsonToken.BEGIN_OBJECT) {
+            reader.skipValue()
+            return Pair(null, null)
+        }
+        reader.beginObject()
+        var start: Pair<Double, Double>? = null
+        var end: Pair<Double, Double>? = null
+        while (reader.hasNext()) {
+            when (reader.nextName()) {
+                "start", "startLocation" -> start = parseLocationSubObject(reader)
+                "end", "endLocation" -> end = parseLocationSubObject(reader)
+                else -> reader.skipValue()
+            }
+        }
+        reader.endObject()
+        return Pair(start, end)
+    }
+
+    private fun parseTimelinePathEntries(reader: JsonReader): List<ParsedTimelinePathPoint> {
+        if (reader.peek() != JsonToken.BEGIN_ARRAY) {
+            reader.skipValue()
+            return emptyList()
+        }
+        val entries = mutableListOf<ParsedTimelinePathPoint>()
+        reader.beginArray()
+        while (reader.hasNext()) {
+            if (reader.peek() != JsonToken.BEGIN_OBJECT) {
+                reader.skipValue()
+                continue
+            }
+            reader.beginObject()
+            var coordinate: Pair<Double, Double>? = null
+            var timestamp: Long? = null
+            var offsetMinutes: Double? = null
+            while (reader.hasNext()) {
+                when (reader.nextName()) {
+                    "point" -> {
+                        coordinate = if (reader.peek() == JsonToken.BEGIN_OBJECT) {
+                            parseLocationSubObject(reader)
+                        } else {
+                            parseGeoUriString(reader.nextString())
+                        }
+                    }
+                    "time", "timestamp" -> timestamp = parseTimestampToMillis(reader.nextString())
+                    "durationMinutesOffsetFromStartTime" -> {
+                        offsetMinutes = reader.nextString().toDoubleOrNull()
+                    }
+                    else -> reader.skipValue()
+                }
+            }
+            reader.endObject()
+            if (coordinate != null && isValidCoordinate(coordinate.first, coordinate.second)) {
+                entries.add(
+                    ParsedTimelinePathPoint(
+                        latitude = coordinate.first,
+                        longitude = coordinate.second,
+                        timestampMillis = timestamp,
+                        offsetMinutes = offsetMinutes
+                    )
+                )
+            }
+        }
+        reader.endArray()
+        return entries
     }
 
     private fun parseLocationSubObject(reader: JsonReader): Pair<Double, Double>? {
@@ -663,11 +874,11 @@ object GoogleTimelineParser {
         var lng: Double? = null
         while (reader.hasNext()) {
             when (reader.nextName()) {
-                "latitudeE7", "latE7" -> lat = reader.nextLong() / 1e7
-                "longitudeE7", "lngE7" -> lng = reader.nextLong() / 1e7
+                "latitudeE7", "latE7" -> lat = e7ToDegrees(reader.nextLong(), 900_000_000L)
+                "longitudeE7", "lngE7" -> lng = e7ToDegrees(reader.nextLong(), 1_800_000_000L)
                 "latitude", "lat" -> lat = reader.nextDouble()
                 "longitude", "lng" -> lng = reader.nextDouble()
-                "point", "LatLng" -> {
+                "latLng", "LatLng", "point" -> {
                     val s = reader.nextString()
                     val p = parseGeoUriString(s)
                     if (p != null) {
@@ -707,8 +918,12 @@ object GoogleTimelineParser {
      * Parses geo:37.4219999,-122.0840575 or 37.4219999,-122.0840575
      */
     fun parseGeoUriString(raw: String): Pair<Double, Double>? {
-        val clean = raw.trim().removePrefix("geo:").removePrefix("GEO:")
-        val parts = clean.split(',', ';', ' ')
+        val clean = raw.trim()
+            .removePrefix("geo:")
+            .removePrefix("GEO:")
+            .replace("°", "")
+            .trim()
+        val parts = clean.split(',', ';')
         if (parts.size >= 2) {
             val lat = parts[0].trim().toDoubleOrNull()
             val lng = parts[1].trim().toDoubleOrNull()
@@ -723,19 +938,34 @@ object GoogleTimelineParser {
      * Parses standard ISO-8601 strings into epoch milliseconds.
      */
     fun parseTimestampToMillis(raw: String): Long? {
-        val str = raw.trim()
-        // If numeric timestamp
-        str.toLongOrNull()?.let { return it }
+        val value = raw.trim()
+        if (value.isEmpty()) return null
+
+        value.toLongOrNull()?.let { numeric ->
+            val magnitude = if (numeric == Long.MIN_VALUE) Long.MAX_VALUE else kotlin.math.abs(numeric)
+            return when {
+                magnitude < 100_000_000_000L -> numeric * 1000L // Unix seconds
+                magnitude >= 100_000_000_000_000L -> numeric / 1000L // Microseconds
+                else -> numeric // Unix milliseconds
+            }
+        }
 
         return try {
-            Instant.parse(str).toEpochMilli()
+            Instant.parse(value).toEpochMilli()
         } catch (_: DateTimeParseException) {
             try {
-                java.time.OffsetDateTime.parse(str, DateTimeFormatter.ISO_DATE_TIME).toInstant().toEpochMilli()
+                java.time.OffsetDateTime.parse(value, DateTimeFormatter.ISO_DATE_TIME)
+                    .toInstant().toEpochMilli()
             } catch (_: Exception) {
                 null
             }
         }
+    }
+
+    private fun e7ToDegrees(value: Long, maxAxisValue: Long): Double {
+        // Some Takeout exports encode signed E7 coordinates as unsigned 32-bit integers.
+        val signedValue = if (value > maxAxisValue) value - 4_294_967_296L else value
+        return signedValue / 10_000_000.0
     }
 
     private fun isWithinRange(ts: Long, min: Long?, max: Long?): Boolean {
