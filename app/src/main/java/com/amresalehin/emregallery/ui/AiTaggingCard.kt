@@ -402,6 +402,7 @@ fun AiTaggingCard(
                     ) {
                         DropdownMenuItem(
                             text = { Text("Scan Untagged Photos") },
+                            enabled = canTagWithSelectedModel,
                             onClick = {
                                 showActionMenu = false
                                 triggerTagging(false)
@@ -409,6 +410,7 @@ fun AiTaggingCard(
                         )
                         DropdownMenuItem(
                             text = { Text("Re-tag Entire Library") },
+                            enabled = canTagWithSelectedModel,
                             onClick = {
                                 showActionMenu = false
                                 triggerTagging(true)
