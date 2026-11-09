@@ -21,7 +21,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -54,22 +53,6 @@ data class TimelineGeotagUiState(
     val results: List<GeotagResultItem> = emptyList(),
     val progress: GeotagJobProgress = GeotagJobProgress(),
     val activeFilter: GeotagResultFilter = GeotagResultFilter.ALL,
-    val availableTimeZones: List<String> = listOf(
-        ZoneId.systemDefault().id,
-        "UTC",
-        "Europe/London",
-        "Europe/Paris",
-        "Europe/Berlin",
-        "Europe/Istanbul",
-        "America/New_York",
-        "America/Chicago",
-        "America/Denver",
-        "America/Los_Angeles",
-        "Asia/Tokyo",
-        "Asia/Singapore",
-        "Asia/Kolkata",
-        "Australia/Sydney"
-    )
 )
 
 class TimelineGeotagViewModel(application: Application) : AndroidViewModel(application) {

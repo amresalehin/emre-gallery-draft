@@ -49,7 +49,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.osmdroid.util.GeoPoint
-import java.time.ZoneId
 import java.util.Locale
 
 @Composable
@@ -66,7 +65,6 @@ fun GeoTimelineCard(
     var isExpanded by remember { mutableStateOf(initiallyExpanded) }
 
     // Minimal state
-    var selectedUtcOffset by remember { mutableStateOf("UTC") }
     var selectedFolder by remember { mutableStateOf("All") }
     var customTreeUri by remember { mutableStateOf<Uri?>(null) }
     var writeToExif by remember { mutableStateOf(true) }
@@ -80,10 +78,6 @@ fun GeoTimelineCard(
     var isRunning by remember { mutableStateOf(false) }
     var progressFraction by remember { mutableFloatStateOf(0f) }
     var statusSummary by remember { mutableStateOf<String?>(null) }
-
-    val utcOptions = remember {
-        listOf("Auto", "UTC", "+01:00", "+02:00", "+03:00", "+05:30", "+08:00", "+09:00", "-04:00", "-05:00", "-08:00")
-    }
 
     val detectedFolders = remember(media) {
         val list = mutableListOf("All")
@@ -189,18 +183,7 @@ fun GeoTimelineCard(
                 return@launch
             }
 
-            val zoneId = if (selectedUtcOffset == "Auto") {
-                ZoneId.systemDefault().id
-            } else if (selectedUtcOffset.startsWith("+") || selectedUtcOffset.startsWith("-")) {
-                "GMT$selectedUtcOffset"
-            } else {
-                selectedUtcOffset
-            }
-
-            val config = GeotagConfig(
-                timeZoneId = zoneId,
-                skipAlreadyGeotagged = true
-            )
+            val config = GeotagConfig(skipAlreadyGeotagged = true)
 
             var tagged = 0
             var skipped = 0
@@ -288,7 +271,7 @@ fun GeoTimelineCard(
                     else if (timelinePoints.isNotEmpty()) MaterialTheme.colorScheme.surfaceContainerHighest
                     else MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier
-                        .clickable {
+                        .clickable(enabled = !isParsingJson && !isRunning) {
                             if (timelinePoints.isEmpty()) {
                                 jsonPicker.launch(arrayOf("application/json", "text/*", "*/*"))
                             } else {
@@ -301,38 +284,48 @@ fun GeoTimelineCard(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (isParsingJson || isRunning) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(10.dp),
-                                strokeWidth = 1.5.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            // Minimal dot indicator (matching screenshot)
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (timelinePoints.isNotEmpty()) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.outline
-                                    )
-                            )
-                        }
-                        if (statusSummary != null) {
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = statusSummary!!,
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        } else if (timelinePoints.isEmpty()) {
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = "JSON",
-                                style = MaterialTheme.typography.labelSmall
-                            )
+                        when {
+                            isRunning -> {
+                                CircularProgressIndicator(
+                                    progress = { progressFraction },
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.width(7.dp))
+                                Text(
+                                    text = "${(progressFraction * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            isParsingJson -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.width(7.dp))
+                                Text("Loading timeline", style = MaterialTheme.typography.labelSmall)
+                            }
+                            else -> {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (timelinePoints.isNotEmpty()) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.outline
+                                        )
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = statusSummary ?: if (timelinePoints.isEmpty()) "Select timeline" else "Ready",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
                     }
                 }
@@ -346,18 +339,6 @@ fun GeoTimelineCard(
                 )
             }
 
-            // Minimal progress bar when running
-            if (isRunning) {
-                Spacer(Modifier.height(10.dp))
-                LinearProgressIndicator(
-                    progress = { progressFraction },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                )
-            }
-
             // Expanded content
             AnimatedVisibility(visible = isExpanded) {
                 Column(
@@ -365,37 +346,9 @@ fun GeoTimelineCard(
                         .fillMaxWidth()
                         .padding(top = 22.dp)
                 ) {
-                    // 1. UTC Section
-                    Text(
-                        text = "UTC",
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Normal
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    // Timezone is handled automatically by the device.
 
-                    Spacer(Modifier.height(10.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        utcOptions.forEach { utc ->
-                            val isSelected = selectedUtcOffset == utc
-                            CapsulePill(
-                                label = utc,
-                                isSelected = isSelected,
-                                onClick = { selectedUtcOffset = utc }
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(20.dp))
-
-                    // 2. Folder Section
+                    // 1. Folder Section
                     Text(
                         text = "Folder",
                         style = MaterialTheme.typography.bodyLarge.copy(
@@ -432,7 +385,7 @@ fun GeoTimelineCard(
 
                     Spacer(Modifier.height(24.dp))
 
-                    // 3. Write to Exif Row
+                    // 2. Write to Exif Row
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
@@ -468,7 +421,7 @@ fun GeoTimelineCard(
                                 enabled = !isRunning
                             ) {
                                 Text(
-                                    text = timelineFileName ?: "Change JSON",
+                                    text = timelineFileName ?: "Change timeline file",
                                     style = MaterialTheme.typography.labelMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -484,7 +437,7 @@ fun GeoTimelineCard(
                             modifier = Modifier.testTag("geo_timeline_run_button")
                         ) {
                             Text(
-                                text = if (timelinePoints.isEmpty()) "Select JSON" else "Geotag",
+                                text = if (timelinePoints.isEmpty()) "Select timeline file" else "Geotag",
                                 fontWeight = FontWeight.Medium
                             )
                         }

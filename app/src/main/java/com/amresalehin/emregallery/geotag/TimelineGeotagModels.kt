@@ -86,8 +86,6 @@ data class GeotagJobProgress(
  * User configuration for matching images against Google Timeline.
  */
 data class GeotagConfig(
-    /** TimeZone to assume when EXIF timestamp does not provide timezone offset. */
-    val timeZoneId: String = java.util.TimeZone.getDefault().id,
     /** Manual camera clock adjustment in seconds (if camera clock was fast or slow). */
     val cameraClockOffsetSeconds: Long = 0L,
     /** Maximum allowed time difference in seconds between photo and nearest timeline point. Default 900s (15 min). */

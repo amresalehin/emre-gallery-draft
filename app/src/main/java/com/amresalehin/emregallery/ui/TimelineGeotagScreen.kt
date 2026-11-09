@@ -212,11 +212,10 @@ fun TimelineGeotagScreen(
                 )
             }
 
-            // STEP 3: Matching & Timezone Settings Card
+            // STEP 3: Matching Settings Card
             item {
                 MatchingSettingsCard(
                     config = uiState.config,
-                    availableTimeZones = uiState.availableTimeZones,
                     onOpenSettings = { showSettingsDialog = true }
                 )
             }
@@ -275,7 +274,6 @@ fun TimelineGeotagScreen(
     if (showSettingsDialog) {
         GeotagSettingsDialog(
             config = uiState.config,
-            availableTimeZones = uiState.availableTimeZones,
             onSave = { updated ->
                 viewModel.updateConfig { updated }
                 showSettingsDialog = false
@@ -554,7 +552,6 @@ private fun ImageSourceCard(
 @Composable
 private fun MatchingSettingsCard(
     config: GeotagConfig,
-    availableTimeZones: List<String>,
     onOpenSettings: () -> Unit
 ) {
     Card(
@@ -592,7 +589,7 @@ private fun MatchingSettingsCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Timezone, drift correction, interpolation",
+                        text = "Clock drift correction and interpolation",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -637,11 +634,6 @@ private fun MatchingSettingsCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                AssistChip(
-                    onClick = onOpenSettings,
-                    label = { Text("Zone: ${config.timeZoneId.substringAfterLast('/')}") },
-                    leadingIcon = { Icon(Icons.Default.Schedule, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                )
                 AssistChip(
                     onClick = onOpenSettings,
                     label = { Text("Max: ${config.maxTimeDeltaSeconds / 60}m") },
@@ -704,11 +696,31 @@ private fun ExecutionProgressCard(
                     )
                 }
             } else if (progress.isRunning) {
+                val fraction = if (progress.totalImages > 0) {
+                    progress.processedCount.toFloat() / progress.totalImages.toFloat()
+                } else 0f
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(Modifier.weight(1f)) {
+                    Box(
+                        modifier = Modifier.size(58.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            progress = { fraction },
+                            modifier = Modifier.size(54.dp),
+                            strokeWidth = 4.dp
+                        )
+                        Text(
+                            text = "${(fraction * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(
                             text = "Geotagging in progress...",
                             style = MaterialTheme.typography.titleMedium,
@@ -721,39 +733,16 @@ private fun ExecutionProgressCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        Text(
+                            text = "${progress.processedCount} of ${progress.totalImages} processed",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
+                    Spacer(Modifier.width(8.dp))
                     OutlinedButton(onClick = onStop, modifier = Modifier.testTag("stop_geotagging_button")) {
                         Text("Stop")
                     }
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                val fraction = if (progress.totalImages > 0) {
-                    progress.processedCount.toFloat() / progress.totalImages.toFloat()
-                } else 0f
-
-                LinearProgressIndicator(
-                    progress = { fraction },
-                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
-                )
-
-                Spacer(Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "${progress.processedCount} of ${progress.totalImages} processed",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "${(fraction * 100).toInt()}%",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
             } else if (progress.isCompleted) {
                 // Completed Summary
@@ -1074,11 +1063,9 @@ private fun AlbumSelectDialog(
 @Composable
 private fun GeotagSettingsDialog(
     config: GeotagConfig,
-    availableTimeZones: List<String>,
     onSave: (GeotagConfig) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selectedZone by remember { mutableStateOf(config.timeZoneId) }
     var maxDeltaMin by remember { mutableStateOf((config.maxTimeDeltaSeconds / 60).toFloat()) }
     var cameraDriftSec by remember { mutableStateOf(config.cameraClockOffsetSeconds.toFloat()) }
     var interpolate by remember { mutableStateOf(config.interpolateBetweenPoints) }
@@ -1091,36 +1078,6 @@ private fun GeotagSettingsDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // TimeZone selection
-                Text(
-                    text = "Camera Time Zone",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                var expandedZone by remember { mutableStateOf(false) }
-                Box {
-                    OutlinedButton(
-                        onClick = { expandedZone = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(selectedZone)
-                    }
-                    DropdownMenu(
-                        expanded = expandedZone,
-                        onDismissRequest = { expandedZone = false }
-                    ) {
-                        availableTimeZones.forEach { zone ->
-                            DropdownMenuItem(
-                                text = { Text(zone) },
-                                onClick = {
-                                    selectedZone = zone
-                                    expandedZone = false
-                                }
-                            )
-                        }
-                    }
-                }
-
                 // Max time delta
                 Text(
                     text = "Max Match Window: ${maxDeltaMin.toInt()} minutes",
@@ -1165,7 +1122,6 @@ private fun GeotagSettingsDialog(
                 onClick = {
                     onSave(
                         config.copy(
-                            timeZoneId = selectedZone,
                             maxTimeDeltaSeconds = (maxDeltaMin * 60).toLong(),
                             cameraClockOffsetSeconds = cameraDriftSec.toLong(),
                             interpolateBetweenPoints = interpolate
