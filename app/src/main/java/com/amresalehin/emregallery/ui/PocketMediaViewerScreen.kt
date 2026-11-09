@@ -21,6 +21,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -128,7 +129,8 @@ fun PocketMediaViewerScreen(
     initialIndex: Int,
     stack: MediaInboxStack,
     onDismiss: () -> Unit,
-    onOpenBrowser: (String) -> Unit
+    onOpenBrowser: (String) -> Unit,
+    isDark: Boolean = isSystemInDarkTheme()
 ) {
     if (items.isEmpty()) return
 
@@ -144,7 +146,8 @@ fun PocketMediaViewerScreen(
             initialIndex = initialIndex.coerceIn(0, items.size - 1),
             stack = stack,
             onDismiss = onDismiss,
-            onOpenBrowser = onOpenBrowser
+            onOpenBrowser = onOpenBrowser,
+            isDark = isDark
         )
     }
 }
@@ -155,13 +158,25 @@ private fun PocketMediaViewerContent(
     initialIndex: Int,
     stack: MediaInboxStack,
     onDismiss: () -> Unit,
-    onOpenBrowser: (String) -> Unit
+    onOpenBrowser: (String) -> Unit,
+    isDark: Boolean = isSystemInDarkTheme()
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val viewConfig = remember(context) { ViewConfiguration.get(context) }
     val minFlingVelocity = remember(viewConfig) { viewConfig.scaledMinimumFlingVelocity.toFloat() }
+
+    // Dynamic theme colors matching Light/Dark Mode
+    val baseBgColor = if (isDark) Color.Black else Color(0xFFFAFAFA)
+    val scrimTintColor = if (isDark) Color.Black else Color.White
+    val scrimTintAlpha = if (isDark) 0.50f else 0.35f
+    val btnBgColor = if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.90f)
+    val btnBorderColor = if (isDark) Color.White.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.14f)
+    val btnIconColor = if (isDark) Color.White else Color(0xFF141414)
+    val titleTextColor = if (isDark) Color.White else Color(0xFF141414)
+    val subtitleTextColor = if (isDark) Color.White.copy(alpha = 0.75f) else Color(0xFF6E6E6E)
+    val rippleColor = if (isDark) Color.White else Color.Black
 
     val view = LocalView.current
     val activity = remember(context) { context.findActivity() }
@@ -253,11 +268,11 @@ private fun PocketMediaViewerContent(
             val backdropAlpha = (1f - dismissFraction * 0.70f).coerceIn(0.20f, 1f)
             val scrimAlpha = (p * backdropAlpha).coerceIn(0f, 1f)
 
-            // Base black background
+            // Base background adapting to dark or light mode
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = scrimAlpha))
+                    .background(baseBgColor.copy(alpha = scrimAlpha))
             )
 
             // Blurred scrim area: media blurred at 24.dp fills the fullscreen background just like deck cards stack
@@ -273,14 +288,14 @@ private fun PocketMediaViewerContent(
                         .fillMaxSize()
                         .blur(24.dp)
                         .graphicsLayer {
-                            alpha = (scrimAlpha * 0.85f).coerceIn(0f, 1f)
+                            alpha = (scrimAlpha * (if (isDark) 0.85f else 0.75f)).coerceIn(0f, 1f)
                         }
                 )
                 // Soft translucent scrim tint for depth, focus and contrast
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = (scrimAlpha * 0.50f).coerceIn(0f, 1f)))
+                        .background(scrimTintColor.copy(alpha = (scrimAlpha * scrimTintAlpha).coerceIn(0f, 1f)))
                 )
             }
             // Horizontal Media Pager with coordinated shared-canvas gestures
@@ -350,12 +365,13 @@ private fun PocketMediaViewerContent(
                         if (isCurrent) isCurrentZoomed = zoomed
                     },
                     transitionProgress = transitionProgress.value,
-                    dismissOffsetY = dismissOffsetY.value
+                    dismissOffsetY = dismissOffsetY.value,
+                    isDark = isDark
                 )
             }
 
-            // Top and bottom edge gradient shading (like Native Gallery Viewer)
-            ViewerEdgeShading(visible = showControls && !isClosing)
+            // Top and bottom edge gradient shading (theme-aware)
+            PocketViewerEdgeShading(visible = showControls && !isClosing, isDark = isDark)
 
             // Calculate system status bar height ignoring visibility to match home screen search bar position
             val systemStatusBarHeightDp = with(density) {
@@ -386,9 +402,13 @@ private fun PocketMediaViewerContent(
                         .blur(16.dp)
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(
+                                colors = if (isDark) listOf(
                                     Color.Black.copy(alpha = 0.72f),
                                     Color.Black.copy(alpha = 0.40f),
+                                    Color.Transparent
+                                ) else listOf(
+                                    Color.White.copy(alpha = 0.85f),
+                                    Color.White.copy(alpha = 0.50f),
                                     Color.Transparent
                                 )
                             )
@@ -414,8 +434,8 @@ private fun PocketMediaViewerContent(
                     // Back / Close Button (Circle with border, 44dp touch target matching Search Bar menu button)
                     Surface(
                         shape = CircleShape,
-                        color = Color.Black.copy(alpha = 0.65f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                        color = btnBgColor,
+                        border = BorderStroke(1.dp, btnBorderColor),
                         shadowElevation = 4.dp,
                         modifier = Modifier
                             .padding(start = 4.dp)
@@ -423,7 +443,7 @@ private fun PocketMediaViewerContent(
                             .clip(CircleShape)
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
-                                indication = ripple(color = Color.White),
+                                indication = ripple(color = rippleColor),
                                 onClick = initiateClose
                             )
                             .testTag("viewer_back_button")
@@ -432,7 +452,7 @@ private fun PocketMediaViewerContent(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Close full screen media",
-                                tint = Color.White,
+                                tint = btnIconColor,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -445,7 +465,7 @@ private fun PocketMediaViewerContent(
                         Text(
                             text = if (items.size > 1) "${pagerState.currentPage + 1} of ${items.size}" else (currentItem.title.ifBlank { stack.title.ifBlank { "Media" } }),
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White,
+                            color = titleTextColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -453,7 +473,7 @@ private fun PocketMediaViewerContent(
                             Text(
                                 text = stack.sourceDomain.ifBlank { stack.title },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color.White.copy(alpha = 0.75f),
+                                color = subtitleTextColor,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -471,15 +491,15 @@ private fun PocketMediaViewerContent(
                         // 1. Redirect Button (Icon-only)
                         Surface(
                             shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.65f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                            color = btnBgColor,
+                            border = BorderStroke(1.dp, btnBorderColor),
                             shadowElevation = 4.dp,
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
-                                    indication = ripple(color = Color.White),
+                                    indication = ripple(color = rippleColor),
                                     onClick = {
                                         val targetUrl = currentItem.sourceUrl.ifBlank { stack.sourceUrl }
                                         if (targetUrl.isNotBlank()) {
@@ -495,7 +515,7 @@ private fun PocketMediaViewerContent(
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                                     contentDescription = "Redirect to source URL",
-                                    tint = Color.White,
+                                    tint = btnIconColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -504,15 +524,15 @@ private fun PocketMediaViewerContent(
                         // 2. Copy Button (Icon-only)
                         Surface(
                             shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.65f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                            color = btnBgColor,
+                            border = BorderStroke(1.dp, btnBorderColor),
                             shadowElevation = 4.dp,
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
-                                    indication = ripple(color = Color.White),
+                                    indication = ripple(color = rippleColor),
                                     onClick = {
                                         val textToCopy = currentItem.sourceUrl.ifBlank { stack.sourceUrl }
                                         if (textToCopy.isNotBlank()) {
@@ -531,7 +551,7 @@ private fun PocketMediaViewerContent(
                                 Icon(
                                     imageVector = Icons.Default.ContentCopy,
                                     contentDescription = "Copy media URL",
-                                    tint = Color.White,
+                                    tint = btnIconColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -540,15 +560,15 @@ private fun PocketMediaViewerContent(
                         // 3. Save Button (Icon-only, downloads media to device)
                         Surface(
                             shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.65f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                            color = btnBgColor,
+                            border = BorderStroke(1.dp, btnBorderColor),
                             shadowElevation = 4.dp,
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
-                                    indication = ripple(color = Color.White),
+                                    indication = ripple(color = rippleColor),
                                     onClick = {
                                         executeSaveMedia(
                                             context = context,
@@ -564,7 +584,7 @@ private fun PocketMediaViewerContent(
                                 Icon(
                                     imageVector = Icons.Default.Download,
                                     contentDescription = "Save media to device",
-                                    tint = Color.White,
+                                    tint = btnIconColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -698,6 +718,60 @@ private fun executeSaveMedia(
 }
 
 /**
+ * Top and bottom edge gradient shading behind the overlay controls, adapting to theme.
+ */
+@Composable
+private fun BoxScope.PocketViewerEdgeShading(
+    visible: Boolean,
+    isDark: Boolean,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(260)),
+        exit = fadeOut(animationSpec = tween(220)),
+        modifier = modifier.fillMaxSize()
+    ) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val edgeShadeHeight = maxHeight * 0.22f
+            val shadeColor = if (isDark) Color.Black else Color.White
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(edgeShadeHeight)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                shadeColor.copy(alpha = if (isDark) 0.62f else 0.70f),
+                                shadeColor.copy(alpha = if (isDark) 0.38f else 0.42f),
+                                shadeColor.copy(alpha = if (isDark) 0.16f else 0.18f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(edgeShadeHeight)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                shadeColor.copy(alpha = if (isDark) 0.16f else 0.18f),
+                                shadeColor.copy(alpha = if (isDark) 0.42f else 0.45f),
+                                shadeColor.copy(alpha = if (isDark) 0.68f else 0.72f)
+                            )
+                        )
+                    )
+            )
+        }
+    }
+}
+
+/**
  * Individual zoomable media page inside the HorizontalPager, supporting:
  * - Pinch-to-zoom (up to 4.5x)
  * - Double-tap zoom (2.5x) and double-tap reset (1.0x)
@@ -719,6 +793,7 @@ private fun PocketZoomableMediaPage(
     onZoomChanged: (Boolean) -> Unit,
     transitionProgress: Float = 1f,
     dismissOffsetY: Float = 0f,
+    isDark: Boolean = isSystemInDarkTheme(),
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -915,14 +990,14 @@ private fun PocketZoomableMediaPage(
                         .blur(24.dp)
                         .graphicsLayer {
                             val pageAlpha = if (isCurrentPage) transitionProgress.coerceIn(0f, 1f) else 1f
-                            alpha = (pageAlpha * 0.85f).coerceIn(0f, 1f)
+                            alpha = (pageAlpha * (if (isDark) 0.85f else 0.75f)).coerceIn(0f, 1f)
                         }
                 )
                 // Soft translucent scrim tint for depth and focus just like the deck cards stack
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.50f))
+                        .background(if (isDark) Color.Black.copy(alpha = 0.50f) else Color.White.copy(alpha = 0.35f))
                 )
             }
 
@@ -1025,6 +1100,7 @@ fun BookmarkDeckVideoPlayer(
     isPlaying: Boolean = true,
     isMuted: Boolean = false,
     onToggleMute: (() -> Unit)? = null,
+    isDark: Boolean = isSystemInDarkTheme(),
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -1119,15 +1195,15 @@ fun BookmarkDeckVideoPlayer(
         if (onToggleMute != null) {
             Surface(
                 shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.65f),
-                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.25f)),
+                color = if (isDark) Color.Black.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.88f),
+                border = BorderStroke(0.5.dp, if (isDark) Color.White.copy(alpha = 0.25f) else Color.Black.copy(alpha = 0.15f)),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(12.dp)
                     .size(36.dp)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
-                        indication = ripple(color = Color.White),
+                        indication = ripple(color = if (isDark) Color.White else Color.Black),
                         onClick = onToggleMute
                     )
                     .testTag("deck_video_mute_toggle")
@@ -1136,7 +1212,7 @@ fun BookmarkDeckVideoPlayer(
                     Icon(
                         imageVector = if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
                         contentDescription = if (isMuted) "Unmute video" else "Mute video",
-                        tint = Color.White,
+                        tint = if (isDark) Color.White else Color(0xFF141414),
                         modifier = Modifier.size(18.dp)
                     )
                 }

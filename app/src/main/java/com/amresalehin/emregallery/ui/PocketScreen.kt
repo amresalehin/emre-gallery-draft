@@ -1759,6 +1759,7 @@ fun PocketBookmarkViewerPage(
                                                 isPlaying = !isSwiping && fullScreenMediaIndex == null,
                                                 isMuted = isDeckVideoMuted,
                                                 onToggleMute = { isDeckVideoMuted = !isDeckVideoMuted },
+                                                isDark = isDark,
                                                 modifier = Modifier
                                                     .fillMaxSize()
                                                     .padding(8.dp)
@@ -2286,7 +2287,8 @@ fun PocketBookmarkViewerPage(
                 initialIndex = initialIndex,
                 stack = stack,
                 onDismiss = { fullScreenMediaIndex = null },
-                onOpenBrowser = onOpenBrowser
+                onOpenBrowser = onOpenBrowser,
+                isDark = isDark
             )
         }
     }
