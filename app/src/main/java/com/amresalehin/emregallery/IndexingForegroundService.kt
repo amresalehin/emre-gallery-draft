@@ -523,7 +523,7 @@ class IndexingForegroundService : Service() {
         val doneCount = photos.size - pending.size
         val initialPaused = prefs.getBoolean(KEY_PAUSED, false)
         pauseSignal.value = initialPaused
-        updateState(task = TASK_AI_TAGGING, running = true, paused = initialPaused, processed = doneCount, total = photos.size, error = null)
+        updateState(task = TASK_AI_TAGGING, running = true, paused = initialPaused, processed = doneCount, total = photos.size, failed = 0, error = null)
         postProgress("AI image tagging", "Scanning ${pending.size} photos with AI vision", doneCount, photos.size)
         var completed = doneCount
         var failed = 0
