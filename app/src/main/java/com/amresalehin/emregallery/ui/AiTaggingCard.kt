@@ -700,7 +700,7 @@ fun AiTaggingCard(
                                 triggerTagging(true)
                                 onShowSnackbar?.invoke("Re-tagging photos in background")
                             },
-                            enabled = !isRunning && !isModelDownloading,
+                            enabled = !isRunning && !isModelDownloading && canTagWithSelectedModel,
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
                                 .weight(1f)
