@@ -1240,6 +1240,7 @@ fun OverviewTabContent(
                             )
                         }
                     }
+                    }
                 } else {
                     Surface(
                         shape = RoundedCornerShape(10.dp),
