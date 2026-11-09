@@ -1082,6 +1082,9 @@ fun GalleryApp() {
                             onBack = { performBackNavigation() },
                             onOpen = { photo ->
                                 openMediaInViewer(photo, mapMedia)
+                            },
+                            onGeotag = {
+                                navigateTo(Destination.SETTINGS, rememberPrevious = true)
                             }
                         )
                     }

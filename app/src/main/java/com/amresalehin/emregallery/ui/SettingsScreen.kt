@@ -168,8 +168,15 @@ fun SettingsScreen(
         "tagging".contains(query, ignoreCase = true) ||
         "ai tagging".contains(query, ignoreCase = true) ||
         "labels".contains(query, ignoreCase = true) ||
-        "smart vision".contains(query, ignoreCase = true) ||
-        "keywords".contains(query, ignoreCase = true)
+        "smart vision".contains(query, ignoreCase = true)
+
+    val matchesGeoTimeline = query.isBlank() ||
+        "geo timeline".contains(query, ignoreCase = true) ||
+        "timeline".contains(query, ignoreCase = true) ||
+        "geotag".contains(query, ignoreCase = true) ||
+        "gps".contains(query, ignoreCase = true) ||
+        "utc".contains(query, ignoreCase = true) ||
+        "exif".contains(query, ignoreCase = true)
 
     val otherEntries = listOf(
         "About" to Icons.Default.Info
@@ -328,8 +335,12 @@ fun SettingsScreen(
                         cardBackground = cardBackground,
                         cardBorder = cardBorder,
                         numberFormat = numberFormat,
+                        availableFolders = availableFolders,
                         onStartTagging = { rescanAll ->
                             indexingViewModel.startAiTagging(rescanAll = rescanAll)
+                        },
+                        onStartTaggingWithScope = { rescanAll, modelId, folders ->
+                            indexingViewModel.startAiTagging(rescanAll = rescanAll, modelId = modelId, folders = folders)
                         },
                         onStopTagging = {
                             indexingViewModel.stopAiTagging()
@@ -351,7 +362,20 @@ fun SettingsScreen(
                 }
             }
 
-            // 6. OTHER SETTINGS TILES ("About")
+            // 6. GEO TIMELINE CARD
+            if (matchesGeoTimeline) {
+                item(key = "geo_timeline_card") {
+                    GeoTimelineCard(
+                        media = media,
+                        cardBackground = cardBackground,
+                        cardBorder = cardBorder,
+                        initiallyExpanded = query.isNotBlank() && matchesGeoTimeline,
+                        onShowSnackbar = onShowSnackbar
+                    )
+                }
+            }
+
+            // 7. OTHER SETTINGS TILES ("About")
             items(otherEntries, key = { it.first }) { (label, icon) ->
                 AestheticSettingsTile(
                     label = label,
@@ -364,7 +388,7 @@ fun SettingsScreen(
             }
 
             // Empty search state
-            if (!matchesTheme && !matchesOcr && !matchesFace && !matchesTagging && !matchesAi && otherEntries.isEmpty() && query.isNotBlank()) {
+            if (!matchesTheme && !matchesOcr && !matchesFace && !matchesTagging && !matchesAi && !matchesGeoTimeline && otherEntries.isEmpty() && query.isNotBlank()) {
                 item {
                     Box(
                         modifier = Modifier

@@ -53,7 +53,41 @@ object LinkMetadataFetcher {
             val finalDomain = MediaClassifier.cleanDomainFromUrl(finalUrl).ifBlank { domain }
 
             // Handle direct image responses
-            if (response.contentType.startsWith("image/")) {
+            val cleanLower = finalUrl.lowercase(java.util.Locale.ROOT).substringBefore('?').substringBefore('#')
+            val isDirectImage = response.contentType.startsWith("image/") ||
+                    cleanLower.endsWith(".jpg") || cleanLower.endsWith(".jpeg") ||
+                    cleanLower.endsWith(".png") || cleanLower.endsWith(".webp") ||
+                    cleanLower.endsWith(".gif") || cleanLower.endsWith(".avif") ||
+                    cleanLower.endsWith(".bmp") || cleanLower.endsWith(".svg")
+
+            val isDirectVideo = response.contentType.startsWith("video/") ||
+                    cleanLower.endsWith(".mp4") || cleanLower.endsWith(".webm") ||
+                    cleanLower.endsWith(".mov") || cleanLower.endsWith(".mkv") ||
+                    cleanLower.endsWith(".m3u8") || cleanLower.endsWith(".mpd")
+
+            if (isDirectVideo) {
+                val videoName = finalUrl.substringAfterLast('/').substringBefore('?').ifBlank { finalDomain }
+                val singleItem = MediaInboxItem(
+                    id = "direct_${finalUrl.hashCode().toUInt().toString(16)}",
+                    title = videoName,
+                    localUri = "",
+                    sourceUrl = finalUrl,
+                    isVideo = true,
+                    format = response.contentType.substringAfter('/').ifBlank { cleanLower.substringAfterLast('.') }
+                )
+                return@withContext LinkMetadata(
+                    url = finalUrl,
+                    title = videoName,
+                    description = "Direct Video",
+                    previewImageUrl = finalUrl,
+                    siteName = finalDomain,
+                    domain = finalDomain,
+                    faviconUrl = defaultFavicon,
+                    mediaItems = listOf(singleItem)
+                )
+            }
+
+            if (isDirectImage) {
                 val imageName = finalUrl.substringAfterLast('/').substringBefore('?').ifBlank { finalDomain }
                 val singleItem = MediaInboxItem(
                     id = "direct_${finalUrl.hashCode().toUInt().toString(16)}",
@@ -61,7 +95,7 @@ object LinkMetadataFetcher {
                     localUri = "",
                     sourceUrl = finalUrl,
                     isVideo = false,
-                    format = response.contentType.substringAfter('/')
+                    format = response.contentType.substringAfter('/').ifBlank { cleanLower.substringAfterLast('.') }
                 )
                 return@withContext LinkMetadata(
                     url = finalUrl,

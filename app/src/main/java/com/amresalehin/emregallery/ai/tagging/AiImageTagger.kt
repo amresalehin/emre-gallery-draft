@@ -67,11 +67,13 @@ object AiImageTagger {
     suspend fun tagAndSave(
         context: Context,
         item: MediaItem,
-        prefs: PreferencesRepository
+        prefs: PreferencesRepository,
+        preferredModel: String? = null
     ): AiTaggingResult = withContext(Dispatchers.IO) {
         val aiPrefs = AiPreferencesManager(context)
         val activeCloudProvider = aiPrefs.activeProvider.first()
-        val result = generateTags(context, item, activeCloudProvider)
+        val effectiveModel = preferredModel ?: AiTaggingSettings.getSelectedModel(context)
+        val result = generateTags(context, item, activeCloudProvider, effectiveModel)
         if (result.isSuccess && result.tags.isNotEmpty()) {
             prefs.addTagsForMedia(item.uri, result.tags)
         }
@@ -84,11 +86,42 @@ object AiImageTagger {
     suspend fun generateTags(
         context: Context,
         item: MediaItem,
-        cloudProvider: CloudAiProvider? = null
+        cloudProvider: CloudAiProvider? = null,
+        preferredModel: String? = null
     ): AiTaggingResult = withContext(Dispatchers.IO) {
         val startNs = System.nanoTime()
+        val targetModel = (preferredModel ?: AiTaggingSettings.getSelectedModel(context)).lowercase()
 
-        // 1. Try Cloud Vision AI if active provider is configured with an API key / endpoint
+        // 1. If explicit Smart Vision requested, analyze immediately
+        if (targetModel == AiTaggingSettings.MODEL_SMART_VISION || targetModel == "smart vision") {
+            val smartTags = analyzeImageWithSmartVision(context, item)
+            val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
+            return@withContext AiTaggingResult(
+                tags = smartTags,
+                engineName = "Smart Vision",
+                durationMs = durationMs
+            )
+        }
+
+        // 2. If Florence-2 requested and installed, run local inference
+        if ((targetModel == AiTaggingSettings.MODEL_FLORENCE_2 || targetModel == "florence-2" || targetModel == "florence-2-base") &&
+            FlorenceModelManager.isInstalled(context, "florence2")
+        ) {
+            val localResult = runCatching {
+                tagWithLocalFlorence(context, item)
+            }.getOrNull()
+
+            if (localResult != null && localResult.isNotEmpty()) {
+                val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
+                return@withContext AiTaggingResult(
+                    tags = localResult,
+                    engineName = "Florence-2 On-Device",
+                    durationMs = durationMs
+                )
+            }
+        }
+
+        // 3. Try Cloud Vision AI if requested or active provider is configured with an API key / endpoint
         if (cloudProvider != null && cloudProvider.baseUrl.isNotBlank() && cloudProvider.isActive) {
             val cloudResult = runCatching {
                 tagWithCloudVision(context, item, cloudProvider)
@@ -104,7 +137,7 @@ object AiImageTagger {
             }
         }
 
-        // 2. Try Local Model (Florence-2) if ready and installed
+        // 4. Try Local Model (Florence-2) if ready and installed
         if (FlorenceModelManager.isInstalled(context, "florence2")) {
             val localResult = runCatching {
                 tagWithLocalFlorence(context, item)
@@ -120,7 +153,7 @@ object AiImageTagger {
             }
         }
 
-        // 3. High-Speed, Zero-Dependency Smart Vision & Content Analyzer
+        // 5. High-Speed, Zero-Dependency Smart Vision & Content Analyzer
         val smartTags = analyzeImageWithSmartVision(context, item)
         val durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs)
         return@withContext AiTaggingResult(

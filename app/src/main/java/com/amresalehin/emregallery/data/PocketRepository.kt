@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 
 /**
  * Dedicated, independent repository for Pocket bookmarks and saved web reading materials.
@@ -175,15 +176,54 @@ class PocketRepository(
     ): MediaInboxStack {
         val cleanUrl = url.trim()
         val cleanDomain = domain.ifBlank { MediaClassifier.cleanDomainFromUrl(cleanUrl) }
+
+        val cleanLower = cleanUrl.lowercase(Locale.ROOT).substringBefore('?').substringBefore('#')
+        val ext = cleanLower.substringAfterLast('.', "")
+        val isDirectImage = ext in listOf("jpg", "jpeg", "png", "webp", "gif", "avif", "bmp", "svg", "heic", "heif", "ico") ||
+                cleanUrl.lowercase(Locale.ROOT).let { lower ->
+                    lower.contains("format=jpg") || lower.contains("format=png") ||
+                    lower.contains("format=webp") || lower.contains("format=avif") ||
+                    lower.startsWith("data:image/")
+                }
+
+        val isDirectVideo = ext in listOf("mp4", "webm", "mov", "mkv", "m3u8", "mpd", "avi", "3gp", "ts") ||
+                cleanUrl.lowercase(Locale.ROOT).let { lower ->
+                    lower.contains("format=mp4") || lower.contains("format=webm") ||
+                    lower.startsWith("data:video/")
+                }
+
+        val isMedia = isDirectImage || isDirectVideo
+
+        val mediaFileName = cleanUrl.substringAfterLast('/').substringBefore('?').ifBlank {
+            cleanDomain.ifBlank { "Media" }
+        }
+
+        val initialItems = if (isMedia) {
+            listOf(
+                MediaInboxItem(
+                    id = "media_${System.currentTimeMillis()}_${cleanUrl.hashCode().toUInt().toString(16)}",
+                    title = title.ifBlank { mediaFileName },
+                    localUri = if (cleanUrl.startsWith("file://") || cleanUrl.startsWith("content://")) cleanUrl else "",
+                    sourceUrl = cleanUrl,
+                    isVideo = isDirectVideo,
+                    dateAddedMillis = System.currentTimeMillis()
+                )
+            )
+        } else {
+            emptyList()
+        }
+
+        val initialPreview = previewImageUrl.ifBlank { if (isMedia) cleanUrl else "" }
+
         val bookmark = MediaInboxStack(
             id = "bookmark_${System.currentTimeMillis()}",
-            title = title.ifBlank { cleanDomain.ifBlank { cleanUrl } },
+            title = title.ifBlank { if (isMedia) mediaFileName else cleanDomain.ifBlank { cleanUrl } },
             sourceDomain = cleanDomain,
             sourceUrl = cleanUrl,
-            items = emptyList(),
+            items = initialItems,
             timestampMillis = System.currentTimeMillis(),
-            description = description,
-            previewImageUrl = previewImageUrl
+            description = description.ifBlank { if (isMedia) (if (isDirectVideo) "Saved Video" else "Saved Image") else "" },
+            previewImageUrl = initialPreview
         )
         val updated = listOf(bookmark) + _bookmarks.value.filter {
             it.id != bookmark.id && (it.sourceUrl.isBlank() || it.sourceUrl != cleanUrl)

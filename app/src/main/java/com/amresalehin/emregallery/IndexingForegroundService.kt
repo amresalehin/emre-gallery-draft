@@ -129,7 +129,10 @@ class IndexingForegroundService : Service() {
                         intent?.getStringExtra(EXTRA_ENGINE_ID) ?: BuffaloLFaceEngine.ENGINE_ID
                     )
                     ACTION_START_AI_TAGGING -> runAiTagging(
-                        intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true
+                        rescanAll = intent?.getBooleanExtra(EXTRA_RESCAN_ALL, false) == true,
+                        modelId = intent?.getStringExtra(EXTRA_AI_MODEL) ?: intent?.getStringExtra(EXTRA_MODEL),
+                        folderFilter = intent?.getStringArrayListExtra(EXTRA_TAGGING_FOLDERS)?.toSet()
+                            ?: intent?.getStringArrayListExtra(EXTRA_FOLDERS)?.toSet()
                     )
                 }
                 prefs.edit().putBoolean(KEY_PAUSED, false).apply()
@@ -500,9 +503,20 @@ class IndexingForegroundService : Service() {
         }
     }
 
-    private suspend fun runAiTagging(rescanAll: Boolean) {
+    private suspend fun runAiTagging(
+        rescanAll: Boolean,
+        modelId: String? = null,
+        folderFilter: Set<String>? = null
+    ) {
         runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
-        val photos = loadPhotos()
+        val allPhotos = loadPhotos()
+        val isAll = if (folderFilter != null) folderFilter.isEmpty() else com.amresalehin.emregallery.ai.tagging.AiTaggingSettings.isAllFolders(applicationContext)
+        val selectedFolders = folderFilter ?: if (!isAll) com.amresalehin.emregallery.ai.tagging.AiTaggingSettings.getSelectedFolders(applicationContext) else emptySet()
+        val photos = if (!isAll && selectedFolders.isNotEmpty()) {
+            allPhotos.filter { com.amresalehin.emregallery.face.FaceRecognitionSettings.normalizeFolderPath(it.relativePath) in selectedFolders }
+        } else {
+            allPhotos
+        }
         val prefsRepo = PreferencesRepository(this@IndexingForegroundService)
         val tagsMap = prefsRepo.customTagsMap.first()
         val pending = if (rescanAll) photos else photos.filter { (tagsMap[it.uri] ?: emptySet()).isEmpty() }
@@ -512,12 +526,14 @@ class IndexingForegroundService : Service() {
         updateState(task = TASK_AI_TAGGING, running = true, paused = initialPaused, processed = doneCount, total = photos.size, error = null)
         postProgress("AI image tagging", "Scanning ${pending.size} photos with AI vision", doneCount, photos.size)
         var completed = doneCount
+        val effectiveModel = modelId ?: com.amresalehin.emregallery.ai.tagging.AiTaggingSettings.getSelectedModel(applicationContext)
         for (item in pending) {
             awaitResume()
             val result = com.amresalehin.emregallery.ai.tagging.AiImageTagger.tagAndSave(
                 context = this@IndexingForegroundService,
                 item = item,
-                prefs = prefsRepo
+                prefs = prefsRepo,
+                preferredModel = effectiveModel
             )
             completed++
             updateState(
@@ -628,6 +644,8 @@ class IndexingForegroundService : Service() {
         const val EXTRA_ENGINE_ID = "engine_id"
         const val EXTRA_RETRY_FAILED_ONLY = "retry_failed_only"
         const val EXTRA_FOLDERS = "face_indexing_folders"
+        const val EXTRA_AI_MODEL = "com.amresalehin.emregallery.indexing.EXTRA_AI_MODEL"
+        const val EXTRA_TAGGING_FOLDERS = "com.amresalehin.emregallery.indexing.EXTRA_TAGGING_FOLDERS"
 
         private fun command(context: Context, action: String, configure: Intent.() -> Unit = {}) {
             val intent = Intent(context, IndexingForegroundService::class.java).setAction(action).apply(configure)
@@ -682,9 +700,18 @@ class IndexingForegroundService : Service() {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
             }
 
-        fun startAiTagging(context: Context, rescanAll: Boolean = false) =
+        fun startAiTagging(
+            context: Context,
+            rescanAll: Boolean = false,
+            modelId: String? = null,
+            folders: Set<String>? = null
+        ) =
             command(context, ACTION_START_AI_TAGGING) {
                 putExtra(EXTRA_RESCAN_ALL, rescanAll)
+                if (modelId != null) putExtra(EXTRA_AI_MODEL, modelId)
+                if (folders != null && folders.isNotEmpty()) {
+                    putStringArrayListExtra(EXTRA_TAGGING_FOLDERS, ArrayList(folders))
+                }
             }
 
         fun downloadModel(

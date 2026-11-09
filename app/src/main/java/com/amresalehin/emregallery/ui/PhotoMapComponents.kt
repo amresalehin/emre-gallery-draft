@@ -83,6 +83,7 @@ fun PhotoMapTopBar(
     onDismissLayerMenu: () -> Unit,
     onSelectLayer: (String) -> Unit,
     onFitAllPhotos: () -> Unit,
+    onGeotag: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -142,6 +143,25 @@ fun PhotoMapTopBar(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.FilterCenterFocus, contentDescription = "Fit all media", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+
+        if (onGeotag != null) {
+            Spacer(Modifier.width(8.dp))
+            Surface(
+                onClick = onGeotag,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.size(38.dp).testTag("photo_map_geotag_button")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.AddLocationAlt,
+                        contentDescription = "Geotag with Google Timeline",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
         }
     }

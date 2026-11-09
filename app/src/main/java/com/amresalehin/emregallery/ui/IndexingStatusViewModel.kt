@@ -1011,7 +1011,11 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         )
     }
 
-    fun startAiTagging(rescanAll: Boolean = false) {
+    fun startAiTagging(
+        rescanAll: Boolean = false,
+        modelId: String? = null,
+        folders: Set<String>? = null
+    ) {
         val state = _uiState.value
         if (state.ocr.isRunning || state.faceFinding.isRunning || state.enteFaceFinding.isRunning ||
             state.location.isRunning || state.aiTagging.isRunning ||
@@ -1021,7 +1025,7 @@ class IndexingStatusViewModel(application: Application) : AndroidViewModel(appli
         aiTaggingStartTimeMillis = System.currentTimeMillis()
         aiTaggingStartProcessed = if (rescanAll) 0 else state.aiTagging.processed
         _uiState.update { it.copy(aiTagging = it.aiTagging.copy(isRunning = true, isPaused = false, processed = aiTaggingStartProcessed)) }
-        IndexingForegroundService.startAiTagging(context, rescanAll = rescanAll)
+        IndexingForegroundService.startAiTagging(context, rescanAll = rescanAll, modelId = modelId, folders = folders)
     }
 
     fun stopAiTagging() {

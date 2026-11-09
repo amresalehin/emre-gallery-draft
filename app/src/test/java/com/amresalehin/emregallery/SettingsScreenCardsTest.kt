@@ -1,6 +1,7 @@
 package com.amresalehin.emregallery
 
 import com.amresalehin.emregallery.ui.Destination
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -88,4 +89,34 @@ class SettingsScreenCardsTest {
         assertTrue(matchesTagging("smart vision"))
         assertFalse(matchesTagging("theme"))
     }
+
+    @Test
+    fun testTaggingFolderScopingLogic() {
+        val photos = listOf(
+            "DCIM/Camera/IMG_01.jpg",
+            "Pictures/Screenshots/SCR_01.png",
+            "Download/MEME.jpg"
+        )
+
+        fun filterPhotos(allFolders: Boolean, selectedFolders: Set<String>): List<String> {
+            if (allFolders || selectedFolders.isEmpty()) return photos
+            return photos.filter { path ->
+                val folder = path.substringBeforeLast('/').trim('/')
+                selectedFolders.contains(folder)
+            }
+        }
+
+        // All folders selected: all 3 photos
+        assertEquals(3, filterPhotos(allFolders = true, emptySet()).size)
+
+        // Only Screenshots folder selected
+        val screenshotsOnly = filterPhotos(allFolders = false, setOf("Pictures/Screenshots"))
+        assertEquals(1, screenshotsOnly.size)
+        assertEquals("Pictures/Screenshots/SCR_01.png", screenshotsOnly.first())
+
+        // Multiple folders selected
+        val cameraAndDownload = filterPhotos(allFolders = false, setOf("DCIM/Camera", "Download"))
+        assertEquals(2, cameraAndDownload.size)
+    }
 }
+

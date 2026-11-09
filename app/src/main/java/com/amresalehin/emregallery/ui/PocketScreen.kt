@@ -354,54 +354,65 @@ fun PocketScreen(
                                 hasActiveFilters = hasActiveFilters,
                                 onBookmarkAction = {
                                     val trimmed = searchQuery.trim()
-                                    if (trimmed.isNotBlank()) {
-                                        val domain = MediaClassifier.cleanDomainFromUrl(trimmed)
-                                        val saved = pocketRepo.addBookmark(
-                                            title = domain.ifBlank { trimmed },
-                                            url = trimmed
+                                    val liveClip = clipboardManager.primaryClip
+                                    val clipText = if (liveClip != null && liveClip.itemCount > 0) {
+                                        liveClip.getItemAt(0).text?.toString()?.trim() ?: ""
+                                    } else ""
+
+                                    val rawTarget = when {
+                                        trimmed.isNotBlank() -> trimmed
+                                        clipText.isNotBlank() -> clipText
+                                        else -> ""
+                                    }
+
+                                    if (rawTarget.isNotBlank()) {
+                                        val targetUrl = MediaClassifier.extractFirstUrl(rawTarget)
+                                            ?: if (rawTarget.contains(".") || rawTarget.startsWith("http://", ignoreCase = true) || rawTarget.startsWith("https://", ignoreCase = true) || rawTarget.startsWith("file://", ignoreCase = true) || rawTarget.startsWith("content://", ignoreCase = true)) {
+                                                MediaClassifier.sanitizeUrl(rawTarget)
+                                            } else {
+                                                rawTarget
+                                            }
+
+                                        val domain = MediaClassifier.cleanDomainFromUrl(targetUrl)
+                                        pocketRepo.addBookmark(
+                                            title = domain.ifBlank { targetUrl },
+                                            url = targetUrl
                                         )
                                         searchQuery = ""
                                         isSearchFocused = false
                                         focusManager.clearFocus()
                                         keyboardController?.hide()
-                                        selectedStackForDetail = saved
                                         scope.launch {
-                                            snackbarHostState.showSnackbar("Bookmark saved to Pocket")
-                                        }
-                                    } else if (clipboardUrl != null) {
-                                        val domain = MediaClassifier.cleanDomainFromUrl(clipboardUrl!!)
-                                        val saved = pocketRepo.addBookmark(
-                                            title = domain.ifBlank { clipboardUrl!! },
-                                            url = clipboardUrl!!
-                                        )
-                                        clipboardUrl = null
-                                        isSearchFocused = false
-                                        focusManager.clearFocus()
-                                        keyboardController?.hide()
-                                        selectedStackForDetail = saved
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar("Bookmark saved from clipboard")
+                                            snackbarHostState.showSnackbar("Saved to Pocket")
                                         }
                                     } else {
-                                        showAddBookmarkDialog = true
+                                        scope.launch {
+                                            snackbarHostState.showSnackbar("Enter or paste a media link or URL to save")
+                                        }
                                     }
                                 },
                                 onSearchSubmit = { target ->
                                     val trimmed = target.trim()
                                     if (trimmed.isNotBlank()) {
-                                        if (MediaClassifier.isValidWebUrl(trimmed) || trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                                            val domain = MediaClassifier.cleanDomainFromUrl(trimmed)
-                                            val saved = pocketRepo.addBookmark(
-                                                title = domain.ifBlank { trimmed },
-                                                url = trimmed
+                                        val targetUrl = MediaClassifier.extractFirstUrl(trimmed)
+                                            ?: if (trimmed.contains(".") || trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true) || trimmed.startsWith("file://", ignoreCase = true) || trimmed.startsWith("content://", ignoreCase = true)) {
+                                                MediaClassifier.sanitizeUrl(trimmed)
+                                            } else {
+                                                ""
+                                            }
+
+                                        if (targetUrl.isNotBlank()) {
+                                            val domain = MediaClassifier.cleanDomainFromUrl(targetUrl)
+                                            pocketRepo.addBookmark(
+                                                title = domain.ifBlank { targetUrl },
+                                                url = targetUrl
                                             )
                                             searchQuery = ""
                                             isSearchFocused = false
                                             focusManager.clearFocus()
                                             keyboardController?.hide()
-                                            selectedStackForDetail = saved
                                             scope.launch {
-                                                snackbarHostState.showSnackbar("Bookmark saved to Pocket")
+                                                snackbarHostState.showSnackbar("Saved to Pocket")
                                             }
                                         } else {
                                             keyboardController?.hide()
@@ -550,7 +561,6 @@ fun PocketScreen(
                         previewImageUrl = previewUrl
                     )
                     showAddBookmarkDialog = false
-                    selectedStackForDetail = added
                     scope.launch {
                         snackbarHostState.showSnackbar("Bookmark saved to Pocket")
                     }
@@ -780,22 +790,24 @@ fun PocketSearchPasteCapsule(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    // Cross (clear) button
-                    IconButton(
-                        onClick = { onQueryChange("") },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("pocket_search_clear_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Clear search",
-                            tint = secondaryText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    // Cross (clear) button only when text is present
+                    if (query.isNotEmpty()) {
+                        IconButton(
+                            onClick = { onQueryChange("") },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("pocket_search_clear_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Clear search",
+                                tint = secondaryText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
 
-                    // Bookmark icon button (monochrome theme)
+                    // Save / Bookmark icon button (monochrome theme)
                     IconButton(
                         onClick = onBookmarkAction,
                         modifier = Modifier
@@ -804,7 +816,7 @@ fun PocketSearchPasteCapsule(
                     ) {
                         Icon(
                             imageVector = Icons.Default.BookmarkAdd,
-                            contentDescription = "Save bookmark",
+                            contentDescription = "Save media to Pocket",
                             tint = textColor,
                             modifier = Modifier.size(22.dp)
                         )
