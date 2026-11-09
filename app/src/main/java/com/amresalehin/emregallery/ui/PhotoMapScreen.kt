@@ -253,6 +253,7 @@ fun PhotoMapScreen(
     LaunchedEffect(selectedMapMedia) {
         val selected = selectedMapMedia
         selectedPlaceName = null
+        selectedMapProvenance = null
         if (selected != null) {
             selectedMapProvenance = viewModel.getLocationProvenanceForMedia(selected.first)
             selectedPlaceName = viewModel.getPlaceName(selected.second) ?: "Place name unavailable"

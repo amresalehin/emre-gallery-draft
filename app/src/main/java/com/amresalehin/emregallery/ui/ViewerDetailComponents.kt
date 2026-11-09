@@ -1215,8 +1215,7 @@ fun OverviewTabContent(
                             }
                         }
                     }
-                }
-                if (locationProvenance != null) {
+                    if (locationProvenance != null) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp)

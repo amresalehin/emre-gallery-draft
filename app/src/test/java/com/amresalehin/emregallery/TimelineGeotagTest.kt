@@ -420,4 +420,159 @@ class TimelineGeotagTest {
         assertTrue(gpx.contains("<ele>10.5</ele>"))
         assertTrue(gpx.contains("<name>Test Track</name>"))
     }
+
+
+    @Test
+    fun `does not interpolate across unrelated timeline segments`() {
+        val start = 1_700_000_000_000L
+        val candidate = ImageGeotagCandidate(
+            uriString = "content://media/segment-boundary",
+            displayName = "segment-boundary.jpg",
+            dateTimeOriginalMillis = start + 300_000L
+        )
+        val points = listOf(
+            TimelineLocationPoint(
+                timestampMillis = start,
+                latitude = 22.57,
+                longitude = 88.36,
+                source = "timeline_path",
+                segmentId = "activity-A"
+            ),
+            TimelineLocationPoint(
+                timestampMillis = start + 600_000L,
+                latitude = 22.59,
+                longitude = 88.38,
+                source = "timeline_path",
+                segmentId = "activity-B"
+            )
+        )
+
+        val result = TimelineGeotagEngine.matchCandidate(
+            candidate,
+            points,
+            GeotagConfig(maxInterpolationGapSeconds = 900L, maxTimeDeltaSeconds = 0L)
+        )
+
+        assertEquals(GeotagStatus.UNMATCHED, result.status)
+        assertFalse(result.isInterpolated)
+    }
+
+    @Test
+    fun `interpolates only when path samples share a segment`() {
+        val start = 1_700_000_000_000L
+        val candidate = ImageGeotagCandidate(
+            uriString = "content://media/same-segment",
+            displayName = "same-segment.jpg",
+            dateTimeOriginalMillis = start + 300_000L
+        )
+        val points = listOf(
+            TimelineLocationPoint(start, 22.57, 88.36, source = "timeline_path", segmentId = "activity-A"),
+            TimelineLocationPoint(start + 600_000L, 22.59, 88.38, source = "timeline_path", segmentId = "activity-A")
+        )
+
+        val result = TimelineGeotagEngine.matchCandidate(
+            candidate,
+            points,
+            GeotagConfig(maxInterpolationGapSeconds = 900L)
+        )
+
+        assertEquals(GeotagStatus.MATCHED, result.status)
+        assertEquals("PATH_INTERPOLATION", result.matchMethod)
+        assertEquals(22.58, result.matchedPoint?.latitude ?: 0.0, 0.00001)
+    }
+
+    @Test
+    fun `uses stationary visit coordinate throughout its interval`() {
+        val start = 1_700_000_000_000L
+        val candidate = ImageGeotagCandidate(
+            uriString = "content://media/visit",
+            displayName = "visit.jpg",
+            dateTimeOriginalMillis = start + 1_800_000L
+        )
+        val visit = TimelineLocationPoint(
+            timestampMillis = start,
+            latitude = 22.5726,
+            longitude = 88.3639,
+            source = "visit",
+            segmentId = "visit-1",
+            interpolationEligible = false,
+            intervalEndMillis = start + 3_600_000L
+        )
+
+        val result = TimelineGeotagEngine.matchCandidate(candidate, listOf(visit), GeotagConfig())
+
+        assertEquals(GeotagStatus.MATCHED, result.status)
+        assertEquals("VISIT", result.matchMethod)
+        assertEquals(22.5726, result.matchedPoint?.latitude ?: 0.0, 0.00001)
+    }
+
+    @Test
+    fun `modern timeline path samples retain semantic segment identity`() {
+        val json = """
+            {
+              "semanticSegments": [
+                {
+                  "startTime": "2025-06-01T10:00:00Z",
+                  "endTime": "2025-06-01T10:10:00Z",
+                  "timelinePath": [
+                    {"point":"22.5700°, 88.3600°","time":"2025-06-01T10:01:00Z"},
+                    {"point":"22.5800°, 88.3700°","time":"2025-06-01T10:08:00Z"}
+                  ]
+                },
+                {
+                  "startTime": "2025-06-01T11:00:00Z",
+                  "endTime": "2025-06-01T11:10:00Z",
+                  "timelinePath": [
+                    {"point":"22.5900°, 88.3800°","time":"2025-06-01T11:01:00Z"},
+                    {"point":"22.6000°, 88.3900°","time":"2025-06-01T11:08:00Z"}
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val pathPoints = GoogleTimelineParser.parseTimeline(ByteArrayInputStream(json.toByteArray()))
+            .filter { it.source == "timeline_path" }
+
+        assertEquals(4, pathPoints.size)
+        assertNotNull(pathPoints[0].segmentId)
+        assertEquals(pathPoints[0].segmentId, pathPoints[1].segmentId)
+        assertNotEquals(pathPoints[0].segmentId, pathPoints[2].segmentId)
+        assertFalse(pathPoints.any { it.timestampEstimated })
+    }
+
+    @Test
+    fun `legacy coordinate-only timeline path is marked as estimated`() {
+        val json = """
+            {
+              "timelineObjects": [
+                {
+                  "activitySegment": {
+                    "duration": {
+                      "startTimestamp": "2025-06-01T10:00:00Z",
+                      "endTimestamp": "2025-06-01T10:10:00Z"
+                    },
+                    "timelinePath": [
+                      {"point":"22.5700°, 88.3600°"},
+                      {"point":"22.5800°, 88.3700°"}
+                    ]
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val points = GoogleTimelineParser.parseTimeline(ByteArrayInputStream(json.toByteArray()))
+            .filter { it.source == "timeline_path" }
+
+        assertEquals(2, points.size)
+        assertTrue(points.all { it.timestampEstimated })
+        assertEquals(points[0].segmentId, points[1].segmentId)
+    }
+
+    @Test
+    fun `EXIF writes are disabled by default`() {
+        assertFalse(GeotagConfig().writeToExif)
+    }
+
 }
