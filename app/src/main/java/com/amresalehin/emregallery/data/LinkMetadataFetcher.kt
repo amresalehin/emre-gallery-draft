@@ -3,10 +3,13 @@ package com.amresalehin.emregallery.data
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.parser.Parser
 import java.net.URI
+import java.util.Locale
 
 data class LinkMetadata(
     val url: String,
@@ -22,7 +25,8 @@ data class LinkMetadata(
 /**
  * High-performance parser and automatic fetcher for web link titles, descriptions, previews,
  * and all site media items (images, artwork, video posters).
- * Extracts standard Open Graph, Twitter Cards, document metadata, and scans full DOM media collections.
+ * Extracts standard Open Graph, Twitter Cards, JSON-LD Schema.org metadata, document metadata,
+ * and scans full DOM media collections.
  */
 object LinkMetadataFetcher {
     private const val TAG = "LinkMetadataFetcher"
@@ -47,13 +51,61 @@ object LinkMetadataFetcher {
             "https://www.google.com/s2/favicons?domain=$domain&sz=128"
         } else ""
 
+        val highResSiteIcon = if (domain.isNotBlank()) {
+            "https://www.google.com/s2/favicons?domain=$domain&sz=256"
+        } else ""
+
+        // 1. Specialized Extractor Engine (yt-dlp primary, gallery-dl secondary)
+        if (GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(normalizedUrl).isSupported) {
+            try {
+                val gdlRes = GalleryDlEngine.extractMedia(normalizedUrl)
+                if (gdlRes.success && gdlRes.items.isNotEmpty()) {
+                    val mediaItems = gdlRes.items.map { item ->
+                        MediaInboxItem(
+                            id = "gdl_${item.id}",
+                            title = item.title,
+                            localUri = "",
+                            sourceUrl = item.url,
+                            isVideo = item.isVideo,
+                            isAudio = item.isAudio,
+                            isStream = item.isStream,
+                            format = item.format,
+                            sizeBytes = item.sizeBytes ?: 0L,
+                            dateAddedMillis = System.currentTimeMillis()
+                        )
+                    }
+                    val preview = gdlRes.previewImageUrl.ifBlank {
+                        gdlRes.items.firstOrNull { !it.isVideo }?.url
+                            ?: gdlRes.items.firstOrNull()?.thumbnailUrl
+                            ?: gdlRes.items.firstOrNull()?.url
+                            ?: highResSiteIcon
+                    }
+                    val cleanTitle = gdlRes.pageTitle.ifBlank { domain }
+                    val cleanDesc = gdlRes.pageDescription.ifBlank { "Discovered via ${gdlRes.extractorName} (${mediaItems.size} items)" }
+
+                    return@withContext LinkMetadata(
+                        url = normalizedUrl,
+                        title = cleanTitle,
+                        description = cleanDesc,
+                        previewImageUrl = preview,
+                        siteName = gdlRes.extractorName.ifBlank { domain },
+                        domain = domain,
+                        faviconUrl = defaultFavicon,
+                        mediaItems = mediaItems
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "GalleryDlEngine extraction attempt failed for $normalizedUrl: ${e.message}")
+            }
+        }
+
         try {
-            val response = OkHttpDownloader.getHtml(normalizedUrl, maxBytes = 1024 * 1024)
+            val response = OkHttpDownloader.getHtml(normalizedUrl, maxBytes = 2 * 1024 * 1024)
             val finalUrl = response.finalUrl.ifBlank { normalizedUrl }
             val finalDomain = MediaClassifier.cleanDomainFromUrl(finalUrl).ifBlank { domain }
 
             // Handle direct image responses
-            val cleanLower = finalUrl.lowercase(java.util.Locale.ROOT).substringBefore('?').substringBefore('#')
+            val cleanLower = finalUrl.lowercase(Locale.ROOT).substringBefore('?').substringBefore('#')
             val isDirectImage = response.contentType.startsWith("image/") ||
                     cleanLower.endsWith(".jpg") || cleanLower.endsWith(".jpeg") ||
                     cleanLower.endsWith(".png") || cleanLower.endsWith(".webp") ||
@@ -110,36 +162,181 @@ object LinkMetadataFetcher {
             }
 
             if (!response.isSuccessful || response.bodyString.isNullOrBlank()) {
+                if (GalleryDlEngine.isAvailable()) {
+                    val gdlRes = runCatching { GalleryDlEngine.extractMedia(finalUrl) }.getOrNull()
+                    if (gdlRes != null && gdlRes.success && gdlRes.items.isNotEmpty()) {
+                        val mediaItems = gdlRes.items.map { item ->
+                            MediaInboxItem(
+                                id = "gdl_${item.id}",
+                                title = item.title,
+                                localUri = "",
+                                sourceUrl = item.url,
+                                isVideo = item.isVideo,
+                                isAudio = item.isAudio,
+                                isStream = item.isStream,
+                                format = item.format,
+                                sizeBytes = item.sizeBytes ?: 0L,
+                                dateAddedMillis = System.currentTimeMillis()
+                            )
+                        }
+                        val preview = gdlRes.previewImageUrl.ifBlank {
+                            gdlRes.items.firstOrNull { !it.isVideo }?.url
+                                ?: gdlRes.items.firstOrNull()?.thumbnailUrl
+                                ?: gdlRes.items.firstOrNull()?.url
+                                ?: highResSiteIcon
+                        }
+                        val cleanTitle = gdlRes.pageTitle.ifBlank { finalDomain }
+                        val cleanDesc = gdlRes.pageDescription.ifBlank { "Discovered via ${gdlRes.extractorName} (${mediaItems.size} items)" }
+
+                        return@withContext LinkMetadata(
+                            url = finalUrl,
+                            title = cleanTitle,
+                            description = cleanDesc,
+                            previewImageUrl = preview,
+                            siteName = gdlRes.extractorName.ifBlank { finalDomain },
+                            domain = finalDomain,
+                            faviconUrl = defaultFavicon,
+                            mediaItems = mediaItems
+                        )
+                    }
+                }
+
+                val fallbackItem = if (highResSiteIcon.isNotBlank()) {
+                    listOf(
+                        MediaInboxItem(
+                            id = "site_icon_${finalDomain.hashCode().toUInt().toString(16)}",
+                            title = finalDomain,
+                            localUri = "",
+                            sourceUrl = highResSiteIcon,
+                            isVideo = false,
+                            format = "PNG"
+                        )
+                    )
+                } else emptyList()
+
                 return@withContext LinkMetadata(
                     url = finalUrl,
                     title = finalDomain.ifBlank { finalUrl },
                     description = "",
-                    previewImageUrl = "",
+                    previewImageUrl = highResSiteIcon,
                     siteName = finalDomain,
                     domain = finalDomain,
                     faviconUrl = defaultFavicon,
-                    mediaItems = emptyList()
+                    mediaItems = fallbackItem
                 )
             }
 
             parseHtml(response.bodyString, finalUrl)
         } catch (e: Exception) {
             Log.e(TAG, "Error fetching link metadata for $normalizedUrl", e)
+            val fallbackItem = if (highResSiteIcon.isNotBlank()) {
+                listOf(
+                    MediaInboxItem(
+                        id = "site_icon_${domain.hashCode().toUInt().toString(16)}",
+                        title = domain,
+                        localUri = "",
+                        sourceUrl = highResSiteIcon,
+                        isVideo = false,
+                        format = "PNG"
+                    )
+                )
+            } else emptyList()
+
             LinkMetadata(
                 url = normalizedUrl,
                 title = domain.ifBlank { normalizedUrl },
                 description = "",
-                previewImageUrl = "",
+                previewImageUrl = highResSiteIcon,
                 siteName = domain,
                 domain = domain,
                 faviconUrl = defaultFavicon,
-                mediaItems = emptyList()
+                mediaItems = fallbackItem
             )
         }
     }
 
+    private data class JsonLdMetadata(
+        val title: String = "",
+        val description: String = "",
+        val imageUrl: String = "",
+        val siteName: String = ""
+    )
+
     /**
-     * Parses raw HTML string and extracts OpenGraph, Twitter, document metadata,
+     * Parses application/ld+json script tags (used heavily by modern SPAs, Next.js, Magnific, Shopify).
+     */
+    private fun parseJsonLd(doc: Document): JsonLdMetadata {
+        val scripts = doc.select("script[type='application/ld+json']")
+        for (script in scripts) {
+            val raw = script.data().trim().ifBlank { script.html().trim() }
+            if (raw.isBlank()) continue
+
+            try {
+                if (raw.startsWith("[")) {
+                    val arr = JSONArray(raw)
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i) ?: continue
+                        val parsed = extractFromJsonLdObject(obj)
+                        if (parsed.title.isNotBlank() || parsed.imageUrl.isNotBlank()) return parsed
+                    }
+                } else if (raw.startsWith("{")) {
+                    val obj = JSONObject(raw)
+                    val graph = obj.optJSONArray("@graph")
+                    if (graph != null) {
+                        for (i in 0 until graph.length()) {
+                            val item = graph.optJSONObject(i) ?: continue
+                            val parsed = extractFromJsonLdObject(item)
+                            if (parsed.title.isNotBlank() || parsed.imageUrl.isNotBlank()) return parsed
+                        }
+                    } else {
+                        val parsed = extractFromJsonLdObject(obj)
+                        if (parsed.title.isNotBlank() || parsed.imageUrl.isNotBlank()) return parsed
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return JsonLdMetadata()
+    }
+
+    private fun extractFromJsonLdObject(obj: JSONObject): JsonLdMetadata {
+        val type = obj.optString("@type", "")
+        val isRelevant = type in listOf("WebPage", "WebSite", "Article", "NewsArticle", "BlogPosting", "Organization", "SoftwareApplication", "Product", "") ||
+                obj.has("headline") || obj.has("name")
+
+        if (!isRelevant) return JsonLdMetadata()
+
+        val title = obj.optString("headline", "").ifBlank { obj.optString("name", "") }
+        val description = obj.optString("description", "")
+        var image = ""
+
+        val rawImg = obj.opt("image")
+        if (rawImg is String && rawImg.isNotBlank()) {
+            image = rawImg
+        } else if (rawImg is JSONObject) {
+            image = rawImg.optString("url", "")
+        } else if (rawImg is JSONArray && rawImg.length() > 0) {
+            val first = rawImg.opt(0)
+            if (first is String) image = first
+            else if (first is JSONObject) image = first.optString("url", "")
+        }
+
+        if (image.isBlank()) {
+            image = obj.optString("thumbnailUrl", "").ifBlank { obj.optString("logo", "") }
+        }
+
+        val publisher = obj.optJSONObject("publisher")
+        val siteName = publisher?.optString("name", "") ?: ""
+
+        return JsonLdMetadata(
+            title = title,
+            description = description,
+            imageUrl = image,
+            siteName = siteName
+        )
+    }
+
+    /**
+     * Parses raw HTML string and extracts OpenGraph, Twitter, JSON-LD, document metadata,
      * and all discovered site media items.
      * Pure and isolated for reliable testing.
      */
@@ -150,6 +347,7 @@ object LinkMetadataFetcher {
         } else ""
 
         val doc: Document = Jsoup.parse(html, targetUrl)
+        val jsonLd = parseJsonLd(doc)
 
         // 1. Title Extraction
         val ogTitle = doc.selectFirst("meta[property='og:title']")?.attr("content")?.trim()
@@ -161,8 +359,9 @@ object LinkMetadataFetcher {
         val itempropName = doc.selectFirst("meta[itemprop='name']")?.attr("content")?.trim()
         val h1Title = doc.selectFirst("h1")?.text()?.trim()
 
-        val candidateTitle = sequenceOf(ogTitle, twitterTitle, docTitle, metaTitle, itempropName, h1Title)
-            .firstOrNull { !it.isNullOrBlank() }
+        val candidateTitle = sequenceOf(ogTitle, twitterTitle, jsonLd.title.takeIf { it.isNotBlank() }, docTitle, metaTitle, itempropName, h1Title)
+            .mapNotNull { it?.trim() }
+            .firstOrNull { it.isNotBlank() && !BotDetectionMitigator.isBotChallenge(it, targetUrl) }
             ?: domain.ifBlank { targetUrl }
 
         val cleanTitle = cleanText(candidateTitle)
@@ -177,9 +376,9 @@ object LinkMetadataFetcher {
         val itempropDesc = doc.selectFirst("meta[itemprop='description']")?.attr("content")?.trim()
         val firstParagraph = doc.select("p").asSequence()
             .map { it.text().trim() }
-            .firstOrNull { it.length in 30..400 }
+            .firstOrNull { it.length in 30..400 && !it.contains("cookies", ignoreCase = true) }
 
-        val candidateDesc = sequenceOf(ogDesc, twitterDesc, metaDesc, itempropDesc, firstParagraph)
+        val candidateDesc = sequenceOf(ogDesc, twitterDesc, jsonLd.description.takeIf { it.isNotBlank() }, metaDesc, itempropDesc, firstParagraph)
             .firstOrNull { !it.isNullOrBlank() }
             ?: ""
 
@@ -188,16 +387,20 @@ object LinkMetadataFetcher {
         // 3. Site Name
         val ogSiteName = doc.selectFirst("meta[property='og:site_name']")?.attr("content")?.trim()
             ?: doc.selectFirst("meta[name='application-name']")?.attr("content")?.trim()
-        val siteName = ogSiteName?.ifBlank { null } ?: domain
+        val siteName = ogSiteName?.ifBlank { null }
+            ?: jsonLd.siteName.takeIf { it.isNotBlank() }
+            ?: domain
 
         // 4. Preview Image Extraction
         val ogImage = doc.selectFirst("meta[property='og:image']")?.let { extractAbsUrl(it, "content") }
             ?: doc.selectFirst("meta[name='og:image']")?.let { extractAbsUrl(it, "content") }
         val ogImageSecure = doc.selectFirst("meta[property='og:image:secure_url']")?.let { extractAbsUrl(it, "content") }
+            ?: doc.selectFirst("meta[property='og:image:url']")?.let { extractAbsUrl(it, "content") }
         val twitterImage = doc.selectFirst("meta[name='twitter:image']")?.let { extractAbsUrl(it, "content") }
             ?: doc.selectFirst("meta[name='twitter:image:src']")?.let { extractAbsUrl(it, "content") }
             ?: doc.selectFirst("meta[property='twitter:image']")?.let { extractAbsUrl(it, "content") }
         val linkImageSrc = doc.selectFirst("link[rel='image_src']")?.let { extractAbsUrl(it, "href") }
+        val thumbnailMeta = doc.selectFirst("meta[name='thumbnail']")?.let { extractAbsUrl(it, "content") }
         val itempropImage = doc.selectFirst("meta[itemprop='image']")?.let { extractAbsUrl(it, "content") }
             ?: doc.selectFirst("link[itemprop='image']")?.let { extractAbsUrl(it, "href") }
         val appleTouchIcon = doc.selectFirst("link[rel='apple-touch-icon']")?.let { extractAbsUrl(it, "href") }
@@ -208,13 +411,20 @@ object LinkMetadataFetcher {
             ogImage,
             ogImageSecure,
             twitterImage,
+            jsonLd.imageUrl.takeIf { it.isNotBlank() },
             linkImageSrc,
+            thumbnailMeta,
             itempropImage,
             appleTouchIcon,
             hiResIcon
         ).firstOrNull { !it.isNullOrBlank() } ?: ""
 
-        val previewImageUrl = resolveAbsoluteUrl(targetUrl, candidateImage)
+        val rawResolvedPreview = resolveAbsoluteUrl(targetUrl, candidateImage)
+        val previewImageUrl = if (rawResolvedPreview.isNotBlank()) {
+            rawResolvedPreview
+        } else if (domain.isNotBlank()) {
+            "https://www.google.com/s2/favicons?domain=$domain&sz=256"
+        } else ""
 
         // 5. Favicon Extraction
         val faviconEl = doc.selectFirst("link[rel='shortcut icon']")
@@ -225,7 +435,7 @@ object LinkMetadataFetcher {
         val finalFavicon = if (resolvedFavicon.isNotBlank()) resolvedFavicon else defaultFavicon
 
         // 6. Extract all media items of the site
-        val mediaItems = extractSiteMedia(doc, targetUrl, cleanTitle, previewImageUrl)
+        val mediaItems = extractSiteMedia(doc, targetUrl, cleanTitle, previewImageUrl, jsonLd.imageUrl)
 
         return LinkMetadata(
             url = targetUrl,
@@ -246,7 +456,8 @@ object LinkMetadataFetcher {
         doc: Document,
         baseUrl: String,
         defaultTitle: String = "",
-        primaryPreviewUrl: String = ""
+        primaryPreviewUrl: String = "",
+        jsonLdImageUrl: String = ""
     ): List<MediaInboxItem> {
         val items = mutableListOf<MediaInboxItem>()
         val seenUrls = mutableSetOf<String>()
@@ -299,17 +510,22 @@ object LinkMetadataFetcher {
             addCandidate(primaryPreviewUrl, defaultTitle.ifBlank { "Cover Image" })
         }
 
-        // 2. Additional OpenGraph & Twitter Images
-        doc.select("meta[property='og:image'], meta[name='og:image'], meta[property='og:image:secure_url']").forEach {
+        // 2. JSON-LD Image if distinct
+        if (jsonLdImageUrl.isNotBlank()) {
+            addCandidate(jsonLdImageUrl, defaultTitle)
+        }
+
+        // 3. Additional OpenGraph & Twitter Images
+        doc.select("meta[property='og:image'], meta[name='og:image'], meta[property='og:image:secure_url'], meta[property='og:image:url']").forEach {
             val u = it.absUrl("content").ifBlank { it.attr("content") }
             addCandidate(u, defaultTitle)
         }
-        doc.select("meta[name='twitter:image'], meta[name='twitter:image:src']").forEach {
+        doc.select("meta[name='twitter:image'], meta[name='twitter:image:src'], meta[property='twitter:image']").forEach {
             val u = it.absUrl("content").ifBlank { it.attr("content") }
             addCandidate(u, defaultTitle)
         }
 
-        // 3. Videos & Posters
+        // 4. Videos & Posters
         doc.select("video").forEach { vid ->
             val poster = vid.absUrl("poster").ifBlank { vid.attr("poster") }
             if (poster.isNotBlank()) addCandidate(poster, "Video Poster", isVideo = false)
@@ -321,8 +537,8 @@ object LinkMetadataFetcher {
             }
         }
 
-        // 4. Content Images (articles, main content, figures, galleries, body)
-        val imageElements = doc.select("article img, main img, #content img, .content img, .post-content img, .entry-content img, figure img, .gallery img, img")
+        // 5. Content Images (articles, main content, figures, galleries, Next.js pictures, body images)
+        val imageElements = doc.select("article img, main img, #content img, .content img, .post-content img, .entry-content img, figure img, picture source, .gallery img, img")
         for (img in imageElements) {
             // Check srcset for highest resolution candidate
             val srcset = img.attr("srcset").ifBlank { img.attr("data-srcset") }
@@ -350,13 +566,19 @@ object LinkMetadataFetcher {
             if (items.size >= 40) break // limit to top 40 for optimal performance
         }
 
+        // 6. Guarantee at least one valid media item if preview URL is available
+        if (items.isEmpty() && primaryPreviewUrl.isNotBlank()) {
+            addCandidate(primaryPreviewUrl, defaultTitle)
+        }
+
         return items
     }
 
     private fun extractAbsUrl(element: org.jsoup.nodes.Element, attributeKey: String): String {
         val abs = element.absUrl(attributeKey).trim()
-        if (abs.isNotBlank()) return abs
-        return element.attr(attributeKey).trim()
+        if (abs.isNotBlank()) return Parser.unescapeEntities(abs, false)
+        val attr = element.attr(attributeKey).trim()
+        return Parser.unescapeEntities(attr, false)
     }
 
     private fun cleanText(text: String): String {
@@ -369,7 +591,8 @@ object LinkMetadataFetcher {
 
     private fun resolveAbsoluteUrl(baseUrl: String, candidate: String): String {
         if (candidate.isBlank()) return ""
-        val trimmed = candidate.trim()
+        val unescaped = Parser.unescapeEntities(candidate.trim(), false).trim()
+        val trimmed = unescaped
         if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
             return trimmed
         }

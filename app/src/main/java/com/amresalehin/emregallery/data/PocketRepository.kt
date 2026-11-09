@@ -308,13 +308,40 @@ class PocketRepository(
 
                 val meta = LinkMetadataFetcher.fetch(latest.sourceUrl)
                 val current = _bookmarks.value.find { it.id == bookmarkId } ?: return@launch
-                if (meta.mediaItems.isNotEmpty()) {
-                    val updated = current.copy(
-                        items = meta.mediaItems,
-                        previewImageUrl = current.previewImageUrl.ifBlank { meta.previewImageUrl }
+
+                val newPreview = current.previewImageUrl.ifBlank { meta.previewImageUrl }
+                val resolvedItems = if (meta.mediaItems.isNotEmpty()) {
+                    meta.mediaItems
+                } else if (newPreview.isNotBlank()) {
+                    listOf(
+                        MediaInboxItem(
+                            id = "site_media_${current.id}_preview",
+                            title = meta.title.ifBlank { current.title },
+                            localUri = "",
+                            sourceUrl = newPreview,
+                            isVideo = false,
+                            format = "JPEG",
+                            dateAddedMillis = System.currentTimeMillis()
+                        )
                     )
-                    updateBookmark(updated)
+                } else {
+                    current.items
                 }
+
+                val cleanDomain = current.sourceDomain.ifBlank { MediaClassifier.cleanDomainFromUrl(current.sourceUrl) }
+                val isTitleDefault = current.title.isBlank() ||
+                        current.title.equals(cleanDomain, ignoreCase = true) ||
+                        current.title.equals(current.sourceUrl, ignoreCase = true) ||
+                        current.title == "Untitled Bookmark"
+
+                val updated = current.copy(
+                    title = if (isTitleDefault && meta.title.isNotBlank()) meta.title else current.title,
+                    description = current.description.ifBlank { meta.description },
+                    previewImageUrl = newPreview,
+                    sourceDomain = current.sourceDomain.ifBlank { meta.domain },
+                    items = resolvedItems
+                )
+                updateBookmark(updated)
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching site media for bookmark $bookmarkId", e)
             }
@@ -331,12 +358,31 @@ class PocketRepository(
                 if (latest.sourceUrl.isBlank()) return@launch
 
                 val meta = LinkMetadataFetcher.fetch(latest.sourceUrl)
+                val newPreview = meta.previewImageUrl.ifBlank { latest.previewImageUrl }
+                val resolvedItems = if (meta.mediaItems.isNotEmpty()) {
+                    meta.mediaItems
+                } else if (newPreview.isNotBlank()) {
+                    listOf(
+                        MediaInboxItem(
+                            id = "site_media_${latest.id}_preview",
+                            title = meta.title.ifBlank { latest.title },
+                            localUri = "",
+                            sourceUrl = newPreview,
+                            isVideo = false,
+                            format = "JPEG",
+                            dateAddedMillis = System.currentTimeMillis()
+                        )
+                    )
+                } else {
+                    latest.items
+                }
+
                 val updated = latest.copy(
                     title = meta.title.ifBlank { latest.title },
                     description = meta.description.ifBlank { latest.description },
-                    previewImageUrl = meta.previewImageUrl.ifBlank { latest.previewImageUrl },
+                    previewImageUrl = newPreview,
                     sourceDomain = meta.domain.ifBlank { latest.sourceDomain },
-                    items = if (meta.mediaItems.isNotEmpty()) meta.mediaItems else latest.items
+                    items = resolvedItems
                 )
                 updateBookmark(updated)
             } catch (e: Exception) {

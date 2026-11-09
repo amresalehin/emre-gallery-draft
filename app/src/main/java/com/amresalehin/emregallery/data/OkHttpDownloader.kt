@@ -148,14 +148,11 @@ object OkHttpDownloader {
                 val original = chain.request()
                 val requestBuilder = original.newBuilder()
 
-                if (original.header("User-Agent").isNullOrBlank()) {
-                    requestBuilder.header("User-Agent", DEFAULT_USER_AGENT)
-                }
-                if (original.header("Accept").isNullOrBlank()) {
-                    requestBuilder.header(
-                        "Accept",
-                        "text/html,application/xhtml+xml,application/xml;q=0.9,image/*;q=0.8,video/*;q=0.8,audio/*;q=0.8,*/*;q=0.7"
-                    )
+                // Attach comprehensive browser stealth headers to prevent anti-bot and Cloudflare 403 blocks
+                BotDetectionMitigator.STEALTH_HEADERS.forEach { (key, value) ->
+                    if (original.header(key).isNullOrBlank()) {
+                        requestBuilder.header(key, value)
+                    }
                 }
                 chain.proceed(requestBuilder.build())
             }
@@ -322,25 +319,76 @@ object OkHttpDownloader {
 
     /**
      * Executes an HTTP GET request with OkHttp, following redirects and utilizing shared session cookies.
+     * Incorporates multi-stage resilience: Desktop User-Agent retry, www/non-www alternate host,
+     * and Jsoup connection fallback to conquer anti-bot, Cloudflare, and CDN 403 blocks.
      */
     suspend fun getHtml(
         url: String,
         referer: String? = null,
         maxBytes: Long = 2 * 1024 * 1024
     ): HttpResponse = withContext(Dispatchers.IO) {
+        // Attempt 1: Standard OkHttp GET with mobile stealth headers
+        val res1 = executeOkHttpGet(url, referer, maxBytes, isDesktop = false)
+        if (res1.isSuccessful && !res1.bodyString.isNullOrBlank()) {
+            return@withContext res1
+        }
+
+        // Attempt 2: OkHttp GET with Desktop Chrome headers
+        val resDesktop = executeOkHttpGet(url, referer, maxBytes, isDesktop = true)
+        if (resDesktop.isSuccessful && !resDesktop.bodyString.isNullOrBlank()) {
+            return@withContext resDesktop
+        }
+
+        // Attempt 3: If domain didn't have 'www.', try 'www.' (or vice-versa)
+        val alternateUrl = getAlternateWwwUrl(url)
+        if (!alternateUrl.isNullOrBlank() && alternateUrl != url) {
+            val resAlt = executeOkHttpGet(alternateUrl, referer, maxBytes, isDesktop = true)
+            if (resAlt.isSuccessful && !resAlt.bodyString.isNullOrBlank()) {
+                return@withContext resAlt
+            }
+        }
+
+        // Attempt 4: Direct Jsoup HTTPURLConnection fallback (different TLS/cipher stack than OkHttp)
+        val jsoupRes = executeJsoupFallback(url, maxBytes)
+        if (jsoupRes != null && jsoupRes.isSuccessful && !jsoupRes.bodyString.isNullOrBlank()) {
+            return@withContext jsoupRes
+        }
+
+        // Return best response or last failure
+        resDesktop.takeIf { it.statusCode > 0 } ?: res1
+    }
+
+    private fun executeOkHttpGet(
+        url: String,
+        referer: String?,
+        maxBytes: Long,
+        isDesktop: Boolean
+    ): HttpResponse {
         val reqBuilder = Request.Builder().url(url)
         if (!referer.isNullOrBlank()) {
             reqBuilder.header("Referer", referer)
         }
 
-        try {
+        if (isDesktop) {
+            reqBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            reqBuilder.header("Sec-Ch-Ua-Platform", "\"Windows\"")
+            reqBuilder.header("Sec-Ch-Ua-Mobile", "?0")
+            reqBuilder.header("Sec-Ch-Ua", "\"Chromium\";v=\"131\", \"Google Chrome\";v=\"131\", \"Not_A Brand\";v=\"24\"")
+            reqBuilder.header("Sec-Fetch-Dest", "document")
+            reqBuilder.header("Sec-Fetch-Mode", "navigate")
+            reqBuilder.header("Sec-Fetch-Site", "none")
+            reqBuilder.header("Sec-Fetch-User", "?1")
+            reqBuilder.header("Upgrade-Insecure-Requests", "1")
+        }
+
+        return try {
             client.newCall(reqBuilder.build()).execute().use { response ->
                 val code = response.code
-                val contentType = response.header("Content-Type")?.lowercase() ?: ""
+                val contentType = response.header("Content-Type")?.lowercase(Locale.ROOT) ?: ""
                 val finalUrl = response.request.url.toString()
 
                 if (!response.isSuccessful) {
-                    return@withContext HttpResponse(
+                    return HttpResponse(
                         isSuccessful = false,
                         statusCode = code,
                         contentType = contentType,
@@ -369,7 +417,7 @@ object OkHttpDownloader {
                 )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "getHtml failed for $url", e)
+            Log.w(TAG, "executeOkHttpGet failed for $url (desktop=$isDesktop): ${e.message}")
             HttpResponse(
                 isSuccessful = false,
                 statusCode = -1,
@@ -377,6 +425,49 @@ object OkHttpDownloader {
                 finalUrl = url,
                 errorMessage = e.message ?: "Network request failed"
             )
+        }
+    }
+
+    private fun getAlternateWwwUrl(url: String): String? {
+        return try {
+            val uri = java.net.URI(url)
+            val host = uri.host ?: return null
+            val newHost = if (host.startsWith("www.", ignoreCase = true)) {
+                host.substring(4)
+            } else {
+                "www.$host"
+            }
+            java.net.URI(uri.scheme ?: "https", uri.userInfo, newHost, uri.port, uri.path, uri.query, uri.fragment).toString()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun executeJsoupFallback(url: String, maxBytes: Long): HttpResponse? {
+        return try {
+            val conn = org.jsoup.Jsoup.connect(url)
+                .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .followRedirects(true)
+                .ignoreHttpErrors(true)
+                .timeout(12000)
+                .maxBodySize(maxBytes.toInt())
+                .execute()
+
+            val statusCode = conn.statusCode()
+            if (statusCode in 200..299) {
+                HttpResponse(
+                    isSuccessful = true,
+                    statusCode = statusCode,
+                    contentType = conn.contentType() ?: "text/html",
+                    finalUrl = conn.url().toString(),
+                    bodyString = conn.body()
+                )
+            } else null
+        } catch (e: Exception) {
+            Log.w(TAG, "executeJsoupFallback failed for $url: ${e.message}")
+            null
         }
     }
 

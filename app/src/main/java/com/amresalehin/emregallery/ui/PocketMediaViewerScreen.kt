@@ -94,6 +94,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import com.amresalehin.emregallery.data.GalleryDlEngine
 import com.amresalehin.emregallery.data.OkHttpDownloader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -629,10 +630,15 @@ private fun executeSaveMedia(
     coroutineScope.launch {
         Toast.makeText(context, "Saving media to device...", Toast.LENGTH_SHORT).show()
         val targetDir = OkHttpDownloader.getTargetStorageDir(context)
+        val downloadUrl = item.sourceUrl.ifBlank { item.localUri }
         val ext = when {
             item.isVideo -> "mp4"
             item.isAudio -> "mp3"
             item.format.isNotBlank() && !item.format.contains("/") -> item.format.lowercase()
+            downloadUrl.contains(".mp4", ignoreCase = true) -> "mp4"
+            downloadUrl.contains(".webm", ignoreCase = true) -> "webm"
+            downloadUrl.contains(".png", ignoreCase = true) -> "png"
+            downloadUrl.contains(".webp", ignoreCase = true) -> "webp"
             else -> "jpg"
         }
         val safeBaseName = (item.title.ifBlank { stack.title.ifBlank { "media_${System.currentTimeMillis()}" } })
@@ -663,8 +669,54 @@ private fun executeSaveMedia(
             }
         }
 
-        // 2. If it's a remote URL or data URI, download via OkHttpDownloader on IO thread
-        val downloadUrl = item.sourceUrl.ifBlank { item.localUri }
+        // 2. FFmpeg stream engine for HLS (.m3u8), DASH (.mpd), and fragmented stream manifests
+        val isStreamUrl = item.isStream || downloadUrl.contains(".m3u8", ignoreCase = true) || downloadUrl.contains(".mpd", ignoreCase = true)
+        if (isStreamUrl) {
+            val mp4FileName = if (fileName.endsWith(".mp4", ignoreCase = true)) fileName else "${fileName.substringBeforeLast('.')}.mp4"
+            val targetFile = File(targetDir, mp4FileName)
+            val remuxResult = withContext(Dispatchers.IO) {
+                com.amresalehin.emregallery.ffmpeg.FfmpegKitEngine.remuxStream(
+                    streamUrl = downloadUrl,
+                    outputFile = targetFile,
+                    context = context
+                )
+            }
+            if (remuxResult.isSuccess && targetFile.exists() && targetFile.length() > 0L) {
+                Toast.makeText(context, "Saved stream to device via FFmpeg: ${targetFile.name}", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+        }
+
+        // 3. Specialized extractor engine (yt-dlp & gallery-dl) for media from YouTube, Twitter, Reddit, TikTok, etc.
+        val isExtractorUrl = GalleryDlEngine.isAvailable() && (
+            GalleryDlEngine.checkSupport(downloadUrl).isSupported ||
+            (stack.sourceUrl.isNotBlank() && GalleryDlEngine.checkSupport(stack.sourceUrl).isSupported)
+        )
+        if (isExtractorUrl) {
+            val gdlFile = withContext(Dispatchers.IO) {
+                GalleryDlEngine.downloadMedia(
+                    context = context,
+                    mediaUrl = downloadUrl,
+                    fileName = fileName,
+                    referer = stack.sourceUrl.ifBlank { null }
+                ) ?: run {
+                    if (stack.sourceUrl.isNotBlank() && stack.sourceUrl != downloadUrl) {
+                        GalleryDlEngine.downloadMedia(
+                            context = context,
+                            mediaUrl = stack.sourceUrl,
+                            fileName = fileName,
+                            referer = stack.sourceUrl
+                        )
+                    } else null
+                }
+            }
+            if (gdlFile != null && gdlFile.exists() && gdlFile.length() > 0L) {
+                Toast.makeText(context, "Saved to device via extractor engine: ${gdlFile.name}", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+        }
+
+        // 4. Download via OkHttpDownloader on IO thread
         if (downloadUrl.startsWith("http://", ignoreCase = true) ||
             downloadUrl.startsWith("https://", ignoreCase = true) ||
             downloadUrl.startsWith("data:", ignoreCase = true)

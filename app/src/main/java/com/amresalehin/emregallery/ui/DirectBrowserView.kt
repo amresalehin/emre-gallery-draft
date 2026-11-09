@@ -275,10 +275,54 @@ fun DirectBrowserView(
                 onSaveToPocket = {
                     if (currentUrl.isNotBlank()) {
                         val pocketRepo = com.amresalehin.emregallery.data.PocketRepository.getInstance(context)
-                        pocketRepo.addBookmark(
-                            title = pageTitle.ifBlank { currentUrl },
-                            url = currentUrl
-                        )
+                        val effectiveTitle = pageTitle.ifBlank { webViewInstance?.title ?: currentUrl }
+                        
+                        webViewInstance?.evaluateJavascript(
+                            """
+                            (function() {
+                                try {
+                                    var ogImg = document.querySelector('meta[property="og:image"]')?.content ||
+                                                document.querySelector('meta[name="og:image"]')?.content ||
+                                                document.querySelector('meta[name="twitter:image"]')?.content ||
+                                                document.querySelector('link[rel="apple-touch-icon"]')?.href || '';
+                                    var ogDesc = document.querySelector('meta[property="og:description"]')?.content ||
+                                                 document.querySelector('meta[name="description"]')?.content || '';
+                                    return JSON.stringify({ image: ogImg, desc: ogDesc });
+                                } catch(e) {
+                                    return JSON.stringify({ image: '', desc: '' });
+                                }
+                            })();
+                            """.trimIndent()
+                        ) { resultJson ->
+                            var previewImg = ""
+                            var pageDesc = ""
+                            if (!resultJson.isNullOrBlank() && resultJson != "null") {
+                                try {
+                                    val unquoted = if (resultJson.startsWith("\"") && resultJson.endsWith("\"")) {
+                                        org.json.JSONTokener(resultJson).nextValue().toString()
+                                    } else {
+                                        resultJson
+                                    }
+                                    val json = org.json.JSONObject(unquoted)
+                                    previewImg = json.optString("image", "")
+                                    pageDesc = json.optString("desc", "")
+                                } catch (_: Exception) {}
+                            }
+
+                            pocketRepo.addBookmark(
+                                title = effectiveTitle,
+                                url = currentUrl,
+                                description = pageDesc,
+                                previewImageUrl = previewImg,
+                                autoFetchMetadata = true
+                            )
+                        } ?: run {
+                            pocketRepo.addBookmark(
+                                title = effectiveTitle,
+                                url = currentUrl,
+                                autoFetchMetadata = true
+                            )
+                        }
                         Toast.makeText(context, "Saved to Pocket", Toast.LENGTH_SHORT).show()
                     }
                 },

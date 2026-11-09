@@ -181,4 +181,69 @@ class LinkMetadataUnitTest {
 
         assertEquals("", stackWithoutPreview.previewImageUrl)
     }
+
+    @Test
+    fun testParseJsonLdMetadata() {
+        val html = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <script type="application/ld+json">
+                {
+                    "@context": "https://schema.org",
+                    "@graph": [
+                        {
+                            "@type": "WebPage",
+                            "name": "Magnific AI (by Freepik) | The AI Creative Platform",
+                            "description": "The complete platform of creative AI tools for image, video, and audio generation.",
+                            "image": "https://media.magnific.com/meta-tags-social/mg-home-og.jpg?w=1200&amp;h=675"
+                        }
+                    ]
+                }
+                </script>
+            </head>
+            <body></body>
+            </html>
+        """.trimIndent()
+
+        val metadata = LinkMetadataFetcher.parseHtml(html, "https://magnific.com")
+
+        assertEquals("Magnific AI (by Freepik) | The AI Creative Platform", metadata.title)
+        assertEquals("The complete platform of creative AI tools for image, video, and audio generation.", metadata.description)
+        assertEquals("https://media.magnific.com/meta-tags-social/mg-home-og.jpg?w=1200&h=675", metadata.previewImageUrl)
+        assertFalse(metadata.mediaItems.isEmpty())
+        assertEquals("https://media.magnific.com/meta-tags-social/mg-home-og.jpg?w=1200&h=675", metadata.mediaItems.first().sourceUrl)
+    }
+
+    @Test
+    fun testHtmlEntityUnescapingInImageUrls() {
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta property="og:title" content="Entity Test" />
+                <meta property="og:image" content="https://cdn.example.org/photo.jpg?size=large&amp;quality=high" />
+            </head>
+            <body></body>
+            </html>
+        """.trimIndent()
+
+        val metadata = LinkMetadataFetcher.parseHtml(html, "https://example.org/item")
+        assertEquals("https://cdn.example.org/photo.jpg?size=large&quality=high", metadata.previewImageUrl)
+    }
+
+    @Test
+    fun testGalleryDlCheckSupportPopularSites() {
+        val ytSupport = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        assertTrue("YouTube should be recognized as supported extractor", ytSupport.isSupported)
+
+        val redditSupport = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://reddit.com/r/EarthPorn/comments/abc123")
+        assertTrue("Reddit should be recognized as supported extractor", redditSupport.isSupported)
+
+        val xSupport = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://x.com/Android/status/123456789")
+        assertTrue("X / Twitter should be recognized as supported extractor", xSupport.isSupported)
+
+        val tiktokSupport = com.amresalehin.emregallery.data.GalleryDlEngine.checkSupport("https://www.tiktok.com/@user/video/123456")
+        assertTrue("TikTok should be recognized as supported extractor", tiktokSupport.isSupported)
+    }
 }

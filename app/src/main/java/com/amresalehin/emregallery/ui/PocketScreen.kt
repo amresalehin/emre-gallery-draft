@@ -1318,6 +1318,16 @@ fun PocketBookmarkViewerPage(
                     isVideo = false
                 )
             )
+        } else if (stack.sourceDomain.isNotBlank()) {
+            listOf(
+                MediaInboxItem(
+                    id = "icon_${stack.id}",
+                    title = stack.title.ifBlank { stack.sourceDomain },
+                    localUri = "",
+                    sourceUrl = "https://www.google.com/s2/favicons?domain=${stack.sourceDomain}&sz=256",
+                    isVideo = false
+                )
+            )
         } else {
             emptyList()
         }

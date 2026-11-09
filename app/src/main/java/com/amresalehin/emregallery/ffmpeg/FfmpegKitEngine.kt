@@ -463,4 +463,34 @@ object FfmpegKitEngine {
             null
         }
     }
+
+    /**
+     * Remuxes HLS/DASH/TS streams or URLs directly into a clean, standalone MP4 file.
+     */
+    suspend fun remuxStream(
+        streamUrl: String,
+        outputFile: File,
+        context: Context? = null
+    ): FfmpegExecutionResult = withContext(Dispatchers.IO) {
+        val cmd = "-y -i \"$streamUrl\" -c copy -bsf:a aac_adtstoasc -movflags +faststart \"${outputFile.absolutePath}\""
+        val res = executeCommand(cmd)
+        if (res.isSuccess && outputFile.exists() && outputFile.length() > 0L) {
+            context?.let { ctx ->
+                android.media.MediaScannerConnection.scanFile(ctx, arrayOf(outputFile.absolutePath), arrayOf("video/mp4"), null)
+            }
+            res.copy(outputFile = outputFile)
+        } else {
+            // Fallback: transcode stream if direct bitstream copy fails
+            val transcodeCmd = "-y -i \"$streamUrl\" -c:v libx264 -preset fast -c:a aac -movflags +faststart \"${outputFile.absolutePath}\""
+            val transRes = executeCommand(transcodeCmd)
+            if (transRes.isSuccess && outputFile.exists() && outputFile.length() > 0L) {
+                context?.let { ctx ->
+                    android.media.MediaScannerConnection.scanFile(ctx, arrayOf(outputFile.absolutePath), arrayOf("video/mp4"), null)
+                }
+                transRes.copy(outputFile = outputFile)
+            } else {
+                transRes.copy(isSuccess = false)
+            }
+        }
+    }
 }

@@ -46,6 +46,8 @@ data class GalleryDlExtractResult(
     val extractorName: String = "",
     val category: String = "",
     val pageTitle: String = "",
+    val pageDescription: String = "",
+    val previewImageUrl: String = "",
     val items: List<ScrapedMediaItem> = emptyList(),
     val errorMessage: String? = null
 )
@@ -352,11 +354,15 @@ object GalleryDlEngine {
 
             val extractorName = root.optString("extractor", root.optString("engine", methodName))
             val (pageTitle, itemsList) = parseExtractedItems(root, url.trim())
+            val pageDescription = root.optString("pageDescription", "")
+            val previewImageUrl = root.optString("previewImageUrl", "")
 
             GalleryDlExtractResult(
                 success = true,
                 extractorName = extractorName,
                 pageTitle = pageTitle,
+                pageDescription = pageDescription,
+                previewImageUrl = previewImageUrl,
                 items = itemsList
             )
         } catch (e: Exception) {
@@ -451,12 +457,17 @@ object GalleryDlEngine {
     }
 
     fun defaultPopularSites(): List<GalleryDlSite> = listOf(
+        GalleryDlSite("YouTube", listOf("youtube.com", "youtu.be"), "smart_display"),
+        GalleryDlSite("TikTok", listOf("tiktok.com"), "music_note"),
+        GalleryDlSite("Instagram", listOf("instagram.com"), "camera"),
         GalleryDlSite("Reddit", listOf("reddit.com", "redd.it", "i.redd.it", "v.redd.it"), "reddit"),
-        GalleryDlSite("Imgur", listOf("imgur.com", "i.imgur.com"), "image"),
         GalleryDlSite("Twitter / X", listOf("twitter.com", "x.com", "pbs.twimg.com"), "tag"),
+        GalleryDlSite("Imgur", listOf("imgur.com", "i.imgur.com"), "image"),
         GalleryDlSite("Pinterest", listOf("pinterest.com", "i.pinimg.com"), "pin"),
         GalleryDlSite("ArtStation", listOf("artstation.com"), "palette"),
         GalleryDlSite("DeviantArt", listOf("deviantart.com"), "brush"),
+        GalleryDlSite("Vimeo", listOf("vimeo.com"), "movie"),
+        GalleryDlSite("SoundCloud", listOf("soundcloud.com"), "audiotrack"),
         GalleryDlSite("Danbooru", listOf("donmai.us", "gelbooru.com", "safebooru.org", "yande.re"), "collections"),
         GalleryDlSite("Flickr", listOf("flickr.com"), "photo_camera"),
         GalleryDlSite("Tumblr", listOf("tumblr.com"), "feed"),

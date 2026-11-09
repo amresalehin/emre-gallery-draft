@@ -487,6 +487,8 @@ def extract_gallery_dl(url, options_json="{}"):
         "success": len(items) > 0,
         "engine": "gallery-dl",
         "pageTitle": str(page_title) if page_title else "",
+        "pageDescription": "",
+        "previewImageUrl": (items[0]["url"] if items and not items[0].get("isVideo") else (items[0].get("thumbnailUrl") or "")) if items else "",
         "itemsCount": len(items),
         "items": items
     })
@@ -510,6 +512,8 @@ def extract_yt_dlp(url, options_json="{}"):
 
     items = []
     page_title = ""
+    page_description = ""
+    page_thumbnail = ""
     seen_urls = set()
 
     try:
@@ -611,6 +615,11 @@ def extract_yt_dlp(url, options_json="{}"):
                     if not page_title:
                         page_title = v_title
 
+                    if not page_description:
+                        page_description = entry.get("description") or ""
+                    if not page_thumbnail:
+                        page_thumbnail = entry.get("thumbnail") or ""
+
                     width = entry.get("width") or (best_fmt.get("width") if best_fmt else None)
                     height = entry.get("height") or (best_fmt.get("height") if best_fmt else None)
                     resolution_hint = f"{width}x{height}" if width and height else None
@@ -676,6 +685,8 @@ def extract_yt_dlp(url, options_json="{}"):
         "success": len(items) > 0,
         "engine": "yt-dlp",
         "pageTitle": str(page_title) if page_title else "",
+        "pageDescription": str(page_description)[:500] if page_description else "",
+        "previewImageUrl": str(page_thumbnail) if page_thumbnail else (items[0]["url"] if items and not items[0].get("isVideo") else ""),
         "itemsCount": len(items),
         "items": items
     })
