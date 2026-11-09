@@ -55,11 +55,14 @@ data class AiTaggingResult(
 )
 
 /**
- * Comprehensive AI Image Tagging Engine.
- * Supports:
- * 1. Cloud Multimodal Vision AI (OpenAI, Groq, Ollama, OpenRouter, Anthropic-compatible endpoints)
- * 2. On-Device Vision-Language Model (Florence-2 Base)
- * 3. Smart On-Device Vision Analyzer (zero-latency offline analysis of color, scene, EXIF, and OCR features)
+ * AI image tagging orchestrator.
+ *
+ * Executable routes:
+ * 1. Explicit Cloud AI selection through an OpenAI-compatible multimodal endpoint.
+ * 2. Smart Vision's on-device metadata, pixel and OCR-cache heuristics.
+ *
+ * Local VLM assets are registered separately, but are not exposed as executable tagging
+ * engines until their model-specific inference adapters are implemented.
  */
 object AiImageTagger {
 
