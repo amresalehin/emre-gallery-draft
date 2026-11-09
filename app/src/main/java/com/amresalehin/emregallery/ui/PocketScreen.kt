@@ -134,13 +134,13 @@ object PocketThemeColors {
         if (isDark) Color(0xFFEDEDED) else Color(0xFFFFFFFF)
 
     fun stackLayer1(isDark: Boolean): Color =
-        if (isDark) Color(0xFF141414) else Color(0xFFE2E2E2)
+        if (isDark) Color(0xFF18161D) else Color(0xFFEAE5ED)
 
     fun stackLayer2(isDark: Boolean): Color =
-        if (isDark) Color(0xFF1C1C1C) else Color(0xFFECECEC)
+        if (isDark) Color(0xFF1E1C22) else Color(0xFFFFFFFF)
 
     fun stackFront(isDark: Boolean): Color =
-        if (isDark) Color(0xFF242424) else Color(0xFFFFFFFF)
+        if (isDark) Color(0xFF26242C) else Color(0xFFE6E0E9)
 
     fun webGradient(isDark: Boolean): List<Color> =
         if (isDark) listOf(Color(0xFF222222), Color(0xFF181818))

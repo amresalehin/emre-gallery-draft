@@ -447,96 +447,61 @@ fun PocketBookmarkViewerPage(
                     }
                 }
 
-                // Major Screen Area: Deck Card Stack (Strict 9:14 Aspect Ratio, Taking Major Part of Screen)
+                // Major Screen Area: Deck Card Stack (Strict 1:1 Aspect Ratio)
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 12.dp),
+                        .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     BoxWithConstraints(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        val targetRatio = 9f / 14f
-                        val maxDeckW = maxWidth
-                        val maxDeckH = maxHeight
-
-                        val (deckWidth, deckHeight) = if (maxDeckW / targetRatio <= maxDeckH) {
-                            maxDeckW to (maxDeckW / targetRatio)
-                        } else {
-                            (maxDeckH * targetRatio) to maxDeckH
-                        }
+                        val maxDeckW = maxWidth - 24.dp
+                        val maxDeckH = maxHeight - 16.dp
+                        val deckSide = minOf(maxDeckW, maxDeckH).coerceAtLeast(180.dp)
 
                         Box(
-                            modifier = Modifier.size(width = deckWidth, height = deckHeight),
+                            modifier = Modifier.size(deckSide),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Layer 1 (Bottom peeking card: 2 cards ahead, offset y = -32.dp, scale 0.88f)
+                            // Layer 1 (Bottom peeking card: 2 cards ahead, offset x = 18.dp, y = -12.dp, rotationZ = 6.5f)
                             if (totalCards > 2) {
                                 val backIndex2 = (safeIndex + 2) % totalCards
-                                val backItem2 = effectiveMediaList.getOrNull(backIndex2)
-                                val mediaPath2 = remember(backItem2) {
-                                    if (backItem2?.localUri?.isNotBlank() == true) {
-                                        val f = File(backItem2.localUri.removePrefix("file://"))
-                                        if (f.exists()) f.absolutePath else backItem2.sourceUrl
-                                    } else backItem2?.sourceUrl ?: ""
-                                }
-
                                 Surface(
-                                    shape = RoundedCornerShape(26.dp),
+                                    shape = RoundedCornerShape(32.dp),
                                     color = PocketThemeColors.stackLayer1(isDark),
-                                    border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.3f) else Color(0xFFD6D6D6)),
-                                    shadowElevation = if (isDark) 2.dp else 1.dp,
+                                    border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.35f) else Color(0xFFDDD8E2)),
+                                    shadowElevation = if (isDark) 2.dp else 1.5.dp,
                                     modifier = Modifier
-                                        .fillMaxWidth(0.88f)
-                                        .fillMaxHeight()
-                                        .offset(y = (-32).dp)
-                                ) {
-                                    if (mediaPath2.isNotBlank()) {
-                                        Box(modifier = Modifier.fillMaxSize()) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(context)
-                                                    .data(mediaPath2)
-                                                    .crossfade(true)
-                                                    .build(),
-                                                contentDescription = null,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .blur(16.dp)
-                                            )
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .background(if (isDark) Color.Black.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.45f))
-                                            )
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            translationX = 18.dp.toPx()
+                                            translationY = (-12).dp.toPx()
+                                            rotationZ = 6.5f
                                         }
-                                    }
+                                ) {
+                                    Box(modifier = Modifier.fillMaxSize())
                                 }
                             }
 
-                            // Layer 2 (Middle peeking card: next media, offset y = -16.dp, scale 0.94f)
+                            // Layer 2 (Middle peeking card: next media, offset x = 10.dp, y = -6.dp, rotationZ = 3.5f)
                             if (totalCards > 1) {
                                 val backIndex1 = (safeIndex + 1) % totalCards
-                                val backItem1 = effectiveMediaList.getOrNull(backIndex1)
-                                val mediaPath1 = remember(backItem1) {
-                                    if (backItem1?.localUri?.isNotBlank() == true) {
-                                        val f = File(backItem1.localUri.removePrefix("file://"))
-                                        if (f.exists()) f.absolutePath else backItem1.sourceUrl
-                                    } else backItem1?.sourceUrl ?: ""
-                                }
-
                                 Surface(
-                                    shape = RoundedCornerShape(26.dp),
+                                    shape = RoundedCornerShape(32.dp),
                                     color = PocketThemeColors.stackLayer2(isDark),
-                                    border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.5f) else Color(0xFFCECECE)),
-                                    shadowElevation = if (isDark) 4.dp else 2.dp,
+                                    border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.45f) else Color(0xFFE2DCE6)),
+                                    shadowElevation = if (isDark) 4.dp else 2.5.dp,
                                     modifier = Modifier
-                                        .fillMaxWidth(0.94f)
-                                        .fillMaxHeight()
-                                        .offset(y = (-16).dp)
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            translationX = 10.dp.toPx()
+                                            translationY = (-6).dp.toPx()
+                                            rotationZ = 3.5f
+                                        }
                                         .clickable {
                                             scope.launch {
                                                 offsetX.animateTo(-600f, tween(180))
@@ -545,41 +510,11 @@ fun PocketBookmarkViewerPage(
                                             }
                                         }
                                 ) {
-                                    if (mediaPath1.isNotBlank()) {
-                                        Box(modifier = Modifier.fillMaxSize()) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(context)
-                                                    .data(mediaPath1)
-                                                    .crossfade(true)
-                                                    .build(),
-                                                contentDescription = null,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .blur(20.dp)
-                                            )
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .background(if (isDark) Color.Black.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.2f))
-                                            )
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(context)
-                                                    .data(mediaPath1)
-                                                    .crossfade(true)
-                                                    .build(),
-                                                contentDescription = backItem1?.title,
-                                                contentScale = ContentScale.Fit,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .padding(8.dp)
-                                            )
-                                        }
-                                    }
+                                    Box(modifier = Modifier.fillMaxSize())
                                 }
                             }
 
-                            // Layer 3 (Top Front Card in Deck - Exact 9:14 Container, Interactive Swipe Gesture)
+                            // Layer 3 (Top Front Card in Deck - Exact 1:1 Container, Interactive Swipe Gesture)
                             val currentItem = effectiveMediaList.getOrNull(safeIndex)
                             val currentMediaPath = remember(currentItem) {
                                 if (currentItem?.localUri?.isNotBlank() == true) {
@@ -589,10 +524,10 @@ fun PocketBookmarkViewerPage(
                             }
 
                             Surface(
-                                shape = RoundedCornerShape(26.dp),
+                                shape = RoundedCornerShape(32.dp),
                                 color = PocketThemeColors.stackFront(isDark),
-                                shadowElevation = if (isDark) 12.dp else 6.dp,
-                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.8f) else dividerCol),
+                                shadowElevation = if (isDark) 8.dp else 4.dp,
+                                border = BorderStroke(1.dp, if (isDark) dividerCol.copy(alpha = 0.6f) else Color(0xFFDED8E2)),
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .graphicsLayer {
@@ -655,29 +590,11 @@ fun PocketBookmarkViewerPage(
                                     }
 
                                     Box(
-                                        modifier = Modifier.fillMaxSize(),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(14.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        AsyncImage(
-                                            model = ImageRequest.Builder(context)
-                                                .data(currentMediaPath)
-                                                .crossfade(true)
-                                                .build(),
-                                            contentDescription = null,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .blur(24.dp)
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(
-                                                if (isDark) Color.Black.copy(alpha = 0.5f)
-                                                else Color.Black.copy(alpha = 0.3f)
-                                            )
-                                        )
-
                                         if (isCurrentVideo) {
                                             BookmarkDeckVideoPlayer(
                                                 uri = currentMediaPath,
@@ -687,8 +604,7 @@ fun PocketBookmarkViewerPage(
                                                 isDark = isDark,
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .padding(8.dp)
-                                                    .clip(RoundedCornerShape(20.dp))
+                                                    .clip(RoundedCornerShape(22.dp))
                                             )
                                         } else {
                                             AsyncImage(
@@ -700,7 +616,7 @@ fun PocketBookmarkViewerPage(
                                                 contentScale = ContentScale.Fit,
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .padding(8.dp)
+                                                    .clip(RoundedCornerShape(22.dp))
                                             )
                                         }
                                     }
@@ -708,11 +624,7 @@ fun PocketBookmarkViewerPage(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .background(
-                                                Brush.linearGradient(
-                                                    colors = PocketThemeColors.webGradient(isDark)
-                                                )
-                                            ),
+                                            .padding(20.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Column(
@@ -721,10 +633,10 @@ fun PocketBookmarkViewerPage(
                                         ) {
                                             if (faviconUrl.isNotBlank()) {
                                                 Surface(
-                                                    shape = RoundedCornerShape(16.dp),
+                                                    shape = RoundedCornerShape(18.dp),
                                                     color = PocketThemeColors.faviconSurface(isDark),
                                                     shadowElevation = 3.dp,
-                                                    modifier = Modifier.size(52.dp)
+                                                    modifier = Modifier.size(56.dp)
                                                 ) {
                                                     Box(contentAlignment = Alignment.Center) {
                                                         AsyncImage(
@@ -733,7 +645,7 @@ fun PocketBookmarkViewerPage(
                                                                 .crossfade(true)
                                                                 .build(),
                                                             contentDescription = stack.sourceDomain,
-                                                            modifier = Modifier.size(34.dp)
+                                                            modifier = Modifier.size(36.dp)
                                                         )
                                                     }
                                                 }
@@ -742,10 +654,10 @@ fun PocketBookmarkViewerPage(
                                                     imageVector = Icons.Default.Bookmark,
                                                     contentDescription = null,
                                                     tint = textColor,
-                                                    modifier = Modifier.size(44.dp)
+                                                    modifier = Modifier.size(48.dp)
                                                 )
                                             }
-                                            Spacer(Modifier.height(8.dp))
+                                            Spacer(Modifier.height(10.dp))
                                             Text(
                                                 text = stack.sourceDomain.ifBlank { "Bookmark Preview" },
                                                 style = MaterialTheme.typography.titleMedium,
@@ -757,6 +669,29 @@ fun PocketBookmarkViewerPage(
                                 }
                             }
                         }
+                    }
+                }
+
+                // Card counter pill indicator (e.g. "2 / 5") from design
+                if (totalCards > 1) {
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isDark) Color(0xFF26242C) else Color(0xFFEDE8F0),
+                        border = BorderStroke(0.5.dp, if (isDark) dividerCol.copy(alpha = 0.4f) else Color(0xFFDAD5DF)),
+                        modifier = Modifier
+                            .padding(bottom = 8.dp)
+                            .testTag("bookmark_deck_counter_badge")
+                    ) {
+                        Text(
+                            text = "${safeIndex + 1} / $totalCards",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 13.sp,
+                                letterSpacing = 0.5.sp
+                            ),
+                            color = textColor,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        )
                     }
                 }
             }
