@@ -19,3 +19,8 @@
 
 # Media3 ExoPlayer
 -keep class androidx.media3.** { *; }
+
+# FFmpegKit JNI/API reflection
+-keep class com.arthenica.ffmpegkit.** { *; }
+-keep class com.arthenica.smartexception.** { *; }
+-dontwarn com.arthenica.ffmpegkit.**

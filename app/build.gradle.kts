@@ -3,11 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.chaquo.python")
 }
-
 android {
     namespace = "com.amresalehin.emregallery"
     compileSdk = 35
-
     defaultConfig {
         applicationId = "com.aistudio.emregallery.xytkpq"
         minSdk = 26
@@ -15,46 +13,32 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
-
     buildTypes {
-        debug {
-            // Debug build configuration
-        }
+        debug { }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
-
     packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
+        jniLibs { useLegacyPackaging = true }
         resources {
             excludes += listOf(
-                "/META-INF/{AL2.0,LGPL2.1}",
-                "/META-INF/INDEX.LIST",
-                "/META-INF/io.netty.versions.properties",
-                "/META-INF/DEPENDENCIES",
-                "/META-INF/LICENSE*",
-                "/META-INF/NOTICE*",
-                "/META-INF/*.version"
+                "/META-INF/{AL2.0,LGPL2.1}", "/META-INF/INDEX.LIST",
+                "/META-INF/io.netty.versions.properties", "/META-INF/DEPENDENCIES",
+                "/META-INF/LICENSE*", "/META-INF/NOTICE*", "/META-INF/*.version"
             )
         }
     }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
 }
-
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
     implementation(composeBom)
@@ -79,11 +63,8 @@ dependencies {
     implementation("io.coil-kt:coil-video:2.7.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
-    // On-device InsightFace buffalo_l SCRFD detector and ArcFace inference.
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
-    // Native Tesseract engine and its JNI libraries are packaged in the APK.
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
-    // On-device Google ML Kit Text Recognition with multiple language script support
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
@@ -94,6 +75,8 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.5")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Maintained FFmpegKit continuation; LGPL build, not the GPL variant.
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full:8.1.7")
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
@@ -104,7 +87,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
-
 chaquopy {
     defaultConfig {
         version = "3.10"

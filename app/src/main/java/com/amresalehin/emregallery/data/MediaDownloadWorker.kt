@@ -123,8 +123,32 @@ class MediaDownloadWorker(
             val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
             val isYtDlpTarget = sourceEngine == "yt-dlp" || isSocialUrl || isStreamingMedia
 
-            // 1. For social video and HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp)
-            if (isYtDlpTarget && GalleryDlEngine.isAvailable()) {
+            // 1. Native FFmpeg path for HLS/DASH manifests. Social video pages
+            // retain yt-dlp because they need site-specific extraction.
+            if (isStreamingMedia && FFmpegMediaDownloader.isManifestUrl(mediaUrl)) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.15f, KEY_STATUS to "Processing stream with FFmpeg: $title..."))
+                val outputName = fileName.substringBeforeLast('.', fileName) + ".mp4"
+                val outputDir = applicationContext.getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES)
+                    ?: applicationContext.filesDir
+                val ffmpegOutput = File(outputDir, outputName)
+                val ffmpegResult = FFmpegMediaDownloader.download(
+                    sourceUrl = mediaUrl,
+                    destination = ffmpegOutput,
+                    headers = buildMap {
+                        putAll(downloadHeaders)
+                        if (!referer.isNullOrBlank() && keys.none { it.equals("Referer", true) }) put("Referer", referer)
+                        if (!cookieString.isNullOrBlank() && keys.none { it.equals("Cookie", true) }) put("Cookie", cookieString)
+                    }
+                )
+                downloadedFile = ffmpegResult.file
+                if (!ffmpegResult.success) {
+                    errorDiagnostic = ffmpegResult.diagnostic ?: "FFmpeg stream processing failed"
+                    Log.w(TAG, "FFmpeg failed; falling back to yt-dlp: $errorDiagnostic")
+                }
+            }
+
+            // 2. Social media pages and FFmpeg failures use yt-dlp/gallery-dl.
+            if (downloadedFile == null && isYtDlpTarget && GalleryDlEngine.isAvailable()) {
                 setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Downloading stream/video: $title..."))
                 downloadedFile = GalleryDlEngine.downloadMedia(
                     context = applicationContext,
