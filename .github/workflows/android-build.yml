@@ -7,6 +7,7 @@ on:
       - 'integration/**'
       - 'fix/**'
       - 'chore/**'
+      - 'feature/**'
   pull_request:
     branches:
       - Develop
@@ -51,14 +52,29 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-      - name: Run unit tests and assemble debug APK
-        run: bash ./gradlew --no-daemon testDebugUnitTest assembleDebug
+      - name: Verify Gradle wrapper
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --version
+
+      - name: Run unit tests and assemble debug and release APKs
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleRelease
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: emre-gallery-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: emre-gallery-release-unsigned-${{ github.sha }}
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
