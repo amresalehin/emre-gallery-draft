@@ -897,14 +897,11 @@ object MediaClassifier {
                 .replace(Regex("""/cdn-cgi/image/[^/]+/"""), "/")
                 .replace(Regex("""/(?:[a-z]_[a-zA-Z0-9_-]+,?)+/"""), "/")
 
-            // 9. Strip video quality / transcode suffixes to deduplicate multiple transcode qualities of same video
-            val videoQualityRegex = Regex("""(?:\.(?:144|240|360|480|720|1080|1440|2160)p(?:\.vp9|\.av1)?|[._-](?:144|240|360|480|720|1080|1440|2160)p)\.(webm|mp4|mkv)$""", RegexOption.IGNORE_CASE)
-            val normalizedVideoPath = videoQualityRegex.replace(normalizedHostAndPath) { match ->
-                "." + match.groupValues[1]
-            }
+            // Preserve video rendition identity. 720p and 1080p files are separate
+            // downloadable choices, not duplicates of one another.
+            val normalizedVideoPath = normalizedHostAndPath
 
-            // 10. Format variants normalization (raster image formats .jpg, .jpeg, .webp, .avif, .png of the same asset)
-            // Deduplicate format variants by normalizing raster image extensions to .img
+            // Raster image format variants can still be folded into one image asset.
             val normalizedFormatPath = if (Regex("""\.(?:jpe?g|webp|png|avif)$""", RegexOption.IGNORE_CASE).containsMatchIn(normalizedVideoPath)) {
                 normalizedVideoPath.replace(Regex("""\.(?:jpe?g|webp|png|avif)$""", RegexOption.IGNORE_CASE), ".img")
             } else {
@@ -918,16 +915,52 @@ object MediaClassifier {
                 "sqp", "rs", "sigh", "sig", "sparams",
                 "itag", "range", "ratebypass", "rn", "rbuf", "mime", "gir", "clen", "dur", "lmt"
             )
+            val isVideoResource = Regex("""\.(?:m3u8|mpd|mp4|webm|mov|mkv|m4v)$""", RegexOption.IGNORE_CASE)
+                .containsMatchIn(normalizedFormatPath)
+            val videoVariantParams = setOf("itag", "quality", "height", "width", "res", "resolution", "format", "mime")
             val filteredQuery = if (queryPart.isNotBlank()) {
                 queryPart.split("&").filter { param ->
                     val key = param.substringBefore("=").lowercase(Locale.ROOT)
-                    !TRACKING_QUERY_PARAMS.contains(key) && !sizingParams.contains(key)
+                    !TRACKING_QUERY_PARAMS.contains(key) &&
+                        (!sizingParams.contains(key) || (isVideoResource && videoVariantParams.contains(key)))
                 }.sorted().joinToString("&")
             } else ""
 
             if (filteredQuery.isEmpty()) normalizedFormatPath else "$normalizedFormatPath?$filteredQuery"
         } catch (_: Exception) {
             url.lowercase(Locale.ROOT)
+        }
+    }
+
+    /**
+     * Extracts a human-readable video rendition label from common URL path/query conventions.
+     * Examples: movie_1080p.mp4, ?quality=720p, ?height=1080.
+     */
+    fun extractVideoQualityLabel(url: String): String? {
+        val decoded = runCatching { java.net.URLDecoder.decode(url, "UTF-8") }.getOrDefault(url)
+        val pMatch = Regex("""(?<!\d)(2160|1440|1080|960|720|576|540|480|360|240|144)p(?!\d)""", RegexOption.IGNORE_CASE)
+            .find(decoded)
+        if (pMatch != null) return "${pMatch.groupValues[1]}p"
+
+        val dimensionMatch = Regex("""(?:^|[?&/_-])(?:height|h|res|resolution)=(\d{3,4})(?:\b|&|$)""", RegexOption.IGNORE_CASE)
+            .find(decoded)
+        if (dimensionMatch != null) return "${dimensionMatch.groupValues[1]}p"
+
+        val qualityMatch = Regex("""[?&](?:quality|quality_label)=(?:hd)?(2160|1440|1080|960|720|576|540|480|360|240|144)(?:p)?(?:&|$)""", RegexOption.IGNORE_CASE)
+            .find(decoded)
+        if (qualityMatch != null) return "${qualityMatch.groupValues[1]}p"
+
+        val itag = Regex("""[?&]itag=(\d+)""", RegexOption.IGNORE_CASE).find(decoded)?.groupValues?.get(1)
+        return when (itag) {
+            "315", "308", "266", "701" -> "2160p"
+            "304", "299", "303", "264", "271", "700" -> "1440p"
+            "248", "303", "299", "137", "248", "699" -> "1080p"
+            "247", "302", "136", "698" -> "720p"
+            "244", "135", "697" -> "480p"
+            "243", "134", "696" -> "360p"
+            "242", "133", "695" -> "240p"
+            "278", "160", "694" -> "144p"
+            else -> null
         }
     }
 

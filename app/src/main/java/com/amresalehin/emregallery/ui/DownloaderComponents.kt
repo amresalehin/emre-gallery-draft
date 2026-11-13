@@ -1854,7 +1854,12 @@ fun DownloaderMediaCard(
     val parsedDim = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item).let { (w, h) ->
         if (w != null && h != null) (w to h) else null
     }
-    val dimText = if (parsedDim != null && parsedDim.first > 0 && parsedDim.second > 0) {
+    val qualityLabel = item.resolutionHint?.takeIf {
+        item.isVideo || item.isStream
+    } ?: if (item.isVideo || item.isStream) {
+        MediaClassifier.extractVideoQualityLabel(item.url)
+    } else null
+    val dimText = qualityLabel ?: if (parsedDim != null && parsedDim.first > 0 && parsedDim.second > 0) {
         "${parsedDim.first} × ${parsedDim.second}"
     } else {
         item.resolutionHint ?: "40 × 40"

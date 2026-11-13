@@ -386,8 +386,10 @@ object MediaCaptureEngine {
             headers["Cookie"] = cookieStr
         }
 
+        val resolvedQualityHint = resolutionHint
+            ?: if (classification.isVideo || classification.isStream) MediaClassifier.extractVideoQualityLabel(cleanedUrl) else null
         val metadataMap = mutableMapOf<String, String>()
-        resolutionHint?.let { metadataMap["resolution"] = it }
+        resolvedQualityHint?.let { metadataMap["resolution"] = it }
         mimeHint?.let { metadataMap["mime_hint"] = it }
         metadataMap["source_url"] = baseUrl
 
@@ -403,7 +405,7 @@ object MediaCaptureEngine {
             thumbnailUrl = thumb,
             source = source.label,
             mimeType = classification.mimeType,
-            resolutionHint = resolutionHint,
+            resolutionHint = resolvedQualityHint,
             provenance = MediaProvenance(
                 extractorEngine = "MediaCaptureEngine (${source.label})",
                 pageUrl = baseUrl,
