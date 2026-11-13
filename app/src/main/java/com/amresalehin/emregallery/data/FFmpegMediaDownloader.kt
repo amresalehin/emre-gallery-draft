@@ -83,8 +83,9 @@ object FFmpegMediaDownloader {
     private suspend fun execute(arguments: List<String>): Pair<Boolean, String?> =
         suspendCancellableCoroutine { continuation ->
             val finished = AtomicBoolean(false)
-            val command = FFmpegKit.argumentsToString(arguments.toTypedArray())
-            val session: FFmpegSession = FFmpegKit.executeAsync(command) { completed ->
+            // Pass the argument vector directly: this avoids command-string parsing and
+            // preserves spaces/CRLF in HTTP headers and paths as single arguments.
+            val session: FFmpegSession = FFmpegKit.executeWithArgumentsAsync(arguments.toTypedArray()) { completed ->
                 if (finished.compareAndSet(false, true) && continuation.isActive) {
                     val success = ReturnCode.isSuccess(completed.returnCode)
                     val diagnostic = if (success) null else
