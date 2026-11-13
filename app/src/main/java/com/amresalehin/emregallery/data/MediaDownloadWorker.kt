@@ -104,7 +104,8 @@ class MediaDownloadWorker(
         }.getOrDefault(emptyMap())
 
         val cookieString = OkHttpDownloader.sharedCookieJar.getCookieString(mediaUrl).takeIf { it.isNotBlank() }
-            ?: downloadHeaders["Cookie"]
+            ?: OkHttpDownloader.sharedCookieJar.getCookieString(sourceUrl).takeIf { it.isNotBlank() }
+            ?: downloadHeaders.entries.firstOrNull { it.key.equals("Cookie", true) }?.value
 
         try {
             setForeground(getForegroundInfo())
@@ -118,27 +119,39 @@ class MediaDownloadWorker(
             var downloadedFile: File? = null
             var errorDiagnostic: String? = null
 
-            val isSocialUrl = listOf("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "vimeo.com", "twitter.com", "x.com")
-                .any { mediaUrl.contains(it, ignoreCase = true) }
-            val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
-            val isYtDlpTarget = sourceEngine == "yt-dlp" || isSocialUrl || isStreamingMedia
+            var extractorHandled = false
+            var expectedAudioFromExtractor = false
+            var expectedVideoFromExtractor = false
 
-            // 1. For social video and HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp)
-            if (isYtDlpTarget && GalleryDlEngine.isAvailable()) {
-                setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Downloading stream/video: $title..."))
-                downloadedFile = GalleryDlEngine.downloadMedia(
+            // Resolve the original webpage, not merely a transient CDN URL. yt-dlp
+            // discovers independent audio/video representations and FFmpegKit muxes them.
+            if ((isVideo || isStream) && GalleryDlEngine.isAvailable()) {
+                setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Resolving audio and video tracks: $title..."))
+                val audioAwareResult = GalleryDlEngine.downloadVideoWithAudio(
                     context = applicationContext,
+                    sourcePageUrl = sourceUrl,
                     mediaUrl = mediaUrl,
                     fileName = fileName,
                     referer = referer,
                     headers = downloadHeaders,
                     cookies = cookieString
                 )
+                extractorHandled = audioAwareResult.handled
+                expectedAudioFromExtractor = audioAwareResult.expectedAudio
+                expectedVideoFromExtractor = audioAwareResult.expectedVideo
+                if (audioAwareResult.handled) {
+                    downloadedFile = audioAwareResult.file
+                    if (downloadedFile == null) {
+                        errorDiagnostic = audioAwareResult.errorMessage
+                            ?: "The media extractor resolved this source but could not produce a validated file"
+                    }
+                }
             }
 
-            // 2. Standard or fallback download via OkHttp with HTTP Range resumability
+            // Only use the direct URL when yt-dlp did not resolve/handle the source.
+            // Never downgrade a failed separate-track download to the video-only CDN URL.
             var okHttpResult: OkHttpDownloader.DownloadResult? = null
-            if (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L) {
+            if (!extractorHandled && (downloadedFile == null || !downloadedFile.exists() || downloadedFile.length() == 0L)) {
                 var lastProgressUpdate = System.currentTimeMillis()
                 var lastBytes = 0L
                 val result = OkHttpDownloader.downloadMediaFileDetailed(
@@ -183,7 +196,8 @@ class MediaDownloadWorker(
                         msg.contains("corrupt or invalid raster", ignoreCase = true)
                     } ?: false
 
-                    // 3. Fallback to Python runner only if OkHttp download failed and NOT 429 rate limit and NOT an invalid non-media response
+                    // Legacy fallback is retained for direct media URLs and non-stream
+                    // sources; it is never used after a handled audio/video extraction.
                     if (!isRateLimited && !isInvalidContent && GalleryDlEngine.isAvailable()) {
                         setProgress(workDataOf(KEY_PROGRESS to 0.4f, KEY_STATUS to "Attempting engine fallback for $title..."))
                         downloadedFile = GalleryDlEngine.downloadMedia(
@@ -203,6 +217,23 @@ class MediaDownloadWorker(
                 return@withContext Result.failure()
             }
 
+            if (downloadedFile != null && downloadedFile.exists() && downloadedFile.length() > 0L &&
+                (isVideo || isAudio || isStream)) {
+                val probe = MediaStreamMuxer.probe(downloadedFile)
+                val invalidStreams = probe == null ||
+                    (isVideo && probe?.hasVideo != true) ||
+                    (isAudio && probe?.hasAudio != true) ||
+                    (isStream && probe?.hasVideo != true && probe?.hasAudio != true) ||
+                    (expectedVideoFromExtractor && probe?.hasVideo != true) ||
+                    (expectedAudioFromExtractor && probe?.hasAudio != true)
+                if (invalidStreams) {
+                    Log.w(TAG, "Rejecting downloaded media without required streams: ${downloadedFile.name}")
+                    downloadedFile.delete()
+                    errorDiagnostic = "Downloaded file failed audio/video stream verification"
+                    downloadedFile = null
+                }
+            }
+
             if (downloadedFile != null && downloadedFile.exists() && downloadedFile.length() > 0L) {
                 setProgress(workDataOf(KEY_PROGRESS to 1.0f, KEY_STATUS to "Saved successfully"))
 
@@ -214,7 +245,7 @@ class MediaDownloadWorker(
                     isVideo = isVideo,
                     isAudio = isAudio,
                     isStream = isStream,
-                    format = format,
+                    format = downloadedFile.extension.takeIf { it.isNotBlank() }?.uppercase() ?: format,
                     sizeBytes = downloadedFile.length(),
                     dateAddedMillis = System.currentTimeMillis()
                 )

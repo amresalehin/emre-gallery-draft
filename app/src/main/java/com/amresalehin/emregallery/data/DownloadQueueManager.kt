@@ -78,13 +78,13 @@ object DownloadQueueManager {
         val sId = stackId ?: "stack_${System.currentTimeMillis()}"
         val sTitle = stackTitle ?: sourceDomain ?: "Discovered Media"
         val domain = sourceDomain ?: ""
-        val url = sourceUrl ?: item.url
+        val url = item.provenance.pageUrl.takeIf { it.isNotBlank() } ?: sourceUrl ?: referer ?: item.url
         val headersJson = serializeHeaders(item.downloadHeaders)
 
         val inputData = Data.Builder()
             .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
             .putString(MediaDownloadWorker.KEY_FILE_NAME, item.title)
-            .putString(MediaDownloadWorker.KEY_REFERER, referer)
+            .putString(MediaDownloadWorker.KEY_REFERER, referer ?: url)
             .putString(MediaDownloadWorker.KEY_ITEM_ID, item.id)
             .putString(MediaDownloadWorker.KEY_TITLE, item.title)
             .putBoolean(MediaDownloadWorker.KEY_IS_VIDEO, item.isVideo)
@@ -176,11 +176,12 @@ object DownloadQueueManager {
         val distinctItems = MediaClassifier.deduplicateScrapedItems(items)
 
         val workIds = distinctItems.map { item ->
+            val itemSourceUrl = item.provenance.pageUrl.takeIf { it.isNotBlank() } ?: url
             val headersJson = serializeHeaders(item.downloadHeaders)
             val inputData = Data.Builder()
                 .putString(MediaDownloadWorker.KEY_MEDIA_URL, item.url)
                 .putString(MediaDownloadWorker.KEY_FILE_NAME, item.title)
-                .putString(MediaDownloadWorker.KEY_REFERER, referer)
+                .putString(MediaDownloadWorker.KEY_REFERER, referer ?: itemSourceUrl)
                 .putString(MediaDownloadWorker.KEY_ITEM_ID, item.id)
                 .putString(MediaDownloadWorker.KEY_TITLE, item.title)
                 .putBoolean(MediaDownloadWorker.KEY_IS_VIDEO, item.isVideo)
@@ -190,7 +191,7 @@ object DownloadQueueManager {
                 .putString(MediaDownloadWorker.KEY_STACK_ID, sId)
                 .putString(MediaDownloadWorker.KEY_STACK_TITLE, sTitle)
                 .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, domain)
-                .putString(MediaDownloadWorker.KEY_SOURCE_URL, url)
+                .putString(MediaDownloadWorker.KEY_SOURCE_URL, itemSourceUrl)
                 .putString(MediaDownloadWorker.KEY_SOURCE_ENGINE, item.provenance.extractorEngine)
                 .apply {
                     if (!headersJson.isNullOrBlank()) {

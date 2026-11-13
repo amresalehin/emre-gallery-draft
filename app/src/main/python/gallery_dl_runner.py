@@ -236,7 +236,7 @@ def extract_gallery_dl(url, options_json="{}"):
 def extract_yt_dlp(url, options_json="{}"):
     """
     Extracts media items using yt-dlp exclusively.
-    Selects single pre-muxed format and preserves page URL for resilient save-time downloads.
+    Selects an audio-capable page format and preserves the original webpage URL for save-time extraction.
     """
     clean_url = url.strip() if url else ""
     if not clean_url or not YTDLP_AVAILABLE:
@@ -258,9 +258,14 @@ def extract_yt_dlp(url, options_json="{}"):
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best",
+            # Discovery must retain every representation, including silent video-only
+            # and audio-only entries. The downloader chooses exact formats later.
             "socket_timeout": 20,
-            "user_agent": user_agent
+            "http_headers": {
+                "User-Agent": user_agent,
+                **({"Cookie": str(opts.get("cookies"))} if opts.get("cookies") else {}),
+                **({"Referer": str(opts.get("referer"))} if opts.get("referer") else {})
+            }
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
@@ -292,8 +297,16 @@ def extract_yt_dlp(url, options_json="{}"):
                     thumb = entry.get("thumbnail")
                     filesize = entry.get("filesize") or entry.get("filesize_approx")
 
-                    is_audio_only = entry.get("vcodec") == "none" or v_ext in ["mp3", "m4a", "opus", "aac"]
+                    selected_tracks = select_yt_dlp_formats(entry.get("formats") or [])
+                    is_audio_only = bool(selected_tracks and selected_tracks.get("kind") == "audio_only")
+                    has_video = bool(selected_tracks and selected_tracks.get("has_video"))
+                    has_audio = bool(selected_tracks and selected_tracks.get("has_audio"))
+                    if not selected_tracks:
+                        is_audio_only = entry.get("vcodec") == "none" or v_ext in ["mp3", "m4a", "m4b", "opus", "aac"]
+                        has_video = not is_audio_only
+                        has_audio = is_audio_only or entry.get("acodec") not in (None, "none")
                     is_stream = (".m3u8" in clean_url) or (".mpd" in clean_url)
+                    is_video = has_video and not is_audio_only
                     category = "AUDIO" if is_audio_only else ("STREAMS" if is_stream else "VIDEOS")
 
                     url_hash = hashlib.sha256(direct_url.encode('utf-8')).hexdigest()[:12]
@@ -302,11 +315,12 @@ def extract_yt_dlp(url, options_json="{}"):
                         "url": direct_url,
                         "title": item_title,
                         "category": category,
-                        "format": v_ext.upper(),
-                        "mimeType": f"audio/{v_ext}" if is_audio_only else ("application/x-mpegURL" if is_stream else f"video/{v_ext}"),
-                        "isVideo": not is_audio_only,
+                        "format": ("HLS/DASH" if is_stream else ("AUDIO" if is_audio_only else ("VIDEO" if v_ext in ["m4a", "m4b", "aac", "opus", "mp3"] else v_ext.upper()))),
+                        "mimeType": ("audio/vnd.apple.mpegurl" if is_stream and is_audio_only else ("application/x-mpegURL" if is_stream else (f"audio/{v_ext}" if is_audio_only else f"video/{'mp4' if v_ext in ['m4a', 'm4b', 'aac', 'opus', 'mp3'] else v_ext}"))),
+                        "isVideo": is_video,
                         "isAudio": is_audio_only,
                         "isStream": is_stream,
+                        "hasAudio": has_audio,
                         "thumbnailUrl": thumb,
                         "resolutionHint": resolution_hint,
                         "sizeBytes": filesize,
@@ -326,6 +340,230 @@ def extract_yt_dlp(url, options_json="{}"):
         "itemsCount": len(items),
         "items": items
     })
+
+
+def _format_sort_key(fmt, video=True):
+    """Stable quality ordering for yt-dlp format dictionaries."""
+    def number(key, default=0):
+        try:
+            value = fmt.get(key)
+            return float(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    if video:
+        return (
+            number("height"), number("width"), number("fps"),
+            number("vbr"), number("tbr"), number("filesize") or number("filesize_approx")
+        )
+    return (
+        number("quality"), number("abr"), number("asr"),
+        number("tbr"), number("filesize") or number("filesize_approx")
+    )
+
+
+def select_yt_dlp_formats(formats):
+    """Choose separate best video/audio tracks when available, otherwise a muxed format."""
+    if not isinstance(formats, list):
+        return None
+
+    usable = []
+    for fmt in formats:
+        if not isinstance(fmt, dict) or not fmt.get("format_id") or fmt.get("has_drm"):
+            continue
+        protocol = str(fmt.get("protocol") or "").lower()
+        if protocol in ("mhtml", "http_dash_segments") and not fmt.get("url"):
+            continue
+        usable.append(fmt)
+
+    def has_codec(value):
+        return bool(value) and str(value).lower() != "none"
+
+    video_only = [f for f in usable if has_codec(f.get("vcodec")) and not has_codec(f.get("acodec"))]
+    audio_only = [f for f in usable if has_codec(f.get("acodec")) and not has_codec(f.get("vcodec"))]
+    muxed = [f for f in usable if has_codec(f.get("vcodec")) and has_codec(f.get("acodec"))]
+
+    if video_only and audio_only:
+        video_fmt = max(video_only, key=lambda f: _format_sort_key(f, video=True))
+        audio_fmt = max(audio_only, key=lambda f: _format_sort_key(f, video=False))
+        return {
+            "kind": "split",
+            "video_format_id": str(video_fmt["format_id"]),
+            "audio_format_id": str(audio_fmt["format_id"]),
+            "has_video": True,
+            "has_audio": True,
+        }
+
+    if muxed:
+        fmt = max(muxed, key=lambda f: _format_sort_key(f, video=True))
+        return {
+            "kind": "single",
+            "format_id": str(fmt["format_id"]),
+            "has_video": True,
+            "has_audio": True,
+        }
+
+    # Preserve legitimate video-only / audio-only media. The Kotlin layer decides
+    # whether that result satisfies the discovered item's declared media type.
+    if video_only:
+        fmt = max(video_only, key=lambda f: _format_sort_key(f, video=True))
+        return {"kind": "video_only", "format_id": str(fmt["format_id"]), "has_video": True, "has_audio": False}
+    if audio_only:
+        fmt = max(audio_only, key=lambda f: _format_sort_key(f, video=False))
+        return {"kind": "audio_only", "format_id": str(fmt["format_id"]), "has_video": False, "has_audio": True}
+    return None
+
+
+def _resolve_ytdlp_download_path(ydl, info, work_dir, prefix):
+    """Resolve the actual output file returned by yt-dlp, including postprocessor renames."""
+    candidates = []
+    if isinstance(info, dict):
+        for entry in info.get("requested_downloads") or []:
+            if isinstance(entry, dict):
+                for key in ("filepath", "_filename"):
+                    if entry.get(key):
+                        candidates.append(entry[key])
+        for key in ("filepath", "_filename"):
+            if info.get(key):
+                candidates.append(info[key])
+        try:
+            candidates.append(ydl.prepare_filename(info))
+        except Exception:
+            pass
+
+    for candidate in candidates:
+        try:
+            path = os.path.abspath(str(candidate))
+            if os.path.isfile(path) and os.path.getsize(path) > 0:
+                return path
+        except Exception:
+            continue
+
+    try:
+        matches = sorted(
+            os.path.join(work_dir, name)
+            for name in os.listdir(work_dir)
+            if name.startswith(prefix + ".")
+            and not name.endswith((".part", ".ytdl", ".tmp"))
+            and os.path.isfile(os.path.join(work_dir, name))
+            and os.path.getsize(os.path.join(work_dir, name)) > 0
+        )
+        return matches[0] if matches else None
+    except Exception:
+        return None
+
+
+def _download_ytdlp_format(url, format_id, work_dir, prefix, http_headers):
+    """Download one exact yt-dlp format without triggering an external merger."""
+    os.makedirs(work_dir, exist_ok=True)
+    outtmpl = os.path.join(work_dir, prefix + ".%(ext)s")
+    ydl_opts = {
+        "format": str(format_id),
+        "outtmpl": outtmpl,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "continuedl": False,
+        "overwrites": True,
+        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 10,
+        "file_access_retries": 5,
+        "skip_unavailable_fragments": False,
+        "concurrent_fragment_downloads": 1,
+        "http_headers": http_headers,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        path = _resolve_ytdlp_download_path(ydl, info, work_dir, prefix)
+    if not path:
+        raise RuntimeError("yt-dlp reported completion but no non-empty output file was found")
+    return path
+
+
+def download_yt_dlp_tracks(url, work_dir, headers_json="{}"):
+    """Resolve a page and download the best audio/video tracks independently.
+
+    The function deliberately does not mux. Android's bundled FFmpegKit performs
+    muxing and probes the output before the caller moves it into the media library.
+    """
+    clean_url = str(url or "").strip()
+    if not clean_url or not YTDLP_AVAILABLE:
+        return json.dumps({"handled": False, "success": False, "error": "yt-dlp unavailable or empty source URL"})
+
+    try:
+        extra_headers = json.loads(headers_json) if headers_json else {}
+        if not isinstance(extra_headers, dict):
+            extra_headers = {}
+    except Exception:
+        extra_headers = {}
+
+    http_headers = {str(k): str(v) for k, v in extra_headers.items() if v is not None}
+    if not any(k.lower() == "user-agent" for k in http_headers):
+        http_headers["User-Agent"] = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+
+    selection = None
+    try:
+        os.makedirs(work_dir, exist_ok=True)
+        inspect_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "noplaylist": True,
+            "socket_timeout": 30,
+            "retries": 3,
+            "http_headers": http_headers,
+            "extract_flat": False,
+        }
+        with yt_dlp.YoutubeDL(inspect_opts) as ydl:
+            info = ydl.extract_info(clean_url, download=False)
+
+        if isinstance(info, dict) and info.get("entries"):
+            info = next((entry for entry in info["entries"] if isinstance(entry, dict)), None)
+        if not isinstance(info, dict):
+            return json.dumps({"handled": False, "success": False, "error": "No media entry returned by yt-dlp"})
+
+        formats = info.get("formats") or []
+        selection = select_yt_dlp_formats(formats)
+        if selection is None:
+            # A direct-media extractor may expose a single format on the top-level info.
+            top = dict(info)
+            top.setdefault("format_id", info.get("format_id") or "best")
+            selection = select_yt_dlp_formats([top])
+        if selection is None:
+            return json.dumps({"handled": False, "success": False, "error": "yt-dlp found no usable audio/video formats"})
+
+        source_url = info.get("webpage_url") or info.get("original_url") or clean_url
+        title = info.get("title") or info.get("id") or "media"
+        result = {
+            "handled": True,
+            "success": False,
+            "kind": selection["kind"],
+            "hasVideo": bool(selection.get("has_video")),
+            "hasAudio": bool(selection.get("has_audio")),
+            "title": str(title),
+            "sourceUrl": str(source_url),
+        }
+
+        if selection["kind"] == "split":
+            video_path = _download_ytdlp_format(source_url, selection["video_format_id"], work_dir, "video", http_headers)
+            audio_path = _download_ytdlp_format(source_url, selection["audio_format_id"], work_dir, "audio", http_headers)
+            result.update({"success": True, "videoPath": video_path, "audioPath": audio_path})
+        else:
+            media_path = _download_ytdlp_format(source_url, selection["format_id"], work_dir, "media", http_headers)
+            result.update({"success": True, "mediaPath": media_path})
+
+        return json.dumps(result)
+    except Exception as exc:
+        # Only block a raw-URL fallback once an actual representation was selected.
+        # Extraction/network failures before selection should still allow direct HTTP.
+        return json.dumps({
+            "handled": selection is not None,
+            "success": False,
+            "hasVideo": bool(selection and selection.get("has_video")),
+            "hasAudio": bool(selection and selection.get("has_audio")),
+            "error": "%s: %s" % (exc.__class__.__name__, str(exc)),
+        })
 
 def extract_media(url, options_json="{}"):
     """
@@ -382,7 +620,8 @@ def extract_media(url, options_json="{}"):
 
 def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None):
     """
-    Downloads media file using yt-dlp (with single pre-muxed format) or requests with cookies/headers.
+    Downloads direct media or a genuinely muxed yt-dlp format. Separate-track downloads
+    are handled by download_yt_dlp_tracks and the Android FFmpegKit muxer.
     Never commits raw .m3u8 or .mpd playlist text as a finished file.
     """
     extra_headers = {}
@@ -414,7 +653,7 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
                 "outtmpl": target_path,
                 "quiet": True,
                 "no_warnings": True,
-                "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best",
+                "format": "best[vcodec!=none][acodec!=none]/best[acodec!=none]",
                 "socket_timeout": 30,
                 "http_headers": http_headers
             }
@@ -496,7 +735,7 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
                 "outtmpl": target_path,
                 "quiet": True,
                 "no_warnings": True,
-                "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best",
+                "format": "best[vcodec!=none][acodec!=none]/best[acodec!=none]",
                 "http_headers": http_headers
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

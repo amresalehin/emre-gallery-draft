@@ -124,7 +124,7 @@ object MediaCaptureEngine {
                         }
                     }
                     if (chosenVideo) {
-                        list.push({u: chosenVideo, s: 'DOM', p: poster, r: 'video'});
+                        list.push({u: chosenVideo, s: 'DOM', p: poster, t: 'video'});
                     } else if (poster) {
                         list.push({u: poster, s: 'POSTER', r: 'poster'});
                     }
@@ -148,7 +148,10 @@ object MediaCaptureEngine {
                         }
                     }
                     if (chosenAudio) {
-                        list.push({u: chosenAudio, s: 'DOM', r: 'audio'});
+                        // Keep media semantics separate from the resolution hint. The
+                        // previous `r: 'audio'` marker was parsed as a resolution and
+                        // the URL was then incorrectly classified as an image.
+                        list.push({u: chosenAudio, s: 'DOM', t: 'audio'});
                     }
                 }
 
@@ -484,11 +487,18 @@ object MediaCaptureEngine {
 
         if (isVideo || isAudio || isImage) {
             val cleanReqUrl = if (isVideo) MediaClassifier.cleanMediaUrl(reqUrl) else reqUrl
+            val requestMimeHint = when {
+                acceptHeader.startsWith("audio/") -> acceptHeader.substringBefore(',').substringBefore(';').trim()
+                acceptHeader.startsWith("video/") -> acceptHeader.substringBefore(',').substringBefore(';').trim()
+                acceptHeader.contains("mpegurl") -> "application/x-mpegURL"
+                acceptHeader.contains("dash+xml") -> "application/dash+xml"
+                else -> null
+            }
             val item = buildMediaItem(
                 rawUrl = cleanReqUrl,
                 source = ExtractionSource.NETWORK_INTERCEPT,
                 baseUrl = baseUrl,
-                mimeHint = null
+                mimeHint = requestMimeHint
             )
             if (item != null) {
                 onMediaDiscovered(item)
@@ -527,14 +537,21 @@ object MediaCaptureEngine {
                         "IFRAME" -> ExtractionSource.IFRAME
                         else -> ExtractionSource.DOM_SCRAPE
                     }
-                    val poster = obj.optString("p", "").ifBlank { null }
-                    val res = obj.optString("r", "").ifBlank { null }
+                    val poster = obj.optString("p", "").takeIf { it.isNotBlank() }
+                    val res = obj.optString("r", "").takeIf { it.isNotBlank() }
+                    val semanticType = obj.optString("t", "").takeIf { it.isNotBlank() }
+                    val mimeHint = when {
+                        semanticType.equals("audio", ignoreCase = true) || res.equals("audio", ignoreCase = true) -> "audio/*"
+                        semanticType.equals("video", ignoreCase = true) -> "video/*"
+                        else -> null
+                    }
                     val item = buildMediaItem(
                         rawUrl = rawUrl,
                         source = source,
                         baseUrl = baseUrl,
                         poster = poster,
-                        resolutionHint = res,
+                        resolutionHint = res.takeUnless { it.equals("audio", ignoreCase = true) || it.equals("video", ignoreCase = true) },
+                        mimeHint = mimeHint,
                         indexHint = i
                     )
                     if (item != null) {

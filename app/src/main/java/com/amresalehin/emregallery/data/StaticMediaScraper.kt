@@ -151,12 +151,13 @@ class StaticMediaScraper {
             domSelector: String? = null,
             declaredWidth: Int? = null,
             declaredHeight: Int? = null,
-            itemTitleHint: String? = null
+            itemTitleHint: String? = null,
+            mimeHint: String? = null
         ) {
             val resolved = MediaClassifier.resolveUrl(rawUrl, baseUrl) ?: return
             if (!MediaClassifier.isValidMedia(resolved)) return
 
-            val classification = MediaClassifier.classify(resolved)
+            val classification = MediaClassifier.classify(resolved, mimeHint)
             val isVidAudStream = classification.isVideo || classification.isAudio || classification.isStream
             if (ContentAwareMediaFilter.isUiChromeUrl(
                     url = resolved,
@@ -172,7 +173,7 @@ class StaticMediaScraper {
             // Resolve full-resolution media if URL is a known thumbnail (e.g. Wikimedia / MediaWiki)
             val resolvedInfo = MediaClassifier.resolveOriginalMedia(resolved)
             val downloadUrl = resolvedInfo.mediaUrl
-            val targetClassification = MediaClassifier.classify(downloadUrl)
+            val targetClassification = MediaClassifier.classify(downloadUrl, mimeHint)
 
             if (ContentAwareMediaFilter.isUiChromeUrl(
                     url = downloadUrl,
@@ -257,7 +258,7 @@ class StaticMediaScraper {
 
         // 2. Video elements & posters (deduplicated per video element)
         for (video in doc.select("video")) {
-            val poster = video.attr("poster").ifBlank { null }
+            val poster = video.attr("poster").takeIf { it.isNotBlank() }
             val vw = video.attr("width").toIntOrNull()
             val vh = video.attr("height").toIntOrNull()
             val vRes = if (vw != null && vh != null) "${vw}x${vh}" else null
@@ -275,7 +276,17 @@ class StaticMediaScraper {
                 }
             }
             if (!chosenUrl.isNullOrBlank()) {
-                addCandidate(chosenUrl, ExtractionSource.DOM_SCRAPE, resolution = vRes, posterUrl = poster, domSelector = "video")
+                val declaredVideoMime = video.attr("type").ifBlank {
+                    video.selectFirst("source[type]")?.attr("type").orEmpty()
+                }.takeIf { it.startsWith("video/", ignoreCase = true) } ?: "video/*"
+                addCandidate(
+                    chosenUrl,
+                    ExtractionSource.DOM_SCRAPE,
+                    resolution = vRes,
+                    posterUrl = poster,
+                    domSelector = "video",
+                    mimeHint = declaredVideoMime
+                )
             }
             if (!poster.isNullOrBlank() && chosenUrl == null) {
                 addCandidate(poster, ExtractionSource.DOM_SCRAPE, resolution = "Poster", domSelector = "video[poster]")
@@ -297,7 +308,15 @@ class StaticMediaScraper {
                 }
             }
             if (!chosenAudio.isNullOrBlank()) {
-                addCandidate(chosenAudio, ExtractionSource.DOM_SCRAPE, domSelector = "audio")
+                val declaredAudioMime = audio.attr("type").ifBlank {
+                    audio.selectFirst("source[type]")?.attr("type").orEmpty()
+                }.takeIf { it.startsWith("audio/", ignoreCase = true) } ?: "audio/*"
+                addCandidate(
+                    chosenAudio,
+                    ExtractionSource.DOM_SCRAPE,
+                    domSelector = "audio",
+                    mimeHint = declaredAudioMime
+                )
             }
         }
 

@@ -1187,8 +1187,23 @@ object MediaClassifier {
         val lower = url.lowercase(Locale.ROOT)
         val mimeLower = mimeHint?.lowercase(Locale.ROOT) ?: ""
 
-        // 1. Streaming media (HLS & DASH)
+        // 1. Streaming media (HLS & DASH). Audio-only HLS playlists are still streams,
+        // but must retain their audio semantics so the downloader does not treat them
+        // as ordinary video manifests.
         val cleanPath = lower.substringBefore("?").substringBefore("#")
+        val isAudioStream = mimeLower.startsWith("audio/") &&
+                (cleanPath.endsWith(".m3u8") || lower.contains(".m3u8") ||
+                 mimeLower.contains("mpegurl") || mimeLower.contains("vnd.apple.mpegurl"))
+        if (isAudioStream) {
+            return ClassificationResult(
+                category = MediaCategory.STREAMS,
+                format = "HLS Audio",
+                mimeType = mimeLower,
+                isVideo = false,
+                isAudio = true,
+                isStream = true
+            )
+        }
         val isHlsManifest = cleanPath.endsWith(".m3u8") || lower.contains(".m3u8") ||
                 mimeLower.contains("x-mpegurl") || mimeLower.contains("vnd.apple.mpegurl") || mimeLower.contains("application/mpegurl")
         if (isHlsManifest) {
@@ -1214,6 +1229,36 @@ object MediaClassifier {
             )
         }
 
+        // An explicit audio MIME type is authoritative, including extensionless CDN URLs
+        // and less common codecs which cannot be inferred from a filename suffix.
+        if (mimeLower.startsWith("audio/")) {
+            val subtype = mimeLower.substringAfter("audio/").substringBefore(';').trim()
+            val audioFormat = when {
+                subtype.isBlank() || subtype == "*" -> "AUDIO"
+                subtype.contains("mpeg") || subtype == "mp3" -> "MP3"
+                subtype.contains("aac") -> "AAC"
+                subtype.contains("mp4") || subtype.contains("m4a") -> "M4A"
+                subtype.contains("ogg") -> "OGG"
+                subtype.contains("opus") -> "OPUS"
+                subtype.contains("wav") || subtype.contains("wave") -> "WAV"
+                subtype.contains("webm") -> "WEBM AUDIO"
+                subtype.contains("flac") -> "FLAC"
+                subtype.contains("amr") -> "AMR"
+                subtype.contains("aiff") -> "AIFF"
+                subtype.contains("caf") -> "CAF"
+                subtype.contains("matroska") -> "MKA"
+                else -> subtype.uppercase(Locale.ROOT).ifBlank { "AUDIO" }
+            }
+            return ClassificationResult(
+                category = MediaCategory.AUDIO,
+                format = audioFormat,
+                mimeType = mimeLower.substringBefore(';').trim(),
+                isVideo = false,
+                isAudio = true,
+                isStream = false
+            )
+        }
+
         // 2. Video formats
         if (lower.contains(".mp4") || mimeLower.contains("video/mp4") || lower.contains("video/mp4")) {
             return ClassificationResult(
@@ -1225,7 +1270,7 @@ object MediaClassifier {
                 isStream = false
             )
         }
-        if (lower.contains(".webm") || mimeLower.contains("video/webm")) {
+        if ((lower.contains(".webm") && !mimeLower.startsWith("audio/")) || mimeLower.contains("video/webm")) {
             return ClassificationResult(
                 category = MediaCategory.VIDEOS,
                 format = "WEBM",
@@ -1256,7 +1301,8 @@ object MediaClassifier {
             )
         }
         if (mimeLower.startsWith("video/")) {
-            val sub = mimeLower.substringAfter("video/").uppercase(Locale.ROOT)
+            val sub = mimeLower.substringAfter("video/").substringBefore(';').trim()
+                .takeUnless { it.isBlank() || it == "*" }?.uppercase(Locale.ROOT) ?: "VIDEO"
             return ClassificationResult(
                 category = MediaCategory.VIDEOS,
                 format = sub,
@@ -1268,17 +1314,50 @@ object MediaClassifier {
         }
 
         // 3. Audio formats
-        if (lower.contains(".mp3") || mimeLower.contains("audio/mpeg") || mimeLower.contains("audio/mp3")) {
+        val audioPath = cleanPath
+        val audioExtension = audioPath.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        val recognizedAudioExtensions = setOf(
+            "mp3", "m4a", "m4b", "aac", "wav", "wave", "oga", "ogg", "opus",
+            "weba", "webm", "flac", "amr", "aiff", "aif", "caf", "wma", "mka"
+        )
+        if (audioExtension in recognizedAudioExtensions || lower.contains(".mp3") ||
+            mimeLower.contains("audio/mpeg") || mimeLower.contains("audio/mp3")) {
             return ClassificationResult(
                 category = MediaCategory.AUDIO,
-                format = "MP3",
-                mimeType = "audio/mpeg",
+                format = when (audioExtension) {
+                    "m4a", "m4b" -> "M4A"
+                    "aac" -> "AAC"
+                    "wav", "wave" -> "WAV"
+                    "oga", "ogg" -> "OGG"
+                    "opus" -> "OPUS"
+                    "weba", "webm" -> "WEBM AUDIO"
+                    "flac" -> "FLAC"
+                    "amr" -> "AMR"
+                    "aiff", "aif" -> "AIFF"
+                    "caf" -> "CAF"
+                    "wma" -> "WMA"
+                    "mka" -> "MKA"
+                    else -> "MP3"
+                },
+                mimeType = mimeLower.takeIf { it.startsWith("audio/") } ?: when (audioExtension) {
+                    "m4a", "m4b", "aac" -> "audio/mp4"
+                    "wav", "wave" -> "audio/wav"
+                    "oga", "ogg", "opus" -> "audio/ogg"
+                    "weba", "webm" -> "audio/webm"
+                    "flac" -> "audio/flac"
+                    "amr" -> "audio/amr"
+                    "aiff", "aif" -> "audio/aiff"
+                    "caf" -> "audio/x-caf"
+                    "wma" -> "audio/x-ms-wma"
+                    "mka" -> "audio/x-matroska"
+                    else -> "audio/mpeg"
+                },
                 isVideo = false,
                 isAudio = true,
                 isStream = false
             )
         }
-        if (lower.contains(".m4a") || lower.contains(".aac") || mimeLower.contains("audio/aac") || mimeLower.contains("audio/mp4")) {
+        if (lower.contains(".m4a") || lower.contains(".m4b") || lower.contains(".aac") || mimeLower.contains("audio/aac") || mimeLower.contains("audio/mp4")) {
             return ClassificationResult(
                 category = MediaCategory.AUDIO,
                 format = if (lower.contains(".aac")) "AAC" else "M4A",
@@ -1298,7 +1377,7 @@ object MediaClassifier {
                 isStream = false
             )
         }
-        if (lower.contains(".ogg") || lower.contains(".opus") || mimeLower.contains("audio/ogg") || mimeLower.contains("audio/opus")) {
+        if (lower.contains(".oga") || lower.contains(".ogg") || lower.contains(".opus") || mimeLower.contains("audio/ogg") || mimeLower.contains("audio/opus")) {
             return ClassificationResult(
                 category = MediaCategory.AUDIO,
                 format = if (lower.contains(".opus")) "OPUS" else "OGG",

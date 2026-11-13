@@ -11,6 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.URL
+import java.util.UUID
 
 data class GalleryDlStatus(
     val available: Boolean,
@@ -38,6 +39,14 @@ data class GalleryDlOptions(
     val userAgent: String? = null,
     val cookies: String? = null,
     val timeoutSeconds: Int = 30
+)
+
+data class AudioAwareDownloadResult(
+    val handled: Boolean,
+    val file: File? = null,
+    val expectedAudio: Boolean = false,
+    val expectedVideo: Boolean = false,
+    val errorMessage: String? = null
 )
 
 data class GalleryDlExtractResult(
@@ -214,7 +223,7 @@ object GalleryDlEngine {
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
                 provenance = MediaProvenance(
-                    extractorEngine = "gallery-dl / yt-dlp",
+                    extractorEngine = obj.optString("source", "gallery-dl"),
                     pageUrl = pageUrl
                 ),
                 metadata = mapOf("source_url" to pageUrl),
@@ -288,6 +297,161 @@ object GalleryDlEngine {
 
     suspend fun extractMedia(url: String, options: GalleryDlOptions = GalleryDlOptions()): GalleryDlExtractResult =
         executePythonExtractor("extract_media", url, options)
+
+    /**
+     * Resolves the original webpage with yt-dlp, downloads separate tracks when offered,
+     * muxes them with FFmpegKit, and returns only a locally validated media file.
+     * `handled=true` means the extractor resolved the source and callers must not silently
+     * fall back to a raw CDN URL after a track download or mux failure.
+     */
+    suspend fun downloadVideoWithAudio(
+        context: Context,
+        sourcePageUrl: String,
+        mediaUrl: String,
+        fileName: String,
+        referer: String? = null,
+        headers: Map<String, String>? = null,
+        cookies: String? = null
+    ): AudioAwareDownloadResult = withContext(Dispatchers.IO) {
+        if (!isAvailable()) return@withContext AudioAwareDownloadResult(handled = false)
+
+        val sourceUrl = sourcePageUrl.takeIf { it.isNotBlank() }
+            ?: referer?.takeIf { it.isNotBlank() }
+            ?: mediaUrl
+        val workDir = File(context.cacheDir, "audio-video-${UUID.randomUUID()}")
+        if (!workDir.mkdirs() && !workDir.isDirectory) {
+            return@withContext AudioAwareDownloadResult(handled = false, errorMessage = "Unable to create temporary download directory")
+        }
+
+        var extractorHandled = false
+        try {
+            val effectiveHeaders = LinkedHashMap<String, String>()
+            headers?.forEach { (key, value) -> effectiveHeaders[key] = value }
+            if (!effectiveHeaders.keys.any { it.equals("User-Agent", true) }) {
+                effectiveHeaders["User-Agent"] = OkHttpDownloader.DEFAULT_USER_AGENT
+            }
+            if (!referer.isNullOrBlank() && !effectiveHeaders.keys.any { it.equals("Referer", true) }) {
+                effectiveHeaders["Referer"] = referer
+            }
+            val effectiveCookies = cookies ?: effectiveHeaders.entries.firstOrNull { it.key.equals("Cookie", true) }?.value
+            if (!effectiveCookies.isNullOrBlank()) {
+                val existingCookieKeys = effectiveHeaders.keys.filter { it.equals("Cookie", true) }
+                existingCookieKeys.forEach { effectiveHeaders.remove(it) }
+                effectiveHeaders["Cookie"] = effectiveCookies
+            }
+            val headersJson = JSONObject().apply {
+                effectiveHeaders.forEach { (key, value) -> put(key, value) }
+            }.toString()
+
+            val runner = Python.getInstance().getModule("gallery_dl_runner")
+            val raw = runner.callAttr("download_yt_dlp_tracks", sourceUrl, workDir.absolutePath, headersJson).toString()
+            val result = JSONObject(raw)
+            val handled = result.optBoolean("handled", false)
+            extractorHandled = handled
+            if (!handled) {
+                return@withContext AudioAwareDownloadResult(
+                    handled = false,
+                    errorMessage = result.optString("error").takeIf { it.isNotBlank() }
+                )
+            }
+
+            val expectedAudio = result.optBoolean("hasAudio", false)
+            val expectedVideo = result.optBoolean("hasVideo", false)
+            if (!result.optBoolean("success", false)) {
+                return@withContext AudioAwareDownloadResult(
+                    handled = true,
+                    expectedAudio = expectedAudio,
+                    expectedVideo = expectedVideo,
+                    errorMessage = result.optString("error", "yt-dlp track download failed")
+                )
+            }
+
+            fun privateFile(key: String): File? {
+                val rawPath = result.optString(key).takeIf { it.isNotBlank() } ?: return null
+                val candidate = File(rawPath).canonicalFile
+                val root = workDir.canonicalFile
+                if (!candidate.path.startsWith(root.path + File.separator)) return null
+                return candidate.takeIf { it.isFile && it.length() > 0L }
+            }
+
+            val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val galleryFolder = File(publicDownloads, "Emre Gallery")
+            val outputDir = if ((galleryFolder.exists() || galleryFolder.mkdirs()) && galleryFolder.canWrite()) {
+                galleryFolder
+            } else {
+                val fallback = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir, "Emre Gallery")
+                if (!fallback.exists()) fallback.mkdirs()
+                fallback
+            }
+            val safeName = fileName.replace(Regex("[^a-zA-Z0-9._-]"), "_").ifBlank { "media" }
+            val stem = safeName.substringBeforeLast('.', safeName).ifBlank { "media" }
+            val targetBase = File(outputDir, "${System.currentTimeMillis()}_$stem.mp4")
+            var outputFile: File? = null
+
+            when (result.optString("kind")) {
+                "split" -> {
+                    val videoFile = privateFile("videoPath")
+                    val audioFile = privateFile("audioPath")
+                    if (videoFile == null || audioFile == null) {
+                        return@withContext AudioAwareDownloadResult(
+                            handled = true, expectedAudio = true, expectedVideo = true,
+                            errorMessage = "yt-dlp did not produce both non-empty audio and video tracks"
+                        )
+                    }
+                    outputFile = MediaStreamMuxer.mux(videoFile, audioFile, targetBase)
+                    if (outputFile == null) {
+                        return@withContext AudioAwareDownloadResult(
+                            handled = true, expectedAudio = true, expectedVideo = true,
+                            errorMessage = "FFmpeg could not mux the selected audio and video tracks"
+                        )
+                    }
+                }
+                "single", "video_only", "audio_only" -> {
+                    val sourceFile = privateFile("mediaPath")
+                    if (sourceFile == null) {
+                        return@withContext AudioAwareDownloadResult(
+                            handled = true, expectedAudio = expectedAudio, expectedVideo = expectedVideo,
+                            errorMessage = "yt-dlp completed without a non-empty media file"
+                        )
+                    }
+                    val extension = sourceFile.extension.ifBlank { "bin" }
+                    val targetFile = File(outputDir, "${System.currentTimeMillis()}_$stem.$extension")
+                    sourceFile.copyTo(targetFile, overwrite = true)
+                    outputFile = targetFile
+                }
+                else -> {
+                    return@withContext AudioAwareDownloadResult(
+                        handled = true, expectedAudio = expectedAudio, expectedVideo = expectedVideo,
+                        errorMessage = "yt-dlp returned an unsupported track selection"
+                    )
+                }
+            }
+
+            val finalFile = outputFile
+            val probe = finalFile?.let { MediaStreamMuxer.probe(it) }
+            if (finalFile == null || probe == null ||
+                (expectedVideo && !probe.hasVideo) || (expectedAudio && !probe.hasAudio)) {
+                finalFile?.delete()
+                return@withContext AudioAwareDownloadResult(
+                    handled = true, expectedAudio = expectedAudio, expectedVideo = expectedVideo,
+                    errorMessage = "Downloaded file failed audio/video stream verification"
+                )
+            }
+
+            android.media.MediaScannerConnection.scanFile(context, arrayOf(finalFile.absolutePath), null, null)
+            AudioAwareDownloadResult(
+                handled = true, file = finalFile, expectedAudio = expectedAudio, expectedVideo = expectedVideo
+            )
+        } catch (t: Throwable) {
+            Log.e(TAG, "Audio-aware yt-dlp download failed for $sourceUrl", t)
+            AudioAwareDownloadResult(
+                handled = extractorHandled,
+                errorMessage = t.localizedMessage ?: "Audio-aware extraction or muxing failed"
+            )
+        } finally {
+            runCatching { workDir.deleteRecursively() }
+        }
+    }
 
     /**
      * Downloads a media file with proper referer header via Python requests or fallback.
