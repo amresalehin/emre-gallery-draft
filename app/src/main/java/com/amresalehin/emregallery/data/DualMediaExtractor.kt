@@ -84,7 +84,8 @@ class DirectMediaProvider : ExtractionProvider {
             source = "Direct Link",
             provenance = MediaProvenance(
                 extractorEngine = "Direct URL",
-                pageUrl = context.url
+                pageUrl = context.url,
+                downloadStrategy = if (classification.isStream) MediaDownloadStrategy.YTDLP_STREAM else MediaDownloadStrategy.DIRECT_HTTP
             ),
             metadata = mapOf("source_url" to context.url),
             downloadHeaders = mapOf(
@@ -99,7 +100,7 @@ class DirectMediaProvider : ExtractionProvider {
 
 class GalleryDlProvider : ExtractionProvider {
     override fun isApplicable(context: MediaRequestContext): Boolean {
-        return GalleryDlEngine.isAvailable() && GalleryDlEngine.checkSupport(context.url).isSupported
+        return GalleryDlEngine.isGalleryDlAvailable() && GalleryDlEngine.checkSupport(context.url).isSupported
     }
 
     override suspend fun extract(
@@ -125,13 +126,8 @@ class GalleryDlProvider : ExtractionProvider {
 
 class YtDlpProvider : ExtractionProvider {
     override fun isApplicable(context: MediaRequestContext): Boolean {
-        if (!GalleryDlEngine.isAvailable()) return false
-        val lower = context.url.lowercase()
-        val videoHosts = listOf(
-            "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
-            "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com"
-        )
-        return videoHosts.any { lower.contains(it) } || lower.contains(".m3u8") || lower.contains(".mpd")
+        return GalleryDlEngine.isYtDlpAvailable() &&
+                (MediaProviderRouting.isYtDlpPageUrl(context.url) || MediaProviderRouting.isManifestUrl(context.url))
     }
 
     override suspend fun extract(
@@ -235,7 +231,8 @@ class DualMediaExtractor(private val context: Context) {
         val pageTitle: String = "",
         val domain: String = "",
         val items: List<ScrapedMediaItem> = emptyList(),
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val providerErrors: List<String> = emptyList()
     )
 
     enum class ExtractionPhase {
@@ -278,6 +275,7 @@ class DualMediaExtractor(private val context: Context) {
 
         extractionJob = scope.launch {
             val itemsMap = LinkedHashMap<String, ScrapedMediaItem>()
+            val providerErrors = java.util.Collections.synchronizedList(mutableListOf<String>())
             val itemsMutex = Mutex()
 
             suspend fun updateItems(
@@ -338,7 +336,13 @@ class DualMediaExtractor(private val context: Context) {
                             val secondary = if (preferred === candidateVideo) existing else candidateVideo
                             val upgraded = preferred.copy(
                                 id = existing.id,
-                                thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl
+                                thumbnailUrl = preferred.thumbnailUrl ?: secondary.thumbnailUrl,
+                                provenance = preferred.provenance.copy(
+                                    downloadStrategy = MediaDownloadStrategy.merge(
+                                        preferred.provenance.downloadStrategy,
+                                        secondary.provenance.downloadStrategy
+                                    )
+                                )
                             )
                             if (upgraded != existing) {
                                 itemsMap[key] = upgraded
@@ -397,7 +401,13 @@ class DualMediaExtractor(private val context: Context) {
                             url = resolvedUrl,
                             thumbnailUrl = mergedThumb,
                             resolutionHint = mergedResolution,
-                            provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
+                            provenance = preferred.provenance.copy(
+                                extractorEngine = mergedEngine,
+                                downloadStrategy = MediaDownloadStrategy.merge(
+                                    preferred.provenance.downloadStrategy,
+                                    secondary.provenance.downloadStrategy
+                                )
+                            ),
                             downloadHeaders = mergedHeaders
                         )
                         if (upgraded != existing) {
@@ -488,9 +498,17 @@ class DualMediaExtractor(private val context: Context) {
                                             launch { updateStatus(status) }
                                         }
                                     )
-                                } else null
+                                } else {
+                                    if (GalleryDlEngine.isAvailable() && !GalleryDlEngine.isGalleryDlAvailable()) {
+                                        providerErrors.add("gallery-dl is not installed in the embedded Python runtime.")
+                                    }
+                                    null
+                                }
+                            } catch (ce: CancellationException) {
+                                throw ce
                             } catch (e: Exception) {
                                 Log.w("DualMediaExtractor", "gallery-dl extraction error", e)
+                                providerErrors.add("gallery-dl: ${e.localizedMessage ?: e.javaClass.simpleName}")
                                 null
                             }
                         }
@@ -507,9 +525,25 @@ class DualMediaExtractor(private val context: Context) {
                                             launch { updateStatus(status) }
                                         }
                                     )
-                                } else null
+                                } else {
+                                    if (MediaProviderRouting.requiresVideoResult(requestContext.url) &&
+                                        !GalleryDlEngine.isYtDlpAvailable()
+                                    ) {
+                                        providerErrors.add(
+                                            if (GalleryDlEngine.isAvailable()) {
+                                                "yt-dlp is not installed in the embedded Python runtime."
+                                            } else {
+                                                "The embedded Python runtime is unavailable; yt-dlp extraction cannot run."
+                                            }
+                                        )
+                                    }
+                                    null
+                                }
+                            } catch (ce: CancellationException) {
+                                throw ce
                             } catch (e: Exception) {
                                 Log.w("DualMediaExtractor", "yt-dlp extraction error", e)
+                                providerErrors.add("yt-dlp: ${e.localizedMessage ?: e.javaClass.simpleName}")
                                 null
                             }
                         }
@@ -525,8 +559,11 @@ class DualMediaExtractor(private val context: Context) {
                                         launch { updateStatus(status) }
                                     }
                                 )
+                            } catch (ce: CancellationException) {
+                                throw ce
                             } catch (e: Exception) {
                                 Log.w("DualMediaExtractor", "StaticHtmlProvider error", e)
+                                providerErrors.add("Static HTML: ${e.localizedMessage ?: e.javaClass.simpleName}")
                                 null
                             }
                         }
@@ -551,6 +588,7 @@ class DualMediaExtractor(private val context: Context) {
                                 throw ce
                             } catch (e: Exception) {
                                 Log.w("DualMediaExtractor", "Browser extraction error", e)
+                                providerErrors.add("Browser: ${e.localizedMessage ?: e.javaClass.simpleName}")
                                 null
                             }
                         }
@@ -563,15 +601,19 @@ class DualMediaExtractor(private val context: Context) {
                         if (gdlResult != null && gdlResult.items.isNotEmpty()) {
                             updateItems(gdlResult.items, title = gdlResult.pageTitle)
                         }
+                        gdlResult?.errorMessage?.takeIf { it.isNotBlank() }?.let { providerErrors.add("gallery-dl: $it") }
                         if (ytdlpResult != null && ytdlpResult.items.isNotEmpty()) {
                             updateItems(ytdlpResult.items, title = ytdlpResult.pageTitle)
                         }
+                        ytdlpResult?.errorMessage?.takeIf { it.isNotBlank() }?.let { providerErrors.add("yt-dlp: $it") }
                         if (staticResult != null && staticResult.items.isNotEmpty()) {
                             updateItems(staticResult.items, title = staticResult.pageTitle)
                         }
+                        staticResult?.errorMessage?.takeIf { it.isNotBlank() }?.let { providerErrors.add("Static HTML: $it") }
                         if (browserResult != null && browserResult.items.isNotEmpty()) {
                             updateItems(browserResult.items, title = browserResult.pageTitle)
                         }
+                        browserResult?.errorMessage?.takeIf { it.isNotBlank() }?.let { providerErrors.add("Browser: $it") }
                     }
                 } finally {
                     browserProvider.cleanup()
@@ -580,10 +622,25 @@ class DualMediaExtractor(private val context: Context) {
 
                 itemsMutex.withLock {
                     val finalCount = itemsMap.size
+                    val hasDownloadableVideo = itemsMap.values.any { it.isVideo || it.isAudio || it.isStream }
+                    val previewOnlyForVideoPage = MediaProviderRouting.requiresVideoResult(requestContext.url) &&
+                            finalCount > 0 && !hasDownloadableVideo
+                    val distinctProviderErrors = providerErrors.distinct()
+                    val error = when {
+                        previewOnlyForVideoPage -> "Only preview images were found; no downloadable video or audio was resolved."
+                        finalCount == 0 && distinctProviderErrors.isNotEmpty() -> distinctProviderErrors.joinToString("; ")
+                        finalCount == 0 -> "No media discovered on this page."
+                        else -> null
+                    }
+                    val successMessage = "Extraction completed. Discovered $finalCount media items."
                     _state.value = _state.value.copy(
                         isRunning = false,
-                        phase = ExtractionPhase.COMPLETED,
-                        statusMessage = if (finalCount > 0) "Extraction completed. Discovered $finalCount media items." else "No media discovered on this page."
+                        phase = if (error != null) ExtractionPhase.ERROR else ExtractionPhase.COMPLETED,
+                        statusMessage = error ?: if (distinctProviderErrors.isNotEmpty()) {
+                            "$successMessage Some providers failed: ${distinctProviderErrors.joinToString("; ")}"
+                        } else successMessage,
+                        errorMessage = error,
+                        providerErrors = distinctProviderErrors
                     )
                 }
             } catch (ce: CancellationException) {
@@ -630,7 +687,13 @@ class DualMediaExtractor(private val context: Context) {
                     id = existing.id,
                     url = resolvedUrl,
                     thumbnailUrl = mergedThumb,
-                    provenance = preferred.provenance.copy(extractorEngine = mergedEngine),
+                    provenance = preferred.provenance.copy(
+                        extractorEngine = mergedEngine,
+                        downloadStrategy = MediaDownloadStrategy.merge(
+                            preferred.provenance.downloadStrategy,
+                            secondary.provenance.downloadStrategy
+                        )
+                    ),
                     downloadHeaders = mergedHeaders
                 )
                 if (upgraded != existing) {

@@ -91,6 +91,7 @@ object DownloadQueueManager {
             .putBoolean(MediaDownloadWorker.KEY_IS_AUDIO, item.isAudio)
             .putBoolean(MediaDownloadWorker.KEY_IS_STREAM, item.isStream)
             .putString(MediaDownloadWorker.KEY_FORMAT, item.format)
+            .putString(MediaDownloadWorker.KEY_DOWNLOAD_STRATEGY, item.provenance.downloadStrategy.name)
             .putString(MediaDownloadWorker.KEY_STACK_ID, sId)
             .putString(MediaDownloadWorker.KEY_STACK_TITLE, sTitle)
             .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, domain)
@@ -114,28 +115,11 @@ object DownloadQueueManager {
         val uniqueWorkName = "download_${abs(dedupKey.hashCode())}"
 
         val workManager = WorkManager.getInstance(context)
-        val existingWorkList = runCatching {
-            workManager.getWorkInfosForUniqueWork(uniqueWorkName).get()
-        }.getOrDefault(emptyList())
-
-        val activeWork = existingWorkList.firstOrNull {
-            it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
-        }
-
-        val finalWorkId: UUID
-        if (activeWork != null && !isRetry) {
-            // Re-use already active WorkManager request ID so pause/cancel references the running job
-            finalWorkId = activeWork.id
-            activeItemIds.add(item.id)
-        } else {
-            finalWorkId = request.id
-            workManager.enqueueUniqueWork(
-                uniqueWorkName,
-                if (isRetry) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
-                request
-            )
-            markDownloadStarted(count = 1, itemId = item.id)
-        }
+        // Keep one worker per logical item: each worker owns the item ID it completes.
+        // APPEND_OR_REPLACE serializes identical media URLs without losing later items.
+        val finalWorkId = request.id
+        workManager.enqueueUniqueWork(uniqueWorkName, policyFor(isRetry), request)
+        markDownloadStarted(count = 1, itemId = item.id)
 
         DownloadActivityManager.initialize(context)
         DownloadActivityManager.recordQueued(
@@ -187,6 +171,7 @@ object DownloadQueueManager {
                 .putBoolean(MediaDownloadWorker.KEY_IS_AUDIO, item.isAudio)
                 .putBoolean(MediaDownloadWorker.KEY_IS_STREAM, item.isStream)
                 .putString(MediaDownloadWorker.KEY_FORMAT, item.format)
+                .putString(MediaDownloadWorker.KEY_DOWNLOAD_STRATEGY, item.provenance.downloadStrategy.name)
                 .putString(MediaDownloadWorker.KEY_STACK_ID, sId)
                 .putString(MediaDownloadWorker.KEY_STACK_TITLE, sTitle)
                 .putString(MediaDownloadWorker.KEY_SOURCE_DOMAIN, domain)
@@ -209,26 +194,9 @@ object DownloadQueueManager {
             val dedupKey = MediaClassifier.deduplicationKey(item.url)
             val uniqueWorkName = "download_${abs(dedupKey.hashCode())}"
 
-            val existingWorkList = runCatching {
-                workManager.getWorkInfosForUniqueWork(uniqueWorkName).get()
-            }.getOrDefault(emptyList())
-
-            val activeWork = existingWorkList.firstOrNull {
-                it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
-            }
-
-            if (activeWork != null) {
-                activeItemIds.add(item.id)
-                activeWork.id
-            } else {
-                workManager.enqueueUniqueWork(
-                    uniqueWorkName,
-                    ExistingWorkPolicy.KEEP,
-                    request
-                )
-                markDownloadStarted(count = 1, itemId = item.id)
-                request.id
-            }
+            workManager.enqueueUniqueWork(uniqueWorkName, policyFor(isRetry = false), request)
+            markDownloadStarted(count = 1, itemId = item.id)
+            request.id
         }
 
         DownloadActivityManager.initialize(context)
@@ -248,6 +216,9 @@ object DownloadQueueManager {
         return WorkManager.getInstance(context)
             .getWorkInfosByTagFlow(MediaDownloadWorker.WORK_TAG_DOWNLOAD)
     }
+
+    internal fun policyFor(isRetry: Boolean): ExistingWorkPolicy =
+        if (isRetry) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE
 
     fun cancelDownload(context: Context, workId: UUID) {
         runCatching {

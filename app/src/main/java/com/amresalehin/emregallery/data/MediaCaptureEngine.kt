@@ -407,7 +407,8 @@ object MediaCaptureEngine {
             provenance = MediaProvenance(
                 extractorEngine = "MediaCaptureEngine (${source.label})",
                 pageUrl = baseUrl,
-                domSelector = if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null
+                domSelector = if (source == ExtractionSource.NETWORK_INTERCEPT) "network_request" else null,
+                downloadStrategy = if (classification.isStream) MediaDownloadStrategy.YTDLP_STREAM else MediaDownloadStrategy.AUTO
             ),
             metadata = metadataMap,
             downloadHeaders = headers

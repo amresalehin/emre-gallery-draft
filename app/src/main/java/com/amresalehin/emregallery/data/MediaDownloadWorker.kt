@@ -88,6 +88,7 @@ class MediaDownloadWorker(
         val sourceDomain = inputData.getString(KEY_SOURCE_DOMAIN) ?: ""
         val sourceUrl = inputData.getString(KEY_SOURCE_URL) ?: mediaUrl
         val sourceEngine = inputData.getString(KEY_SOURCE_ENGINE) ?: ""
+        val downloadStrategy = MediaDownloadStrategy.fromWireValue(inputData.getString(KEY_DOWNLOAD_STRATEGY))
         val headersJson = inputData.getString(KEY_HEADERS_JSON)
 
         val downloadHeaders: Map<String, String> = runCatching {
@@ -118,10 +119,18 @@ class MediaDownloadWorker(
             var downloadedFile: File? = null
             var errorDiagnostic: String? = null
 
-            val isSocialUrl = listOf("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "vimeo.com", "twitter.com", "x.com")
-                .any { mediaUrl.contains(it, ignoreCase = true) }
-            val isStreamingMedia = isStream || mediaUrl.contains(".m3u8", ignoreCase = true) || mediaUrl.contains(".mpd", ignoreCase = true)
-            val isYtDlpTarget = sourceEngine == "yt-dlp" || isSocialUrl || isStreamingMedia
+            val isStreamingMedia = isStream || MediaProviderRouting.isManifestUrl(mediaUrl)
+            val isYtDlpTarget = downloadStrategy == MediaDownloadStrategy.YTDLP_PAGE ||
+                    downloadStrategy == MediaDownloadStrategy.YTDLP_STREAM || isStreamingMedia ||
+                    (downloadStrategy == MediaDownloadStrategy.AUTO && MediaProviderRouting.isYtDlpPageUrl(mediaUrl)) ||
+                    sourceEngine.equals("yt-dlp", ignoreCase = true)
+            val effectiveDownloadStrategy = if (downloadStrategy != MediaDownloadStrategy.AUTO) {
+                downloadStrategy
+            } else when {
+                isStreamingMedia -> MediaDownloadStrategy.YTDLP_STREAM
+                MediaProviderRouting.isYtDlpPageUrl(mediaUrl) || sourceEngine.equals("yt-dlp", ignoreCase = true) -> MediaDownloadStrategy.YTDLP_PAGE
+                else -> MediaDownloadStrategy.AUTO
+            }
 
             // 1. For social video and HLS/DASH streaming media, route through stream-specific remuxer (yt-dlp)
             if (isYtDlpTarget && GalleryDlEngine.isAvailable()) {
@@ -132,7 +141,8 @@ class MediaDownloadWorker(
                     fileName = fileName,
                     referer = referer,
                     headers = downloadHeaders,
-                    cookies = cookieString
+                    cookies = cookieString,
+                    downloadStrategy = effectiveDownloadStrategy
                 )
             }
 
@@ -192,7 +202,8 @@ class MediaDownloadWorker(
                             fileName = fileName,
                             referer = referer,
                             headers = downloadHeaders,
-                            cookies = cookieString
+                            cookies = cookieString,
+                            downloadStrategy = effectiveDownloadStrategy
                         )
                     }
                 }
@@ -303,6 +314,7 @@ class MediaDownloadWorker(
         const val KEY_SOURCE_DOMAIN = "source_domain"
         const val KEY_SOURCE_URL = "source_url"
         const val KEY_SOURCE_ENGINE = "source_engine"
+        const val KEY_DOWNLOAD_STRATEGY = "download_strategy"
         const val KEY_HEADERS_JSON = "headers_json"
 
         const val KEY_PROGRESS = "progress"

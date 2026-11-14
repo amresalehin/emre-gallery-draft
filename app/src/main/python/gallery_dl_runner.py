@@ -77,25 +77,6 @@ def check_support(url):
         except Exception:
             pass
 
-    # 2. Check yt-dlp
-    if YTDLP_AVAILABLE:
-        try:
-            lower = clean_url.lower()
-            video_hosts = [
-                "youtube.com", "youtu.be", "vimeo.com", "tiktok.com", "dailymotion.com",
-                "twitch.tv", "soundcloud.com", "bandcamp.com", "facebook.com", "instagram.com/reel"
-            ]
-            if any(vh in lower for vh in video_hosts):
-                return json.dumps({
-                    "supported": True,
-                    "category": "video",
-                    "subcategory": "stream",
-                    "extractor": "YoutubeDL",
-                    "engine": "yt-dlp"
-                })
-        except Exception:
-            pass
-
     return json.dumps({"supported": False, "category": "", "extractor": ""})
 
 def extract_gallery_dl(url, options_json="{}"):
@@ -248,6 +229,7 @@ def extract_yt_dlp(url, options_json="{}"):
         opts = {}
 
     user_agent = opts.get("user_agent") or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    cookies = opts.get("cookies")
 
     items = []
     page_title = ""
@@ -260,7 +242,8 @@ def extract_yt_dlp(url, options_json="{}"):
             "skip_download": True,
             "format": "b[vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]/best",
             "socket_timeout": 20,
-            "user_agent": user_agent
+            "user_agent": user_agent,
+            "http_headers": {"Cookie": cookies} if cookies else {}
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(clean_url, download=False)
@@ -310,7 +293,8 @@ def extract_yt_dlp(url, options_json="{}"):
                         "thumbnailUrl": thumb,
                         "resolutionHint": resolution_hint,
                         "sizeBytes": filesize,
-                        "source": "yt-dlp"
+                        "source": "yt-dlp",
+                        "downloadStrategy": "YTDLP_STREAM" if is_stream else "YTDLP_PAGE"
                     })
     except Exception as e:
         return json.dumps({
@@ -380,7 +364,8 @@ def extract_media(url, options_json="{}"):
         "items": all_items
     })
 
-def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None):
+def download_media_file(media_url, target_path, referer=None, user_agent=None, cookies=None, headers_json=None,
+                        download_strategy="AUTO"):
     """
     Downloads media file using yt-dlp (with single pre-muxed format) or requests with cookies/headers.
     Never commits raw .m3u8 or .mpd playlist text as a finished file.
@@ -395,13 +380,10 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
             pass
 
     ua = user_agent or "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-    is_stream = (".m3u8" in media_url) or (".mpd" in media_url)
-    is_social_or_video = any(h in media_url.lower() for h in [
-        "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "vimeo.com", "twitter.com", "x.com"
-    ])
-
+    strategy = (download_strategy or "AUTO").upper()
+    is_stream = strategy == "YTDLP_STREAM" or (".m3u8" in media_url) or (".mpd" in media_url)
     # 1. For streams or social pages, prioritize yt-dlp directly
-    if (is_stream or is_social_or_video) and YTDLP_AVAILABLE:
+    if (strategy in ("YTDLP_PAGE", "YTDLP_STREAM") or is_stream) and YTDLP_AVAILABLE:
         try:
             http_headers = {"User-Agent": ua}
             if referer:
@@ -431,6 +413,10 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
                 return True
         except Exception:
             pass
+
+    # A page-backed item is not a direct file. Never try to save its HTML as media.
+    if strategy == "YTDLP_PAGE":
+        return False
 
     # 2. Direct HTTP requests download
     try:
@@ -483,7 +469,7 @@ def download_media_file(media_url, target_path, referer=None, user_agent=None, c
         pass
 
     # 3. Fallback to yt-dlp if direct request failed and target is a video/stream
-    if YTDLP_AVAILABLE and (is_stream or any(ext in media_url.lower() for ext in [".mp4", ".mkv", ".webm", ".m3u8", ".mpd", "youtube", "tiktok", "vimeo"])):
+    if YTDLP_AVAILABLE and (strategy in ("YTDLP_PAGE", "YTDLP_STREAM") or is_stream or any(ext in media_url.lower() for ext in [".mp4", ".mkv", ".webm", ".m3u8", ".mpd"])):
         try:
             http_headers = {"User-Agent": ua}
             if referer:

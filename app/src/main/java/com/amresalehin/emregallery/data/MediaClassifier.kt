@@ -1080,12 +1080,16 @@ object MediaClassifier {
                 }
 
                 val engines = group.map { it.provenance.extractorEngine }.distinct()
+                val mergedStrategy = group.fold(MediaDownloadStrategy.AUTO) { current, candidate ->
+                    MediaDownloadStrategy.merge(current, candidate.provenance.downloadStrategy)
+                }
                 val mergedProvenance = if (engines.size > 1) {
                     best.provenance.copy(
-                        extractorEngine = engines.joinToString(" + ")
+                        extractorEngine = engines.joinToString(" + "),
+                        downloadStrategy = mergedStrategy
                     )
                 } else {
-                    best.provenance
+                    best.provenance.copy(downloadStrategy = mergedStrategy)
                 }
 
                 val bestThumb = best.thumbnailUrl ?: group.firstNotNullOfOrNull { it.thumbnailUrl }

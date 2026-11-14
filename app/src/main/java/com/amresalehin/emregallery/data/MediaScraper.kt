@@ -3,8 +3,29 @@ package com.amresalehin.emregallery.data
 data class MediaProvenance(
     val extractorEngine: String = "Static HTML",
     val pageUrl: String = "",
-    val domSelector: String? = null
+    val domSelector: String? = null,
+    val downloadStrategy: MediaDownloadStrategy = MediaDownloadStrategy.AUTO
 )
+
+/** Describes how the saved item URL must be resolved at download time. */
+enum class MediaDownloadStrategy {
+    AUTO,
+    DIRECT_HTTP,
+    YTDLP_PAGE,
+    YTDLP_STREAM;
+
+    companion object {
+        fun fromWireValue(value: String?): MediaDownloadStrategy =
+            entries.firstOrNull { it.name.equals(value?.trim(), ignoreCase = true) } ?: AUTO
+
+        fun merge(preferred: MediaDownloadStrategy, secondary: MediaDownloadStrategy): MediaDownloadStrategy = when {
+            preferred == YTDLP_PAGE || secondary == YTDLP_PAGE -> YTDLP_PAGE
+            preferred == YTDLP_STREAM || secondary == YTDLP_STREAM -> YTDLP_STREAM
+            preferred != AUTO -> preferred
+            else -> secondary
+        }
+    }
+}
 
 data class ScrapedMediaItem(
     val id: String,

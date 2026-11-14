@@ -80,6 +80,21 @@ object GalleryDlEngine {
         }
     }
 
+    private fun capabilityAvailable(key: String): Boolean {
+        if (!isAvailable()) return false
+        return runCatching {
+            val json = JSONObject(
+                Python.getInstance().getModule("gallery_dl_runner")
+                    .callAttr("get_engine_status").toString()
+            )
+            json.optBoolean(key, false)
+        }.getOrDefault(false)
+    }
+
+    fun isGalleryDlAvailable(): Boolean = capabilityAvailable("gallery_dl_available")
+
+    fun isYtDlpAvailable(): Boolean = capabilityAvailable("yt_dlp_available")
+
     /**
      * Retrieves runtime status, version, and supported popular sites.
      */
@@ -147,9 +162,9 @@ object GalleryDlEngine {
 
         if (!isAvailable()) {
             // Heuristic check if Python isn't active
-            val lower = url.lowercase()
+            val host = MediaProviderRouting.hostOf(url)
             for (site in defaultPopularSites()) {
-                if (site.domains.any { lower.contains(it) }) {
+                if (site.domains.any { MediaProviderRouting.hostMatches(host, it) }) {
                     return GalleryDlSupportInfo(
                         isSupported = true,
                         category = site.name.lowercase(),
@@ -214,8 +229,11 @@ object GalleryDlEngine {
                 resolutionHint = obj.optString("resolutionHint").takeIf { !it.isNullOrBlank() },
                 sizeBytes = if (obj.has("sizeBytes") && !obj.isNull("sizeBytes")) obj.getLong("sizeBytes") else null,
                 provenance = MediaProvenance(
-                    extractorEngine = "gallery-dl / yt-dlp",
-                    pageUrl = pageUrl
+                    extractorEngine = obj.optString("source", "gallery-dl"),
+                    pageUrl = pageUrl,
+                    downloadStrategy = MediaDownloadStrategy.fromWireValue(
+                        obj.optString("downloadStrategy").takeIf { it.isNotBlank() }
+                    )
                 ),
                 metadata = mapOf("source_url" to pageUrl),
                 downloadHeaders = mapOf(
@@ -298,7 +316,8 @@ object GalleryDlEngine {
         fileName: String,
         referer: String? = null,
         headers: Map<String, String>? = null,
-        cookies: String? = null
+        cookies: String? = null,
+        downloadStrategy: MediaDownloadStrategy = MediaDownloadStrategy.AUTO
     ): File? = withContext(Dispatchers.IO) {
         try {
             val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -337,7 +356,8 @@ object GalleryDlEngine {
                     referer ?: "",
                     userAgent,
                     effectiveCookies ?: "",
-                    headersJson
+                    headersJson,
+                    downloadStrategy.name
                 ).toBoolean()
 
                 if (success && targetFile.exists() && targetFile.length() > 0L) {
