@@ -204,9 +204,14 @@ class BrowserMediaExtractor(private val context: Context) {
                 }
 
                 wv.addJavascriptInterface(
-                    EmreMediaBridge { rawUrl ->
+                    EmreMediaBridge { rawUrl, mediaType ->
+                        val semanticMime = when {
+                            mediaType.equals("audio", true) -> "audio/*"
+                            mediaType.equals("video", true) -> "video/*"
+                            else -> null
+                        }
                         mainHandler.post {
-                            dispatchMediaItem(rawUrl, ExtractionSource.DOM_SCRAPE)
+                            dispatchMediaItem(rawUrl, ExtractionSource.DOM_SCRAPE, mimeHint = semanticMime)
                         }
                     },
                     "EmreBridge"
@@ -493,12 +498,10 @@ class BrowserMediaExtractor(private val context: Context) {
         }
     }
 
-    class EmreMediaBridge(private val onMediaFound: (String) -> Unit) {
+    class EmreMediaBridge(private val onMediaFound: (String, String?) -> Unit) {
         @android.webkit.JavascriptInterface
-        fun reportMedia(url: String?) {
-            if (!url.isNullOrBlank()) {
-                onMediaFound(url)
-            }
+        fun reportMedia(url: String?, mediaType: String?) {
+            if (!url.isNullOrBlank()) onMediaFound(url, mediaType?.takeIf { it.isNotBlank() })
         }
     }
 

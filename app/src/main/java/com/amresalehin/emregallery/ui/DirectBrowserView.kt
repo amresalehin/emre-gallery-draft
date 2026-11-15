@@ -412,11 +412,17 @@ fun DirectBrowserView(
                             }
 
                             addJavascriptInterface(
-                                BrowserMediaExtractor.EmreMediaBridge { rawUrl ->
+                                BrowserMediaExtractor.EmreMediaBridge { rawUrl, mediaType ->
+                                    val semanticMime = when {
+                                        mediaType.equals("audio", true) -> "audio/*"
+                                        mediaType.equals("video", true) -> "video/*"
+                                        else -> null
+                                    }
                                     val item = MediaCaptureEngine.buildMediaItem(
                                         rawUrl = rawUrl,
                                         source = ExtractionSource.DOM_SCRAPE,
-                                        baseUrl = currentUrl
+                                        baseUrl = currentUrl,
+                                        mimeHint = semanticMime
                                     )
                                     if (item != null) {
                                         onMediaExtracted(item)

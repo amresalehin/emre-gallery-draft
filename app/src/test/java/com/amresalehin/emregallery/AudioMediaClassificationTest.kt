@@ -59,6 +59,23 @@ class AudioMediaClassificationTest {
     }
 
     @Test
+    fun cmafAudioMp4IsClassifiedAsAudioWithoutMimeHints() {
+        val result = MediaClassifier.classify("https://v.redd.it/example/CMAF_AUDIO_128.mp4")
+        assertEquals(MediaCategory.AUDIO, result.category)
+        assertTrue(result.isAudio)
+        assertFalse(result.isVideo)
+        assertEquals("audio/mp4", result.mimeType)
+    }
+
+    @Test
+    fun cmafVp9Mp4RemainsVideo() {
+        val result = MediaClassifier.classify("https://v.redd.it/example/CMAF_VP9_480.mp4")
+        assertEquals(MediaCategory.VIDEOS, result.category)
+        assertTrue(result.isVideo)
+        assertFalse(result.isAudio)
+    }
+
+    @Test
     fun videoMp4RemainsVideo() {
         val result = MediaClassifier.classify("https://cdn.example.test/movie.mp4", "video/mp4")
         assertEquals(MediaCategory.VIDEOS, result.category)

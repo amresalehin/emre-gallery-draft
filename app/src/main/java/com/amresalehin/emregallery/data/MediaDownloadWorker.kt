@@ -82,6 +82,8 @@ class MediaDownloadWorker(
         val isVideo = inputData.getBoolean(KEY_IS_VIDEO, false)
         val isAudio = inputData.getBoolean(KEY_IS_AUDIO, false)
         val isStream = inputData.getBoolean(KEY_IS_STREAM, false)
+        val requiresAudioTrack = inputData.getBoolean(KEY_REQUIRE_AUDIO_TRACK, false)
+        val companionAudioUrl = inputData.getString(KEY_COMPANION_AUDIO_URL)
         val format = inputData.getString(KEY_FORMAT) ?: ""
         val stackId = inputData.getString(KEY_STACK_ID) ?: "stack_${System.currentTimeMillis()}"
         val stackTitle = inputData.getString(KEY_STACK_TITLE) ?: "Discovered Media"
@@ -123,9 +125,9 @@ class MediaDownloadWorker(
             var expectedAudioFromExtractor = false
             var expectedVideoFromExtractor = false
 
-            // Resolve the original webpage, not merely a transient CDN URL. yt-dlp
-            // discovers independent audio/video representations and FFmpegKit muxes them.
-            if ((isVideo || isStream) && GalleryDlEngine.isAvailable()) {
+            // Resolve the original page, not a transient CDN rendition. A paired CMAF
+            // audio track makes audio mandatory; raw video-only fallback is forbidden.
+            if ((isVideo || isStream) && (GalleryDlEngine.isAvailable() || requiresAudioTrack)) {
                 setProgress(workDataOf(KEY_PROGRESS to 0.2f, KEY_STATUS to "Resolving audio and video tracks: $title..."))
                 val audioAwareResult = GalleryDlEngine.downloadVideoWithAudio(
                     context = applicationContext,
@@ -134,17 +136,21 @@ class MediaDownloadWorker(
                     fileName = fileName,
                     referer = referer,
                     headers = downloadHeaders,
-                    cookies = cookieString
+                    cookies = cookieString,
+                    companionAudioUrl = companionAudioUrl
                 )
-                extractorHandled = audioAwareResult.handled
-                expectedAudioFromExtractor = audioAwareResult.expectedAudio
-                expectedVideoFromExtractor = audioAwareResult.expectedVideo
+                extractorHandled = audioAwareResult.handled || requiresAudioTrack
+                expectedAudioFromExtractor = audioAwareResult.expectedAudio || requiresAudioTrack
+                expectedVideoFromExtractor = audioAwareResult.expectedVideo || (requiresAudioTrack && isVideo)
                 if (audioAwareResult.handled) {
                     downloadedFile = audioAwareResult.file
                     if (downloadedFile == null) {
                         errorDiagnostic = audioAwareResult.errorMessage
-                            ?: "The media extractor resolved this source but could not produce a validated file"
+                            ?: "The media extractor could not produce a validated audio/video file"
                     }
+                } else if (requiresAudioTrack) {
+                    errorDiagnostic = audioAwareResult.errorMessage
+                        ?: "The companion audio track could not be resolved; refusing a silent video-only download"
                 }
             }
 
@@ -328,6 +334,8 @@ class MediaDownloadWorker(
         const val KEY_IS_VIDEO = "is_video"
         const val KEY_IS_AUDIO = "is_audio"
         const val KEY_IS_STREAM = "is_stream"
+        const val KEY_REQUIRE_AUDIO_TRACK = "require_audio_track"
+        const val KEY_COMPANION_AUDIO_URL = "companion_audio_url"
         const val KEY_FORMAT = "format"
         const val KEY_STACK_ID = "stack_id"
         const val KEY_STACK_TITLE = "stack_title"
