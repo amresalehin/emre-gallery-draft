@@ -3,22 +3,34 @@ package com.amresalehin.emregallery.ui
 import com.amresalehin.emregallery.data.CmafTrackAssociation
 import com.amresalehin.emregallery.data.ScrapedMediaItem
 
-/** Displays actual/source-supplied dimensions only; never fabricates a spatial measurement. */
+/** Displays source dimensions or a truthful unavailable label; never fabricates a size. */
 internal fun resolveScrapedMediaDimensionLabel(
     item: ScrapedMediaItem,
     dynamicDimensions: Map<String, Pair<Int, Int>>
 ): String {
-    val dimensions = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item).let { (w, h) ->
+    val hint = item.resolutionHint?.trim()?.takeIf {
+        it.isNotBlank() && !it.equals("Network", true) && !it.equals("Unknown", true) &&
+            !it.equals("40 × 40", true) && !it.equals("40x40", true) &&
+            !it.equals("40 x 40", true)
+    }
+
+    // Audio bitrates and codecs are not spatial dimensions. Older captures may
+    // still carry the former generic "40 × 40" placeholder in resolutionHint.
+    if (item.isAudio) return hint ?: "Audio only"
+
+    // Ignore the legacy placeholder while still letting the parser inspect a real
+    // size embedded in the URL or title.
+    val isLegacyPlaceholder = item.resolutionHint?.filterNot { it.isWhitespace() }
+        ?.replace('×', 'x')
+        ?.equals("40x40", ignoreCase = true) == true
+    val parseItem = if (isLegacyPlaceholder) item.copy(resolutionHint = null) else item
+    val dimensions = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(parseItem).let { (w, h) ->
         if (w != null && h != null) w to h else null
     }
+
     if (dimensions != null && dimensions.first > 0 && dimensions.second > 0) {
         return "${dimensions.first} × ${dimensions.second}"
     }
-    val hint = item.resolutionHint?.trim()?.takeIf {
-        it.isNotBlank() && !it.equals("Network", true) && !it.equals("Unknown", true) &&
-            !it.equals("40 × 40", true) && !it.equals("40x40", true)
-    }
-    if (item.isAudio) return hint ?: "Audio only"
     if (item.isVideo || item.isStream) return hint ?: "Resolution unavailable"
     return hint ?: "Dimensions unavailable"
 }

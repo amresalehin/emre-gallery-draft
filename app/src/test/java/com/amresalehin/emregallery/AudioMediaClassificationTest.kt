@@ -59,6 +59,18 @@ class AudioMediaClassificationTest {
     }
 
     @Test
+    fun explicitAudioMp4MimeOverridesTheMp4FilenameExtension() {
+        val result = MediaClassifier.classify(
+            "https://cdn.example.test/track.mp4",
+            "audio/mp4"
+        )
+        assertEquals(MediaCategory.AUDIO, result.category)
+        assertTrue(result.isAudio)
+        assertFalse(result.isVideo)
+        assertEquals("audio/mp4", result.mimeType)
+    }
+
+    @Test
     fun cmafAudioMp4IsClassifiedAsAudioWithoutMimeHints() {
         val result = MediaClassifier.classify("https://v.redd.it/example/CMAF_AUDIO_128.mp4")
         assertEquals(MediaCategory.AUDIO, result.category)

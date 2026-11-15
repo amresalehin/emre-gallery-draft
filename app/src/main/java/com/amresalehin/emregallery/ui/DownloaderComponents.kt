@@ -1074,6 +1074,16 @@ fun DownloaderResultsPage(
         MediaClassifier.deduplicateScrapedItems(extractorState.items + sessionItems)
     }
 
+    // Audio may be discovered before its companion video. If the user selected the
+    // standalone audio card before pairing completed, transfer selection to the
+    // best paired video rendition when the associated list is published.
+    LaunchedEffect(allScrapedItems) {
+        val remapped = CmafTrackAssociation.remapSelectedAudioIds(selectedItemIds, allScrapedItems)
+        if (remapped != selectedItemIds) {
+            selectedItemIds = remapped
+        }
+    }
+
     // Auto-select newly discovered items
     LaunchedEffect(allScrapedItems.size) {
         if (allScrapedItems.isNotEmpty() && selectedItemIds.isEmpty() && !extractorState.isRunning) {

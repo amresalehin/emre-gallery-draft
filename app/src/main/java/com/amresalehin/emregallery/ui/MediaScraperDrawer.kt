@@ -239,15 +239,9 @@ fun RealScrapedCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val (w, h) = dynamicDimensions[item.id] ?: parseScrapedMediaDimensions(item)
-                    val dimText = when {
-                        w != null && h != null -> "${w}x${h}"
-                        w != null -> "${w}w"
-                        !item.resolutionHint.isNullOrBlank() -> item.resolutionHint
-                        else -> item.category.name.lowercase().replaceFirstChar { it.uppercase() }
-                    }
+                    val dimText = resolveScrapedMediaDimensionLabel(item, dynamicDimensions)
                     Text(
-                        text = dimText ?: "",
+                        text = dimText,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 9.sp,
@@ -367,7 +361,13 @@ fun ThreeColumnSkeletonCard(heightDp: Int) {
  * Comprehensive parser for media dimensions from resolution hints, URL patterns, and titles.
  */
 fun parseScrapedMediaDimensions(item: ScrapedMediaItem): Pair<Int?, Int?> {
-    val hint = item.resolutionHint?.trim()
+    val rawHint = item.resolutionHint?.trim()
+    // "40 × 40" was an old UI placeholder, not source metadata. Do not let it
+    // satisfy the dimension filter or suppress the real image-header probe.
+    val isLegacyPlaceholder = rawHint?.filterNot { it.isWhitespace() }
+        ?.replace('×', 'x')
+        ?.equals("40x40", ignoreCase = true) == true
+    val hint = rawHint.takeUnless { isLegacyPlaceholder }
     if (!hint.isNullOrBlank()) {
         val match = Regex("""(\d{2,5})\s*[xX×]\s*(\d{2,5})""").find(hint)
         if (match != null) {

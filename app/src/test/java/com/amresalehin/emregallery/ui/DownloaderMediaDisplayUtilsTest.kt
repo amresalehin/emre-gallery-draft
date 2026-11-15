@@ -35,6 +35,27 @@ class DownloaderMediaDisplayUtilsTest {
     }
 
     @Test
+    fun dimensionParserRejectsLegacyPlaceholder() {
+        val item = ScrapedMediaItem(
+            id = "image", url = "https://cdn.example.test/image.jpg",
+            title = "image.jpg", category = MediaCategory.IMAGES,
+            resolutionHint = "40 × 40"
+        )
+        assertEquals(null, parseScrapedMediaDimensions(item))
+    }
+
+    @Test
+    fun actualUrlDimensionsRemainAvailableWhenHintIsLegacyPlaceholder() {
+        val item = ScrapedMediaItem(
+            id = "image", url = "https://cdn.example.test/640x360/image.jpg",
+            title = "image.jpg", category = MediaCategory.IMAGES,
+            resolutionHint = "40 × 40"
+        )
+        assertEquals(640 to 360, parseScrapedMediaDimensions(item))
+        assertEquals("640 × 360", resolveScrapedMediaDimensionLabel(item, emptyMap()))
+    }
+
+    @Test
     fun actualDimensionsArePreserved() {
         val item = ScrapedMediaItem(
             id = "image", url = "https://cdn.example.test/image.jpg", title = "image.jpg"
