@@ -57,12 +57,12 @@ internal object CmafTrackAssociation {
 
     private fun audioBitrate(item: ScrapedMediaItem): Int {
         val text = name(item).substringAfter("audio", name(item))
-        return Regex("""(?:^|[^0-9])(d{2,4})(?:kbps|k)?(?:[^0-9]|$)""")
+        return Regex("""(?:^|[^0-9])([0-9]{2,4})(?:kbps|k)?(?:[^0-9]|$)""")
             .find(text)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
     }
 
     private fun videoHeight(item: ScrapedMediaItem): Int =
-        Regex("""(?:^|[^0-9])(d{3,4})(?:p|[^0-9]|$)""")
+        Regex("""(?:^|[^0-9])([0-9]{3,4})(?:p|[^0-9]|$)""")
             .find(name(item))?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
 
     private fun bestAudio(items: List<ScrapedMediaItem>): ScrapedMediaItem =

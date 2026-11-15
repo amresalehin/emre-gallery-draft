@@ -56,7 +56,7 @@ class MediaCaptureAudioSemanticsTest {
     fun networkAcceptAudioOverridesMp4Extension() {
         val discovered = mutableListOf<com.amresalehin.emregallery.data.ScrapedMediaItem>()
         MediaCaptureEngine.shouldInterceptRequest(
-            request = mediaRequest("https://cdn.example.test/track.mp4", "audio/mp4, */*"),
+            request = mediaRequest("https://cdn.example.test/audioasset.mp4", "audio/mp4, */*"),
             baseUrl = page,
             onMediaDiscovered = discovered::add
         )

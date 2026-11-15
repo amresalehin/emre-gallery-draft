@@ -41,7 +41,7 @@ class DownloaderMediaDisplayUtilsTest {
             title = "image.jpg", category = MediaCategory.IMAGES,
             resolutionHint = "40 × 40"
         )
-        assertEquals(null, parseScrapedMediaDimensions(item))
+        assertEquals(null to null, parseScrapedMediaDimensions(item))
     }
 
     @Test
