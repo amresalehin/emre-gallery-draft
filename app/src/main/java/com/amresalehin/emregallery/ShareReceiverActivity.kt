@@ -31,8 +31,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.amresalehin.emregallery.data.MediaClassifier
 import com.amresalehin.emregallery.data.PreferencesRepository
+import com.amresalehin.emregallery.data.WebUrlUtils
 import com.amresalehin.emregallery.ui.DownloaderResultsPage
 import com.amresalehin.emregallery.ui.FullScreenBrowserView
 import com.amresalehin.emregallery.ui.theme.EmreGalleryTheme
@@ -110,7 +110,7 @@ class ShareReceiverActivity : ComponentActivity() {
                 if (cd.itemCount > 0) cd.getItemAt(0).text?.toString() ?: cd.getItemAt(0).uri?.toString() else null
             }
 
-        return MediaClassifier.extractFirstUrl(text)
+        return WebUrlUtils.extractFirstUrl(text)
     }
 
     private fun finishWithFade() {

@@ -110,7 +110,7 @@ object DownloadQueueManager {
             .addTag("item_${item.id}")
             .build()
 
-        val dedupKey = MediaClassifier.deduplicationKey(item.url)
+        val dedupKey = MediaDeduplicator.deduplicationKey(item.url)
         val uniqueWorkName = "download_${abs(dedupKey.hashCode())}"
 
         val workManager = WorkManager.getInstance(context)
@@ -173,7 +173,7 @@ object DownloadQueueManager {
         val url = sourceUrl ?: referer ?: ""
 
         val workManager = WorkManager.getInstance(context)
-        val distinctItems = MediaClassifier.deduplicateScrapedItems(items)
+        val distinctItems = MediaDeduplicator.deduplicateScrapedItems(items)
 
         val workIds = distinctItems.map { item ->
             val headersJson = serializeHeaders(item.downloadHeaders)
@@ -206,7 +206,7 @@ object DownloadQueueManager {
                 .addTag("item_${item.id}")
                 .build()
 
-            val dedupKey = MediaClassifier.deduplicationKey(item.url)
+            val dedupKey = MediaDeduplicator.deduplicationKey(item.url)
             val uniqueWorkName = "download_${abs(dedupKey.hashCode())}"
 
             val existingWorkList = runCatching {

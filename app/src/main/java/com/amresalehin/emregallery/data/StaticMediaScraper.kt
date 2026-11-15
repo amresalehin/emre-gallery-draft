@@ -28,7 +28,7 @@ class StaticMediaScraper {
         val domain = runCatching { URL(normalizedUrl).host }.getOrDefault("")
 
         // Check if the input is a direct media file
-        val isValid = MediaClassifier.isValidMedia(normalizedUrl)
+        val isValid = MediaUrlValidator.isValidMedia(normalizedUrl)
         val classification = MediaClassifier.classify(normalizedUrl)
         val isDirectMedia = isValid && (classification.isVideo || classification.isAudio || classification.isStream ||
                 normalizedUrl.endsWith(".jpg", true) || normalizedUrl.endsWith(".jpeg", true) ||
@@ -36,7 +36,7 @@ class StaticMediaScraper {
                 normalizedUrl.endsWith(".gif", true) || normalizedUrl.endsWith(".svg", true))
 
         if (isDirectMedia) {
-            val resolvedInfo = MediaClassifier.resolveOriginalMedia(normalizedUrl)
+            val resolvedInfo = OriginalMediaResolver.resolve(normalizedUrl)
             val downloadUrl = resolvedInfo.mediaUrl
             val targetClass = MediaClassifier.classify(downloadUrl)
             val fileName = resolvedInfo.cleanTitle ?: MediaClassifier.deriveFileName(downloadUrl, targetClass.format, 0)
@@ -152,8 +152,8 @@ class StaticMediaScraper {
             declaredHeight: Int? = null,
             itemTitleHint: String? = null
         ) {
-            val resolved = MediaClassifier.resolveUrl(rawUrl, baseUrl) ?: return
-            if (!MediaClassifier.isValidMedia(resolved)) return
+            val resolved = WebUrlUtils.resolveUrl(rawUrl, baseUrl) ?: return
+            if (!MediaUrlValidator.isValidMedia(resolved)) return
 
             val classification = MediaClassifier.classify(resolved)
             val isVidAudStream = classification.isVideo || classification.isAudio || classification.isStream
@@ -169,7 +169,7 @@ class StaticMediaScraper {
             }
 
             // Resolve full-resolution media if URL is a known thumbnail (e.g. Wikimedia / MediaWiki)
-            val resolvedInfo = MediaClassifier.resolveOriginalMedia(resolved)
+            val resolvedInfo = OriginalMediaResolver.resolve(resolved)
             val downloadUrl = resolvedInfo.mediaUrl
             val targetClassification = MediaClassifier.classify(downloadUrl)
 
@@ -187,7 +187,7 @@ class StaticMediaScraper {
             // Ensure thumbnail URL is always a valid image URL and never null for images
             val thumb = resolvedInfo.thumbnailUrl ?: posterUrl ?: if (targetClassification.category == MediaCategory.IMAGES) resolved else posterUrl
 
-            val key = MediaClassifier.canonicalKey(downloadUrl)
+            val key = MediaDeduplicator.canonicalKey(downloadUrl)
             val title = resolvedInfo.cleanTitle ?: itemTitleHint ?: MediaClassifier.deriveFileName(downloadUrl, targetClassification.format, itemsMap.size)
 
             val headers = mutableMapOf<String, String>()
@@ -226,7 +226,7 @@ class StaticMediaScraper {
 
             val existing = itemsMap[key]
             if (existing != null) {
-                if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
+                if (MediaQualityEvaluator.compareQuality(item, existing) > 0) {
                     itemsMap[key] = item.copy(
                         id = existing.id,
                         thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
@@ -382,7 +382,7 @@ class StaticMediaScraper {
             val h = elem.attr("height").toIntOrNull() ?: elem.attr("data-height").toIntOrNull()
             val alt = elem.attr("alt").ifBlank { elem.attr("title") }.takeIf { it.isNotBlank() }
             if (rawSrcset.isNotBlank()) {
-                val entries = MediaClassifier.parseSrcset(rawSrcset, baseUrl)
+                val entries = SrcsetParser.parse(rawSrcset, baseUrl)
                 for ((url, res) in entries) {
                     val pxMatch = Regex("""[/_-](\d{2,5})px[-_./]""").find(url)
                     val resHint = if (pxMatch != null) {
@@ -456,8 +456,8 @@ class StaticMediaScraper {
 
             val href = link.attr("href").trim()
             if (href.isBlank()) continue
-            val resolvedHref = MediaClassifier.resolveUrl(href, baseUrl) ?: continue
-            if (MediaClassifier.isValidMedia(resolvedHref)) {
+            val resolvedHref = WebUrlUtils.resolveUrl(href, baseUrl) ?: continue
+            if (MediaUrlValidator.isValidMedia(resolvedHref)) {
                 val lower = resolvedHref.lowercase()
                 val cleanPath = lower.substringBefore("?").substringBefore("#")
                 if (cleanPath.endsWith(".jpg") || cleanPath.endsWith(".jpeg") || cleanPath.endsWith(".png") ||
@@ -466,7 +466,7 @@ class StaticMediaScraper {
                 ) {
                     val childImg = link.selectFirst("img")
                     val childThumb = childImg?.attr("src")?.ifBlank { childImg.attr("data-src") }
-                    val poster = if (!childThumb.isNullOrBlank()) MediaClassifier.resolveUrl(childThumb, baseUrl) else null
+                    val poster = if (!childThumb.isNullOrBlank()) WebUrlUtils.resolveUrl(childThumb, baseUrl) else null
                     val linkTitle = link.attr("title").ifBlank { link.text() }.takeIf { it.isNotBlank() }
                     addCandidate(
                         rawUrl = resolvedHref,

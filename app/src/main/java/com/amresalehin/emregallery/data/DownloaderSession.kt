@@ -70,12 +70,12 @@ object DownloaderSession {
         synchronized(itemsLock) {
             var updated = false
             for (item in newItems) {
-                val key = MediaClassifier.canonicalKey(item.url)
+                val key = MediaDeduplicator.canonicalKey(item.url)
                 val existing = canonicalMap[key]
                 if (existing == null) {
                     canonicalMap[key] = item
                     updated = true
-                } else if (MediaClassifier.compareMediaQuality(item, existing) > 0) {
+                } else if (MediaQualityEvaluator.compareQuality(item, existing) > 0) {
                     canonicalMap[key] = item.copy(
                         id = existing.id,
                         thumbnailUrl = item.thumbnailUrl ?: existing.thumbnailUrl
