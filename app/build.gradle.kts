@@ -4,30 +4,85 @@ plugins {
     id("com.chaquo.python")
 }
 
+// CI signing is supplied through GitHub Actions secrets. Never commit keystores
+// or signing passwords to the repository.
+val ciDebugStoreFile = System.getenv("ANDROID_DEBUG_KEYSTORE")
+    ?.takeIf { it.isNotBlank() }
+    ?.let { java.io.File(it) }
+val ciDebugStorePassword = System.getenv("ANDROID_DEBUG_STORE_PASSWORD")
+val ciDebugKeyAlias = System.getenv("ANDROID_DEBUG_KEY_ALIAS")
+val ciDebugKeyPassword = System.getenv("ANDROID_DEBUG_KEY_PASSWORD")
+val hasCiDebugSigning = ciDebugStoreFile?.isFile == true &&
+    !ciDebugStorePassword.isNullOrBlank() &&
+    !ciDebugKeyAlias.isNullOrBlank() &&
+    !ciDebugKeyPassword.isNullOrBlank()
+
+val ciReleaseStoreFile = System.getenv("ANDROID_RELEASE_KEYSTORE")
+    ?.takeIf { it.isNotBlank() }
+    ?.let { java.io.File(it) }
+val ciReleaseStorePassword = System.getenv("ANDROID_RELEASE_STORE_PASSWORD")
+val ciReleaseKeyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
+val ciReleaseKeyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
+val hasCiReleaseSigning = ciReleaseStoreFile?.isFile == true &&
+    !ciReleaseStorePassword.isNullOrBlank() &&
+    !ciReleaseKeyAlias.isNullOrBlank() &&
+    !ciReleaseKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.amresalehin.emregallery"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.aistudio.emregallery.xytkpq"
+        // Keep the installable package aligned with the app's source namespace.
+        applicationId = "com.amresalehin.emregallery"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
 
+    signingConfigs {
+        if (hasCiDebugSigning) {
+            create("ciDebug") {
+                storeFile = ciDebugStoreFile!!
+                storePassword = ciDebugStorePassword
+                keyAlias = ciDebugKeyAlias
+                keyPassword = ciDebugKeyPassword
+            }
+        }
+        if (hasCiReleaseSigning) {
+            create("ciRelease") {
+                storeFile = ciReleaseStoreFile!!
+                storePassword = ciReleaseStorePassword
+                keyAlias = ciReleaseKeyAlias
+                keyPassword = ciReleaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         debug {
-            // Debug build configuration
+            // Without the CI secret, Gradle uses its normal local debug key.
+            // With the secret, CI debug APKs retain the same signer across runs.
+            if (hasCiDebugSigning) {
+                signingConfig = signingConfigs.getByName("ciDebug")
+            }
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            // Release builds are signed only when a dedicated release key is supplied.
+            if (hasCiReleaseSigning) {
+                signingConfig = signingConfigs.getByName("ciRelease")
+            }
         }
     }
 
