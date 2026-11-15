@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -8,7 +10,7 @@ plugins {
 // or signing passwords to the repository.
 val ciDebugStoreFile = System.getenv("ANDROID_DEBUG_KEYSTORE")
     ?.takeIf { it.isNotBlank() }
-    ?.let { java.io.File(it) }
+    ?.let { File(it) }
 val ciDebugStorePassword = System.getenv("ANDROID_DEBUG_STORE_PASSWORD")
 val ciDebugKeyAlias = System.getenv("ANDROID_DEBUG_KEY_ALIAS")
 val ciDebugKeyPassword = System.getenv("ANDROID_DEBUG_KEY_PASSWORD")
@@ -19,7 +21,7 @@ val hasCiDebugSigning = ciDebugStoreFile?.isFile == true &&
 
 val ciReleaseStoreFile = System.getenv("ANDROID_RELEASE_KEYSTORE")
     ?.takeIf { it.isNotBlank() }
-    ?.let { java.io.File(it) }
+    ?.let { File(it) }
 val ciReleaseStorePassword = System.getenv("ANDROID_RELEASE_STORE_PASSWORD")
 val ciReleaseKeyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
 val ciReleaseKeyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
