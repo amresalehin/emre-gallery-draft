@@ -52,26 +52,36 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # The Android Gradle Plugin supplies the standard debug signing key.
-      - name: Run unit tests and assemble debug APK
+      # applicationIdSuffix uses these values to isolate each CI debug APK.
+      - name: Run unit tests and assemble unique debug APK
         run: bash ./gradlew --no-daemon testDebugUnitTest assembleDebug
 
       - name: Verify debug APK package and signature
         shell: bash
         run: |
+          set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
-          BUILD_TOOLS_DIR="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$SDK_ROOT"
+          BUILD_TOOLS_DIR="$(find "$SDK_ROOT/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           test -x "$BUILD_TOOLS_DIR/aapt"
           test -x "$BUILD_TOOLS_DIR/apksigner"
-          "$BUILD_TOOLS_DIR/aapt" dump badging "$APK" | grep -F "package: name='com.amresalehin.emregallery'"
+
+          EXPECTED_APPLICATION_ID="com.amresalehin.emregallery.ci${GITHUB_RUN_ID}a${GITHUB_RUN_ATTEMPT}"
+          ACTUAL_APPLICATION_ID="$("$BUILD_TOOLS_DIR/aapt" dump badging "$APK" | awk -F"'" '/^package: name=/ { print $2; exit }')"
+          echo "Expected application ID: $EXPECTED_APPLICATION_ID"
+          echo "Actual application ID:   $ACTUAL_APPLICATION_ID"
+          test "$ACTUAL_APPLICATION_ID" = "$EXPECTED_APPLICATION_ID"
+
           "$BUILD_TOOLS_DIR/apksigner" verify --verbose "$APK"
           "$BUILD_TOOLS_DIR/apksigner" verify --print-certs "$APK"
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: emre-gallery-debug-${{ github.sha }}
+          name: emre-gallery-debug-${{ github.sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

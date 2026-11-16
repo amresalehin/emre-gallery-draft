@@ -1,18 +1,46 @@
-import java.io.File
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.chaquo.python")
 }
 
+// Give every GitHub Actions debug build a unique install identity. Local debug
+// builds keep the base application ID; release builds are unchanged.
+val isGitHubActions = providers.environmentVariable("GITHUB_ACTIONS").orNull == "true"
+val ciRunId = providers.environmentVariable("GITHUB_RUN_ID").orNull
+val ciRunAttempt = providers.environmentVariable("GITHUB_RUN_ATTEMPT").orNull
+val ciRunIdentity = if (isGitHubActions) {
+    val runId = requireNotNull(ciRunId) {
+        "GITHUB_RUN_ID must be set for GitHub Actions debug builds"
+    }
+    val runAttempt = requireNotNull(ciRunAttempt) {
+        "GITHUB_RUN_ATTEMPT must be set for GitHub Actions debug builds"
+    }
+    require(runId.isNotEmpty() && runId.all { it in '0'..'9' }) {
+        "GITHUB_RUN_ID must contain only digits"
+    }
+    require(runAttempt.isNotEmpty() && runAttempt.all { it in '0'..'9' }) {
+        "GITHUB_RUN_ATTEMPT must contain only digits"
+    }
+    runId to runAttempt
+} else {
+    null
+}
+val debugApplicationIdSuffix = ciRunIdentity?.let { (runId, runAttempt) ->
+    ".ci${runId}a${runAttempt}"
+}.orEmpty()
+val debugApplicationLabel = ciRunIdentity?.let { (runId, runAttempt) ->
+    "Emre Gallery CI ${runId}/${runAttempt}"
+} ?: "@string/app_name"
+
 android {
     namespace = "com.amresalehin.emregallery"
     compileSdk = 35
 
     defaultConfig {
-        // Keep the installable package aligned with the app's source namespace.
+        // Keep source namespace stable. CI identity is applied to debug only.
         applicationId = "com.amresalehin.emregallery"
+        manifestPlaceholders["applicationLabel"] = "@string/app_name"
         minSdk = 26
         targetSdk = 35
         versionCode = 2
@@ -24,7 +52,13 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = debugApplicationIdSuffix
+            manifestPlaceholders["applicationLabel"] = debugApplicationLabel
+        }
+
         // Debug uses Android Gradle Plugin's standard debug signing key.
+        // Release keeps its normal application ID and existing build settings.
         release {
             isMinifyEnabled = true
             isShrinkResources = true
