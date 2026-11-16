@@ -6,30 +6,6 @@ plugins {
     id("com.chaquo.python")
 }
 
-// CI signing is supplied through GitHub Actions secrets. Never commit keystores
-// or signing passwords to the repository.
-val ciDebugStoreFile = System.getenv("ANDROID_DEBUG_KEYSTORE")
-    ?.takeIf { it.isNotBlank() }
-    ?.let { File(it) }
-val ciDebugStorePassword = System.getenv("ANDROID_DEBUG_STORE_PASSWORD")
-val ciDebugKeyAlias = System.getenv("ANDROID_DEBUG_KEY_ALIAS")
-val ciDebugKeyPassword = System.getenv("ANDROID_DEBUG_KEY_PASSWORD")
-val hasCiDebugSigning = ciDebugStoreFile?.isFile == true &&
-    !ciDebugStorePassword.isNullOrBlank() &&
-    !ciDebugKeyAlias.isNullOrBlank() &&
-    !ciDebugKeyPassword.isNullOrBlank()
-
-val ciReleaseStoreFile = System.getenv("ANDROID_RELEASE_KEYSTORE")
-    ?.takeIf { it.isNotBlank() }
-    ?.let { File(it) }
-val ciReleaseStorePassword = System.getenv("ANDROID_RELEASE_STORE_PASSWORD")
-val ciReleaseKeyAlias = System.getenv("ANDROID_RELEASE_KEY_ALIAS")
-val ciReleaseKeyPassword = System.getenv("ANDROID_RELEASE_KEY_PASSWORD")
-val hasCiReleaseSigning = ciReleaseStoreFile?.isFile == true &&
-    !ciReleaseStorePassword.isNullOrBlank() &&
-    !ciReleaseKeyAlias.isNullOrBlank() &&
-    !ciReleaseKeyPassword.isNullOrBlank()
-
 android {
     namespace = "com.amresalehin.emregallery"
     compileSdk = 35
@@ -47,33 +23,8 @@ android {
         }
     }
 
-    signingConfigs {
-        if (hasCiDebugSigning) {
-            create("ciDebug") {
-                storeFile = ciDebugStoreFile!!
-                storePassword = ciDebugStorePassword
-                keyAlias = ciDebugKeyAlias
-                keyPassword = ciDebugKeyPassword
-            }
-        }
-        if (hasCiReleaseSigning) {
-            create("ciRelease") {
-                storeFile = ciReleaseStoreFile!!
-                storePassword = ciReleaseStorePassword
-                keyAlias = ciReleaseKeyAlias
-                keyPassword = ciReleaseKeyPassword
-            }
-        }
-    }
-
     buildTypes {
-        debug {
-            // Without the CI secret, Gradle uses its normal local debug key.
-            // With the secret, CI debug APKs retain the same signer across runs.
-            if (hasCiDebugSigning) {
-                signingConfig = signingConfigs.getByName("ciDebug")
-            }
-        }
+        // Debug uses Android Gradle Plugin's standard debug signing key.
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -81,10 +32,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Release builds are signed only when a dedicated release key is supplied.
-            if (hasCiReleaseSigning) {
-                signingConfig = signingConfigs.getByName("ciRelease")
-            }
         }
     }
 

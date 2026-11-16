@@ -27,9 +27,6 @@ jobs:
     name: Unit tests and debug APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      DEBUG_SIGNING_AVAILABLE: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 != '' }}
-      RELEASE_SIGNING_AVAILABLE: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 != '' }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -55,51 +52,8 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # Store the keystore as a GitHub Actions secret (base64 encoded).
-      # No signing material is written to the repository or artifact.
-      - name: Prepare persistent debug signing key
-        if: ${{ env.DEBUG_SIGNING_AVAILABLE == 'true' }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
-        run: |
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/emre-gallery-debug.jks"
-          test -s "$RUNNER_TEMP/emre-gallery-debug.jks"
-
-      - name: Prepare release signing key
-        if: ${{ env.RELEASE_SIGNING_AVAILABLE == 'true' }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
-        run: |
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/emre-gallery-release.jks"
-          test -s "$RUNNER_TEMP/emre-gallery-release.jks"
-
-      - name: Report signing configuration
-        shell: bash
-        env:
-          DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
-            echo "Persistent debug signing is configured."
-          else
-            echo "::warning::ANDROID_DEBUG_KEYSTORE_BASE64 is not configured. This run will use a temporary GitHub-hosted debug key; its APK may not update an APK from another run."
-          fi
-          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
-            echo "Release signing is configured."
-          else
-            echo "Release signing is not configured; the release task will be skipped."
-          fi
-
+      # The Android Gradle Plugin supplies the standard debug signing key.
       - name: Run unit tests and assemble debug APK
-        env:
-          ANDROID_DEBUG_KEYSTORE: ${{ runner.temp }}/emre-gallery-debug.jks
-          ANDROID_DEBUG_STORE_PASSWORD: ${{ secrets.ANDROID_DEBUG_STORE_PASSWORD }}
-          ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.ANDROID_DEBUG_KEY_ALIAS }}
-          ANDROID_DEBUG_KEY_PASSWORD: ${{ secrets.ANDROID_DEBUG_KEY_PASSWORD }}
-          ANDROID_RELEASE_KEYSTORE: ${{ runner.temp }}/emre-gallery-release.jks
-          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
-          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
         run: bash ./gradlew --no-daemon testDebugUnitTest assembleDebug
 
       - name: Verify debug APK package and signature
@@ -114,43 +68,10 @@ jobs:
           "$BUILD_TOOLS_DIR/apksigner" verify --verbose "$APK"
           "$BUILD_TOOLS_DIR/apksigner" verify --print-certs "$APK"
 
-      - name: Build signed release APK
-        if: ${{ env.RELEASE_SIGNING_AVAILABLE == 'true' }}
-        env:
-          ANDROID_DEBUG_KEYSTORE: ${{ runner.temp }}/emre-gallery-debug.jks
-          ANDROID_DEBUG_STORE_PASSWORD: ${{ secrets.ANDROID_DEBUG_STORE_PASSWORD }}
-          ANDROID_DEBUG_KEY_ALIAS: ${{ secrets.ANDROID_DEBUG_KEY_ALIAS }}
-          ANDROID_DEBUG_KEY_PASSWORD: ${{ secrets.ANDROID_DEBUG_KEY_PASSWORD }}
-          ANDROID_RELEASE_KEYSTORE: ${{ runner.temp }}/emre-gallery-release.jks
-          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
-          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
-        run: bash ./gradlew --no-daemon assembleRelease
-
-      - name: Verify release APK signature
-        if: ${{ env.RELEASE_SIGNING_AVAILABLE == 'true' }}
-        shell: bash
-        run: |
-          APK="app/build/outputs/apk/release/app-release.apk"
-          test -s "$APK"
-          BUILD_TOOLS_DIR="$(find "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
-          "$BUILD_TOOLS_DIR/aapt" dump badging "$APK" | grep -F "package: name='com.amresalehin.emregallery'"
-          "$BUILD_TOOLS_DIR/apksigner" verify --verbose "$APK"
-          "$BUILD_TOOLS_DIR/apksigner" verify --print-certs "$APK"
-
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: emre-gallery-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload signed release APK
-        if: ${{ env.RELEASE_SIGNING_AVAILABLE == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: emre-gallery-release-${{ github.sha }}
-          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14
