@@ -1,18 +1,11 @@
 name: Android build
 
 on:
+  # Run the Android checks on every branch; do not maintain a fragile branch allowlist.
   push:
-    branches:
-      - Develop
-      - 'integration/**'
-      - 'fix/**'
-      - 'chore/**'
+  # Run pull-request checks regardless of the PR target branch.
   pull_request:
-    branches:
-      - Develop
-      - 'integration/**'
-      - 'fix/**'
-      - 'chore/**'
+  # Keep manual execution available from the Actions tab.
   workflow_dispatch:
 
 permissions:
